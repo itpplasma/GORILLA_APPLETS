@@ -347,7 +347,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     & measuring_times)
 !
                 use pusher_tetra_rk_mod, only: find_tetra,pusher_tetra_rk,initialize_const_motion_rk
-                use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly,manage_intermediate_steps_arrays
+                use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
                 use tetra_physics_poly_precomp_mod , only: make_precomp_poly_perpinv, initialize_boole_precomp_poly_perpinv, &
                     & alloc_precomp_poly_perpinv
                 use tetra_physics_mod, only: tetra_physics,particle_charge,particle_mass
@@ -408,7 +408,6 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                         call initialize_const_motion_rk(perpinv,perpinv2)
                     case(2)
                         call initialize_const_motion_poly(perpinv,perpinv2)
-                        call manage_intermediate_steps_arrays()
                 end select        
 !
 !             !NOT FULLY IMPLEMENTED YET: Precompute quatities dependent on perpinv
@@ -477,9 +476,6 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                     endif
 !
                 enddo !Loop for tetrahedron pushings
-!
-                !Deallocate intermediate step arrays if pusher_poly was used
-                call manage_intermediate_steps_arrays()
 !
                 !Compute vperp from position
                 vperp = vperp_func(z_save,perpinv,ind_tetr_save)

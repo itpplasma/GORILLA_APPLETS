@@ -531,7 +531,7 @@ print *, ''
         use tetra_physics_mod, only: tetra_physics,particle_mass,hamiltonian_time,particle_charge,isinside
         use orbit_timestep_gorilla_mod, only: check_coordinate_domain,bmod_func
         use pusher_tetra_rk_mod, only: find_tetra,pusher_tetra_rk,initialize_const_motion_rk
-        use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly,manage_intermediate_steps_arrays
+        use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
         use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
         use gorilla_diag_mod, only: diag_pusher_tetry_poly
 !
@@ -625,7 +625,6 @@ print *, ''
                 call initialize_const_motion_rk(perpinv,perpinv2)
             case(2)
                 call initialize_const_motion_poly(perpinv,perpinv2)
-                call manage_intermediate_steps_arrays()
         end select
 !
         z_save = x-tetra_physics(ind_tetr)%x1
@@ -755,9 +754,6 @@ endif
             enddo !Loop for tetrahedron pushings
 !
         end do !i t_steps
-!
-        !Deallocate intermediate_steps_arrays if pusher_poly was used
-        call manage_intermediate_steps_arrays()
 !
 !print *, 'counter_tor_mappings',counter_tor_mappings
 !print *, 't_hamiltonian',t_hamiltonian
