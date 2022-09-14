@@ -27,7 +27,7 @@
             read(11,nml=GORILLA_APPLETS_NML)
             close(11)
 
-            print *,'Mono-energetic transport coefficient: Loaded input data from input file'
+            print *,'GORILLA_APPLETS: Loaded input data from input file'
 !            
         end subroutine load_gorilla_applets_inp
 
