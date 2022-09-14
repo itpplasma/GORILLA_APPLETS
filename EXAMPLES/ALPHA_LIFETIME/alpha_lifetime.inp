@@ -1,0 +1,30 @@
+! INPUT FILE FOR ALPHA LIFETIME WITH GORILLA
+!
+&alpha_lifetimenml
+!
+  !time for tracing of alpha particle
+  time_step = 0.01d0 ,
+!
+  !Kinetic energy of particle
+  energy_eV = 3.5d6 ,
+!
+  !Number of particles to be traced
+  n_particles = 1000 ,
+!
+  !Set integrator type
+  ! 1 ... GORILLA
+  ! 2 ... DIRECT
+  i_integrator_type = 1 ,
+!
+  !Option for precomputation of above random numbers
+  ! 1 ... compute seed with a random number
+  ! 2 ... load seed from file 'seed.dat'
+  seed_option = 2 ,
+!
+  !Boolean for precalculation of random numbers
+  boole_random_precalc = .true. ,
+!
+  !Filename for life time of alpha particles
+  filename_alpha_lifetime = 'alpha_life_time_gorilla.dat' ,
+!
+/
