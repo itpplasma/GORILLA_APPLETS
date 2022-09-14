@@ -33,9 +33,6 @@
     !Load input from gorilla_applets.inp (i_option)
     call load_gorilla_applets_inp()
 !
-    !Load input from mono_energetic_transp_coef.inp (v_E, n_particles)
-    call load_mono_energetic_transp_coef_inp()
-!
 !-------------------------------------------------------------------------------------------!
 !-------------- Monte Carlo evaluation of mono-energetic transport coefficient -------------!
 !
@@ -63,17 +60,29 @@
 !
         case(2) !Computation of mono-energetic transport coefficient - ONE given collisionality
 !
+!
+            !Load input from mono_energetic_transp_coef.inp (v_E, n_particles)
+            call load_mono_energetic_transp_coef_inp()
+!
             call calc_mono_energetic_transp_coef()
 !
 !-------------------------------------------------------------------------------------------!
 !
         case(3) !Computation of mono-energetic transport coefficient - Scan over collisionalities
 !
+!
+            !Load input from mono_energetic_transp_coef.inp (v_E, n_particles)
+            call load_mono_energetic_transp_coef_inp()
+!
             call calc_mono_energetic_transp_coef_nu_scan()
 !
 !-------------------------------------------------------------------------------------------!
 !
         case(4) !Computation of numerical diffusion coefficient (No collisions)
+!
+!
+            !Load input from mono_energetic_transp_coef.inp (v_E, n_particles)
+            call load_mono_energetic_transp_coef_inp()
 !
             call calc_numerical_diff_coef()
 !
