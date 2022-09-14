@@ -10,12 +10,12 @@ FC = gfortran
 #OPTS = -J OBJS -g
 
 # The developer repo option
-#OPTS= -g -J OBJS -O3 -fopenmp 
+OPTS= -g -J OBJS -O3 -fopenmp 
 # The option below shows in which line the error occurs
 #OPTS= -J OBJS  -g -fbacktrace -ffpe-trap=zero,overflow,invalid  -fbounds-check -fcheck=all -fopenmp
 #OPTS= -J OBJS  -ffpe-trap=invalid,zero,overflow -g -fopenmp
 # Official Core module options
-OPTS ?= -J OBJS  -g -fbacktrace -ffpe-trap=zero,overflow,invalid  -fbounds-check -fopenmp
+#OPTS ?= -J OBJS  -g -fbacktrace -ffpe-trap=zero,overflow,invalid  -fbounds-check -fopenmp
 
 UNAME_S	:= $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
@@ -76,11 +76,14 @@ SOURCES = SetWorkingPrecision.f90\
 	gorilla_applets_sub_mod.f90 \
 	alpha_lifetime_gorilla_mod.f90 \
 	direct_vmec_integrator_mod.f90 \
-	poincare_invariances_mod.f90 \
 	test_grid_mod.f90 \
-	boltzmann_mod.f90 \
-	total_dwell_times_mod.f90 \
 	gorilla_applets_main.f90
+
+# poincare_invariances_mod.f90 \
+#	test_grid_mod.f90 \
+#	boltzmann_mod.f90 \
+#	total_dwell_times_mod.f90 \
+#	gorilla_applets_main.f90
 
 OBJS = $(patsubst %.f90,OBJS/%.o,$(SOURCES))
 
