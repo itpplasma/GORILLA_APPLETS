@@ -7,10 +7,10 @@
   use gorilla_applets_sub_mod, only: calc_mono_energetic_transp_coef, &
                                     & calc_numerical_diff_coef, calc_mono_energetic_transp_coef_nu_scan
   use gorilla_applets_settings_mod, only: i_option,load_gorilla_applets_inp
+  use mono_energetic_transp_coef_settings_mod, only: load_mono_energetic_transp_coef_inp
   use alpha_lifetime_gorilla_mod, only: calc_alpha_lifetime_gorilla
   use direct_vmec_integrator_mod, only: direct_vmec_integrator
   !use poincare_invariances_mod, only: compute_first_poincare_invariance
-  use test_grid_mod, only: test_grid,test_west,test_eirene_grid
   !use total_dwell_times_mod, only: calc_total_dwell_times
   !use boltzmann_mod, only: calc_boltzmann
 !
@@ -30,8 +30,11 @@
     !Load GORILLA settings input data
     call load_gorilla_inp()
 !
-    !Load input from gorilla_applets.inp (v_E, n_particles)
+    !Load input from gorilla_applets.inp (i_option)
     call load_gorilla_applets_inp()
+!
+    !Load input from mono_energetic_transp_coef.inp (v_E, n_particles)
+    call load_mono_energetic_transp_coef_inp()
 !
 !-------------------------------------------------------------------------------------------!
 !-------------- Monte Carlo evaluation of mono-energetic transport coefficient -------------!
@@ -91,12 +94,6 @@
         case(7) !Compute 1st Poincaré invariance
 !
             !call compute_first_poincare_invariance
-!
-!-------------------------------------------------------------------------------------------!
-!
-        case(8) !Test west
-!
-            call test_eirene_grid()
 !
 !-------------------------------------------------------------------------------------------!
 !

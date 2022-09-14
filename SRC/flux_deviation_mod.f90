@@ -15,7 +15,7 @@
 !
         subroutine calc_rand_numbers(n_particles,n_time_steps)
 !
-            use gorilla_applets_settings_mod, only: seed_option
+            use mono_energetic_transp_coef_settings_mod, only: seed_option
 !
             implicit none
 !
@@ -97,7 +97,7 @@
             use parmot_mod, only: rmu,ro0
             use velo_mod, only: isw_field_type
             use supporting_functions_mod, only: theta_sym_flux2theta_vmec,theta_vmec2theta_sym_flux
-            use gorilla_applets_settings_mod, only: lambda_start,boole_psi_mat
+            use mono_energetic_transp_coef_settings_mod, only: lambda_start,boole_psi_mat
             use gorilla_settings_mod, only: boole_helical_pert, helical_pert_eps_Aphi, helical_pert_m_fourier, &
                                           & helical_pert_n_fourier
 !

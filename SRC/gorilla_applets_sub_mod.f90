@@ -20,7 +20,7 @@
             use tetra_physics_mod, only: particle_mass
             use tetra_grid_settings_mod, only: grid_kind
             use vector_potentail_mod, only: torflux
-            use gorilla_applets_settings_mod, only: energy_eV,v_E
+            use mono_energetic_transp_coef_settings_mod, only: energy_eV,v_E
             use fluxtv_mod, only: pos_fluxtv_mat,load_flux_tube_volume
 !
             implicit none
@@ -94,7 +94,7 @@
             use tetra_grid_mod, only: ntetr
             use tetra_grid_settings_mod, only: grid_kind,grid_size,n_field_periods
             use flux_deviation_mod, only: calc_flux_deviation
-            use gorilla_applets_settings_mod, only: boole_collisions, boole_random_precalc, i_integrator_type, &
+            use mono_energetic_transp_coef_settings_mod, only: boole_collisions, boole_random_precalc, i_integrator_type, &
                                        & filename_transp_diff_coef, filename_delta_s_squared, filename_std_dvt_delta_s_squared, &
                                        & idiffcoef_output, energy_eV, v_E, nu_star, n_particles
 !
@@ -183,7 +183,7 @@
             use tetra_grid_mod, only: ntetr
             use tetra_grid_settings_mod, only: grid_kind,grid_size,n_field_periods
             use flux_deviation_mod, only: calc_flux_deviation
-            use gorilla_applets_settings_mod, only: boole_collisions, boole_random_precalc, i_integrator_type, &
+            use mono_energetic_transp_coef_settings_mod, only: boole_collisions, boole_random_precalc, i_integrator_type, &
                                        & filename_transp_diff_coef, filename_delta_s_squared, filename_std_dvt_delta_s_squared, &
                                        & idiffcoef_output, energy_eV, v_E, n_particles, n_nu_scans, nu_star_start, &
                                        & nu_exp_basis
@@ -284,7 +284,7 @@
             use tetra_physics_mod, only: particle_mass
             use tetra_grid_settings_mod, only: n1,n2,n3,set_grid_size
             use fluxtv_mod, only: load_flux_tube_volume
-            use gorilla_applets_settings_mod, only: boole_collisions,boole_random_precalc,i_integrator_type, &
+            use mono_energetic_transp_coef_settings_mod, only: boole_collisions,boole_random_precalc,i_integrator_type, &
                                            & filename_delta_s_squared, filename_std_dvt_delta_s_squared, &
                                            & idiffcoef_output,total_MC_time,energy_eV, &
                                            & n_particles,filename_numerical_diff_coef, &
