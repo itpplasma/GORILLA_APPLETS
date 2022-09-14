@@ -160,7 +160,7 @@
 !------------------------------------------------------------------------------------------------------------!
 !
             !Open file for writing alpha_life_time_gorilla
-            !open(99,file=filename_alpha_lifetime)
+            open(99,file=filename_alpha_lifetime)
 !
 
             !Precompute random numbers
@@ -254,9 +254,10 @@ print *, kpart, ' / ', n_particles, 'particle: ', n, 'thread: ' !, omp_get_threa
                         endif
 !
                         !Write results in file
-!                        !$omp critical
-!                            write(99,*) n, boole_particle_lost , x_rand_beg ,pitchpar,x(1),t_confined
-!                        !$omp end critical
+                        !$omp critical
+                            !write(99,*) n, boole_particle_lost , x_rand_beg ,pitchpar,x(1),t_confined
+                            write(99,*) t_confined
+                        !$omp end critical
 !
                     case(2)
                         ierr = 0
@@ -284,8 +285,8 @@ print *, kpart, ' / ', n_particles, 'particle: ', n, 'thread: ' !, omp_get_threa
 !
 !            close(99)
 print *, 'Number of lost particles',n_lost_particles
-open(99,file='confined_fraction.dat')
-write(99,*) 1.d0-dble(n_lost_particles)/dble(n_particles)
+!open(99,file='confined_fraction.dat')
+!write(99,*) 1.d0-dble(n_lost_particles)/dble(n_particles)
 !
             !Deallocate random numbers
             if(boole_random_precalc) then
