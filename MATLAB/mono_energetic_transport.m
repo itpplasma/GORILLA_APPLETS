@@ -2,7 +2,7 @@
 % 
 % 
 % The Gorilla code can calculate the mono-energetic radial transport coefficient 
-% for particles in a fusion reactor. For this the 'gorilla_applets_main.x 
+% for particles in a fusion reactor. For this the 'mono_energetic_transp_main.x 
 % ' file is used. With that it is possible to calculate the fluxtube volume for 
 % a specified fusion devies and a defined grid. With the fluxtube volume the mono-energetic 
 % transport coefficient can be calculated for a given collisionality and mach 
@@ -34,36 +34,41 @@ path_main=[path_script,'/../'];
 % 
 % The path where the FORTRAN code should be execute:
 
-mkdir(path_main,'RUN/mono_energcd(path_RUN);etic_transport');
-path_RUN=[path_main,'RUN/mono_energetic_transport'];
+mkdir(path_main,'RUN/mono_energetic_transport');
+path_RUN=[path_main,'/RUN/mono_energetic_transport'];
 %default path_RUN=[path_main,'/RUN/mono_energetic_transport'];
-
+cd(path_RUN);
 %% 
 % 
 % 
-% In the inp_blueprint folder the inputfiles for the GORILLA code are already 
+% In the INPUT folder the inputfiles for the GORILLA code are already 
 % prepared. All input variables have a default value. These input files will be 
 % loaded into the MATLAB script later on.
 
-path_inp_blueprints=[path_main,'/inp_blueprints'];
-%default path_inp_blueprints=[path_main,'/inp_blueprints'];
+path_inp_blueprints=[path_main,'INPUT'];
+path_inp_blueprints_GORILLA=[path_main,'../GORILLA/INPUT'];
+%path_inp_blueprints=[path_main,'/INPUT'];
+%path_inp_blueprints_GORILLA=[path_main,'../GORILLA/INPUT'];
 addpath(path_inp_blueprints);
+addpath(path_inp_blueprints_GORILLA);
 %% 
 % 
 % 
 % Some parts of the script are shifted to functions. Those function are stored 
 % in an own folder.
 
-path_functions=[path_main,'/matlab_test_cases/functions'];
-%default path_functions=[path_main,'/matlab_test_cases/functions'];
+path_functions=[path_main,'MATLAB/functions'];
+path_functions_GORILLA=[path_main,'../GORILLA/MATLAB/functions'];
+%path_functions=[path_main,'../GORILLA/MATLAB/functions'];
 addpath(path_functions);
+addpath(path_functions_GORILLA);
 %% 
 % 
 % 
 % The created files during this run will be stored in an own folder. The code 
 % while create a new folder if the folder thus not exist.
 
-name_folder='data_plots/mono_energetic_transport';
+name_folder='data_plots/mono_energetic_transport_old_2';
 mkdir(path_script,name_folder);
 path_data_plots=[path_script,'/',name_folder];
 %% 
@@ -73,10 +78,12 @@ path_data_plots=[path_script,'/',name_folder];
 % code can be set in this files. In the inp_blueprints folder there are default 
 % inputfiles already created. In this files one can also find short explanations 
 % for ervery variable. In this script all inputfiles will be load. The function 
-% Inputfile creates an object for every inputfile.
+% Inputfile creates an object for every inputfile. Note that some input
+% templates are in the core GORILLA repo instead in the APPLETS one.
 
-gorilla = InputFile([path_inp_blueprints,'/gorilla.inp']);
-tetra_grid = InputFile([path_inp_blueprints,'/tetra_grid.inp']);
+gorilla = InputFile([path_inp_blueprints_GORILLA,'/gorilla.inp']);
+tetra_grid = InputFile([path_inp_blueprints_GORILLA,'/tetra_grid.inp']);
+mono_energetic_transp_coef = InputFile([path_inp_blueprints,'/mono_energetic_transp_coef.inp']);
 gorilla_applets = InputFile([path_inp_blueprints,'/gorilla_applets.inp']);
 %% 
 % 
@@ -87,7 +94,8 @@ gorilla_applets = InputFile([path_inp_blueprints,'/gorilla_applets.inp']);
 % value out of the inp_blueprints folder.
 
 gorilla.read();
-gorilla_applets.read();
+mono_energetic_transp_coef.read();
+gorilla_applets.read()
 tetra_grid.read();
 %% 
 % 
@@ -95,7 +103,7 @@ tetra_grid.read();
 % The code needs to be executed seperatly for diffrent normalized ExB-drifts 
 % (mach numbers).
 
-mach_number = [0,10^-4];
+mach_number = [0,1*10^-2];
 %mach_number = [0,10^-4,10^-2];
 %% 
 % 
@@ -129,7 +137,7 @@ gorilla.GORILLANML.coord_system = 2;
 % 
 % 3 ... alpha particle
 
-gorilla.GORILLANML.ispecies = 2;
+gorilla.GORILLANML.ispecies = 1;
 %% 
 % 
 % 
@@ -312,8 +320,40 @@ gorilla.GORILLANML.helical_pert_eps_Aphi = 0.1;
 % 
 % Fourier modes of helical perturbation
 
- gorilla.GORILLANML.helical_pert_m_fourier = 2;
- gorilla.GORILLANML.helical_pert_n_fourier = 2;
+gorilla.GORILLANML.helical_pert_m_fourier = 2;
+gorilla.GORILLANML.helical_pert_n_fourier = 2;
+%%
+%
+%
+% Switches to calculate optional quantities
+
+gorilla.GORILLANML.boole_time_Hamiltonian = false;
+gorilla.GORILLANML.boole_gyrophase = false;
+%%
+%
+%
+% Dividing orbit integration into intermediate steps (adaptive) to reduce error made by finit polynomial
+% Only for ipusher = 2 (polynomial pusher)
+%
+% Switch for adaptive time step scheme
+% false ... no adaptive scheme
+% true ... adaptive scheme to ensure energy conservation up to specified fluctuation
+
+gorilla.GORILLANML.boole_adaptive_time_steps = false;
+%%
+%
+%
+% Allowed relative fluctuation of energy between entry and exit of a tetrahedron
+% Must not be smaller or equal zero!
+
+gorilla.GORILLANML.desired_delta_energy = 1.E-10;
+%%
+%
+%
+% Maximum number of intermediate steps allowed for splitting up an orbit section
+% Should not go much beyond 10000 steps.
+
+max_n_intermediate_steps = 10000;
 %% 
 % 
 % Inputfile terta_grid
@@ -342,6 +382,21 @@ tetra_grid.TETRA_GRID_NML.n3 = 30;
 % 3 ... field-aligned grid for non-axisymmetric VMEC
 
 tetra_grid.TETRA_GRID_NML.grid_kind = 3;
+%%
+%
+%
+% MHD equilibrium filename
+
+tetra_grid.TETRA_GRID_NML.g_file_filename = 'MHD_EQUILIBRIA/g_file_for_test';
+tetra_grid.TETRA_GRID_NML.convex_wall_filename = 'MHD_EQUILIBRIA/convex_wall_for_test.dat';
+tetra_grid.TETRA_GRID_NML.netcdf_filename = 'MHD_EQUILIBRIA/netcdf_file_for_test.nc';
+%%
+%
+%
+%MESH_SOLEDGE3X_EIRENE filename
+
+tetra_grid.TETRA_GRID_NML.knots_SOLEDGE3X_EIRENE_filename = 'MHD_EQUILIBRIA/MESH_SOLEDGE3X_EIRENE/knots_for_test.dat';
+tetra_grid.TETRA_GRID_NML.triangles_SOLEDGE3X_EIRENE_filename = 'MHD_EQUILIBRIA/MESH_SOLEDGE3X_EIRENE/triangles_for_test.dat';
 %% 
 % 
 % 
@@ -406,7 +461,7 @@ tetra_grid.TETRA_GRID_NML.filename_mesh_rphiz = 'mesh_rphiz.obj';
 tetra_grid.TETRA_GRID_NML.filename_mesh_sthetaphi = 'mesh_sthetaphi.obj';
 %% 
 % 
-% Inputfile mono_ernergetic_transp
+% Inputfile gorilla_applets
 % 
 % 
 % Fluxtube volume OR mono-energetic radial transport coefficient OR numerical 
@@ -431,6 +486,18 @@ gorilla_applets.GORILLA_APPLETS_NML.i_option = 3;
 % Filname of the fluxtube volume to be precomputed
 
 gorilla_applets.GORILLA_APPLETS_NML.filename_fluxtv_precomp = 'fluxtubevolume.dat';
+%% 
+% 
+% 
+% Filname of the fluxtube volume to be loaded for starting positions of MC simulation
+
+gorilla_applets.GORILLA_APPLETS_NML.filename_fluxtv_load = 'fluxtubevolume.dat';
+%% 
+% 
+% 
+% Kinetic particle energy (in eV) for fluxtube volume computation
+
+gorilla_applets.GORILLA_APPLETS_NML.energy_eV_fluxtv = 3000;
 %% 
 % 
 % 
@@ -475,12 +542,7 @@ gorilla_applets.GORILLA_APPLETS_NML.t_step_fluxtv = 0.001;
 gorilla_applets.GORILLA_APPLETS_NML.nt_steps_fluxtv = 10000;
 %% 
 % 
-% 
-% Kinetic particle energy (in eV) for fluxtube volume computation
-
-gorilla_applets.GORILLA_APPLETS_NML.energy_eV_fluxtv = 3000;
-%% 
-% 
+% Inputfile mono_energetic_transp_coef
 % 
 % Settings of simulation for transport coefficients
 % 
@@ -492,13 +554,13 @@ gorilla_applets.GORILLA_APPLETS_NML.energy_eV_fluxtv = 3000;
 % 
 % 2 ... Direct Integrator in VMEC coordinates
 
-gorilla_applets.GORILLA_APPLETS_NML.i_integrator_type = 1;
+mono_energetic_transp_coef.TRANSPCOEFNML.i_integrator_type = 1;
 %% 
 % 
 % 
 % Number of particles for Monte Carlo simulation
 
-gorilla_applets.GORILLA_APPLETS_NML.n_particles = 200;
+mono_energetic_transp_coef.TRANSPCOEFNML.n_particles = 200;
 %% 
 % 
 % 
@@ -508,19 +570,13 @@ gorilla_applets.GORILLA_APPLETS_NML.n_particles = 200;
 % 
 % true ... with collisions (Lorentz collision operator)
 
-gorilla_applets.GORILLA_APPLETS_NML.boole_collisions = true;
+mono_energetic_transp_coef.TRANSPCOEFNML.boole_collisions = true;
 %% 
 % 
 % 
 % Kinetic particle energy (in eV)
 
-gorilla_applets.GORILLA_APPLETS_NML.energy_eV = 3000;
-%% 
-% 
-% 
-% Filname of the fluxtube volume to be loaded for starting positions of MC simulation
-
-gorilla_applets.GORILLA_APPLETS_NML.filename_fluxtv_load = 'fluxtubevolume.dat';
+mono_energetic_transp_coef.TRANSPCOEFNML.energy_eV = 3*10^3;
 %% 
 % 
 % 
@@ -530,7 +586,7 @@ gorilla_applets.GORILLA_APPLETS_NML.filename_fluxtv_load = 'fluxtubevolume.dat';
 % 
 % false ... Evolution of $\psi$ for a single particle is NOT saved in memory
 
-gorilla_applets.GORILLA_APPLETS_NML.boole_psi_mat = false;
+mono_energetic_transp_coef.TRANSPCOEFNML.boole_psi_mat = false;
 %% 
 % 
 % 
@@ -542,7 +598,7 @@ gorilla_applets.GORILLA_APPLETS_NML.boole_psi_mat = false;
 % 
 % true ... random numbers are precomputed
 
-gorilla_applets.GORILLA_APPLETS_NML.boole_random_precalc = false;
+mono_energetic_transp_coef.TRANSPCOEFNML.boole_random_precalc = true;
 %% 
 % 
 % 
@@ -552,7 +608,7 @@ gorilla_applets.GORILLA_APPLETS_NML.boole_random_precalc = false;
 % 
 % 2 ... load seed from file 'seed.dat'
 
-gorilla_applets.GORILLA_APPLETS_NML.seed_option = 2;
+mono_energetic_transp_coef.TRANSPCOEFNML.seed_option = 2;
 %% 
 % 
 % 
@@ -569,19 +625,19 @@ gorilla_applets.GORILLA_APPLETS_NML.seed_option = 2;
 % 
 % 3 ... BOTH 1 & 2
 
-gorilla_applets.GORILLA_APPLETS_NML.idiffcoef_output = 3;
+mono_energetic_transp_coef.TRANSPCOEFNML.idiffcoef_output = 3;
 %% 
 % 
 % 
 % Filename for evolution of mean value of $(\Delta s)^2$
 
-gorilla_applets.GORILLA_APPLETS_NML.filename_delta_s_squared = ['psi2_v_E_',num2str(mach_number(1)),'.dat'];
+mono_energetic_transp_coef.TRANSPCOEFNML.filename_delta_s_squared = ['psi2_v_E_',num2str(mach_number(1)),'.dat'];
 %% 
 % 
 % 
 % Filename for evolution of standard deviation of mean value of $(\Delta s)^2$
 
-gorilla_applets.GORILLA_APPLETS_NML.filename_std_dvt_delta_s_squared = ['std_psi2_v_E_',num2str(mach_number(1)),'.dat'];
+mono_energetic_transp_coef.TRANSPCOEFNML.filename_std_dvt_delta_s_squared = ['std_psi2_v_E_',num2str(mach_number(1)),'.dat'];
 %% 
 % 
 % 
@@ -591,19 +647,19 @@ gorilla_applets.GORILLA_APPLETS_NML.filename_std_dvt_delta_s_squared = ['std_psi
 % Filename for Fortran computation of diffusion coefficient and deviation of 
 % mean value (Transport with collisions)
 
-gorilla_applets.GORILLA_APPLETS_NML.filename_transp_diff_coef = ['nustar_diffcoef_std_v_E_',num2str(mach_number(1)),'.dat'];
+mono_energetic_transp_coef.TRANSPCOEFNML.filename_transp_diff_coef = ['nustar_diffcoef_std_v_E_',num2str(mach_number(1)),'.dat'];
 %% 
 % 
 % 
 % Normalized collisionality $\nu^\ast$   
 
- gorilla_applets.GORILLA_APPLETS_NML.nu_star = 0.1;
+ mono_energetic_transp_coef.TRANSPCOEFNML.nu_star = 0.1;
 %% 
 % 
 % 
 % Normalized ExB-drift velocity $v_E$ (Mach number)
 
- gorilla_applets.GORILLA_APPLETS_NML.v_E = mach_number(1);
+ mono_energetic_transp_coef.TRANSPCOEFNML.v_E = mach_number(1);
 %% 
 % 
 % 
@@ -613,19 +669,19 @@ gorilla_applets.GORILLA_APPLETS_NML.filename_transp_diff_coef = ['nustar_diffcoe
 % Starting value for normalized collisionality $\nu^\ast$ (Highest value --> 
 % Scan is towards smaller collisionalities)
 
-gorilla_applets.GORILLA_APPLETS_NML.nu_star_start = 0.1;
+mono_energetic_transp_coef.TRANSPCOEFNML.nu_star_start = 0.1;
 %% 
 % 
 % 
 % Basis of negative exponential scan: nu_star = nu_star_start * nu_exp_basis^i
 
-gorilla_applets.GORILLA_APPLETS_NML.nu_exp_basis = 0.5;
+mono_energetic_transp_coef.TRANSPCOEFNML.nu_exp_basis = 0.5;
 %% 
 % 
 % 
 % Number of evaluations of nu_star for scan
 
-gorilla_applets.GORILLA_APPLETS_NML.n_nu_scans = 3;
+mono_energetic_transp_coef.TRANSPCOEFNML.n_nu_scans = 3;
 %% 
 % 
 % 
@@ -634,26 +690,26 @@ gorilla_applets.GORILLA_APPLETS_NML.n_nu_scans = 3;
 % Filename for Fortran computation of diffusion coefficient and deviation of 
 % mean value (numerical diffusion without collisions)
 
-gorilla_applets.GORILLA_APPLETS_NML.filename_numerical_diff_coef = 'numerical_diffcoef_std.dat';
+mono_energetic_transp_coef.TRANSPCOEFNML.filename_numerical_diff_coef = 'numerical_diffcoef_std.dat';
 %% 
 % 
 % 
 % Pitchparameter $\lambda = v_\parallel/v$ at the start for numerical diffusion 
 % coefficient
 
-gorilla_applets.GORILLA_APPLETS_NML.lambda_start = 0.9;
+mono_energetic_transp_coef.TRANSPCOEFNML.lambda_start = 0.9;
 %% 
 % 
 % 
 % Total Monte Carlo physical orbit flight time per particle
 
-gorilla_applets.GORILLA_APPLETS_NML.total_MC_time = 10;
+mono_energetic_transp_coef.TRANSPCOEFNML.total_MC_time = 10;
 %% 
 % 
 % 
 % Number of time steps for evolution of $(\Delta s)^2$
 
-gorilla_applets.GORILLA_APPLETS_NML.nt_steps_numerical_diff = 10000;
+mono_energetic_transp_coef.TRANSPCOEFNML.nt_steps_numerical_diff = 10000;
 %% 
 % 
 % 
@@ -662,6 +718,7 @@ gorilla_applets.GORILLA_APPLETS_NML.nt_steps_numerical_diff = 10000;
 
 gorilla.write([path_RUN,'/gorilla.inp']);
 tetra_grid.write([path_RUN,'/tetra_grid.inp']);
+mono_energetic_transp_coef.write([path_RUN,'/mono_energetic_transp_coef.inp']);
 gorilla_applets.write([path_RUN,'/gorilla_applets.inp']);
 %% 
 % 
@@ -673,17 +730,15 @@ gorilla_applets.write([path_RUN,'/gorilla_applets.inp']);
 % First all necessary files need to be linked to the RUN folder
 
 ! ln -s ../../gorilla_applets_main.x .
-! ln -s ../../netcdf_file_for_test.nc .
-! ln -s ../../netcdf_file_for_test_6.nc .
-! ln -s ../../field_divB0.inp .
-! ln -s ../../preload_for_SYNCH.inp .
-! ln -s ../../seed.inp .
-! ln -s ../../DATA .
-! ln -s ../../btor_rbig.dat
-! ln -s ../../flux_functions.dat
-! ln -s ../../box_size_axis.dat
-! ln -s ../../twodim_functions.dat
-! ln -s ../../out.06
+! ln -s ../../../GORILLA/MHD_EQUILIBRIA .
+! ln -s ../../../GORILLA/INPUT/field_divB0.inp .
+! ln -s ../../../GORILLA/INPUT/preload_for_SYNCH.inp .
+! ln -s ../../INPUT/seed.inp .
+% ! ln -s ../../btor_rbig.dat
+% ! ln -s ../../flux_functions.dat
+% ! ln -s ../../box_size_axis.dat
+% ! ln -s ../../twodim_functions.dat
+% ! ln -s ../../out.06
 %% 
 % 
 % 
@@ -739,7 +794,7 @@ end
 % are equal to the file names (inside the data structure).
 
 data=struct();
-data=load_copy_transport_coef(data,path_RUN,path_data_plots,gorilla_applets);
+data=load_copy_transport_coef(data,path_RUN,path_data_plots,mono_energetic_transp_coef);
 %% 
 % 
 % 
@@ -748,16 +803,16 @@ data=load_copy_transport_coef(data,path_RUN,path_data_plots,gorilla_applets);
 % for every mach number.
 
 for i=2:numel(mach_number)
-    gorilla_applets.GORILLA_APPLETS_NML.v_E = mach_number(i);
+    mono_energetic_transp_coef.TRANSPCOEFNML.v_E = mach_number(i);
     
-    gorilla_applets.GORILLA_APPLETS_NML.filename_delta_s_squared = ['psi2_v_E_',num2str(mach_number(i)),'.dat'];
-    gorilla_applets.GORILLA_APPLETS_NML.filename_std_dvt_delta_s_squared = ['std_psi2_v_E_',num2str(mach_number(i)),'.dat'];
-    gorilla_applets.GORILLA_APPLETS_NML.filename_transp_diff_coef = ['nustar_diffcoef_std_v_E_',num2str(mach_number(i)),'.dat'];
+    mono_energetic_transp_coef.TRANSPCOEFNML.filename_delta_s_squared = ['psi2_v_E_',num2str(mach_number(i)),'.dat'];
+    mono_energetic_transp_coef.TRANSPCOEFNML.filename_std_dvt_delta_s_squared = ['std_psi2_v_E_',num2str(mach_number(i)),'.dat'];
+    mono_energetic_transp_coef.TRANSPCOEFNML.filename_transp_diff_coef = ['nustar_diffcoef_std_v_E_',num2str(mach_number(i)),'.dat'];
     
-    gorilla_applets.write([path_RUN,'/gorilla_applets.inp']);
+    mono_energetic_transp_coef.write([path_RUN,'/mono_energetic_transp_coef.inp']);
     ! ./gorilla_applets_main.x
     
-    data=load_copy_transport_coef(data,path_RUN,path_data_plots,gorilla_applets);
+    data=load_copy_transport_coef(data,path_RUN,path_data_plots,mono_energetic_transp_coef);
 end
 %% 
 % 
@@ -769,18 +824,18 @@ cd(path_script);
 %% 
 % 
 %% Create Plots
-% If the inputvarible 'gorilla_applets.GORILLA_APPLETS_NML.idiffcoef_output' 
+% If the inputvarible 'mono_energetic_transp_coef.TRANSPCOEFNML.idiffcoef_output' 
 % is 1 or 3, the GORILLA code calculates the diffusion coefficient with a linear 
 % interpolation with least squares. The result is than plotted with MATLAB in 
 % an double logarithmic plot. Every curve in the plot represents one mach number.
 % 
-% If the inputvarible 'gorilla_applets.GORILLA_APPLETS_NML.idiffcoef_output' 
+% If the inputvarible 'mono_energetic_transp_coef.TRANSPCOEFNML.idiffcoef_output' 
 % is 2 or 3, the GORILLA code writes the mean vlaue of /Delta s in an output file. 
 % MATLAB than creates an own plot for every mach number and for every \nu_star 
 % value. In all this plots the data should lie on a linear curve. Outherwise the 
 % data is not trustworth. 
 
-if gorilla_applets.GORILLA_APPLETS_NML.idiffcoef_output == 1
+if mono_energetic_transp_coef.TRANSPCOEFNML.idiffcoef_output == 1
     names=fieldnames(data);
     figure
     hold on
@@ -795,7 +850,7 @@ if gorilla_applets.GORILLA_APPLETS_NML.idiffcoef_output == 1
     hold off
     savefig([path_data_plots,'/diffusion_coefficients.fig']);
     saveas(gcf,[path_data_plots,'/diffusion_coefficients.png']);
-elseif gorilla_applets.GORILLA_APPLETS_NML.idiffcoef_output == 2
+elseif mono_energetic_transp_coef.TRANSPCOEFNML.idiffcoef_output == 2
     names=fieldnames(data);
     for i=1:numel(names)/2
         empty_row=find(~data.(names{2*i-1})(:,1));
@@ -805,7 +860,7 @@ elseif gorilla_applets.GORILLA_APPLETS_NML.idiffcoef_output == 2
             figure
             errorbar(data.(names{2*i-1})(j_data,1),data.(names{2*i-1})(j_data,2),data.(names{2*i})(j_data,2).*1.96,'x')
             title('trend of the mean value of \Delta s^2');
-            nu_star=gorilla_applets.GORILLA_APPLETS_NML.nu_star_start.*gorilla_applets.GORILLA_APPLETS_NML.nu_exp_basis.^(j-1);
+            nu_star=mono_energetic_transp_coef.TRANSPCOEFNML.nu_star_start.*mono_energetic_transp_coef.TRANSPCOEFNML.nu_exp_basis.^(j-1);
             legend(['v_E = ',num2str(mach_number(i)),newline,'\nu* = ',num2str(nu_star)])
             xlabel('t [s]');
             ylabel('mean(\Delta s^2)')
@@ -820,6 +875,9 @@ else
     hold on
     for i=1:numel(names)/3
         errorbar(data.(names{3*i-2})(:,1),data.(names{3*i-2})(:,2),data.(names{3*i-2})(:,3).*1.96)
+        M = data.(names{3*i-2});
+        M_name = [path_data_plots,'/',names{3*i-2},'.dat'];
+        save(M_name,'M','-ascii','-tabs');
     end
     title('Mono-energetic radial diffusion coefficients');
     legend([repmat('v_E: ',numel(mach_number),1),num2str(mach_number')])
@@ -837,7 +895,7 @@ else
             figure
             errorbar(data.(names{3*i-1})(j_data,1),data.(names{3*i-1})(j_data,2),data.(names{3*i})(j_data,2).*1.96,'x')
             title('trend of the mean value of \Delta s^2');
-            nu_star=gorilla_applets.GORILLA_APPLETS_NML.nu_star_start.*gorilla_applets.GORILLA_APPLETS_NML.nu_exp_basis.^(j-1);
+            nu_star=mono_energetic_transp_coef.TRANSPCOEFNML.nu_star_start.*mono_energetic_transp_coef.TRANSPCOEFNML.nu_exp_basis.^(j-1);
             legend(['v_E = ',num2str(mach_number(i)),newline,'\nu* = ',num2str(nu_star)])
             xlabel('t [s]');
             ylabel('mean(\Delta s^2)')
@@ -847,6 +905,3 @@ else
         end
     end
 end
-
-%% 
-%
