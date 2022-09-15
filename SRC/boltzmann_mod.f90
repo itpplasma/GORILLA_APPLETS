@@ -1,86 +1,101 @@
 module boltzmann_mod
     implicit none
-
+!
     private
-
-    double precision :: time_step,energy_eV
-    integer :: i_integrator_type, seed_option, n_t_measurements
+!
+    double precision :: time_step,energy_max_eV
+    integer :: i_integrator_type, seed_option, n_t_measurements, n_particles
     logical :: boole_random_precalc
     character(1024) :: filename_total_dwell_times, filename_starting_conditions
-    !
+!
     !Namelist for boltzmann input
-    NAMELIST /boltzmann_nml/ time_step,energy_eV, i_integrator_type, &
-    & filename_total_dwell_times,seed_option,filename_starting_conditions, n_t_measurements 
-
+    NAMELIST /boltzmann_nml/ time_step,energy_max_eV,n_particles,i_integrator_type, &
+    & seed_option,boole_random_precalc,filename_total_dwell_times,filename_starting_conditions, n_t_measurements
+!
     !boole_random_precalc,
-
+!
     public :: calc_boltzmann
-    
+!    
 contains
-
+!
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-
+!
 subroutine load_boltzmann_inp()
-    !
+!
     open(unit=71, file='boltzmann.inp', status='unknown')
     read(71,nml=boltzmann_nml)
     close(71)
-    
+!    
     print *,'GORILLA: Loaded input data from boltzmann.inp'
 end subroutine load_boltzmann_inp
-
+!
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-
-
+!
+subroutine calc_starting_conditions(n_particles,energy_max_eV,vmod,start_pos_pitch_mat)
+!
+    use constants, only: pi
+    use tetra_grid_mod, only: verts_rphiz
+    use pusher_tetra_rk_mod, only: find_tetra
+!
+    implicit none
+    integer, intent(in)                                            :: n_particles
+    double precision, intent(in)                                   :: energy_max_eV, vmod
+    double precision, dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat !dimension(4,n_particle)
+    double precision                                               :: rand_scalar, vpar, vperp
+    double precision                                               :: Rmin, Rmax, Zmin, Zmax
+    double precision, dimension(:), allocatable                    :: rand_vector
+    integer                                                        :: i
+    logical                                                        :: inside
+    double precision, dimension(3)                                 :: x
+    integer                                                        :: ind_tetr_out,iface, counter
+!
+    allocate(start_pos_pitch_mat(4,n_particles))
+    allocate(rand_vector(n_particles))
+!
+    inside = .false.
+    start_pos_pitch_mat = 0
+    counter = 0
+!
+    Rmin = minval(verts_rphiz(1,:))
+    Rmax = maxval(verts_rphiz(1,:))
+    Zmin = minval(verts_rphiz(3,:))
+    Zmax = maxval(verts_rphiz(3,:))
+    PRINT*, 'Rmin, Rmax, Zmin and Zmax are:', Rmin, Rmax, Zmin, Zmax
+    PRINT*, 'numel(verts) = ', size(verts_rphiz(1,:))
+!
+    open(55, file = 'vertices.dat')
+    write(55,'(3ES15.3E4)') verts_rphiz
+!
+    do i = 1,n_particles
+        do while(inside.eqv..false.)
+            counter = counter + 1
+            call RANDOM_NUMBER(rand_scalar)
+            start_pos_pitch_mat(1,i) = Rmin + (Rmax - Rmin)*rand_scalar !R
+            call RANDOM_NUMBER(rand_scalar)
+            start_pos_pitch_mat(2,i) = 2*pi*rand_scalar !Phi
+            call RANDOM_NUMBER(rand_scalar)
+            start_pos_pitch_mat(3,i) = Zmin + (Zmax - Zmin)*rand_scalar !Z
+            x = (/start_pos_pitch_mat(1,i),start_pos_pitch_mat(2,i),start_pos_pitch_mat(3,i)/)
+            call RANDOM_NUMBER(rand_scalar)
+            start_pos_pitch_mat(4,i) = 2*rand_scalar-1 !pitch parameter
+            vpar = start_pos_pitch_mat(4,i)*vmod
+            vperp = sqrt(vmod**2-vpar**2)
+            call find_tetra(x,vpar,vperp,ind_tetr_out,iface)
+            if (ind_tetr_out.ne.-1) inside = .true.
+        enddo
+        inside = .false.
+    enddo
+    PRINT*, 'counter = ', counter
+!
+    ! call RANDOM_NUMBER(rand_vector)
+    ! start_pos_pitch_mat(5,:) = energy_max_eV!*rand_vector !energy
+!
+end subroutine calc_starting_conditions
+!
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-
-subroutine read_in_starting_conditions(start_pos_pitch_mat, n_start_pos)
-    double precision, dimension(:,:), allocatable, intent(out) :: start_pos_pitch_mat
-    integer, intent(out)                                       :: n_start_pos
-    integer                                                    :: file_id_read_start, i_os, i
-
-    file_id_read_start = 100
-    open(unit=file_id_read_start, file = filename_starting_conditions, iostat=i_os, status='old')
-
 !
-        !Error, if file does not exist.
-        if ( i_os /= 0 ) then
-                !Symmetry flux coordinates
-                    print *, "Error opening file with starting positions and starting pitch parameter: ", &
-                    & filename_starting_conditions
-            stop
-        endif
-!
-        !Count number of lines
-            n_start_pos = 0
-!
-        do
-            read(file_id_read_start, '(A)', iostat=i_os)
-            if (i_os /= 0) exit
-            n_start_pos = n_start_pos + 1
-        end do
-!
-        print*, "File with starting positions and pitch parameter contains ", n_start_pos, "starting values."
-!
-        allocate(start_pos_pitch_mat(n_start_pos,4))
-!
-        rewind(file_id_read_start)
-!
-        do i = 1, n_start_pos
-            read(file_id_read_start,*) start_pos_pitch_mat(i,:)
-        end do
-!
-    close(file_id_read_start)
-
-end subroutine read_in_starting_conditions
-
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-
-
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-
 subroutine calc_boltzmann
-
+!
     use orbit_timestep_gorilla_mod, only: initialize_gorilla !,orbit_timestep_gorilla
     use constants, only: ev2erg, pi
     use tetra_physics_mod, only: particle_mass,particle_charge,cm_over_e,mag_axis_R0
@@ -91,38 +106,38 @@ subroutine calc_boltzmann
     use supporting_functions_mod, only: theta_sym_flux2theta_vmec,theta_vmec2theta_sym_flux
     use tetra_grid_settings_mod, only: n_field_periods
     use tetra_grid_mod, only: ntetr
-
+!
     implicit none
-
+!
     double precision, dimension(:), allocatable :: total_dwell_times, single_particle_dwell_times, densities, &
                                                    & single_particle_time_resolved_energies, measuring_times
     double precision, dimension(:,:), allocatable :: total_currents, single_particle_currents, fluid_velocities, &
                                                      & start_pos_pitch_mat, time_resolved_energies
     double precision :: vmod,pitchpar,vpar,vperp,t_remain,t_confined,tau_out_can
     integer :: kpart,i,n,l,m,ind_tetr,iface,n_lost_particles,ierr
-    integer :: n_start, n_end, i_part, n_particles
+    integer :: n_start, n_end, i_part
     double precision, dimension(3) :: x_rand_beg,x
     double precision, dimension(:), allocatable :: xi
     logical :: boole_initialized,boole_particle_lost
     double precision :: dtau, dphi,dtaumin
     double precision, dimension(5) :: z
     Character(LEN=50) :: format_time_resolved_energies
-
+!
     !Load input for boltzmann computation
     call load_boltzmann_inp()
-    !
+!
     allocate(xi(n_particles))
-
-    call read_in_starting_conditions(start_pos_pitch_mat, n_particles)
+!
+    !call read_in_starting_conditions(start_pos_pitch_mat, n_particles)
 !
     n_start = 1
     n_end = n_particles
-
+!
     measuring_times = (/(i,i=n_t_measurements-1,0,-1)/)
     measuring_times = measuring_times/(n_t_measurements-1)*time_step
     !Initialize GORILLA
     call initialize_gorilla()
-
+!
     allocate(total_dwell_times(1:ntetr))
     allocate(single_particle_dwell_times(1:ntetr))
     allocate(densities(1:ntetr))
@@ -131,16 +146,18 @@ subroutine calc_boltzmann
     allocate(fluid_velocities(1:3,1:ntetr))
     allocate(time_resolved_energies(1:n_t_measurements,1:n_particles))
     allocate(single_particle_time_resolved_energies(1:n_t_measurements))
-    
+!
     time_resolved_energies = 0
     total_dwell_times = 0
     total_currents = 0
 !
     !Load fluxtube volume for a starting position (File to be chosen in gorilla_applets.inp)
-    call load_flux_tube_volume()
+    !call load_flux_tube_volume()
 !
     !Compute velocity module from kinetic energy dependent on particle species
-    vmod=sqrt(2.d0*energy_eV*ev2erg/particle_mass)
+    vmod=sqrt(2.d0*energy_max_eV*ev2erg/particle_mass)
+    !
+    call calc_starting_conditions(n_particles,energy_max_eV,vmod,start_pos_pitch_mat)
     !
     !------------------------------------------------------------------------------------------------------------!
     !------------------------------------ Initialization of direct integrator -----------------------------------!
@@ -191,9 +208,9 @@ subroutine calc_boltzmann
                     !$omp end critical
 
                     !You need x_rand_beg(1,3), pitchpar(1) (between -1 and 1), energy is already given
-                    x_rand_beg = start_pos_pitch_mat(n,1:3)
-                    pitchpar = start_pos_pitch_mat(n,4)
-
+                    x_rand_beg = start_pos_pitch_mat(1:3,n)
+                    pitchpar = start_pos_pitch_mat(4,n)
+!
                     select case(i_integrator_type)
                         case(1,0)
                             x = x_rand_beg
@@ -286,7 +303,7 @@ subroutine calc_boltzmann
                 !$OMP END PARALLEL
     !
     !            close(99)
-                
+    !            
                 densities = total_dwell_times / time_step !compute densities
                 do l = 1,ntetr !compute fluid velocity
                         if (densities(l) .EQ. 0) then
@@ -297,14 +314,14 @@ subroutine calc_boltzmann
                             enddo
                         endif
                 enddo
-
-
+!
+!
     print *, 'Number of lost particles',n_lost_particles
     open(99,file='confined_fraction.dat')
     write(99,*) 1.d0-dble(n_lost_particles)/dble(n_particles)
-    
-
-    
+!
+!
+!   
     open(50, file = filename_total_dwell_times)
     write(50,'(ES15.3E4)') total_dwell_times
     close(50)
@@ -321,11 +338,11 @@ subroutine calc_boltzmann
     open(54, file = 'time_resolved_energies.dat')
     write(54,format_time_resolved_energies) time_resolved_energies
     close(54)
-
+!
                 deallocate(total_dwell_times, single_particle_dwell_times, total_currents, &
                 & single_particle_currents, fluid_velocities, densities, start_pos_pitch_mat, &
                 & time_resolved_energies, single_particle_time_resolved_energies)
-
+!
 PRINT*, 'particle mass = ', particle_mass
 PRINT*, 'large radius = ', mag_axis_R0
 PRINT*, 'parallel velocity = ', vpar
@@ -333,15 +350,11 @@ PRINT*, 'absolute value of velocity = ', vmod
 PRINT*, 'perpendicular velocity = ', vperp
 PRINT*, 'pitch par =', pitchpar
 PRINT*, 'particle charge = ', particle_charge
-    !
+!
 end subroutine calc_boltzmann
-
+!
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-
-
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-    
-
+!
 subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, t_remain_out, &
     & single_particle_dwell_times, single_particle_currents, single_particle_time_resolved_energies, &
     & measuring_times)
@@ -459,7 +472,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                     end select
 !
                     t_remain = t_remain - t_pass
-
+!
                     single_particle_dwell_times(ind_tetr_save) = single_particle_dwell_times(ind_tetr_save) + t_pass
                     single_particle_currents(:,ind_tetr_save) = particle_charge*(x-x_save)/t_step ! /t_pass vor the speed but *t_pass to calculate the time averge together with /t_step
                     if (t_remain .LE. measuring_times(i)) then
@@ -485,12 +498,9 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 !             call alloc_precomp_poly_perpinv(2,ntetr)
 !         
 end subroutine orbit_timestep_gorilla_boltzmann
-
+!
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-
-
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-
+!
 subroutine orbit_timestep_can_boltzmann(z,dtau,dtaumin,ierr,tau_out)
     !
           use odeint_mod, only: odeint_allroutines
@@ -572,7 +582,48 @@ subroutine orbit_timestep_can_boltzmann(z,dtau,dtaumin,ierr,tau_out)
           if(ierr.ne.0) return
     !
           end subroutine orbit_timestep_can_boltzmann
-
+!
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
+    subroutine read_in_starting_conditions(start_pos_pitch_mat, n_start_pos)
+    double precision, dimension(:,:), allocatable, intent(out) :: start_pos_pitch_mat
+    integer, intent(out)                                       :: n_start_pos
+    integer                                                    :: file_id_read_start, i_os, i
+! 
+    file_id_read_start = 100
+    open(unit=file_id_read_start, file = filename_starting_conditions, iostat=i_os, status='old')
+!
+        !Error, if file does not exist.
+        if ( i_os /= 0 ) then
+                !Symmetry flux coordinates
+                    print *, "Error opening file with starting positions and starting pitch parameter: ", &
+                    & filename_starting_conditions
+            stop
+        endif
+!
+        !Count number of lines
+            n_start_pos = 0
+!
+        do
+            read(file_id_read_start, '(A)', iostat=i_os)
+            if (i_os /= 0) exit
+            n_start_pos = n_start_pos + 1
+        end do
+!
+        print*, "File with starting positions and pitch parameter contains ", n_start_pos, "starting values."
+!
+        allocate(start_pos_pitch_mat(n_start_pos,4))
+!
+        rewind(file_id_read_start)
+!
+        do i = 1, n_start_pos
+            read(file_id_read_start,*) start_pos_pitch_mat(i,:)
+        end do
+!
+    close(file_id_read_start)
 
+end subroutine read_in_starting_conditions
+!
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
 end module boltzmann_mod

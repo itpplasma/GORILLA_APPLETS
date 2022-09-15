@@ -19,9 +19,9 @@ module total_dwell_times_mod
     public :: calc_total_dwell_times
     
 contains
-
+!
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-
+!
 subroutine load_total_dwell_times_inp()
     !
     open(unit=71, file='total_dwell_times.inp', status='unknown')
@@ -32,8 +32,8 @@ subroutine load_total_dwell_times_inp()
 end subroutine load_total_dwell_times_inp
 
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-
-
+!
+!
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 
 subroutine calc_rand_numbers_total_dwell_times(n_particles)
@@ -384,12 +384,12 @@ subroutine orbit_timestep_gorilla_dwell_times(x,vpar,vperp,t_step,boole_initiali
                     & alloc_precomp_poly_perpinv
                 use tetra_physics_mod, only: tetra_physics,particle_charge,particle_mass
                 !use tetra_grid_mod, only: ntetr
-                use gorilla_settings_mod, only: ipusher, poly_order
+                use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
                 use orbit_timestep_gorilla_mod, only: check_coordinate_domain
                 use supporting_functions_mod, only: bmod_func, vperp_func
-    !
-                implicit none
-    !
+!
+            implicit none
+!
                 double precision, dimension(3), intent(inout)   :: x
                 double precision, intent(inout)                 :: vpar,vperp
                 double precision, intent(in)                    :: t_step
@@ -403,7 +403,10 @@ subroutine orbit_timestep_gorilla_dwell_times(x,vpar,vperp,t_step,boole_initiali
                 double precision                                :: perpinv,perpinv2
                 double precision, dimension(:), intent(inout)   :: single_particle_dwell_times
                 double precision, dimension(:,:), intent(inout) :: single_particle_currents
-    !
+                double precision                                :: hamiltonian_time
+                type(optional_quantities_type)                  :: optional_quantities
+
+                hamiltonian_time = 0
                 !If orbit_timestep is called for the first time without grid position
                 if(.not.boole_initialized) then
     !
@@ -483,7 +486,7 @@ subroutine orbit_timestep_gorilla_dwell_times(x,vpar,vperp,t_step,boole_initiali
                             call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper)
                         case(2)
                             call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_remain,&
-                                                                & t_pass,boole_t_finished,iper)
+                                                                & t_pass,boole_t_finished,iper,optional_quantities)
                     end select
     !
                     t_remain = t_remain - t_pass
@@ -491,6 +494,9 @@ subroutine orbit_timestep_gorilla_dwell_times(x,vpar,vperp,t_step,boole_initiali
                     single_particle_dwell_times(ind_tetr_save) = single_particle_dwell_times(ind_tetr_save) + t_pass
                     single_particle_currents(:,ind_tetr_save) = particle_charge*(x-x_save)/t_step ! /t_pass vor the speed but *t_pass to calculate the time averge together with /t_step
     !
+
+                hamiltonian_time = hamiltonian_time + optional_quantities%t_hamiltonian
+!
                     !Orbit stops within cell, because "flight"-time t_step has finished
                     if(boole_t_finished) then
                         if( present(t_remain_out)) then
@@ -501,6 +507,7 @@ subroutine orbit_timestep_gorilla_dwell_times(x,vpar,vperp,t_step,boole_initiali
     !
                 enddo !Loop for tetrahedron pushings
 !
+                !PRINT*, 'hamiltonian time = ', hamiltonian_time
                 !Compute vperp from position
                 vperp = vperp_func(z_save,perpinv,ind_tetr_save)
     !            
