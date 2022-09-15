@@ -25,6 +25,6 @@
   boole_random_precalc = .true. ,
 !
   !Filename for life time of alpha particles
-  filename_alpha_lifetime = 'alpha_life_time_gorilla.dat' ,
+  filename_alpha_lifetime = 'alpha_lifetime_gorilla.dat' ,
 !
 /
