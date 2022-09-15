@@ -7,7 +7,7 @@ lwidth = 4;
 % Green
 color_green = [18/255,173/255,42/255];
 
-t_confined = load('alpha_life_time_gorilla.dat');
+t_confined = load('alpha_lifetime_gorilla.dat');
 t_sample = logspace(-4,log10(max(t_confined)),100).';
 
 confined_ratio = zeros(size(t_sample));
