@@ -64,7 +64,7 @@ print *, ''
         n_steps = 100 * 2.d0
 !
         !number of orbits
-        n_orbits = 100000
+        n_orbits = 10000000
 !
         !Integrator type
         ! 1 ... GORILLA
@@ -73,7 +73,7 @@ print *, ''
 !
         select case(i_integrator_type)
             case(1)
-                open(2,file='results/poincare_invariance_gorilla_n_1E5.dat')
+                open(2,file='results/poincare_invariance_gorilla_n_1E7_e_var_jperp_var_dtdtau_ham.dat')
             case(2)
                 open(2,file='results/poincare_invariance_direct_1E-08_ns_s3.dat')
         end select
