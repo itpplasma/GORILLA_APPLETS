@@ -1,0 +1,53 @@
+! INPUT FILE FOR COMPUTATION OF MONO-ENERGETIC TRANSPORT COEFFICIENT AND NUMERICAL DIFFUSION COEFFICIENT
+!
+! TRANSPORT COEFFICIENT NAMELIST 
+&GORILLA_APPLETS_NML
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Fluxtube volume OR mono-energetic radial transport coefficient OR numerical diffusion coefficient
+ !1 ... Pre-computation of fluxtube volume for GORILLA
+ !2 ... Computation of mono-energetic transport coefficient for given collisionality and Mach number
+ !3 ... Scan over collisionality: Computation of mono-energetic transport coefficent for constant Mach number
+ !4 ... Computation of numerical diffusion coefficient (No collisions)
+ i_option = 7 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Options for pre-computation of fluxtube volume
+!
+ !Filname of the fluxtube volume to be precomputed
+ filename_fluxtv_precomp = 'fluxtubevolume.dat' ,
+!
+ !Starting value for drift surface
+ ! = s for (s,$\vartheta$,$\varphi$)
+ ! = R for (R,$\varphi$,Z)
+ start_pos_x1 = 0.6d0 ,
+!
+ !Starting value for toroidal variable
+ ! = $\vartheta$ for (s,$\vartheta$,$\varphi$)
+ ! = $\varphi$ for (R,$\varphi$,Z)
+ start_pos_x2  = 0.00013d0 ,
+!
+ !Starting value for poloidal variable $\vartheta$
+ ! = $\varphi$ for (s,$\vartheta$,$\varphi$)
+ ! = Z for (R,$\varphi$,Z)
+ start_pos_x3  = 0.00013d0 ,
+!
+ !Size of a single time step
+ t_step_fluxtv = 1.d-3 ,
+!
+ !Number of time steps for fluxtube volume
+ nt_steps_fluxtv = 100000 ,
+!
+ !Kinetic particle energy (in eV) for fluxtube volume computation
+ energy_eV_fluxtv = 3.d3 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Filname of the fluxtube volume to be loaded for starting positions of MC simulation
+ filename_fluxtv_load = 'fluxtubevolume.dat' ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+/

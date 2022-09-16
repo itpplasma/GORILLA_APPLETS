@@ -64,7 +64,7 @@ print *, ''
         n_steps = 100 * 2.d0
 !
         !number of orbits
-        n_orbits = 100000
+        n_orbits = 100
 !
         !Integrator type
         ! 1 ... GORILLA
@@ -734,8 +734,8 @@ stop
 !
                 t_remain = t_remain - t_pass
 !
-                ! t_hamiltonian = t_hamiltonian + optional_quantities%t_hamiltonian
-                t_hamiltonian = t_hamiltonian + t_pass * hamiltonian_time(ind_tetr_save)%dt_dtau_const_save
+                t_hamiltonian = t_hamiltonian + optional_quantities%t_hamiltonian
+                !t_hamiltonian = t_hamiltonian + t_pass * hamiltonian_time(ind_tetr_save)%dt_dtau_const_save
 !
                 gyrophase = gyrophase + optional_quantities%gyrophase
 !

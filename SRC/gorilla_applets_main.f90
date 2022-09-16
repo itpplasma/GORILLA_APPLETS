@@ -102,7 +102,7 @@
 !
         case(7) !Compute 1st Poincaré invariance
 !
-            !call compute_first_poincare_invariance
+            call compute_first_poincare_invariance
 !
 !-------------------------------------------------------------------------------------------!
 !
