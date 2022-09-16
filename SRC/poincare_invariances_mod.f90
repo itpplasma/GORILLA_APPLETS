@@ -73,7 +73,7 @@ print *, ''
 !
         select case(i_integrator_type)
             case(1)
-                open(2,file='results/poincare_invariance_gorilla_n_1E7_e_var_jperp_const_dtdtau_ham.dat')
+                open(2,file='results/poincare_invariance_gorilla_n_1E7_e_const_jperp_var_dtdtau_ham.dat')
             case(2)
                 open(2,file='results/poincare_invariance_direct_1E-08_ns_s3.dat')
         end select
@@ -188,14 +188,14 @@ print *, ''
             phi_0 = 0.d0
 !
             !Define total energy (Hamiltonian) for individual orbit
-            energy_eV = energy_eV_0 * (1.d0 + 0.1d0 * sin(alpha_0_vec(k)) )
-!            energy_eV = energy_eV_0 * (1.d0)
+!            energy_eV = energy_eV_0 * (1.d0 + 0.1d0 * sin(alpha_0_vec(k)) )
+            energy_eV = energy_eV_0 * (1.d0)
             energy_eV_vec(k) = energy_eV
 !
 
             !Define perpinv for individual orbit
-            !perpinv_vec(k) = perpinv * (1.d0 + 0.1d0 * cos(alpha_0_vec(k)) )
-            perpinv_vec(k) = perpinv
+            perpinv_vec(k) = perpinv * (1.d0 + 0.1d0 * cos(alpha_0_vec(k)) )
+!            perpinv_vec(k) = perpinv
             perpinv2 = perpinv_vec(k)**2
 
 !
