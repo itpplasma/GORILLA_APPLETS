@@ -10,9 +10,9 @@
   use mono_energetic_transp_coef_settings_mod, only: load_mono_energetic_transp_coef_inp
   use alpha_lifetime_gorilla_mod, only: calc_alpha_lifetime_gorilla
   use direct_vmec_integrator_mod, only: direct_vmec_integrator
-  !use poincare_invariances_mod, only: compute_first_poincare_invariance
-  !use total_dwell_times_mod, only: calc_total_dwell_times
-  !use boltzmann_mod, only: calc_boltzmann
+  use poincare_invariances_mod, only: compute_first_poincare_invariance
+  use total_dwell_times_mod, only: calc_total_dwell_times
+  use boltzmann_mod, only: calc_boltzmann
 !
   implicit none
 !
@@ -102,19 +102,19 @@
 !
         case(7) !Compute 1st Poincaré invariance
 !
-            !call compute_first_poincare_invariance
+            call compute_first_poincare_invariance
 !
 !-------------------------------------------------------------------------------------------!
 !
         case(9) !Compute total dwell times
                 !
-            !call calc_total_dwell_times
+            call calc_total_dwell_times
 !
 !-------------------------------------------------------------------------------------------!
 !
         case(10) !Do the boltzmanntest
                 !
-            !call calc_boltzmann
+            call calc_boltzmann
 !
 !-------------------------------------------------------------------------------------------!
 !
