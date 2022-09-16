@@ -7,7 +7,7 @@
  !Electrostatic potential within the plasma volume in Gaussian units:
  !The potential is realised in GORILLA as a rescaling of the toroidal flux by eps_Phi.
  !This results in surfaces of equal potential coinciding with the flux surfaces and an electric field perpendicular to them
- eps_Phi =  0.d0 , !1.d-6
+ eps_Phi =  -1.d-7 , !1.d-6
 !
  !Coordinate system
  !1 ... (R,phi,Z) cylindrical coordinate system
