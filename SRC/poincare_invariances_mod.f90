@@ -64,7 +64,7 @@ print *, ''
         n_steps = 100 * 2.d0
 !
         !number of orbits
-        n_orbits = 100
+        n_orbits = 100000
 !
         !Integrator type
         ! 1 ... GORILLA

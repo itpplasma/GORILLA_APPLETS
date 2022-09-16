@@ -10,7 +10,7 @@
   use mono_energetic_transp_coef_settings_mod, only: load_mono_energetic_transp_coef_inp
   use alpha_lifetime_gorilla_mod, only: calc_alpha_lifetime_gorilla
   use direct_vmec_integrator_mod, only: direct_vmec_integrator
-  !use poincare_invariances_mod, only: compute_first_poincare_invariance
+  use poincare_invariances_mod, only: compute_first_poincare_invariance
   !use total_dwell_times_mod, only: calc_total_dwell_times
   !use boltzmann_mod, only: calc_boltzmann
 !
