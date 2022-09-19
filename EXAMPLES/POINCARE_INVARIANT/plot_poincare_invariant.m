@@ -11,7 +11,6 @@ f1.Position = [0.0797 0.1657 0.6271 0.6565];
     
 %
 p_1 = plot(poincare_invariant_data(:,1),poincare_invariant_data(:,2),'-');
-%p5_1.DisplayName = '$J_\perp = f_1(x^i)$, $H = f_2(x^i)$: Correct (Hamiltonian) gyro-phase $\phi$ \& time dynamics $\mathrm{d} t / \mathrm{d} \tau$';
 p_1.DisplayName = '$a_\perp = 0.1$, $a_H = 0.1$: Correct (Hamiltonian) gyro-phase $\phi$ \& time dynamics $\mathrm{d} t / \mathrm{d} \tau$';
 
 %
