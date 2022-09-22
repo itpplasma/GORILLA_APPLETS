@@ -64,7 +64,7 @@ print *, ''
         n_steps = 100 * 2.d0
 !
         !number of orbits
-        n_orbits = 100000
+        n_orbits = 10000000
 !
         !Integrator type
         ! 1 ... GORILLA
@@ -356,36 +356,36 @@ print *, ''
 !
 !
 
-        delta_orbit_position = n_steps/n_orbit_positions
+!        delta_orbit_position = n_steps/n_orbit_positions
+!!
+!        j = 1
+!        !Write orbit positions
+!        do l = 1,n_orbit_positions
+!!
+!            do k = 1,n_orbits
+!                write(file_id_orbit_position,*) j,s_mat(j,k),theta_mat(j,k),phi_mat(j,k), &
+!                    & pitchpar_mat(j,k),energy_eV_vec(k),ePhi_mat(j,k),(-particle_mass*cm_over_e)*perpinv_vec(k), &
+!                    & gyrophase_mat(j,k), bmod_mat(j,k)
 !
-        j = 1
-        !Write orbit positions
-        do l = 1,n_orbit_positions
+!                call sym_flux_to_cyl(s_mat(j,k),theta_mat(j,k),phi_mat(j,k),R_cyl,PHI_cyl,Z_cyl)
+!                write(file_id_orbit_cyl,*) R_cyl,PHI_cyl,Z_cyl,pitchpar_mat(n_steps+1,k)
+!            enddo
+!!
+!            j = j+delta_orbit_position
+!            file_id_orbit_position = file_id_orbit_position + 1
+!            file_id_orbit_cyl = file_id_orbit_cyl + 1
 !
-            do k = 1,n_orbits
-                write(file_id_orbit_position,*) j,s_mat(j,k),theta_mat(j,k),phi_mat(j,k), &
-                    & pitchpar_mat(j,k),energy_eV_vec(k),ePhi_mat(j,k),(-particle_mass*cm_over_e)*perpinv_vec(k), &
-                    & gyrophase_mat(j,k), bmod_mat(j,k)
-
-                call sym_flux_to_cyl(s_mat(j,k),theta_mat(j,k),phi_mat(j,k),R_cyl,PHI_cyl,Z_cyl)
-                write(file_id_orbit_cyl,*) R_cyl,PHI_cyl,Z_cyl,pitchpar_mat(n_steps+1,k)
-            enddo
+!        enddo
+!!
+!        !Final orbit position
+!        do k = 1,n_orbits
+!            write(file_id_orbit_position,*) j,s_mat(n_steps+1,k),theta_mat(n_steps+1,k),phi_mat(n_steps+1,k), &
+!                & pitchpar_mat(n_steps+1,k),energy_eV_vec(k),ePhi_mat(j,k),(-particle_mass*cm_over_e)*perpinv_vec(k), &
+!                & gyrophase_mat(n_steps+1,k), bmod_mat(j,k)
 !
-            j = j+delta_orbit_position
-            file_id_orbit_position = file_id_orbit_position + 1
-            file_id_orbit_cyl = file_id_orbit_cyl + 1
-
-        enddo
-!
-        !Final orbit position
-        do k = 1,n_orbits
-            write(file_id_orbit_position,*) j,s_mat(n_steps+1,k),theta_mat(n_steps+1,k),phi_mat(n_steps+1,k), &
-                & pitchpar_mat(n_steps+1,k),energy_eV_vec(k),ePhi_mat(j,k),(-particle_mass*cm_over_e)*perpinv_vec(k), &
-                & gyrophase_mat(n_steps+1,k), bmod_mat(j,k)
-
-            call sym_flux_to_cyl(s_mat(n_steps+1,k),theta_mat(n_steps+1,k),phi_mat(n_steps+1,k),R_cyl,PHI_cyl,Z_cyl)
-            write(file_id_orbit_cyl,*) R_cyl,PHI_cyl,Z_cyl,pitchpar_mat(n_steps+1,k)
-        enddo
+!            call sym_flux_to_cyl(s_mat(n_steps+1,k),theta_mat(n_steps+1,k),phi_mat(n_steps+1,k),R_cyl,PHI_cyl,Z_cyl)
+!            write(file_id_orbit_cyl,*) R_cyl,PHI_cyl,Z_cyl,pitchpar_mat(n_steps+1,k)
+!        enddo
 
 !
 !Print electro-static potential energy
