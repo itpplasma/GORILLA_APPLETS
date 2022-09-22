@@ -73,7 +73,7 @@ print *, ''
 !
         select case(i_integrator_type)
             case(1)
-                open(2,file='results/poincare_invariance_gorilla_n_1E7_e_var_jperp_var_dtdtau_ham.dat')
+                open(2,file='results/poincare_invariance_gorilla_n_1E7_e_var_jperp_var_dtdtau_ham_O5.dat')
             case(2)
                 open(2,file='results/poincare_invariance_direct_1E-08_ns_s3.dat')
         end select
