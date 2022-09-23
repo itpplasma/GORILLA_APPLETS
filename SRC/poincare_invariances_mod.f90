@@ -58,7 +58,7 @@ print *, ''
         !boole_integration_over_tau (ONLY for GORILLA)
         ! .true. ... tau is used as an integration variable
         ! .false. ... ordinary time is used as an integration variable
-        boole_integration_over_tau = .true.
+        boole_integration_over_tau = .false.
 !
         !number of times steps
         n_steps = 100 * 2.d0
