@@ -20,8 +20,8 @@
       use tetra_grid_settings_mod, only: grid_kind,grid_size
       use tetra_physics_mod, only: tetra_physics,coord_system,particle_mass
       use fluxtv_pusher_mod, only: pusher_tetr_flux_tube_volume,initialize_const_motion_fluxtv
-      use pusher_tetra_rk_mod, only: find_tetra,pusher_tetra_rk,initialize_const_motion_rk
-      use orbit_timestep_gorilla_mod, only: initialize_gorilla
+      use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
+      use orbit_timestep_gorilla_mod, only: find_tetra, initialize_gorilla
       use supporting_functions_mod, only : sym_flux_in_cyl
       use constants, only: ev2erg
       use gorilla_applets_settings_mod, only: filename_fluxtv_precomp, start_pos_x1, start_pos_x2, start_pos_x3, &

@@ -7,7 +7,7 @@
  !Rectangular: nR, Field-aligned: ns
  n1 = 100 ,
  !Rectangular: nphi, Field-aligned: nphi                  			
- n2 = 3 ,
+ n2 = 5 ,
  !Rectangular: nZ, Field-aligned: ntheta                          		
  n3 = 2 ,
 !
@@ -51,7 +51,7 @@
 !------------------------------------------------------------------------------------------------------------!
 !
  !Switch for writing object file with mesh data
- boole_write_mesh_obj = .true. ,
+ boole_write_mesh_obj = .false. ,
 !
  !Filename for mesh object file in cylindrical coordintes
  filename_mesh_rphiz = 'mesh_rphiz.obj' ,

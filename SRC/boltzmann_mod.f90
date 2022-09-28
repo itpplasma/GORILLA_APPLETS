@@ -5,12 +5,14 @@ module boltzmann_mod
 !
     double precision :: time_step,energy_max_eV
     integer :: i_integrator_type, seed_option, n_t_measurements, n_particles
-    logical :: boole_random_precalc
-    character(1024) :: filename_total_dwell_times, filename_starting_conditions
+    logical :: boole_random_precalc, boole_grid_for_find_tetra
+    character(1024) :: filename_total_dwell_times, filename_starting_conditions, filename_vertex_coordinates, &
+    & filename_vertex_indices
 !
     !Namelist for boltzmann input
-    NAMELIST /boltzmann_nml/ time_step,energy_max_eV,n_particles,i_integrator_type, &
-    & seed_option,boole_random_precalc,filename_total_dwell_times,filename_starting_conditions, n_t_measurements
+    NAMELIST /boltzmann_nml/ time_step,energy_max_eV,n_particles,boole_grid_for_find_tetra,i_integrator_type, &
+    & seed_option,boole_random_precalc,filename_total_dwell_times,filename_starting_conditions,n_t_measurements, &
+    & filename_vertex_coordinates, filename_vertex_indices
 !
     !boole_random_precalc,
 !
@@ -35,7 +37,8 @@ subroutine calc_starting_conditions(n_particles,energy_max_eV,vmod,start_pos_pit
 !
     use constants, only: pi
     use tetra_grid_mod, only: verts_rphiz
-    use pusher_tetra_rk_mod, only: find_tetra
+    use orbit_timestep_gorilla_mod, only: find_tetra
+    !use orbit_timestep_gorilla_mod, only: equidistant_grid, entry_counter, dimension_parametres
 !
     implicit none
     integer, intent(in)                                            :: n_particles
@@ -48,6 +51,9 @@ subroutine calc_starting_conditions(n_particles,energy_max_eV,vmod,start_pos_pit
     logical                                                        :: inside
     double precision, dimension(3)                                 :: x
     integer                                                        :: ind_tetr_out,iface, counter
+    ! integer, dimension(:,:), allocatable                           :: equidistant_grid
+    ! integer, dimension(:), allocatable                             :: entry_counter
+    ! double precision, dimension(3,4)                               :: dimension_parameters   
 !
     allocate(start_pos_pitch_mat(4,n_particles))
     allocate(rand_vector(n_particles))
@@ -60,11 +66,11 @@ subroutine calc_starting_conditions(n_particles,energy_max_eV,vmod,start_pos_pit
     Rmax = maxval(verts_rphiz(1,:))
     Zmin = minval(verts_rphiz(3,:))
     Zmax = maxval(verts_rphiz(3,:))
-    PRINT*, 'Rmin, Rmax, Zmin and Zmax are:', Rmin, Rmax, Zmin, Zmax
-    PRINT*, 'numel(verts) = ', size(verts_rphiz(1,:))
+    ! PRINT*, 'Rmin, Rmax, Zmin and Zmax are:', Rmin, Rmax, Zmin, Zmax
+    ! PRINT*, 'numel(verts) = ', size(verts_rphiz(1,:))
 !
-    open(55, file = 'vertices.dat')
-    write(55,'(3ES15.3E4)') verts_rphiz
+    ! open(55, file = 'vertices.dat')
+    ! write(55,'(3ES15.3E4)') verts_rphiz
 !
     do i = 1,n_particles
         do while(inside.eqv..false.)
@@ -80,12 +86,12 @@ subroutine calc_starting_conditions(n_particles,energy_max_eV,vmod,start_pos_pit
             start_pos_pitch_mat(4,i) = 2*rand_scalar-1 !pitch parameter
             vpar = start_pos_pitch_mat(4,i)*vmod
             vperp = sqrt(vmod**2-vpar**2)
-            call find_tetra(x,vpar,vperp,ind_tetr_out,iface)
+            call find_tetra(x,vpar,vperp,ind_tetr_out,iface,boole_grid_for_find_tetra)
             if (ind_tetr_out.ne.-1) inside = .true.
         enddo
         inside = .false.
     enddo
-    PRINT*, 'counter = ', counter
+    ! PRINT*, 'counter = ', counter
 !
     ! call RANDOM_NUMBER(rand_vector)
     ! start_pos_pitch_mat(5,:) = energy_max_eV!*rand_vector !energy
@@ -105,7 +111,7 @@ subroutine calc_boltzmann
     use velo_mod, only: isw_field_type
     use supporting_functions_mod, only: theta_sym_flux2theta_vmec,theta_vmec2theta_sym_flux
     use tetra_grid_settings_mod, only: n_field_periods
-    use tetra_grid_mod, only: ntetr
+    use tetra_grid_mod, only: ntetr, nvert, verts_rphiz, tetra_grid
 !
     implicit none
 !
@@ -136,7 +142,7 @@ subroutine calc_boltzmann
     measuring_times = (/(i,i=n_t_measurements-1,0,-1)/)
     measuring_times = measuring_times/(n_t_measurements-1)*time_step
     !Initialize GORILLA
-    call initialize_gorilla()
+    call initialize_gorilla(boole_grid_for_find_tetra)
 !
     allocate(total_dwell_times(1:ntetr))
     allocate(single_particle_dwell_times(1:ntetr))
@@ -221,8 +227,8 @@ subroutine calc_boltzmann
                             z(4) = 1.d0
                     end select
 
-                    PRINT*, 'x_rand_beg = ', x_rand_beg
-                    PRINT*, 'pitchpar = ', pitchpar
+                    ! PRINT*, 'x_rand_beg = ', x_rand_beg
+                    ! PRINT*, 'pitchpar = ', pitchpar
     !
                     !Particle velocities in accordance with integrator
                     select case(i_integrator_type)
@@ -339,17 +345,32 @@ subroutine calc_boltzmann
     write(54,format_time_resolved_energies) time_resolved_energies
     close(54)
 !
-                deallocate(total_dwell_times, single_particle_dwell_times, total_currents, &
-                & single_particle_currents, fluid_velocities, densities, start_pos_pitch_mat, &
-                & time_resolved_energies, single_particle_time_resolved_energies)
+    ![R,phi,Z]: Write vertex coordinates to File
+    open(55, file=filename_vertex_coordinates)
+    101 format(1000(e21.14,x))
+    do i=1, nvert
+        write(55,101) verts_rphiz(1, i), verts_rphiz(2, i), verts_rphiz(3, i)
+    end do
+    close(55)
 !
-PRINT*, 'particle mass = ', particle_mass
-PRINT*, 'large radius = ', mag_axis_R0
-PRINT*, 'parallel velocity = ', vpar
-PRINT*, 'absolute value of velocity = ', vmod
-PRINT*, 'perpendicular velocity = ', vperp
-PRINT*, 'pitch par =', pitchpar
-PRINT*, 'particle charge = ', particle_charge
+    !Write vertex indices to File
+    open(56, file=filename_vertex_indices)
+    do i=1, ntetr
+        write(56, *) tetra_grid(i)%ind_knot([1, 2, 3, 4])
+    end do
+    close(56)
+!
+    deallocate(total_dwell_times, single_particle_dwell_times, total_currents, &
+    & single_particle_currents, fluid_velocities, densities, start_pos_pitch_mat, &
+    & time_resolved_energies, single_particle_time_resolved_energies)
+!
+! PRINT*, 'particle mass = ', particle_mass
+! PRINT*, 'large radius = ', mag_axis_R0
+! PRINT*, 'parallel velocity = ', vpar
+! PRINT*, 'absolute value of velocity = ', vmod
+! PRINT*, 'perpendicular velocity = ', vperp
+! PRINT*, 'pitch par =', pitchpar
+! PRINT*, 'particle charge = ', particle_charge
 !
 end subroutine calc_boltzmann
 !
@@ -359,13 +380,13 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     & single_particle_dwell_times, single_particle_currents, single_particle_time_resolved_energies, &
     & measuring_times)
 !
-                use pusher_tetra_rk_mod, only: find_tetra,pusher_tetra_rk,initialize_const_motion_rk
+                use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
                 use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
                 use tetra_physics_poly_precomp_mod , only: make_precomp_poly_perpinv, initialize_boole_precomp_poly_perpinv, &
                     & alloc_precomp_poly_perpinv
                 use tetra_physics_mod, only: tetra_physics,particle_charge,particle_mass
                 use gorilla_settings_mod, only: ipusher, poly_order
-                use orbit_timestep_gorilla_mod, only: check_coordinate_domain
+                use orbit_timestep_gorilla_mod, only: find_tetra, check_coordinate_domain
                 use supporting_functions_mod, only: bmod_func, vperp_func
 !
                 implicit none

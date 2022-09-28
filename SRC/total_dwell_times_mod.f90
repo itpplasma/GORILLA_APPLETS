@@ -378,14 +378,14 @@ end subroutine calc_total_dwell_times
 subroutine orbit_timestep_gorilla_dwell_times(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, &
     & t_remain_out,single_particle_dwell_times, single_particle_currents)
     !
-                use pusher_tetra_rk_mod, only: find_tetra,pusher_tetra_rk,initialize_const_motion_rk
+                use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
                 use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
                 use tetra_physics_poly_precomp_mod , only: make_precomp_poly_perpinv, initialize_boole_precomp_poly_perpinv, &
                     & alloc_precomp_poly_perpinv
                 use tetra_physics_mod, only: tetra_physics,particle_charge,particle_mass
                 !use tetra_grid_mod, only: ntetr
                 use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
-                use orbit_timestep_gorilla_mod, only: check_coordinate_domain
+                use orbit_timestep_gorilla_mod, only: find_tetra, check_coordinate_domain
                 use supporting_functions_mod, only: bmod_func, vperp_func
 !
             implicit none
