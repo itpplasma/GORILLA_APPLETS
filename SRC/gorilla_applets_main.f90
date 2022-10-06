@@ -11,6 +11,7 @@
   use alpha_lifetime_gorilla_mod, only: calc_alpha_lifetime_gorilla
   use direct_vmec_integrator_mod, only: direct_vmec_integrator
   use poincare_invariances_mod, only: compute_first_poincare_invariance
+  use reversibility_test_mod, only: make_reversibility_test
   use total_dwell_times_mod, only: calc_total_dwell_times
   use boltzmann_mod, only: calc_boltzmann
 !
@@ -106,14 +107,20 @@
 !
 !-------------------------------------------------------------------------------------------!
 !
+        case(8) !Perform a reversibility test (demonstrate negative time)
+!
+            call make_reversibility_test()
+!
+!-------------------------------------------------------------------------------------------!
+!
         case(9) !Compute total dwell times
-                !
+!
             call calc_total_dwell_times
 !
 !-------------------------------------------------------------------------------------------!
 !
         case(10) !Do the boltzmanntest
-                !
+!
             call calc_boltzmann
 !
 !-------------------------------------------------------------------------------------------!

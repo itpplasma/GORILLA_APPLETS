@@ -81,6 +81,7 @@ SOURCES = SetWorkingPrecision.f90\
 	alpha_lifetime_gorilla_mod.f90 \
 	direct_vmec_integrator_mod.f90 \
 	poincare_invariances_mod.f90 \
+	reversibility_test_mod.f90 \
 	boltzmann_mod.f90 \
 	total_dwell_times_mod.f90 \
 	gorilla_applets_main.f90
