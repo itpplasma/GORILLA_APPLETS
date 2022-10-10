@@ -1,0 +1,53 @@
+! INPUT FILE FOR REVERSIBILITY TEST
+!
+&reversibility_test_nml
+!
+  !Total time for tracing particles
+  ! HYDRA ions (3keV);        t = 1.3d-4
+  ! TOk ions (3keV);          t = 3.25d-5
+  ! TOK electrons (1E-2eV)    t = 2.1d-4
+  t_total = 3.25d-5 ,
+!
+  !Average "minor radius" of orbits at start
+  !Cylindrical: r, Symmetry Flux: s
+  minor_0 = 0.5d0 ,
+!
+  !Bandwith of "minor radius" of orbits at start
+  !Cylindrical: dr, Symmetry Flux: ds
+  dminor_0 = 0.25d0 ,
+!
+  !Major Radius R of starting contour center
+  !ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
+  R_center = 2.4d0
+!
+  !Height Z of starting contour center
+  !ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
+  Z_center = 0.0d0
+!
+  !Starting $\varphi$ value of orbits at start
+  phi_0 = 0.0d0 ,
+!
+  !Average starting pitch parameter of particles
+  pitchpar_0 = 0.46d0 ,
+!
+  !Average kinetic energy of particles
+  energy_eV_0 = 3.d3 ,
+!
+  !RELATIVE Bandwith of energy (and $\J_{\perp}$) of particles at start
+  relative_bandwith = 0.1d0 ,
+!
+  !Number of time measurements
+  n_steps = 3 ,
+!
+  !Number of orbits
+  n_orbits = 10 ,
+!
+  !Number of time snapeshots
+  n_snapshots = 2 ,
+!
+  !Filename for reversibility test
+  filename_reversibility_test = 'reversibility_test.dat' ,
+!
+  !Number of time measurements
+  boole_diag_reversibility_test = .false. ,
+/
