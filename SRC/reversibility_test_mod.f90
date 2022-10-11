@@ -27,7 +27,7 @@ module reversibility_test_load_mod
     logical, public, protected             :: boole_diag_reversibility_test
 !
     !Namelist for reversibility test input
-    NAMELIST /reversibility_test_nml/ t_total, minor_0, dminor_0, R_center, Z_center, phi_0, pitchpar_0, &
+    NAMELIST /REVERSIBILITY_TEST_NML/ t_total, minor_0, dminor_0, R_center, Z_center, phi_0, pitchpar_0, &
                                         & energy_eV_0, relative_bandwith, n_steps, n_orbits, n_snapshots, &
                                         & filename_reversibility_test, boole_diag_reversibility_test
 !
@@ -198,14 +198,14 @@ module reversibility_test_mod
             j = 1 + (l-1)*delta_snapshot
             do k = 1,n_orbits
                 write(file_id_reversibility_test,*) j, x1_mat(j,k), x2_mat(j,k), x3_mat(j,k), &
-                    & pitchpar_mat(j,k), hamiltonian_time_mat(j,k), gyrophase_mat(j,k)
+                    & pitchpar_mat(j,k), hamiltonian_time_mat(j,k), gyrophase_mat(j,k)/(2.0d0*pi)
             enddo
             write(file_id_reversibility_test,*) snapshot_end
         enddo
         !Final orbit position
         do k = 1,n_orbits
-            write(file_id_reversibility_test,*) j, x1_mat(n_steps+1,k), x2_mat(n_steps+1,k), x3_mat(n_steps+1,k), &
-                & pitchpar_mat(n_steps+1,k), hamiltonian_time_mat(n_steps+1,k), gyrophase_mat(n_steps+1,k)
+            write(file_id_reversibility_test,*) n_steps+1, x1_mat(n_steps+1,k), x2_mat(n_steps+1,k), x3_mat(n_steps+1,k), &
+                & pitchpar_mat(n_steps+1,k), hamiltonian_time_mat(n_steps+1,k), gyrophase_mat(n_steps+1,k)/(2.0d0*pi)
         enddo
         write(file_id_reversibility_test,*) snapshot_end
         close(file_id_reversibility_test)
@@ -263,7 +263,7 @@ module reversibility_test_mod
         !Define start position
         x = x_0
 !
-        call find_tetra_ePhi(x,energy_eV,pitchpar,ind_tetr,iface,vmod=vmod)
+        call find_tetra_ePhi(x,energy_eV,pitchpar,ind_tetr,iface,vmod_out=vmod)
         if(ind_tetr.eq.-1) return
 !
 !------------------------------------------------------------------------------------------------------------!
@@ -402,7 +402,7 @@ endif
         integer                                         :: ind_tetr,iface
         double precision, dimension(3)                  :: z_save
 !
-        call find_tetra_ePhi(x,energy_eV,pitchpar,ind_tetr,iface,vperp=vperp)
+        call find_tetra_ePhi(x,energy_eV,pitchpar,ind_tetr,iface,vperp_out=vperp)
         if(ind_tetr.eq.-1) return
 !
         !Squared perpendicular velocity
@@ -454,7 +454,7 @@ endif
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-    subroutine find_tetra_ePhi(x,energy_eV,pitchpar,ind_tetr,iface,vmod,vperp)
+    subroutine find_tetra_ePhi(x,energy_eV,pitchpar,ind_tetr,iface,vmod_out,vperp_out)
 !
         use constants, only: ev2erg
         use tetra_physics_mod, only: tetra_physics, particle_mass, particle_charge
@@ -468,12 +468,15 @@ endif
         double precision, dimension(3), intent(inout)   :: x
 !
         integer, intent(out)                            :: ind_tetr, iface
-        double precision, intent(out), optional         :: vmod,vperp
+        double precision, intent(out), optional         :: vmod_out,vperp_out
 !
         integer                                         :: ind_tetr_save
-        double precision                                :: vpar
+        double precision                                :: vpar,vperp,vmod
 !
         !Compute velocity module from kinetic energy dependent on particle species
+if(boole_diag_reversibility_test) print*, energy_eV
+if(boole_diag_reversibility_test) print*, ev2erg
+if(boole_diag_reversibility_test) print*, particle_mass
         vmod=sqrt(2.d0*energy_eV*ev2erg/particle_mass)
 !
         !--- Find tetrahedron for starting positions by neglecting electrostatic potential energy
@@ -509,6 +512,9 @@ endif
             print *, 'E_PHI = ', particle_charge * phi_elec_func(x,ind_tetr_save) / ev2erg
             stop
         endif
+
+        if(present(vmod_out)) vmod_out = vmod
+        if(present(vperp_out)) vperp_out = vperp
 !
     end subroutine find_tetra_ePhi
 !

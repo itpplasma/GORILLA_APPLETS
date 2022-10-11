@@ -1,6 +1,6 @@
 ! INPUT FILE FOR REVERSIBILITY TEST
 !
-&reversibility_test_nml
+&REVERSIBILITY_TEST_NML
 !
   !Total time for tracing particles
   ! HYDRA ions (3keV);        t = 1.3d-4
@@ -18,11 +18,11 @@
 !
   !Major Radius R of starting contour center
   !ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
-  R_center = 2.4d0
+  R_center = 2.4d0 ,
 !
   !Height Z of starting contour center
   !ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
-  Z_center = 0.0d0
+  Z_center = 0.0d0 ,
 !
   !Starting $\varphi$ value of orbits at start
   phi_0 = 0.0d0 ,
@@ -30,7 +30,7 @@
   !Average starting pitch parameter of particles
   pitchpar_0 = 0.46d0 ,
 !
-  !Average kinetic energy of particles
+  !Average kinetic energy of particles at start
   energy_eV_0 = 3.d3 ,
 !
   !RELATIVE Bandwith of energy (and $\J_{\perp}$) of particles at start

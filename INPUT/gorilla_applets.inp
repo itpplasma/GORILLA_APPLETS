@@ -5,7 +5,7 @@
 !
 !------------------------------------------------------------------------------------------------------------!
 !
- !Fluxtube volume OR mono-energetic radial transport coefficient OR numerical diffusion coefficient
+ !Choice of application
  !1 ... Pre-computation of fluxtube volume for GORILLA
  !2 ... Computation of mono-energetic transport coefficient for given collisionality and Mach number
  !3 ... Scan over collisionality: Computation of mono-energetic transport coefficent for constant Mach number
