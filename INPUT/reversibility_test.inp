@@ -24,6 +24,9 @@
   !ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
   Z_center = 0.0d0 ,
 !
+  !Fraction of the contour to be traced
+  contour_fraction = 1.0d0 ,
+!
   !Starting $\varphi$ value of orbits at start
   phi_0 = 0.0d0 ,
 !
@@ -45,8 +48,11 @@
   !Number of time snapeshots
   n_snapshots = 2 ,
 !
-  !Filename for reversibility test
+  !Filename for reversibility test (forward part)
   filename_reversibility_test = 'reversibility_test.dat' ,
+!
+  !Filename for reversibility test (backward part)
+  filename_reversibility_test_back = 'reversibility_test_back.dat' ,
 !
   !Number of time measurements
   boole_diag_reversibility_test = .false. ,

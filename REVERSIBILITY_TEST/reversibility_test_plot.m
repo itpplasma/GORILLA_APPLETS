@@ -20,23 +20,34 @@
 %For Construction of Demonstration
 %-----------------------------------------------------------------------------------------------------------------------
 %control of script
-close all
-boole_recalculate = true;
+%close all
+boole_recalculate = false;
 poly_order = 4;
 grid_kind = 2;
 [n1,n2,n3] = deal(70,70,70);
+eps_Phi = -1.d-7;
+%eps_Phi = 0;
 ispecies = 2;
 boole_guess = true;
 i_time_tracing_option = 1;
 t_total = 3.25d-5*6/7;
+%t_total = 1.3d-4;
+dminor_0 = 0.25d0;
+%dminor_0 = 0;
+contour_fraction = 1;
 n_steps = 200;
-n_orbits = 1000;
+n_orbits = 200;
 n_snapshots = 2;
 pitchpar_0 = 0.46d0;
+%pitchpar_0 = 0.6d0;
 energy_eV_0 = 3d3;
+relative_bandwith = 0.1d0;
+%relative_bandwith = 0.00d0;
 
 boole_show_contour = true;
+boole_show_contour_back = true;
 number_of_quantities = 6;
+ylabel_quantities = {'$s$','$\vartheta$','$\varphi$','$\lambda$','$t$','$\phi$'};
 
 n_skip_contour = 1;
 
@@ -52,13 +63,12 @@ axis_factor = 3/5;
 postprocessing_functions_path = 'postprocessing_functions';
 addpath(postprocessing_functions_path);
 
-%tests on lamor radius
+%filenames for output
+filename_reversibility_test = 'reversibility_test.dat';
+filename_reversibility_test_back = 'reversibility_test_back.dat';
 
 if (boole_recalculate)
-    %filenames for output
-    filename_reversibility_test = 'reversibility_test.dat';
-
-    
+  
     %Initialize used paths and files
     %-----------------------------------------------------------------------------------------------------------------------
 
@@ -119,7 +129,7 @@ if (boole_recalculate)
     %All necessary variables for current calculation
 
         %Change in the electrostatic potential within the plasma volume in Gaussian units
-            gorilla.GORILLANML.eps_Phi = -1.d-7;
+            gorilla.GORILLANML.eps_Phi = eps_Phi;
 
         %Coordinate system
             %1 ... (R,phi,Z) cylindrical coordinate system
@@ -219,7 +229,7 @@ if (boole_recalculate)
             
         %Bandwith of "minor radius" of orbits at start
         %Cylindrical: dr, Symmetry Flux: ds
-            reversibility_test.REVERSIBILITY_TEST_NML.dminor_0 = 0.25d0;
+            reversibility_test.REVERSIBILITY_TEST_NML.dminor_0 = dminor_0;
 
         %Major Radius R of starting contour center
         %ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
@@ -228,6 +238,9 @@ if (boole_recalculate)
         %Height Z of starting contour center
         %ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
             reversibility_test.REVERSIBILITY_TEST_NML.Z_center = 0.0d0;
+            
+        %Fraction of the contour to be traced
+            reversibility_test.REVERSIBILITY_TEST_NML.contour_fraction = contour_fraction;
 
         %Starting $\varphi$ value of orbits at start
             reversibility_test.REVERSIBILITY_TEST_NML.phi_0 = 0.0d0;
@@ -239,7 +252,7 @@ if (boole_recalculate)
             reversibility_test.REVERSIBILITY_TEST_NML.energy_eV_0 = energy_eV_0;
 
         %RELATIVE Bandwith of energy (and $\J_{\perp}$) of particles at start
-            reversibility_test.REVERSIBILITY_TEST_NML.relative_bandwith = 0.1d0;
+            reversibility_test.REVERSIBILITY_TEST_NML.relative_bandwith = relative_bandwith;
 
         %Number of time measurements
             reversibility_test.REVERSIBILITY_TEST_NML.n_steps = n_steps;
@@ -250,8 +263,11 @@ if (boole_recalculate)
         %Number of time snapeshots
             reversibility_test.REVERSIBILITY_TEST_NML.n_snapshots = n_snapshots;
 
-        %Filename for reversibility test
+        %Filename for reversibility test (forward part)
             reversibility_test.REVERSIBILITY_TEST_NML.filename_reversibility_test = filename_reversibility_test;
+            
+        %Filename for reversibility test (backward part)
+            reversibility_test.REVERSIBILITY_TEST_NML.filename_reversibility_test_back = filename_reversibility_test_back;
 
         %Number of time measurements
             reversibility_test.REVERSIBILITY_TEST_NML.boole_diag_reversibility_test = false;
@@ -295,11 +311,13 @@ end
 if (boole_show_contour)
     contour_data = load([path_RUN,'/',filename_reversibility_test]);
 end
+if (boole_show_contour_back)
+    contour_back_data = load([path_RUN,'/',filename_reversibility_test_back]);
+end
 
-%Energy evolution comparison
+%Show contour evolution
 if (boole_show_contour)
     xlabel_txt = '$k_{orbit}$';
-    ylabel_txt = '$unit$';
     
     ylimits = nan*ones(2,number_of_quantities);
     [~,contour_data] = extract_snapshot(contour_data);
@@ -307,36 +325,98 @@ if (boole_show_contour)
     ylimits(2,:) = max(contour_data(:,2:number_of_quantities+1),[],1);
     
     figure('Renderer', 'painters', 'Position', [24 37 2500 1300])
+    t = tiledlayout(number_of_quantities,n_snapshots +1);
     
     for j = 1:(n_snapshots+1)
         plot_data = extract_snapshot(contour_data,j);
         for l = 1:number_of_quantities
             jl_entry = (l-1)*(n_snapshots+1) + j;
             contour_labels = [1:size(plot_data,1)];
-            subplot(number_of_quantities,n_snapshots + 1,jl_entry)
+            %subplot(number_of_quantities,n_snapshots + 1,jl_entry)
+            nexttile(jl_entry)
             plot(contour_labels(1:n_skip_contour:end),plot_data(1:n_skip_contour:end,l+1),MarkerContour,'Color',forwardColor,'MarkerSize',MarkerSizeContour)
             ylim(ylimits(:,l))
-            tit = title('(a)','Interpreter','latex');
-            xlab = xlabel(xlabel_txt,'Interpreter','latex');
-            ylab = ylabel(ylabel_txt,'Interpreter','latex');
-            ax = gca;
-            ax.FontSize = FontSize*axis_factor;
-            tit.FontSize = FontSize;
-            xlab.FontSize = FontSize;
-            ylab.FontSize = FontSize;
+            if (j == 1 || l == 1 || l == number_of_quantities)
+                ax = gca;
+                ax.FontSize = FontSize*axis_factor;
+                if (l == 1)
+                    tit = title(['$\tau = $ ',num2str((j-1)/n_snapshots)],'Interpreter','latex');
+                    tit.FontSize = FontSize;
+                end
+                if (l == number_of_quantities)
+                    xlab = xlabel(xlabel_txt,'Interpreter','latex');
+                    xlab.FontSize = FontSize;
+                else
+                    set(gca,'XTick',[])
+                end
+                if (j == 1)
+                    ylabel_txt = ylabel_quantities{l};
+                    ylab = ylabel(ylabel_txt,'Interpreter','latex');
+                    ylab.FontSize = FontSize;
+                else
+                    set(gca,'YTick',[])
+                end
+            else
+                set(gca,'XTick',[])
+                set(gca,'YTick',[])
+            end
         end
     end
     
-%     subplot(1,2,2)
-%     plot(contour_data(1:n_skip_contour:end,1),contour_data(1:n_skip_contour:end,2),MarkerContour,'Color',forwardColor,'MarkerSize',MarkerSizeContour)
-%     xlab = xlabel(xlabel_txt,'Interpreter','latex');
-%     ylab = ylabel(ylabel_txt,'Interpreter','latex');
-%     tit = title('(b)','Interpreter','latex');
-%     ax = gca;
-%     ax.FontSize = FontSize*axis_factor;
-%     xlab.FontSize = FontSize;
-%     ylab.FontSize = FontSize;
-%     tit.FontSize = FontSize;
+    t.TileSpacing = 'compact';
+    t.Padding = 'compact';
+end
+
+%Show contour evolution backwards
+if (boole_show_contour_back)
+    xlabel_txt = '$k_{orbit}$';
+    
+    ylimits = nan*ones(2,number_of_quantities);
+    [~,contour_back_data] = extract_snapshot(contour_back_data);
+    ylimits(1,:) = min(contour_back_data(:,2:number_of_quantities+1),[],1);
+    ylimits(2,:) = max(contour_back_data(:,2:number_of_quantities+1),[],1);
+    
+    figure('Renderer', 'painters', 'Position', [24 37 2500 1300])
+    t = tiledlayout(number_of_quantities,n_snapshots +1);
+    
+    for j = 1:(n_snapshots+1)
+        plot_data = extract_snapshot(contour_back_data,j);
+        for l = 1:number_of_quantities
+            jl_entry = (l-1)*(n_snapshots+1) + j;
+            contour_labels = [1:size(plot_data,1)];
+            %subplot(number_of_quantities,n_snapshots + 1,jl_entry)
+            nexttile(jl_entry)
+            plot(contour_labels(1:n_skip_contour:end),plot_data(1:n_skip_contour:end,l+1),MarkerContour,'Color',forwardColor,'MarkerSize',MarkerSizeContour)
+            ylim(ylimits(:,l))
+            if (j == 1 || l == 1 || l == number_of_quantities)
+                ax = gca;
+                ax.FontSize = FontSize*axis_factor;
+                if (l == 1)
+                    tit = title(['$\tau = $ ',num2str((j-1)/n_snapshots)],'Interpreter','latex');
+                    tit.FontSize = FontSize;
+                end
+                if (l == number_of_quantities)
+                    xlab = xlabel(xlabel_txt,'Interpreter','latex');
+                    xlab.FontSize = FontSize;
+                else
+                    set(gca,'XTick',[])
+                end
+                if (j == 1)
+                    ylabel_txt = ylabel_quantities{l};
+                    ylab = ylabel(ylabel_txt,'Interpreter','latex');
+                    ylab.FontSize = FontSize;
+                else
+                    set(gca,'YTick',[])
+                end
+            else
+                set(gca,'XTick',[])
+                set(gca,'YTick',[])
+            end
+        end
+    end
+    
+    t.TileSpacing = 'compact';
+    t.Padding = 'compact';
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%HELPFUNCTIONS%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
