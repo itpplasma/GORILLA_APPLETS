@@ -57,6 +57,17 @@ module reversibility_test_mod
 !
     implicit none
 !
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
+    !starting values of additional quantites for backward integration
+    type starting_values_type
+        sequence
+        double precision :: t_hamiltonian     !real time of tetrahedron passing
+        double precision :: gyrophase         !gyrophase of particle
+    end type starting_values_type
+!
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
     contains
 
     subroutine make_reversibility_test()
@@ -82,6 +93,7 @@ module reversibility_test_mod
                                                         & hamiltonian_time_mat, gyrophase_mat
         double precision, dimension(:,:), allocatable   :: x1_back_mat, x2_back_mat, x3_back_mat, pitchpar_back_mat, & 
                                                         & hamiltonian_time_back_mat, gyrophase_back_mat
+        type(starting_values_type)                      :: starting_values
 !
         integer                                         :: i,j,k,l, counter_particles, delta_snapshot
         integer                                         :: file_id_reversibility_test,file_id_reversibility_test_back
@@ -152,7 +164,7 @@ module reversibility_test_mod
         !$OMP& PRIVATE(k,x_0,alpha_0,perpinv,perpinv2, &
         !$OMP& vpar_0,ind_tetr,iface, &
         !$OMP& x1_vec,x2_vec,x3_vec,pitchpar_vec,energy_eV, &
-        !$OMP& hamiltonian_time_vec,gyrophase_vec)
+        !$OMP& hamiltonian_time_vec,gyrophase_vec, starting_values)
         !$OMP DO
 !
         !Loop over orbits and store data
@@ -197,11 +209,15 @@ module reversibility_test_mod
             hamiltonian_time_mat(:,k) = hamiltonian_time_vec
             gyrophase_mat(:,k) = gyrophase_vec
 
+            !Save starting values of additional quantities for backward integration
+            starting_values%t_hamiltonian = hamiltonian_time_vec(n_steps+1)
+            starting_values%gyrophase = gyrophase_vec(n_steps+1)
             !Compute orbits backwards (-t_total) from last z = (x_0,vpar_0)
             !As have already correct coordinate set, do not need extra setup like in forward case
             call gorilla_integration(perpinv,perpinv2,energy_eV,-t_total,n_steps, &
                                 & x_0,vpar_0,ind_tetr,iface, &
-                                & x1_vec,x2_vec,x3_vec,pitchpar_vec,hamiltonian_time_vec,gyrophase_vec)
+                                & x1_vec,x2_vec,x3_vec,pitchpar_vec,hamiltonian_time_vec,gyrophase_vec, &
+                                starting_values=starting_values)
 !
             !Write values in backwards matrix
             x1_back_mat(:,k) = x1_vec
@@ -328,7 +344,8 @@ endif
 !
     subroutine gorilla_integration(perpinv,perpinv2,energy_eV,t_total,n_steps, &
                                 & x_0,vpar_0,ind_tetr,iface, &
-                                & x1_vec,x2_vec,x3_vec,pitchpar_vec,hamiltonian_time_vec,gyrophase_vec)
+                                & x1_vec,x2_vec,x3_vec,pitchpar_vec,hamiltonian_time_vec,gyrophase_vec, &
+                                & starting_values)
 !
         use constants, only: ev2erg
         use tetra_physics_mod, only: tetra_physics,particle_mass,particle_charge
@@ -339,36 +356,39 @@ endif
 !
         implicit none
 !
-        double precision, intent(in)                    :: perpinv, perpinv2, energy_eV, t_total
-        integer, intent(in)                             :: n_steps
+        double precision, intent(in)                            :: perpinv, perpinv2, energy_eV, t_total
+        integer, intent(in)                                     :: n_steps
+        type(starting_values_type), optional, intent(in)        :: starting_values
 !
-        double precision, dimension(3), intent(inout)   :: x_0
-        double precision, intent(inout)                 :: vpar_0
-        integer, intent(inout)                          :: ind_tetr, iface
+        double precision, dimension(3), intent(inout)           :: x_0
+        double precision, intent(inout)                         :: vpar_0
+        integer, intent(inout)                                  :: ind_tetr, iface
 !
-        double precision,dimension(:),intent(out)       :: x1_vec, x2_vec, x3_vec, pitchpar_vec, &
-                                                        & hamiltonian_time_vec, gyrophase_vec
+        double precision,dimension(:),intent(out)               :: x1_vec, x2_vec, x3_vec, pitchpar_vec, &
+                                                                & hamiltonian_time_vec, gyrophase_vec
 !
-        double precision                                :: t_step, vmod
-        integer                                         :: i, iper
-        double precision, dimension(3)                  :: z_save
-        double precision                                :: vperp2, t_remain, t_pass
-        logical                                         :: boole_t_finished
-        integer                                         :: counter_tor_mappings
+        double precision                                        :: t_step, vmod
+        integer                                                 :: i, iper
+        double precision, dimension(3)                          :: z_save
+        double precision                                        :: vperp2, t_remain, t_pass
+        logical                                                 :: boole_t_finished
+        integer                                                 :: counter_tor_mappings
 !
-        double precision                                :: t_hamiltonian, gyrophase
-        type(optional_quantities_type)                  :: optional_quantities        
+        double precision                                        :: t_hamiltonian, gyrophase
+        type(optional_quantities_type)                          :: optional_quantities        
 !
 !------------------------------------------------------------------------------------------------------------!
 ! Precomputations and settings
 !
         if(ind_tetr.eq.-1) return
 !
-        !Hamiltonian time
-        t_hamiltonian = 0.d0
-!
-        !Gyrophase
-        gyrophase = 0.d0
+        if(present(starting_values)) then
+            t_hamiltonian = starting_values%t_hamiltonian
+            gyrophase = starting_values%gyrophase
+        else
+            t_hamiltonian = 0.d0
+            gyrophase = 0.d0
+        endif
 !
         !Define time step
         t_step = t_total/dble(n_steps)
@@ -566,6 +586,9 @@ endif
         integer                                         :: ind_tetr_save
         double precision                                :: vpar,vperp,vmod
 !
+        double precision                                :: vmod_save,vpar_save,vperp_save
+        double precision, dimension(3)                  :: x_save
+!
         !Compute velocity module from kinetic energy dependent on particle species
 if(boole_diag_reversibility_test) print*, energy_eV
 if(boole_diag_reversibility_test) print*, ev2erg
@@ -579,6 +602,10 @@ if(boole_diag_reversibility_test) print*, particle_mass
         !Check coordinate domain (optionally perform modulo operation)
         call check_coordinate_domain(x)
 !
+vmod_save = vmod
+vpar_save = vpar
+vperp_save = vperp
+x_save = x
         !Find tetrahedron index and face index for position x
         call find_tetra(x,vpar,vperp,ind_tetr,iface,sign_t_step_in=t_total_sign)
 !
@@ -587,6 +614,7 @@ if(boole_diag_reversibility_test) print*, particle_mass
             print *, 'Particle position not found'
             return
         endif
+x = x_save
 !
         !--- Take into account electrostatic potential energy
 !
@@ -594,7 +622,7 @@ if(boole_diag_reversibility_test) print*, particle_mass
         vmod=sqrt(2.d0* (energy_eV*ev2erg - particle_charge * phi_elec_func(x,ind_tetr) ) / particle_mass)
 !
         vpar = pitchpar*vmod
-        vperp = sqrt((1.d0-pitchpar**2)*vmod**2)
+        vperp = sqrt((1.d0-pitchpar**2))*vmod
 !
         !Repeat find tetra (by taking into account electrostatic potential energy)
         ind_tetr_save = ind_tetr
@@ -602,7 +630,13 @@ if(boole_diag_reversibility_test) print*, particle_mass
 !
         if(ind_tetr.ne.ind_tetr_save) then
             print *, 'ERROR: Electrostatic potential energy term affects find_tetra'
+            print *, '--------------------------'
             print *, 'E_PHI = ', particle_charge * phi_elec_func(x,ind_tetr_save) / ev2erg
+            print *, 'ind_tetr',ind_tetr, 'ind_tetr_save',ind_tetr_save
+            print *, 'vmod',vmod, 'vmod_save',vmod_save
+            print *, 'vperp',vperp, 'vperp_save',vperp_save
+            print *, 'vpar',vpar, 'vpar_save',vpar_save
+            print *, 'x',x, 'x_save',x_save
             stop
         endif
 
