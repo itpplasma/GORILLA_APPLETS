@@ -20,34 +20,38 @@
 %For Construction of Demonstration
 %-----------------------------------------------------------------------------------------------------------------------
 %control of script
-%close all
-boole_recalculate = false;
+close all
+boole_recalculate = true;
 poly_order = 4;
-grid_kind = 2;
+grid_kind = 3;
 [n1,n2,n3] = deal(70,70,70);
+sfc_s_min = 1.d-3;
 eps_Phi = -1.d-7;
 %eps_Phi = 0;
 ispecies = 2;
 boole_guess = true;
 i_time_tracing_option = 1;
 t_total = 3.25d-5*6/7;
-%t_total = 1.3d-4;
+t_total = 1.3d-4*1/3.5;
 dminor_0 = 0.25d0;
-%dminor_0 = 0;
+dminor_0 = 0.1d0;
+phi_0 = 0.01;
 contour_fraction = 1;
-n_steps = 200;
-n_orbits = 200;
+n_steps = 20;
+n_orbits = 100;
 n_snapshots = 2;
 pitchpar_0 = 0.46d0;
-%pitchpar_0 = 0.6d0;
+pitchpar_0 = 0.6d0;
+dpitchpar = 0.2d0;
 energy_eV_0 = 3d3;
 relative_bandwith = 0.1d0;
-%relative_bandwith = 0.00d0;
+relative_bandwith = +0.1d0;
+boole_diag_reversibility_test = false;
 
 boole_show_contour = true;
-boole_show_contour_back = true;
-number_of_quantities = 6;
-ylabel_quantities = {'$s$','$\vartheta$','$\varphi$','$\lambda$','$t$','$\phi$'};
+boole_show_contour_back = false;
+number_of_quantities = 7;
+ylabel_quantities = {'$s$','$\vartheta$','$\varphi$','$\lambda$','$t$','$\phi$','$E$'};
 
 n_skip_contour = 1;
 
@@ -194,7 +198,7 @@ if (boole_recalculate)
             tetra_grid.TETRA_GRID_NML.boole_n_field_periods = true;
             
         %Symmetry Flux Coordinates Annulus (Minimal value for flux coordinates s)
-            tetra_grid.TETRA_GRID_NML.sfc_s_min = 1.d-3;
+            tetra_grid.TETRA_GRID_NML.sfc_s_min = sfc_s_min;
 
 
     %Input file gorilla_applets.inp
@@ -243,15 +247,18 @@ if (boole_recalculate)
             reversibility_test.REVERSIBILITY_TEST_NML.contour_fraction = contour_fraction;
 
         %Starting $\varphi$ value of orbits at start
-            reversibility_test.REVERSIBILITY_TEST_NML.phi_0 = 0.0d0;
+            reversibility_test.REVERSIBILITY_TEST_NML.phi_0 = phi_0;
 
         %Average starting pitch parameter of particles
             reversibility_test.REVERSIBILITY_TEST_NML.pitchpar_0 = pitchpar_0;
+            
+        %Bandwith of starting pitch parameter of particles
+            reversibility_test.REVERSIBILITY_TEST_NML.dpitchpar = dpitchpar;
 
         %Average kinetic energy of particles at start
             reversibility_test.REVERSIBILITY_TEST_NML.energy_eV_0 = energy_eV_0;
 
-        %RELATIVE Bandwith of energy (and $\J_{\perp}$) of particles at start
+        %RELATIVE Bandwith of energy of particles at start
             reversibility_test.REVERSIBILITY_TEST_NML.relative_bandwith = relative_bandwith;
 
         %Number of time measurements
@@ -270,7 +277,7 @@ if (boole_recalculate)
             reversibility_test.REVERSIBILITY_TEST_NML.filename_reversibility_test_back = filename_reversibility_test_back;
 
         %Number of time measurements
-            reversibility_test.REVERSIBILITY_TEST_NML.boole_diag_reversibility_test = false;
+            reversibility_test.REVERSIBILITY_TEST_NML.boole_diag_reversibility_test = boole_diag_reversibility_test;
 
 
     %Run GORILLA
@@ -371,10 +378,10 @@ end
 if (boole_show_contour_back)
     xlabel_txt = '$k_{orbit}$';
     
-    ylimits = nan*ones(2,number_of_quantities);
-    [~,contour_back_data] = extract_snapshot(contour_back_data);
-    ylimits(1,:) = min(contour_back_data(:,2:number_of_quantities+1),[],1);
-    ylimits(2,:) = max(contour_back_data(:,2:number_of_quantities+1),[],1);
+%     ylimits = nan*ones(2,number_of_quantities);
+%     [~,contour_back_data] = extract_snapshot(contour_back_data);
+%     ylimits(1,:) = min(contour_back_data(:,2:number_of_quantities+1),[],1);
+%     ylimits(2,:) = max(contour_back_data(:,2:number_of_quantities+1),[],1);
     
     figure('Renderer', 'painters', 'Position', [24 37 2500 1300])
     t = tiledlayout(number_of_quantities,n_snapshots +1);

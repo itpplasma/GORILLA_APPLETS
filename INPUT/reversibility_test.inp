@@ -33,10 +33,13 @@
   !Average starting pitch parameter of particles
   pitchpar_0 = 0.46d0 ,
 !
+  !Bandwith of starting pitch parameter of particles
+  dpitchpar = 0.2d0 ,
+!
   !Average kinetic energy of particles at start
   energy_eV_0 = 3.d3 ,
 !
-  !RELATIVE Bandwith of energy (and $\J_{\perp}$) of particles at start
+  !RELATIVE Bandwith of energy of particles at start
   relative_bandwith = 0.1d0 ,
 !
   !Number of time measurements
