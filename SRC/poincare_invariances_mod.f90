@@ -531,8 +531,9 @@ print *, ''
 !
         use constants, only: ev2erg, pi
         use tetra_physics_mod, only: tetra_physics,particle_mass,hamiltonian_time,particle_charge,isinside
-        use orbit_timestep_gorilla_mod, only: find_tetra, check_coordinate_domain
+        use orbit_timestep_gorilla_mod, only: check_coordinate_domain
         use supporting_functions_mod, only: bmod_func
+        use find_tetra_mod, only: find_tetra
         use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
         use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
         use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
@@ -776,8 +777,9 @@ endif
 !
         use constants, only: ev2erg
         use tetra_physics_mod, only: tetra_physics,particle_mass,particle_charge
-        use orbit_timestep_gorilla_mod, only: find_tetra,check_coordinate_domain
+        use orbit_timestep_gorilla_mod, only: check_coordinate_domain
         use supporting_functions_mod, only: bmod_func
+        use find_tetra_mod, only: find_tetra
 !
         implicit none
 !

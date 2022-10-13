@@ -4,13 +4,15 @@ module boltzmann_mod
     private
 !
     double precision :: time_step,energy_max_eV
+    integer, dimension(:,:), allocatable :: tetra_indices_per_prism
+    double precision, dimension(:), allocatable :: prism_volumes
     integer :: i_integrator_type, seed_option, n_t_measurements, n_particles
-    logical :: boole_random_precalc, boole_grid_for_find_tetra
+    logical :: boole_random_precalc
     character(1024) :: filename_total_dwell_times, filename_starting_conditions, filename_vertex_coordinates, &
     & filename_vertex_indices
 !
     !Namelist for boltzmann input
-    NAMELIST /boltzmann_nml/ time_step,energy_max_eV,n_particles,boole_grid_for_find_tetra,i_integrator_type, &
+    NAMELIST /boltzmann_nml/ time_step,energy_max_eV,n_particles,i_integrator_type, &
     & seed_option,boole_random_precalc,filename_total_dwell_times,filename_starting_conditions,n_t_measurements, &
     & filename_vertex_coordinates, filename_vertex_indices
 !
@@ -33,16 +35,15 @@ end subroutine load_boltzmann_inp
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-subroutine calc_starting_conditions(n_particles,energy_max_eV,vmod,start_pos_pitch_mat)
+subroutine calc_starting_conditions(vmod,start_pos_pitch_mat)
 !
     use constants, only: pi
-    use tetra_grid_mod, only: verts_rphiz
-    use orbit_timestep_gorilla_mod, only: find_tetra
-    !use orbit_timestep_gorilla_mod, only: equidistant_grid, entry_counter, dimension_parametres
+    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi
+    use find_tetra_mod, only: find_tetra
+    use tetra_physics_mod, only: coord_system
 !
     implicit none
-    integer, intent(in)                                            :: n_particles
-    double precision, intent(in)                                   :: energy_max_eV, vmod
+    double precision, intent(in)                                   :: vmod
     double precision, dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat !dimension(4,n_particle)
     double precision                                               :: rand_scalar, vpar, vperp
     double precision                                               :: Rmin, Rmax, Zmin, Zmax
@@ -51,9 +52,22 @@ subroutine calc_starting_conditions(n_particles,energy_max_eV,vmod,start_pos_pit
     logical                                                        :: inside
     double precision, dimension(3)                                 :: x
     integer                                                        :: ind_tetr_out,iface, counter
-    ! integer, dimension(:,:), allocatable                           :: equidistant_grid
-    ! integer, dimension(:), allocatable                             :: entry_counter
-    ! double precision, dimension(3,4)                               :: dimension_parameters   
+    double precision, dimension(:,:), allocatable                  :: verts
+!
+!!!!comment out the following section to make starting conditions really random!!!
+!
+    integer,dimension(:), allocatable                              :: seed
+    integer                                                        :: n
+!
+    open(unit = 85, file='seed.inp', status='old',action = 'read')
+    read(85,*) n
+    allocate(seed(n))
+    read(85,*) seed
+    close(85)
+    CALL RANDOM_SEED (PUT=seed)
+    deallocate(seed)
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
     allocate(start_pos_pitch_mat(4,n_particles))
     allocate(rand_vector(n_particles))
@@ -62,19 +76,30 @@ subroutine calc_starting_conditions(n_particles,energy_max_eV,vmod,start_pos_pit
     start_pos_pitch_mat = 0
     counter = 0
 !
-    Rmin = minval(verts_rphiz(1,:))
-    Rmax = maxval(verts_rphiz(1,:))
-    Zmin = minval(verts_rphiz(3,:))
-    Zmax = maxval(verts_rphiz(3,:))
+    if (coord_system.eq.1) allocate(verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:))))
+    if (coord_system.eq.2) allocate(verts(size(verts_sthetaphi(:,1)),size(verts_sthetaphi(1,:))))
+    if (coord_system.eq.1) verts = verts_rphiz
+    if (coord_system.eq.2) verts = verts_sthetaphi
+!
+    Rmin = minval(verts(1,:))
+    Rmax = maxval(verts(1,:))
+    Zmin = minval(verts(3,:))
+    Zmax = maxval(verts(3,:))
     ! PRINT*, 'Rmin, Rmax, Zmin and Zmax are:', Rmin, Rmax, Zmin, Zmax
     ! PRINT*, 'numel(verts) = ', size(verts_rphiz(1,:))
 !
     ! open(55, file = 'vertices.dat')
     ! write(55,'(3ES15.3E4)') verts_rphiz
 !
+    !$OMP PARALLEL DEFAULT(NONE) &
+    !$OMP& SHARED(n_particles,start_pos_pitch_mat,Rmin,Rmax,Zmin,Zmax,vmod) &
+    !$OMP& PRIVATE(i,inside,rand_scalar,vpar,vperp,x,ind_tetr_out,iface)
+    !$OMP DO
     do i = 1,n_particles
         do while(inside.eqv..false.)
-            counter = counter + 1
+            ! !$omp critical
+            ! counter = counter + 1
+            ! !$omp end critical
             call RANDOM_NUMBER(rand_scalar)
             start_pos_pitch_mat(1,i) = Rmin + (Rmax - Rmin)*rand_scalar !R
             call RANDOM_NUMBER(rand_scalar)
@@ -86,11 +111,14 @@ subroutine calc_starting_conditions(n_particles,energy_max_eV,vmod,start_pos_pit
             start_pos_pitch_mat(4,i) = 2*rand_scalar-1 !pitch parameter
             vpar = start_pos_pitch_mat(4,i)*vmod
             vperp = sqrt(vmod**2-vpar**2)
-            call find_tetra(x,vpar,vperp,ind_tetr_out,iface,boole_grid_for_find_tetra)
+            call find_tetra(x,vpar,vperp,ind_tetr_out,iface)
             if (ind_tetr_out.ne.-1) inside = .true.
         enddo
         inside = .false.
+        Print*, 'next'
     enddo
+    !$OMP END DO
+    !$OMP END PARALLEL
     ! PRINT*, 'counter = ', counter
 !
     ! call RANDOM_NUMBER(rand_vector)
@@ -129,6 +157,8 @@ subroutine calc_boltzmann
     double precision, dimension(5) :: z
     Character(LEN=50) :: format_time_resolved_energies
 !
+    open(35, file = 'outliers.dat')
+    close(35,status='delete')
     !Load input for boltzmann computation
     call load_boltzmann_inp()
 !
@@ -142,7 +172,8 @@ subroutine calc_boltzmann
     measuring_times = (/(i,i=n_t_measurements-1,0,-1)/)
     measuring_times = measuring_times/(n_t_measurements-1)*time_step
     !Initialize GORILLA
-    call initialize_gorilla(boole_grid_for_find_tetra)
+!
+    call initialize_gorilla()
 !
     allocate(total_dwell_times(1:ntetr))
     allocate(single_particle_dwell_times(1:ntetr))
@@ -163,7 +194,9 @@ subroutine calc_boltzmann
     !Compute velocity module from kinetic energy dependent on particle species
     vmod=sqrt(2.d0*energy_max_eV*ev2erg/particle_mass)
     !
-    call calc_starting_conditions(n_particles,energy_max_eV,vmod,start_pos_pitch_mat)
+    print*, 'calculation of starting conditions started'
+    call calc_starting_conditions(vmod,start_pos_pitch_mat)
+    print*, 'calculation of starting conditions finished'
     !
     !------------------------------------------------------------------------------------------------------------!
     !------------------------------------ Initialization of direct integrator -----------------------------------!
@@ -321,12 +354,11 @@ subroutine calc_boltzmann
                         endif
                 enddo
 !
+    call calc_prism_volumes
 !
     print *, 'Number of lost particles',n_lost_particles
     open(99,file='confined_fraction.dat')
     write(99,*) 1.d0-dble(n_lost_particles)/dble(n_particles)
-!
-!
 !   
     open(50, file = filename_total_dwell_times)
     write(50,'(ES15.3E4)') total_dwell_times
@@ -340,10 +372,12 @@ subroutine calc_boltzmann
     open(53, file = 'fluid_velocities.dat')
     write(53,'(3ES15.3E4)') fluid_velocities
     close(53)
-    write(format_time_resolved_energies, *) '(',n_particles,'ES15.3E4)'
-    open(54, file = 'time_resolved_energies.dat')
-    write(54,format_time_resolved_energies) time_resolved_energies
-    close(54)
+    ! if (n_particles.gt.0) then
+    !     write(format_time_resolved_energies, *) '(',n_particles,'ES15.3E4)'
+    !     open(54, file = 'time_resolved_energies.dat')
+    !     write(54,format_time_resolved_energies) time_resolved_energies
+    !     close(54)
+    ! endif
 !
     ![R,phi,Z]: Write vertex coordinates to File
     open(55, file=filename_vertex_coordinates)
@@ -359,6 +393,10 @@ subroutine calc_boltzmann
         write(56, *) tetra_grid(i)%ind_knot([1, 2, 3, 4])
     end do
     close(56)
+!
+    open(58, file = 'prism_volumes.dat')
+    write(58,'(ES20.10E4)') prism_volumes
+    close(58)
 !
     deallocate(total_dwell_times, single_particle_dwell_times, total_currents, &
     & single_particle_currents, fluid_velocities, densities, start_pos_pitch_mat, &
@@ -385,9 +423,10 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                 use tetra_physics_poly_precomp_mod , only: make_precomp_poly_perpinv, initialize_boole_precomp_poly_perpinv, &
                     & alloc_precomp_poly_perpinv
                 use tetra_physics_mod, only: tetra_physics,particle_charge,particle_mass
-                use gorilla_settings_mod, only: ipusher, poly_order
-                use orbit_timestep_gorilla_mod, only: find_tetra, check_coordinate_domain
+                use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
+                use orbit_timestep_gorilla_mod, only:  check_coordinate_domain
                 use supporting_functions_mod, only: bmod_func, vperp_func
+                use find_tetra_mod, only: find_tetra
 !
                 implicit none
 !
@@ -406,6 +445,10 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                 double precision, dimension(:), intent(inout)   :: single_particle_time_resolved_energies
                 double precision, dimension(:,:), intent(inout) :: single_particle_currents
                 double precision, dimension(:), intent(inout)   :: measuring_times
+                double precision                                :: hamiltonian_time
+                type(optional_quantities_type)                  :: optional_quantities
+
+                hamiltonian_time = 0
 !
                 !If orbit_timestep is called for the first time without grid position
                 if(.not.boole_initialized) then
@@ -489,10 +532,12 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                             call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper)
                         case(2)
                             call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_remain,&
-                                                                & t_pass,boole_t_finished,iper)
+                                                                & t_pass,boole_t_finished,iper,optional_quantities)
                     end select
 !
                     t_remain = t_remain - t_pass
+!
+                    hamiltonian_time = hamiltonian_time + optional_quantities%t_hamiltonian
 !
                     single_particle_dwell_times(ind_tetr_save) = single_particle_dwell_times(ind_tetr_save) + t_pass
                     single_particle_currents(:,ind_tetr_save) = particle_charge*(x-x_save)/t_step ! /t_pass vor the speed but *t_pass to calculate the time averge together with /t_step
@@ -512,6 +557,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 !
                 enddo !Loop for tetrahedron pushings
 !
+PRINT*, 'hamiltonian time = ', hamiltonian_time
                 !Compute vperp from position
                 vperp = vperp_func(z_save,perpinv,ind_tetr_save)
 !            
@@ -519,6 +565,69 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 !             call alloc_precomp_poly_perpinv(2,ntetr)
 !         
 end subroutine orbit_timestep_gorilla_boltzmann
+!
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
+subroutine calc_prism_volumes
+!
+    use constants, only: pi
+    use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
+    use tetra_grid_settings_mod, only: grid_size
+!
+    implicit none
+!
+    integer                                     :: i,k,nprisms
+    integer, dimension(2)                       :: triangle_indices
+    double precision, dimension(3)              :: r_values, z_values, r_values_intermediate, gradient
+    double precision, dimension(2)              :: r, z
+    double precision                            :: z_star, alpha, beta, rmin
+!
+    print*, 'start prism volume computation'
+    nprisms = ntetr/3
+    allocate(tetra_indices_per_prism(nprisms,3))
+    allocate(prism_volumes(nprisms))
+!
+    do i = 1,3
+        tetra_indices_per_prism(:,i) = (/(i+3*k,k = 0,nprisms-1)/)
+    enddo
+!
+    !$OMP PARALLEL DEFAULT(NONE) &
+    !$OMP& SHARED(nprisms,verts_rphiz,tetra_grid,grid_size,tetra_indices_per_prism,prism_volumes) &
+    !$OMP& PRIVATE(r_values,z_values,rmin,triangle_indices,r_values_intermediate,r,z,gradient,z_star,alpha,beta)
+    !$OMP DO
+    do i = 1,nprisms
+        r_values = verts_rphiz(1,tetra_grid(tetra_indices_per_prism(i,1))%ind_knot([1,2,3]))
+        z_values = verts_rphiz(3,tetra_grid(tetra_indices_per_prism(i,1))%ind_knot([1,2,3]))
+        rmin = minval(r_values)
+        r_values = r_values - rmin
+        z_values = z_values - z_values(minloc(r_values,1))
+!
+        triangle_indices(2) = maxloc(r_values,1)
+        r_values_intermediate = r_values
+        r_values_intermediate(triangle_indices(2)) = minval(r_values)
+        triangle_indices(1) = maxloc(r_values_intermediate,1)
+        !triangle_indices(1) = maxloc((/r_values(mod(maxloc(r_values),3)+1),r_values(mod(maxloc(r_values)+1,3)+1)/),1)
+!
+        r = (/r_values(triangle_indices(1)),r_values(triangle_indices(2))/)
+        z = (/z_values(triangle_indices(1)),z_values(triangle_indices(2))/)
+!
+        gradient(1) = z(1)/r(1)
+        gradient(2) = z(2)/r(2)
+        gradient(3) = (z(2)-z(1))/(r(2)-r(1))
+!
+        z_star = z(1) - r(1)*gradient(3)
+        alpha = abs(gradient(1)-gradient(2))
+        beta = gradient(3) - gradient(2)
+!
+        prism_volumes(i) =  2*pi/grid_size(2)*(alpha/3*r(1)**3+alpha*rmin/2*r(1)**2+ & 
+                            abs(z_star*rmin*(r(2)-r(1))+(z_star+beta*rmin)/2*(r(2)**2-r(1)**2)+beta/3*(r(2)**3-r(1)**3)))
+!
+    enddo
+    !$OMP END DO
+    !$OMP END PARALLEL
+    print*, 'end prism volume computation'
+!
+end subroutine calc_prism_volumes
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
@@ -644,7 +753,5 @@ subroutine orbit_timestep_can_boltzmann(z,dtau,dtaumin,ierr,tau_out)
     close(file_id_read_start)
 
 end subroutine read_in_starting_conditions
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
 end module boltzmann_mod

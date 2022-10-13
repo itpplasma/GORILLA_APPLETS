@@ -385,8 +385,9 @@ subroutine orbit_timestep_gorilla_dwell_times(x,vpar,vperp,t_step,boole_initiali
                 use tetra_physics_mod, only: tetra_physics,particle_charge,particle_mass
                 !use tetra_grid_mod, only: ntetr
                 use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
-                use orbit_timestep_gorilla_mod, only: find_tetra, check_coordinate_domain
+                use orbit_timestep_gorilla_mod, only: check_coordinate_domain
                 use supporting_functions_mod, only: bmod_func, vperp_func
+                use find_tetra_mod, only: find_tetra
 !
             implicit none
 !

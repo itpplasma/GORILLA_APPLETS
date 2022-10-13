@@ -9,10 +9,7 @@
   energy_max_eV = 3.5d6 ,
 !
   !Number of particles to be traced
-  n_particles = 40 ,
-!
-  !boolean for precalculation of rectangular grid to improve find_tetra (sensible for n_particles >> 1)
-  boole_grid_for_find_tetra = .true.
+  n_particles = 10,
 !
   !Set integrator type
   !(must be 1, otherwise it currently does not work)

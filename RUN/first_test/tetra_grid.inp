@@ -5,11 +5,11 @@
 !    
  !Grid Size
  !Rectangular: nR, Field-aligned: ns
- n1 = 100 ,
+ n1 = 30 ,
  !Rectangular: nphi, Field-aligned: nphi                  			
- n2 = 5 ,
+ n2 = 30 , 
  !Rectangular: nZ, Field-aligned: ntheta                          		
- n3 = 2 ,
+ n3 = 30 ,
 !
  !Grid kind
  !1 ... rectangular grid for axisymmetric EFIT data (g-file)
@@ -21,7 +21,7 @@
  !MHD equilibrium filename
  g_file_filename = 'MHD_EQUILIBRIA/g_file_for_test_WEST' ,
  convex_wall_filename = 'MHD_EQUILIBRIA/convex_wall_for_test.dat' ,
- netcdf_filename = 'wout_23_1900_fix_bdry.nc' ,
+ netcdf_filename = 'MHD_EQUILIBRIA/netcdf_file_for_test.nc' ,
 !
  !MESH_SOLEDGE3X_EIRENE filename
  knots_SOLEDGE3X_EIRENE_filename = 'MHD_EQUILIBRIA/MESH_SOLEDGE3X_EIRENE/knots_for_test.dat' ,
