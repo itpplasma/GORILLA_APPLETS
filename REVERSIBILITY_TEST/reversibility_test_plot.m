@@ -23,7 +23,7 @@
 close all
 boole_recalculate = true;
 poly_order = 4;
-grid_kind = 3;
+grid_kind = 4;
 [n1,n2,n3] = deal(70,70,70);
 sfc_s_min = 1.d-3;
 eps_Phi = -1.d-7;
@@ -31,35 +31,53 @@ eps_Phi = -1.d-7;
 ispecies = 2;
 boole_guess = true;
 i_time_tracing_option = 1;
-t_total = 3.25d-5*6/7;
-t_total = 1.3d-4*1/3.5;
 dminor_0 = 0.25d0;
-dminor_0 = 0.1d0;
+dminor_0 = 0.25d0;
+angle_0 = 0.0d0;
+dangle_0 = 1.0d0;
 phi_0 = 0.01;
 contour_fraction = 1;
 n_steps = 20;
 n_orbits = 100;
 n_snapshots = 2;
-pitchpar_0 = 0.46d0;
-pitchpar_0 = 0.6d0;
-dpitchpar = 0.2d0;
 energy_eV_0 = 3d3;
-relative_bandwith = 0.1d0;
-relative_bandwith = +0.1d0;
+boole_apply_noise = false;
+seed_option = 2;
 boole_diag_reversibility_test = false;
 
-boole_show_contour = true;
-boole_show_contour_back = false;
+switch(grid_kind)
+    case(2)
+        t_total = 3.25d-5*6/7;
+        %t_total = 2.0d-4;
+        %t_total = 7d-5;
+        phi_0 = 0.01;
+        pitchpar_0 = 0.46d0;
+        dpitchpar = 0.3d0;
+        relative_bandwith = 0.1d0;
+        noise_amplitude = 0.02d0;
+    case(3)
+        t_total = 1.3d-4*3/4;
+        t_total = 2d-4;
+        phi_0 = 1.0d0;
+        pitchpar_0 = 0.4d0;
+        dpitchpar = 0.3d0;
+        noise_amplitude = 0.01d0;
+end
+
+boole_show_contour = false;
+boole_show_contour_back = true;
 number_of_quantities = 7;
-ylabel_quantities = {'$s$','$\vartheta$','$\varphi$','$\lambda$','$t$','$\phi$','$E$'};
+ylabel_quantities = {'$t$','$s$','$\vartheta$','$\varphi$','$\lambda$','$\phi$','$E$'};
 
 n_skip_contour = 1;
 
 forwardColor = [215,25,28]/256;
 backwardColor = [44,123,182]/256;
 
-MarkerContour = '-';
-MarkerSizeContour = 15;
+MarkerContour = '.';
+MarkerContourBack = 'o';
+MarkerSizeContour = 5;
+MarkerSizeContourBack = 5;
 CentralLineWidth = 2;
 FontSize = 25;
 axis_factor = 3/5;
@@ -243,6 +261,12 @@ if (boole_recalculate)
         %ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
             reversibility_test.REVERSIBILITY_TEST_NML.Z_center = 0.0d0;
             
+        %Angle of starting contour center
+            reversibility_test.REVERSIBILITY_TEST_NML.angle_0 = angle_0;
+  
+        %Bandwith of angle of starting contour center
+            reversibility_test.REVERSIBILITY_TEST_NML.dangle_0 = dangle_0;
+            
         %Fraction of the contour to be traced
             reversibility_test.REVERSIBILITY_TEST_NML.contour_fraction = contour_fraction;
 
@@ -269,6 +293,17 @@ if (boole_recalculate)
 
         %Number of time snapeshots
             reversibility_test.REVERSIBILITY_TEST_NML.n_snapshots = n_snapshots;
+            
+        %Switch to apply noise on coordinates at reversal point
+            reversibility_test.REVERSIBILITY_TEST_NML.boole_apply_noise = boole_apply_noise;
+
+        %Realtive amplitude of noise on coordinates at reversal point
+            reversibility_test.REVERSIBILITY_TEST_NML.noise_amplitude = noise_amplitude;
+
+        %Option for computation of above random noise
+        % 1 ... compute seed with a random number
+        % 2 ... load seed from file 'seed.inp'
+            reversibility_test.REVERSIBILITY_TEST_NML.seed_option = seed_option;
 
         %Filename for reversibility test (forward part)
             reversibility_test.REVERSIBILITY_TEST_NML.filename_reversibility_test = filename_reversibility_test;
@@ -315,7 +350,7 @@ end
 %-----------------------------------------------------------------------------------------------------------------------
 
 %Load results
-if (boole_show_contour)
+if (boole_show_contour || boole_show_contour_back)
     contour_data = load([path_RUN,'/',filename_reversibility_test]);
 end
 if (boole_show_contour_back)
@@ -378,22 +413,33 @@ end
 if (boole_show_contour_back)
     xlabel_txt = '$k_{orbit}$';
     
-%     ylimits = nan*ones(2,number_of_quantities);
-%     [~,contour_back_data] = extract_snapshot(contour_back_data);
-%     ylimits(1,:) = min(contour_back_data(:,2:number_of_quantities+1),[],1);
-%     ylimits(2,:) = max(contour_back_data(:,2:number_of_quantities+1),[],1);
+    ylimits = nan*ones(2,number_of_quantities);
+    ylimits_back = nan*ones(2,number_of_quantities);
+    [~,contour_data] = extract_snapshot(contour_data);
+    [~,contour_back_data] = extract_snapshot(contour_back_data);
+    ylimits(1,:) = min(contour_data(:,2:number_of_quantities+1),[],1);
+    ylimits(2,:) = max(contour_data(:,2:number_of_quantities+1),[],1);
+    ylimits_back(1,:) = min(contour_back_data(:,2:number_of_quantities+1),[],1);
+    ylimits_back(2,:) = max(contour_back_data(:,2:number_of_quantities+1),[],1);
+    ylimits(1,:) = min([ylimits(1,:);ylimits_back(1,:)],[],1);
+    ylimits(2,:) = max([ylimits(2,:);ylimits_back(2,:)],[],1);
     
     figure('Renderer', 'painters', 'Position', [24 37 2500 1300])
     t = tiledlayout(number_of_quantities,n_snapshots +1);
     
     for j = 1:(n_snapshots+1)
-        plot_data = extract_snapshot(contour_back_data,j);
+        plot_data = extract_snapshot(contour_data,j);
+        plot_data_back = extract_snapshot(contour_back_data,j);
         for l = 1:number_of_quantities
             jl_entry = (l-1)*(n_snapshots+1) + j;
-            contour_labels = [1:size(plot_data,1)];
+            contour_labels = [1:size(plot_data_back,1)];
             %subplot(number_of_quantities,n_snapshots + 1,jl_entry)
             nexttile(jl_entry)
-            plot(contour_labels(1:n_skip_contour:end),plot_data(1:n_skip_contour:end,l+1),MarkerContour,'Color',forwardColor,'MarkerSize',MarkerSizeContour)
+            plot(contour_labels(1:n_skip_contour:end),plot_data(1:n_skip_contour:end,l+1),MarkerContour,'Color',forwardColor,'MarkerSize',MarkerSizeContour,'MarkerEdgeColor',forwardColor)
+            hold on
+            plot(contour_labels(1:n_skip_contour:end),plot_data_back(1:n_skip_contour:end,l+1),MarkerContourBack,'Color',backwardColor,'MarkerSize',MarkerSizeContourBack,'MarkerEdgeColor',backwardColor)
+            hold off
+            grid on
             ylim(ylimits(:,l))
             if (j == 1 || l == 1 || l == number_of_quantities)
                 ax = gca;
@@ -406,18 +452,18 @@ if (boole_show_contour_back)
                     xlab = xlabel(xlabel_txt,'Interpreter','latex');
                     xlab.FontSize = FontSize;
                 else
-                    set(gca,'XTick',[])
+                    set(gca,'Xticklabel',[])
                 end
                 if (j == 1)
                     ylabel_txt = ylabel_quantities{l};
                     ylab = ylabel(ylabel_txt,'Interpreter','latex');
                     ylab.FontSize = FontSize;
                 else
-                    set(gca,'YTick',[])
+                    set(gca,'Yticklabel',[])
                 end
             else
-                set(gca,'XTick',[])
-                set(gca,'YTick',[])
+                set(gca,'Xticklabel',[])
+                set(gca,'Yticklabel',[])
             end
         end
     end

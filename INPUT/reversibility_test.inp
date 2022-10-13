@@ -18,11 +18,17 @@
 !
   !Major Radius R of starting contour center
   !ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
-  R_center = 2.4d0 ,
+  R_center = 2.9d0 ,
 !
   !Height Z of starting contour center
   !ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
   Z_center = 0.0d0 ,
+!
+  !Angle of starting contour center
+  angle_0 = 0.0d0 ,
+!
+  !Bandwith of angle of starting contour center
+  dangle_0 = 1.0d0 ,
 !
   !Fraction of the contour to be traced
   contour_fraction = 1.0d0 ,
@@ -50,6 +56,17 @@
 !
   !Number of time snapeshots
   n_snapshots = 2 ,
+!
+  !Switch to apply noise on coordinates at reversal point
+  boole_apply_noise = .false.,
+!
+  !Realtive amplitude of noise on coordinates at reversal point
+  noise_amplitude = 1.0d0,
+!
+  !Option for computation of above random noise
+  ! 1 ... compute seed with a random number
+  ! 2 ... load seed from file 'seed.inp'
+  seed_option = 1,
 !
   !Filename for reversibility test (forward part)
   filename_reversibility_test = 'reversibility_test.dat' ,
