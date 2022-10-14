@@ -20,22 +20,20 @@
 %For Construction of Demonstration
 %-----------------------------------------------------------------------------------------------------------------------
 %control of script
-close all
+%close all
 boole_recalculate = true;
+ipusher = 2;
 poly_order = 4;
-grid_kind = 4;
+grid_kind = 2;
+coord_system = 2;
 [n1,n2,n3] = deal(70,70,70);
+[s_0,ds_0,theta_0,dtheta_0,R_0,dR_0,Z_0,dZ_0] = deal(-1);
 sfc_s_min = 1.d-3;
 eps_Phi = -1.d-7;
 %eps_Phi = 0;
 ispecies = 2;
 boole_guess = true;
 i_time_tracing_option = 1;
-dminor_0 = 0.25d0;
-dminor_0 = 0.25d0;
-angle_0 = 0.0d0;
-dangle_0 = 1.0d0;
-phi_0 = 0.01;
 contour_fraction = 1;
 n_steps = 20;
 n_orbits = 100;
@@ -45,41 +43,91 @@ boole_apply_noise = false;
 seed_option = 2;
 boole_diag_reversibility_test = false;
 
+boole_long_test = false;
+
 switch(grid_kind)
     case(2)
         t_total = 3.25d-5*6/7;
         %t_total = 2.0d-4;
         %t_total = 7d-5;
+        if (boole_long_test)
+            n_steps = 1;
+            n_snapshots = 1;
+            t_total = t_total*1000;
+        end
+        s_0 = 0.5d0;
+        ds_0 = 0.25d0;
+        theta_0 = 1.5d0;
+        dtheta_0 = 1.0d0;
         phi_0 = 0.01;
         pitchpar_0 = 0.46d0;
         dpitchpar = 0.3d0;
         relative_bandwith = 0.1d0;
         noise_amplitude = 0.02d0;
+        g_file_filename = 'MHD_EQUILIBRIA/g_file_for_test';
+        convex_wall_filename = 'MHD_EQUILIBRIA/convex_wall_for_test.dat';
+        ylabel_quantities = {'$t$','$s$','$\vartheta$','$\varphi$','$\lambda$','$\phi$','$E$'};
     case(3)
         t_total = 1.3d-4*3/4;
-        t_total = 2d-4;
+        %t_total = 2d-4;
+        coord_system = 2;
+        s_0 = 0.5d0;
+        ds_0 = 0.25d0;
+        theta_0 = 1.5d0;
+        dtheta_0 = 1.0d0;
         phi_0 = 1.0d0;
         pitchpar_0 = 0.4d0;
         dpitchpar = 0.3d0;
         noise_amplitude = 0.01d0;
+        ylabel_quantities = {'$t$','$s$','$\vartheta$','$\varphi$','$\lambda$','$\phi$','$E$'};
+    case(4)
+        t_total = 4.2d-5;
+        t_total = 8.2d-5;
+        coord_system = 1;
+        dR_0 = 1.0d0;
+        dZ_0 = 1.0d0;
+%         R_0 = 231.0d0;
+%         R_0 = 245.0d0;
+        R_0 = 269.0d0;
+%         Z_0 = -53.0d0;
+%         Z_0 = -51.0d0;
+        Z_0 = -40.0d0;
+%         dR_0 = 1.5d0;
+%         dZ_0 = 1.5d0;
+        phi_0 = 5.0d0;
+        pitchpar_0 = -0.3d0;
+        dpitchpar = -0.2d0;
+        relative_bandwith = 0.1d0;
+        noise_amplitude = 0.01d0;
+        n3 = 30;
+        g_file_filename = 'MHD_EQUILIBRIA/g_file_for_test_WEST';
+        convex_wall_filename = 'MHD_EQUILIBRIA/convex_wall_for_test_WEST.dat';
+        ylabel_quantities = {'$t$','$R$','$\varphi$','$Z$','$\lambda$','$\phi$','$E$'};
 end
 
 boole_show_contour = false;
 boole_show_contour_back = true;
+boole_show_contour_diff = true;
+boole_show_WEST_contour = false;
 number_of_quantities = 7;
-ylabel_quantities = {'$t$','$s$','$\vartheta$','$\varphi$','$\lambda$','$\phi$','$E$'};
-
+has_central_line = {'$t$','$\lambda$'};
+has_normalized_limits = {'$\lambda$'};
 n_skip_contour = 1;
 
 forwardColor = [215,25,28]/256;
 backwardColor = [44,123,182]/256;
+DiffColor = [0,0,0]/256;
+CentralLineColor = [100,100,100]/256;
 
 MarkerContour = '.';
 MarkerContourBack = 'o';
-MarkerSizeContour = 5;
+MarkerDiff = '.';
+MarkerSizeContour = 8;
 MarkerSizeContourBack = 5;
+MarkerSizeDiff = 8;
 CentralLineWidth = 2;
 FontSize = 25;
+FontSizeTitle = 20;
 axis_factor = 3/5;
 
 postprocessing_functions_path = 'postprocessing_functions';
@@ -156,7 +204,7 @@ if (boole_recalculate)
         %Coordinate system
             %1 ... (R,phi,Z) cylindrical coordinate system
             %2 ... (s,theta,phi) symmetry flux coordinate system
-            gorilla.GORILLANML.coord_system = 2;
+            gorilla.GORILLANML.coord_system = coord_system;
 
         %particle species
             %1 ... electron, 2 ... deuterium ion, 3 ... alpha particle
@@ -168,7 +216,7 @@ if (boole_recalculate)
             gorilla.GORILLANML.boole_periodic_relocation = true;
 
         %1 ... numerical RK pusher, 2 ... polynomial pusher
-            gorilla.GORILLANML.ipusher = 2;
+            gorilla.GORILLANML.ipusher = ipusher;
 
         %true ... Face guessing algorithm is used, false ... NOT used
             gorilla.GORILLANML.boole_guess = boole_guess;
@@ -209,6 +257,11 @@ if (boole_recalculate)
             %3 ... field-aligned grid for non-axisymmetric VMEC
             %4 ... SOLEDGE3X_EIRENE grid
             tetra_grid.TETRA_GRID_NML.grid_kind = grid_kind;
+            
+        %MHD equilibrium filename
+            tetra_grid.TETRA_GRID_NML.g_file_filename = g_file_filename;
+            tetra_grid.TETRA_GRID_NML.convex_wall_filename = convex_wall_filename;
+            tetra_grid.TETRA_GRID_NML.netcdf_filename = 'MHD_EQUILIBRIA/netcdf_file_for_test.nc';
 
         %Switch for selecting number of field periods automatically or manually
             %.true. ... number of field periods is selected automatically (Tokamak = 1, Stellarator depending on VMEC equilibrium)
@@ -245,33 +298,41 @@ if (boole_recalculate)
         % TOK electrons (1E-2eV)    t = 2.1d-4
             reversibility_test.REVERSIBILITY_TEST_NML.t_total = t_total;
 
-        %Average "minor radius" of orbits at start
-        %Cylindrical: r, Symmetry Flux: s
-            reversibility_test.REVERSIBILITY_TEST_NML.minor_0 = 0.5d0;
-            
-        %Bandwith of "minor radius" of orbits at start
-        %Cylindrical: dr, Symmetry Flux: ds
-            reversibility_test.REVERSIBILITY_TEST_NML.dminor_0 = dminor_0;
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+      %ONLY FOR coord_system = 1 (cylindrical coordinates)
+        %Fluxlabel s of starting contour center
+        reversibility_test.REVERSIBILITY_TEST_NML.s_0 = s_0;
 
+        %Bandwith of flux label s of starting contour
+        reversibility_test.REVERSIBILITY_TEST_NML.ds_0 = ds_0;
+
+        %Theta of starting contour center
+        reversibility_test.REVERSIBILITY_TEST_NML.theta_0 = theta_0;
+
+        %Bandwith of theta of starting contour
+        reversibility_test.REVERSIBILITY_TEST_NML.dtheta_0 = dtheta_0;
+            
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+      %ONLY FOR coord_system = 1 (cylindrical coordinates)
         %Major Radius R of starting contour center
-        %ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
-            reversibility_test.REVERSIBILITY_TEST_NML.R_center = 2.4d0;
+            reversibility_test.REVERSIBILITY_TEST_NML.R_0 = R_0;
+
+        %Bandwitch of radius R of starting contour
+            reversibility_test.REVERSIBILITY_TEST_NML.dR_0 = dR_0;
 
         %Height Z of starting contour center
-        %ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
-            reversibility_test.REVERSIBILITY_TEST_NML.Z_center = 0.0d0;
-            
-        %Angle of starting contour center
-            reversibility_test.REVERSIBILITY_TEST_NML.angle_0 = angle_0;
-  
-        %Bandwith of angle of starting contour center
-            reversibility_test.REVERSIBILITY_TEST_NML.dangle_0 = dangle_0;
-            
-        %Fraction of the contour to be traced
-            reversibility_test.REVERSIBILITY_TEST_NML.contour_fraction = contour_fraction;
+            reversibility_test.REVERSIBILITY_TEST_NML.Z_0 = Z_0;
+
+        %Bandwitch of height Z of starting contour
+             reversibility_test.REVERSIBILITY_TEST_NML.dZ_0 = dZ_0;
+             
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
         %Starting $\varphi$ value of orbits at start
             reversibility_test.REVERSIBILITY_TEST_NML.phi_0 = phi_0;
+            
+        %Fraction of the contour to be traced
+            reversibility_test.REVERSIBILITY_TEST_NML.contour_fraction = contour_fraction;
 
         %Average starting pitch parameter of particles
             reversibility_test.REVERSIBILITY_TEST_NML.pitchpar_0 = pitchpar_0;
@@ -350,7 +411,7 @@ end
 %-----------------------------------------------------------------------------------------------------------------------
 
 %Load results
-if (boole_show_contour || boole_show_contour_back)
+if (boole_show_contour || boole_show_contour_back || boole_show_WEST_contour)
     contour_data = load([path_RUN,'/',filename_reversibility_test]);
 end
 if (boole_show_contour_back)
@@ -409,6 +470,8 @@ if (boole_show_contour)
     t.Padding = 'compact';
 end
 
+a = extract_snapshot(contour_data,2);
+
 %Show contour evolution backwards
 if (boole_show_contour_back)
     xlabel_txt = '$k_{orbit}$';
@@ -432,21 +495,32 @@ if (boole_show_contour_back)
         plot_data_back = extract_snapshot(contour_back_data,j);
         for l = 1:number_of_quantities
             jl_entry = (l-1)*(n_snapshots+1) + j;
+            ylabel_txt = ylabel_quantities{l};
             contour_labels = [1:size(plot_data_back,1)];
             %subplot(number_of_quantities,n_snapshots + 1,jl_entry)
             nexttile(jl_entry)
-            plot(contour_labels(1:n_skip_contour:end),plot_data(1:n_skip_contour:end,l+1),MarkerContour,'Color',forwardColor,'MarkerSize',MarkerSizeContour,'MarkerEdgeColor',forwardColor)
+            if(ismember(ylabel_txt,has_central_line))
+                plot(contour_labels,zeros(size(contour_labels)),'-','Color',CentralLineColor,'LineWidth',CentralLineWidth)
+            end
             hold on
+            plot(contour_labels(1:n_skip_contour:end),plot_data(1:n_skip_contour:end,l+1),MarkerContour,'Color',forwardColor,'MarkerSize',MarkerSizeContour,'MarkerEdgeColor',forwardColor)
             plot(contour_labels(1:n_skip_contour:end),plot_data_back(1:n_skip_contour:end,l+1),MarkerContourBack,'Color',backwardColor,'MarkerSize',MarkerSizeContourBack,'MarkerEdgeColor',backwardColor)
             hold off
-            grid on
-            ylim(ylimits(:,l))
+            if(ismember(ylabel_txt,has_normalized_limits))
+                ylim([-1,1])
+            else
+                ylim(ylimits(:,l))
+            end
+            xlim([contour_labels(1),contour_labels(end)])
             if (j == 1 || l == 1 || l == number_of_quantities)
                 ax = gca;
                 ax.FontSize = FontSize*axis_factor;
                 if (l == 1)
-                    tit = title(['$\tau = $ ',num2str((j-1)/n_snapshots)],'Interpreter','latex');
-                    tit.FontSize = FontSize;
+                    %tit = title(['$\tau = $ ',num2str((j-1)/n_snapshots)],'Interpreter','tex');
+                    forward_title = ['\tau_{+} = ',num2str((j-1)/n_snapshots)];
+                    backward_title = ['\tau_{-} = ',num2str((n_snapshots + 1 - j)/n_snapshots)];
+                    tit = title(sprintf('\\color[rgb]{%f, %f, %f}%s \\color{black}/ \\color[rgb]{%f, %f, %f}%s', forwardColor, forward_title,backwardColor,backward_title),'Interpreter','tex');
+                    tit.FontSize = FontSizeTitle;
                 end
                 if (l == number_of_quantities)
                     xlab = xlabel(xlabel_txt,'Interpreter','latex');
@@ -455,7 +529,6 @@ if (boole_show_contour_back)
                     set(gca,'Xticklabel',[])
                 end
                 if (j == 1)
-                    ylabel_txt = ylabel_quantities{l};
                     ylab = ylabel(ylabel_txt,'Interpreter','latex');
                     ylab.FontSize = FontSize;
                 else
@@ -470,6 +543,132 @@ if (boole_show_contour_back)
     
     t.TileSpacing = 'compact';
     t.Padding = 'compact';
+end
+
+%Show contour evolution backwards
+if (boole_show_contour_diff)
+    xlabel_txt = '$k_{orbit}$';
+    
+    ylimits = nan*ones(2,number_of_quantities);
+    ylimits_back = nan*ones(2,number_of_quantities);
+    ylimits_diff = nan*ones(2,number_of_quantities);
+    [~,contour_data] = extract_snapshot(contour_data);
+    [~,contour_back_data] = extract_snapshot(contour_back_data);
+    ylimits(1,:) = min(contour_data(:,2:number_of_quantities+1),[],1);
+    ylimits(2,:) = max(contour_data(:,2:number_of_quantities+1),[],1);
+    ylimits_back(1,:) = min(contour_back_data(:,2:number_of_quantities+1),[],1);
+    ylimits_back(2,:) = max(contour_back_data(:,2:number_of_quantities+1),[],1);
+    ylimits(1,:) = min([ylimits(1,:);ylimits_back(1,:)],[],1);
+    ylimits(2,:) = max([ylimits(2,:);ylimits_back(2,:)],[],1);
+    
+%     contour_diff_data = contour_data;
+%     contour_diff_data(:,2:end) = (contour_data(:,2:end)-contour_back_data(:,2:end))./max(abs(contour_data(:,2:end)));
+%     ylimits_diff(1,:) = min(contour_diff_data(:,2:number_of_quantities+1),[],1);
+%     ylimits_diff(2,:) = max(contour_diff_data(:,2:number_of_quantities+1),[],1);
+    [contour_diff_data,ylimits_diff] = get_diff(contour_data,contour_back_data,number_of_quantities);
+
+    figure('Renderer', 'painters', 'Position', [24 37 2500 1300])
+    t = tiledlayout(number_of_quantities,n_snapshots + 1);
+    
+    for j = [1:(n_snapshots+1)]
+        plot_data = extract_snapshot(contour_data,j);
+        plot_data_back = extract_snapshot(contour_back_data,j);
+        plot_data_diff = extract_snapshot(contour_diff_data,j);
+        for l = 1:number_of_quantities
+            jl_entry = (l-1)*(n_snapshots + 1) + j;
+            ylabel_txt = ylabel_quantities{l};
+            contour_labels = [1:size(plot_data_back,1)];
+            %subplot(number_of_quantities,n_snapshots + 1,jl_entry)
+            nexttile(jl_entry)
+            hold on
+            if(ismember(ylabel_txt,['$t$']))
+                plot(contour_labels,zeros(size(contour_labels)),'-','Color',CentralLineColor,'LineWidth',CentralLineWidth)
+                hold on
+                plot(contour_labels(1:n_skip_contour:end),plot_data(1:n_skip_contour:end,l+1),MarkerContour,'Color',forwardColor,'MarkerSize',MarkerSizeContour,'MarkerEdgeColor',forwardColor)
+                plot(contour_labels(1:n_skip_contour:end),plot_data_back(1:n_skip_contour:end,l+1),MarkerContourBack,'Color',backwardColor,'MarkerSize',MarkerSizeContourBack,'MarkerEdgeColor',backwardColor)
+                hold off
+                ylim(ylimits(:,l))
+            else
+                hold on
+                plot(contour_labels(1:n_skip_contour:end),plot_data_diff(1:n_skip_contour:end,l+1),MarkerDiff,'Color',DiffColor,'MarkerSize',MarkerSizeDiff,'MarkerEdgeColor',DiffColor)
+                hold off
+                ylim(ylimits_diff(:,l))
+                grid on
+            end
+            xlim([contour_labels(1),contour_labels(end)])
+            if (j == 1 || l == 1 || l == number_of_quantities)
+                ax = gca;
+                ax.FontSize = FontSize*axis_factor;
+                if (l == 1)
+                    forward_title = ['\tau_{+} = ',num2str((j-1)/n_snapshots)];
+                    backward_title = ['\tau_{-} = ',num2str((n_snapshots + 1 - j)/n_snapshots)];
+                    tit = title(sprintf('\\color[rgb]{%f, %f, %f}%s \\color{black}/ \\color[rgb]{%f, %f, %f}%s', forwardColor, forward_title,backwardColor,backward_title),'Interpreter','tex');
+                    tit.FontSize = FontSizeTitle;
+                end
+                if (l == number_of_quantities)
+                    xlab = xlabel(xlabel_txt,'Interpreter','latex');
+                    xlab.FontSize = FontSize;
+                else
+                    set(gca,'Xticklabel',[])
+                end
+                if (j == 1)
+                    ylab = ylabel(ylabel_txt,'Interpreter','latex');
+                    ylab.FontSize = FontSize;
+                else
+                    set(gca,'Yticklabel',[])
+                end
+            else
+                set(gca,'Xticklabel',[])
+                set(gca,'Yticklabel',[])
+            end
+        end
+    end
+    
+    t.TileSpacing = 'compact';
+    t.Padding = 'compact';
+end
+
+if (grid_kind == 4 && boole_show_WEST_contour)
+    %Color scheme
+    grid_color = [204,204,204]/256;
+    grid_thickness = 0.5;
+    WESTColor = [4,90,141]/256;
+    MarkerWEST = '.';
+    MarkerSizeWEST = 8;
+
+    %Read in Soledge3x-EIRENE mesh data and prepare 2D grid
+    fileID = fopen('MHD_EQUILIBRIA/MESH_SOLEDGE3X_EIRENE/knots_for_test.dat');
+    coordinates = textscan(fileID,'%f %f','HeaderLines',1);
+    fclose(fileID);
+    coordinates = cell2mat(coordinates);
+    n_vertex = length(coordinates);
+
+    fileID = fopen('MHD_EQUILIBRIA/MESH_SOLEDGE3X_EIRENE/triangles_for_test.dat');
+    triangles = textscan(fileID,'%f %f %f','HeaderLines',1);
+    fclose(fileID);
+    triangles = cell2mat(triangles);
+    n_triangles = length(triangles);
+
+    grid = nan*ones(n_triangles*5,2);
+    for t = [1:n_triangles]
+        for k = [1:3]
+            grid((t-1)*5 + k,:) = coordinates(triangles(t,k),:);
+        end
+        grid((t-1)*5 + 4,:) = coordinates(triangles(t,1),:);
+        grid((t-1)*5 + 5,:) = nan;
+    end
+
+    figure('Renderer', 'painters', 'Position', [100 100 1300 1000])
+    grid_plot = plot(grid(:,1),grid(:,2),'Color',grid_color);
+    grid_plot.LineWidth = grid_thickness;
+    grid_plot.DisplayName = 'SOLEDGE3X-EIRENE mesh';
+    hold on
+    for j = [1:2:n_snapshots+1]
+        plot_data = extract_snapshot(contour_data,j);
+        %plot(plot_data(:,3),plot_data(:,5),MarkerWEST,'Color',WESTColor,'MarkerSize',MarkerSizeWEST)
+        plot(plot_data(:,3),plot_data(:,5),MarkerWEST,'MarkerSize',MarkerSizeWEST)
+    end
+    hold off
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%HELPFUNCTIONS%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -501,6 +700,17 @@ function [snapshot,array] = extract_snapshot(array,order)
     
     snapshot_indices = [index_snapshot_start,index_snapshot_end];
     snapshot = array(snapshot_indices(1):snapshot_indices(2),:);
+end
+
+function [array_diff,ylimits_diff] = get_diff(array,array_back,number_of_quantities)
+    array_diff = array;
+%     distance = max(abs(extract_snapshot(array,1)-extract_snapshot(array)));
+%     distance = distance(2:end);
+    distance = max(abs(array(:,2:end)));
+    diff = array(:,2:end)-array_back(:,2:end);
+    array_diff(:,2:end) = diff./distance;
+    ylimits_diff(1,:) = min(array_diff(:,2:number_of_quantities+1),[],1);
+    ylimits_diff(2,:) = max(array_diff(:,2:number_of_quantities+1),[],1);
 end
 %%
 % % Load Poincaré invariant over time steps

@@ -8,33 +8,40 @@
   ! TOK electrons (1E-2eV)    t = 2.1d-4
   t_total = 3.25d-5 ,
 !
-  !Average "minor radius" of orbits at start
-  !Cylindrical: r, Symmetry Flux: s
-  minor_0 = 0.5d0 ,
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!ONLY FOR coord_system = 2 (symmetry flux coordiantes)
+  !Fluxlabel s of starting contour center
+  s_0 = 0.5d0 ,
 !
-  !Bandwith of "minor radius" of orbits at start
-  !Cylindrical: dr, Symmetry Flux: ds
-  dminor_0 = 0.25d0 ,
+  !Bandwith of flux label s of starting contour
+  ds_0 = 0.25d0 ,
 !
+  !Theta of starting contour center
+  theta_0 = 0.0d0 ,
+!
+  !Bandwith of theta of starting contour
+  dtheta_0 = 1.0d0 ,
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!ONLY FOR coord_system = 1 (cylindrical coordinates)
   !Major Radius R of starting contour center
-  !ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
-  R_center = 2.9d0 ,
+  R_0 = 245.0d0 ,
+!
+  !Bandwitch of radius R of starting contour
+  dR_0 = -51.0d0 ,
 !
   !Height Z of starting contour center
-  !ONLY NEEDED FOR coord_system = 1 (cylindrical coordinates)
-  Z_center = 0.0d0 ,
+  Z_0 = 1.0d0 ,
 !
-  !Angle of starting contour center
-  angle_0 = 0.0d0 ,
+  !Bandwitch of height Z of starting contour
+  dZ_0 = 1.0d0 ,
 !
-  !Bandwith of angle of starting contour center
-  dangle_0 = 1.0d0 ,
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !Starting $\varphi$ value of orbits at start
+  phi_0 = 0.0d0 ,
 !
   !Fraction of the contour to be traced
   contour_fraction = 1.0d0 ,
-!
-  !Starting $\varphi$ value of orbits at start
-  phi_0 = 0.0d0 ,
 !
   !Average starting pitch parameter of particles
   pitchpar_0 = 0.46d0 ,

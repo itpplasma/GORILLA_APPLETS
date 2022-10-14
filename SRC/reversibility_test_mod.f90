@@ -9,14 +9,16 @@ module reversibility_test_load_mod
 !
     double precision, public, protected    :: t_total
 !
-    double precision, public, protected    :: minor_0
-    double precision, public, protected    :: dminor_0
-    double precision, public, protected    :: R_center
-    double precision, public, protected    :: Z_center
-    double precision, public, protected    :: angle_0
-    double precision, public, protected    :: dangle_0
-    double precision, public, protected    :: contour_fraction
+    double precision, public, protected    :: s_0
+    double precision, public, protected    :: ds_0
+    double precision, public, protected    :: theta_0
+    double precision, public, protected    :: dtheta_0
+    double precision, public, protected    :: R_0
+    double precision, public, protected    :: dR_0
+    double precision, public, protected    :: Z_0
+    double precision, public, protected    :: dZ_0
     double precision, public, protected    :: phi_0
+    double precision, public, protected    :: contour_fraction
     double precision, public, protected    :: pitchpar_0
     double precision, public, protected    :: dpitchpar
 !
@@ -37,8 +39,8 @@ module reversibility_test_load_mod
     logical, public, protected             :: boole_diag_reversibility_test
 !
     !Namelist for reversibility test input
-    NAMELIST /REVERSIBILITY_TEST_NML/ t_total, minor_0, dminor_0, R_center, Z_center, angle_0, dangle_0, &
-                                        & contour_fraction, phi_0, pitchpar_0, dpitchpar, &
+    NAMELIST /REVERSIBILITY_TEST_NML/ t_total, s_0, ds_0, theta_0, dtheta_0, R_0, dR_0, Z_0, dZ_0, phi_0,&
+                                        & contour_fraction, pitchpar_0, dpitchpar, &
                                         & energy_eV_0, relative_bandwith, n_steps, n_orbits, n_snapshots, &
                                         & boole_apply_noise, noise_amplitude, seed_option, &
                                         & filename_reversibility_test, filename_reversibility_test_back, &
@@ -87,6 +89,7 @@ module reversibility_test_mod
         use reversibility_test_load_mod, only: t_total, contour_fraction, pitchpar_0, dpitchpar, &
                                             & n_steps, n_orbits, n_snapshots, energy_eV_0, relative_bandwith, boole_apply_noise, &
                                             & filename_reversibility_test, filename_reversibility_test_back
+        use, intrinsic :: ieee_arithmetic, only: IEEE_VALUE, IEEE_QUIET_NAN
 !
         implicit none
 !
@@ -109,7 +112,7 @@ module reversibility_test_mod
 !
         integer                                         :: i,j,k,l, counter_particles, delta_snapshot
         integer                                         :: file_id_reversibility_test,file_id_reversibility_test_back
-        double precision, dimension(8), parameter       :: snapshot_end = -1
+        double precision, dimension(8)                  :: snapshot_end
 !
 !------------------------------------------------------------------------------------------------------------!
 ! Loading settings
@@ -138,13 +141,31 @@ module reversibility_test_mod
         allocate(alpha_0_vec(n_orbits+1))
         alpha_0_vec(:) = contour_fraction * [(2.d0*pi/dble(n_orbits)*dble(i), i = 0,n_orbits)]
 !
-        !Initialize GORILLA and setup
+        !Initialize GORILLA and data save matrices
         call initialize_gorilla()
         t_total_sign = int(sign(1.d0,t_total))
         if (boole_apply_noise) then
             allocate(rand_noise_vec(n_orbits+1))
             rand_noise_vec = get_rand_noise_vec()
         endif
+!
+        x1_mat = IEEE_VALUE(x1_mat, IEEE_QUIET_NAN)
+        x2_mat = IEEE_VALUE(x2_mat, IEEE_QUIET_NAN)
+        x3_mat = IEEE_VALUE(x3_mat, IEEE_QUIET_NAN)
+        pitchpar_mat = IEEE_VALUE(pitchpar_mat, IEEE_QUIET_NAN)
+        energy_eV_mat = IEEE_VALUE(energy_eV_mat, IEEE_QUIET_NAN)
+        hamiltonian_time_mat = IEEE_VALUE(hamiltonian_time_mat, IEEE_QUIET_NAN)
+        gyrophase_mat = IEEE_VALUE(gyrophase_mat, IEEE_QUIET_NAN)
+!
+        x1_back_mat = IEEE_VALUE(x1_back_mat, IEEE_QUIET_NAN)
+        x2_back_mat = IEEE_VALUE(x2_back_mat, IEEE_QUIET_NAN)
+        x3_back_mat = IEEE_VALUE(x3_back_mat, IEEE_QUIET_NAN)
+        pitchpar_back_mat = IEEE_VALUE(pitchpar_back_mat, IEEE_QUIET_NAN)
+        energy_eV_back_mat = IEEE_VALUE(energy_eV_back_mat, IEEE_QUIET_NAN)
+        hamiltonian_time_back_mat = IEEE_VALUE(hamiltonian_time_back_mat, IEEE_QUIET_NAN)
+        gyrophase_back_mat = IEEE_VALUE(gyrophase_back_mat, IEEE_QUIET_NAN)
+!
+        snapshot_end = IEEE_VALUE(snapshot_end, IEEE_QUIET_NAN)
 !
 !------------------------------------------------------------------------------------------------------------!
 ! Compute orbits
@@ -183,10 +204,13 @@ module reversibility_test_mod
             !energy_eV, x_0 -> x_0,vpar_0,ind_tetr,iface, ...
             call gorilla_integration_setup(lambda,t_total_sign, &
                                         & x_0,vpar_0,energy_eV,ind_tetr,iface,perpinv,perpinv2)
+            if(ind_tetr.eq.-1) cycle
+!
             !Compute orbits
             call gorilla_integration(perpinv,perpinv2,t_total,n_steps, &
                                     & x_0,vpar_0,energy_eV,ind_tetr,iface, &
                                     & x1_vec,x2_vec,x3_vec,pitchpar_vec,energy_eV_vec,hamiltonian_time_vec,gyrophase_vec)
+            if(ind_tetr.eq.-1) cycle
 !
             !Write values in matrix
             x1_mat(:,k) = x1_vec
@@ -210,6 +234,7 @@ module reversibility_test_mod
                                     & x_0,vpar_0,energy_eV,ind_tetr,iface, &
                                     & x1_vec,x2_vec,x3_vec,pitchpar_vec,energy_eV_vec,hamiltonian_time_vec,gyrophase_vec, &
                                     & starting_values=starting_values)
+            if(ind_tetr.eq.-1) cycle
 !
             !Write values in backwards matrix
             x1_back_mat(:,k) = x1_vec
@@ -397,8 +422,6 @@ if(boole_diag_reversibility_test) print *, 'lambda', vpar/vmod_func(energy_eV,x,
 !------------------------------------------------------------------------------------------------------------!
 ! Precomputations and settings
 !
-        if(ind_tetr.eq.-1) return
-!
         if(present(starting_values)) then
             t_hamiltonian = starting_values%t_hamiltonian
             gyrophase = starting_values%gyrophase
@@ -569,7 +592,7 @@ if(boole_diag_reversibility_test) stop
     function starting_position(alpha_0)
 !
         use gorilla_settings_mod, only: coord_system
-        use reversibility_test_load_mod, only: minor_0, dminor_0, R_center, Z_center, angle_0, dangle_0, phi_0
+        use reversibility_test_load_mod, only: s_0, ds_0, theta_0, dtheta_0, R_0, dR_0, Z_0, dZ_0, phi_0
 !
         implicit none
 !
@@ -579,12 +602,12 @@ if(boole_diag_reversibility_test) stop
 !
         select case(coord_system)
         case(1)
-            starting_position(1) = R_center + cos(angle_0 + dangle_0*sin(alpha_0))*(minor_0 + dminor_0*cos(alpha_0))
+            starting_position(1) = R_0 + cos(alpha_0) * dR_0
             starting_position(2) = phi_0
-            starting_position(3) = Z_center + sin(angle_0 + dangle_0*sin(alpha_0))*(minor_0 + dminor_0*cos(alpha_0))
+            starting_position(3) = Z_0 + sin(alpha_0) * dZ_0
         case(2)
-            starting_position(1) = minor_0 + dminor_0*cos(alpha_0)
-            starting_position(2) = angle_0 + dangle_0*sin(alpha_0)
+            starting_position(1) = s_0 + ds_0*cos(alpha_0)
+            starting_position(2) = theta_0 + dtheta_0*sin(alpha_0)
             starting_position(3) = phi_0
         end select
 !
