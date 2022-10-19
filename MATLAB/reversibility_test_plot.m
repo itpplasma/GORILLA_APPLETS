@@ -1,10 +1,10 @@
 %#######################################################################################################################
 % description:
 %-----------------------------------------------------------------------------------------------------------------------
-% * Compute collisionless guiding-center orbit with GORILLA for a trapped Deuterium particle with/without adaptive scheme.
-% * Use a field-aligned grid for a non-axisymmetric VMEC MHD equilibrium.
-% * Create a figure with the Poincar� plots (\varphi = 0) in cylindrical and symmetry flux coordinates.
-% * Compute the normalized parallel adiabatic invariant as a function of banana bounces.
+% * Compute collisionless guiding-center orbit with GORILLA for a contour of Deuterium particles with various starting conditions.
+% * Use a field-aligned grid for several MHD equilibria (ASDEX, VMEC, WEST).
+% * Perform a reversibility test by integrating back from the end postion of the orbit.
+% * Compare the forward/backward evolution of the contour via snapshots.
 %
 %#######################################################################################################################
 % used functions:
@@ -12,22 +12,22 @@
 % InputFile
 % NameList
 % read_in
-% load_copy
 %#######################################################################################################################
 % authors: Georg Graßler
-% created: 16.09.2022
+% created: 10.10.2022
 
 %For Construction of Demonstration
 %-----------------------------------------------------------------------------------------------------------------------
 %control of script
-%close all
-boole_recalculate = true;
+close all
+boole_recalculate = false;
 ipusher = 2;
-poly_order = 4;
-grid_kind = 2;
+poly_order = 2;
+grid_kind = 4;
 coord_system = 2;
 [n1,n2,n3] = deal(70,70,70);
 [s_0,ds_0,theta_0,dtheta_0,R_0,dR_0,Z_0,dZ_0] = deal(-1);
+[g_file_filename,convex_wall_filename] = deal('x');
 sfc_s_min = 1.d-3;
 eps_Phi = -1.d-7;
 %eps_Phi = 0;
@@ -36,7 +36,7 @@ boole_guess = true;
 i_time_tracing_option = 1;
 contour_fraction = 1;
 n_steps = 20;
-n_orbits = 100;
+n_orbits = 99;
 n_snapshots = 2;
 energy_eV_0 = 3d3;
 boole_apply_noise = false;
@@ -66,24 +66,28 @@ switch(grid_kind)
         noise_amplitude = 0.02d0;
         g_file_filename = 'MHD_EQUILIBRIA/g_file_for_test';
         convex_wall_filename = 'MHD_EQUILIBRIA/convex_wall_for_test.dat';
-        ylabel_quantities = {'$t$','$s$','$\vartheta$','$\varphi$','$\lambda$','$\phi$','$E$'};
+        ylabel_quantities = {'$t$','$s$','$\vartheta$','$\varphi$','$\lambda$','$\phi$','$E_{kin}$'};
     case(3)
         t_total = 1.3d-4*3/4;
         %t_total = 2d-4;
         coord_system = 2;
+        eps_Phi = -5.d-6;
         s_0 = 0.5d0;
-        ds_0 = 0.25d0;
-        theta_0 = 1.5d0;
+        ds_0 = 0.4d0;
+        theta_0 = 5.0d0;
+        %theta_0 = 0.0d0;
         dtheta_0 = 1.0d0;
         phi_0 = 1.0d0;
         pitchpar_0 = 0.4d0;
-        dpitchpar = 0.3d0;
+        dpitchpar = -0.3d0;
+        relative_bandwith = 0.9d0;
         noise_amplitude = 0.01d0;
-        ylabel_quantities = {'$t$','$s$','$\vartheta$','$\varphi$','$\lambda$','$\phi$','$E$'};
+        ylabel_quantities = {'$t$','$s$','$\vartheta$','$\varphi$','$\lambda$','$\phi$','$E_{kin}$'};
     case(4)
         t_total = 4.2d-5;
         t_total = 8.2d-5;
         coord_system = 1;
+        eps_Phi = +1.d-6;
         dR_0 = 1.0d0;
         dZ_0 = 1.0d0;
 %         R_0 = 231.0d0;
@@ -102,13 +106,13 @@ switch(grid_kind)
         n3 = 30;
         g_file_filename = 'MHD_EQUILIBRIA/g_file_for_test_WEST';
         convex_wall_filename = 'MHD_EQUILIBRIA/convex_wall_for_test_WEST.dat';
-        ylabel_quantities = {'$t$','$R$','$\varphi$','$Z$','$\lambda$','$\phi$','$E$'};
+        ylabel_quantities = {'$t$','$R$','$\varphi$','$Z$','$\lambda$','$\phi$','$E_{kin}$'};
 end
 
 boole_show_contour = false;
 boole_show_contour_back = true;
 boole_show_contour_diff = true;
-boole_show_WEST_contour = false;
+boole_show_WEST_contour = true;
 number_of_quantities = 7;
 has_central_line = {'$t$','$\lambda$'};
 has_normalized_limits = {'$\lambda$'};
@@ -137,7 +141,6 @@ addpath(postprocessing_functions_path);
 filename_reversibility_test = 'reversibility_test.dat';
 filename_reversibility_test_back = 'reversibility_test_back.dat';
 
-if (boole_recalculate)
   
     %Initialize used paths and files
     %-----------------------------------------------------------------------------------------------------------------------
@@ -166,6 +169,8 @@ if (boole_recalculate)
     %path of the used functions
     path_functions=[path_main,'/MATLAB/functions'];
 
+if (boole_recalculate)
+    
     %define path for data and plots and create a new folder
     mkdir([path_script,'/data_plots'],name_test_case);
     path_data_plots=[path_script,'/data_plots/',name_test_case];
@@ -634,16 +639,18 @@ if (grid_kind == 4 && boole_show_WEST_contour)
     grid_thickness = 0.5;
     WESTColor = [4,90,141]/256;
     MarkerWEST = '.';
-    MarkerSizeWEST = 8;
+    MarkerSizeWEST = 13;
+    xlabel_txt = '$R$ [cm]';
+    ylabel_txt = '$Z$ [cm]';
 
     %Read in Soledge3x-EIRENE mesh data and prepare 2D grid
-    fileID = fopen('MHD_EQUILIBRIA/MESH_SOLEDGE3X_EIRENE/knots_for_test.dat');
+    fileID = fopen([path_main_core,'/MHD_EQUILIBRIA/MESH_SOLEDGE3X_EIRENE/knots_for_test.dat']);
     coordinates = textscan(fileID,'%f %f','HeaderLines',1);
     fclose(fileID);
     coordinates = cell2mat(coordinates);
     n_vertex = length(coordinates);
 
-    fileID = fopen('MHD_EQUILIBRIA/MESH_SOLEDGE3X_EIRENE/triangles_for_test.dat');
+    fileID = fopen([path_main_core,'/MHD_EQUILIBRIA/MESH_SOLEDGE3X_EIRENE/triangles_for_test.dat']);
     triangles = textscan(fileID,'%f %f %f','HeaderLines',1);
     fclose(fileID);
     triangles = cell2mat(triangles);
@@ -662,13 +669,24 @@ if (grid_kind == 4 && boole_show_WEST_contour)
     grid_plot = plot(grid(:,1),grid(:,2),'Color',grid_color);
     grid_plot.LineWidth = grid_thickness;
     grid_plot.DisplayName = 'SOLEDGE3X-EIRENE mesh';
+    contour_handles = cell(1,n_snapshots+1);
     hold on
-    for j = [1:2:n_snapshots+1]
+    for j = [1:1:n_snapshots+1]
         plot_data = extract_snapshot(contour_data,j);
         %plot(plot_data(:,3),plot_data(:,5),MarkerWEST,'Color',WESTColor,'MarkerSize',MarkerSizeWEST)
-        plot(plot_data(:,3),plot_data(:,5),MarkerWEST,'MarkerSize',MarkerSizeWEST)
+        contour_handles{j} = plot(plot_data(:,3),plot_data(:,5),MarkerWEST,'MarkerSize',MarkerSizeWEST);
+        contour_handles{j}.DisplayName = [num2str(j),'. Snapshot'];
     end
     hold off
+    len = legend([grid_plot,contour_handles{:}],'Interpreter','latex');
+    xlab = xlabel(xlabel_txt,'Interpreter','latex');
+    ylab = ylabel(ylabel_txt,'Interpreter','latex');
+    ax = gca;
+    ax.FontSize = FontSize*axis_factor;
+    xlab.FontSize = FontSize;
+    ylab.FontSize = FontSize;
+    len.FontSize = FontSize;
+    
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%HELPFUNCTIONS%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -707,7 +725,7 @@ function [array_diff,ylimits_diff] = get_diff(array,array_back,number_of_quantit
 %     distance = max(abs(extract_snapshot(array,1)-extract_snapshot(array)));
 %     distance = distance(2:end);
     distance = max(abs(array(:,2:end)));
-    diff = array(:,2:end)-array_back(:,2:end);
+    diff = abs(array(:,2:end)-array_back(:,2:end));
     array_diff(:,2:end) = diff./distance;
     ylimits_diff(1,:) = min(array_diff(:,2:number_of_quantities+1),[],1);
     ylimits_diff(2,:) = max(array_diff(:,2:number_of_quantities+1),[],1);

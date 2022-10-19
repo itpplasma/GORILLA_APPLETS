@@ -99,14 +99,14 @@ module reversibility_test_mod
         integer                                         :: t_total_sign, ind_tetr, iface
 !
         double precision,dimension(:),allocatable       :: x1_vec, x2_vec, x3_vec, pitchpar_vec, &
-                                                        & energy_eV_vec, &
+                                                        & kin_energy_eV_vec, &
                                                         & hamiltonian_time_vec, gyrophase_vec, &
                                                         & rand_noise_vec
         double precision, dimension(:,:), allocatable   :: x1_mat, x2_mat, x3_mat, pitchpar_mat, & 
-                                                        & energy_eV_mat, &
+                                                        & kin_energy_eV_mat, &
                                                         & hamiltonian_time_mat, gyrophase_mat
         double precision, dimension(:,:), allocatable   :: x1_back_mat, x2_back_mat, x3_back_mat, pitchpar_back_mat, & 
-                                                        & energy_eV_back_mat, &
+                                                        & kin_energy_eV_back_mat, &
                                                         & hamiltonian_time_back_mat, gyrophase_back_mat
         type(starting_values_type)                      :: starting_values
 !
@@ -124,17 +124,17 @@ module reversibility_test_mod
 !
         !Allocate matrices to save forward data
         allocate(x1_mat(n_steps+1,n_orbits+1), x2_mat(n_steps+1,n_orbits+1), x3_mat(n_steps+1,n_orbits+1), & 
-            & pitchpar_mat(n_steps+1,n_orbits+1), energy_eV_mat(n_steps+1,n_orbits+1), &
+            & pitchpar_mat(n_steps+1,n_orbits+1), kin_energy_eV_mat(n_steps+1,n_orbits+1), &
             & hamiltonian_time_mat(n_steps+1,n_orbits+1), gyrophase_mat(n_steps+1,n_orbits+1))
 
         !Allocate matrices to save backward data
         allocate(x1_back_mat(n_steps+1,n_orbits+1), x2_back_mat(n_steps+1,n_orbits+1), x3_back_mat(n_steps+1,n_orbits+1), & 
-        & pitchpar_back_mat(n_steps+1,n_orbits+1), energy_eV_back_mat(n_steps+1,n_orbits+1), &
+        & pitchpar_back_mat(n_steps+1,n_orbits+1), kin_energy_eV_back_mat(n_steps+1,n_orbits+1), &
         & hamiltonian_time_back_mat(n_steps+1,n_orbits+1), gyrophase_back_mat(n_steps+1,n_orbits+1))
 !
         !Allocate vectors to save individual orbit data
         allocate(x1_vec(n_steps+1), x2_vec(n_steps+1), x3_vec(n_steps+1), &
-                & pitchpar_vec(n_steps+1),energy_eV_vec(n_steps+1), &
+                & pitchpar_vec(n_steps+1),kin_energy_eV_vec(n_steps+1), &
                 & hamiltonian_time_vec(n_steps+1), gyrophase_vec(n_steps+1))
 !
         !Create vector with equidistant theta values
@@ -153,7 +153,7 @@ module reversibility_test_mod
         x2_mat = IEEE_VALUE(x2_mat, IEEE_QUIET_NAN)
         x3_mat = IEEE_VALUE(x3_mat, IEEE_QUIET_NAN)
         pitchpar_mat = IEEE_VALUE(pitchpar_mat, IEEE_QUIET_NAN)
-        energy_eV_mat = IEEE_VALUE(energy_eV_mat, IEEE_QUIET_NAN)
+        kin_energy_eV_mat = IEEE_VALUE(kin_energy_eV_mat, IEEE_QUIET_NAN)
         hamiltonian_time_mat = IEEE_VALUE(hamiltonian_time_mat, IEEE_QUIET_NAN)
         gyrophase_mat = IEEE_VALUE(gyrophase_mat, IEEE_QUIET_NAN)
 !
@@ -161,7 +161,7 @@ module reversibility_test_mod
         x2_back_mat = IEEE_VALUE(x2_back_mat, IEEE_QUIET_NAN)
         x3_back_mat = IEEE_VALUE(x3_back_mat, IEEE_QUIET_NAN)
         pitchpar_back_mat = IEEE_VALUE(pitchpar_back_mat, IEEE_QUIET_NAN)
-        energy_eV_back_mat = IEEE_VALUE(energy_eV_back_mat, IEEE_QUIET_NAN)
+        kin_energy_eV_back_mat = IEEE_VALUE(kin_energy_eV_back_mat, IEEE_QUIET_NAN)
         hamiltonian_time_back_mat = IEEE_VALUE(hamiltonian_time_back_mat, IEEE_QUIET_NAN)
         gyrophase_back_mat = IEEE_VALUE(gyrophase_back_mat, IEEE_QUIET_NAN)
 !
@@ -176,14 +176,14 @@ module reversibility_test_mod
         !$OMP PARALLEL DEFAULT(NONE) &
         !$OMP& SHARED(alpha_0_vec,t_total,n_steps,n_orbits, &
         !$OMP& pitchpar_0,dpitchpar,energy_eV_0,relative_bandwith,boole_apply_noise,rand_noise_vec, &
-        !$OMP& x1_mat,x2_mat,x3_mat,pitchpar_mat,energy_eV_mat, &
+        !$OMP& x1_mat,x2_mat,x3_mat,pitchpar_mat,kin_energy_eV_mat, &
         !$OMP& hamiltonian_time_mat,gyrophase_mat, &
-        !$OMP& x1_back_mat,x2_back_mat,x3_back_mat,pitchpar_back_mat,energy_eV_back_mat, &
+        !$OMP& x1_back_mat,x2_back_mat,x3_back_mat,pitchpar_back_mat,kin_energy_eV_back_mat, &
         !$OMP& hamiltonian_time_back_mat,gyrophase_back_mat, &
         !$OMP& counter_particles,t_total_sign) &
         !$OMP& PRIVATE(k,x_0,alpha_0,lambda,perpinv,perpinv2, &
         !$OMP& vpar_0,ind_tetr,iface, &
-        !$OMP& x1_vec,x2_vec,x3_vec,pitchpar_vec,energy_eV_vec,energy_eV, &
+        !$OMP& x1_vec,x2_vec,x3_vec,pitchpar_vec,kin_energy_eV_vec,energy_eV, &
         !$OMP& hamiltonian_time_vec,gyrophase_vec, starting_values)
         !$OMP DO
 !
@@ -209,7 +209,7 @@ module reversibility_test_mod
             !Compute orbits
             call gorilla_integration(perpinv,perpinv2,t_total,n_steps, &
                                     & x_0,vpar_0,energy_eV,ind_tetr,iface, &
-                                    & x1_vec,x2_vec,x3_vec,pitchpar_vec,energy_eV_vec,hamiltonian_time_vec,gyrophase_vec)
+                                    & x1_vec,x2_vec,x3_vec,pitchpar_vec,kin_energy_eV_vec,hamiltonian_time_vec,gyrophase_vec)
             if(ind_tetr.eq.-1) cycle
 !
             !Write values in matrix
@@ -217,7 +217,7 @@ module reversibility_test_mod
             x2_mat(:,k) = x2_vec
             x3_mat(:,k) = x3_vec
             pitchpar_mat(:,k) = pitchpar_vec
-            energy_eV_mat(:,k) = energy_eV_vec
+            kin_energy_eV_mat(:,k) = kin_energy_eV_vec
             hamiltonian_time_mat(:,k) = hamiltonian_time_vec
             gyrophase_mat(:,k) = gyrophase_vec
 
@@ -232,7 +232,7 @@ module reversibility_test_mod
             !As have already correct coordinate set, do not need extra setup like in forward case
             call gorilla_integration(perpinv,perpinv2,-t_total,n_steps, &
                                     & x_0,vpar_0,energy_eV,ind_tetr,iface, &
-                                    & x1_vec,x2_vec,x3_vec,pitchpar_vec,energy_eV_vec,hamiltonian_time_vec,gyrophase_vec, &
+                                    & x1_vec,x2_vec,x3_vec,pitchpar_vec,kin_energy_eV_vec,hamiltonian_time_vec,gyrophase_vec, &
                                     & starting_values=starting_values)
             if(ind_tetr.eq.-1) cycle
 !
@@ -241,7 +241,7 @@ module reversibility_test_mod
             x2_back_mat(:,k) = x2_vec
             x3_back_mat(:,k) = x3_vec
             pitchpar_back_mat(:,k) = pitchpar_vec
-            energy_eV_back_mat(:,k) = energy_eV_vec
+            kin_energy_eV_back_mat(:,k) = kin_energy_eV_vec
             hamiltonian_time_back_mat(:,k) = hamiltonian_time_vec
             gyrophase_back_mat(:,k) = gyrophase_vec
 !
@@ -264,19 +264,19 @@ module reversibility_test_mod
         !Write orbit positions
         do l = 1, n_snapshots
             j = 1 + (l-1)*delta_snapshot
-            do k = 1,n_orbits
+            do k = 1,n_orbits+1
                 write(file_id_reversibility_test,*) j, hamiltonian_time_mat(j,k), &
                     & x1_mat(j,k), x2_mat(j,k), x3_mat(j,k), &
-                    & pitchpar_mat(j,k), gyrophase_mat(j,k)/(2.0d0*pi), energy_eV_mat(j,k)
+                    & pitchpar_mat(j,k), gyrophase_mat(j,k)/(2.0d0*pi), kin_energy_eV_mat(j,k)
             enddo
             write(file_id_reversibility_test,*) snapshot_end
         enddo
         !Final orbit position
         j = n_steps + 1
-        do k = 1,n_orbits
+        do k = 1,n_orbits+1
             write(file_id_reversibility_test,*) j, hamiltonian_time_mat(j,k), &
                 & x1_mat(j,k), x2_mat(j,k), x3_mat(j,k), &
-                & pitchpar_mat(j,k), gyrophase_mat(j,k)/(2.0d0*pi), energy_eV_mat(j,k)
+                & pitchpar_mat(j,k), gyrophase_mat(j,k)/(2.0d0*pi), kin_energy_eV_mat(j,k)
         enddo
         write(file_id_reversibility_test,*) snapshot_end
         close(file_id_reversibility_test)
@@ -288,32 +288,32 @@ module reversibility_test_mod
         do l = 1, n_snapshots
             !We save the backwards integrated quantities in reversed order to be comparable to forward integrated ones
             j = 1 + (n_steps - (l-1)*delta_snapshot)
-            do k = 1,n_orbits
+            do k = 1,n_orbits+1
                 write(file_id_reversibility_test_back,*) j, hamiltonian_time_back_mat(j,k), &
                     & x1_back_mat(j,k), x2_back_mat(j,k), x3_back_mat(j,k), &
                     & pitchpar_back_mat(j,k), gyrophase_back_mat(j,k)/(2.0d0*pi), &
-                    energy_eV_back_mat(j,k)
+                    kin_energy_eV_back_mat(j,k)
             enddo
             write(file_id_reversibility_test_back,*) snapshot_end
         enddo
         !The first orbit position is printed last in case of backward integration
         j = 1
-        do k = 1,n_orbits
+        do k = 1,n_orbits+1
             write(file_id_reversibility_test_back,*) j, hamiltonian_time_back_mat(j,k), &
                 & x1_back_mat(j,k), x2_back_mat(j,k), x3_back_mat(j,k), &
                 & pitchpar_back_mat(j,k), gyrophase_back_mat(j,k)/(2.0d0*pi), &
-                energy_eV_back_mat(j,k)
+                kin_energy_eV_back_mat(j,k)
         enddo
         write(file_id_reversibility_test_back,*) snapshot_end
         close(file_id_reversibility_test_back)
 !
         deallocate(x1_mat,x2_mat,x3_mat,& 
-                    & pitchpar_mat,energy_eV_mat, & 
+                    & pitchpar_mat,kin_energy_eV_mat, & 
                     & hamiltonian_time_mat,gyrophase_mat)
         deallocate(x1_back_mat,x2_back_mat,x3_back_mat, & 
-                    & pitchpar_back_mat,energy_eV_back_mat, & 
+                    & pitchpar_back_mat,kin_energy_eV_back_mat, & 
                     & hamiltonian_time_back_mat,gyrophase_back_mat)
-        deallocate(x1_vec,x2_vec,x3_vec,pitchpar_vec,energy_eV_vec,hamiltonian_time_vec,gyrophase_vec)
+        deallocate(x1_vec,x2_vec,x3_vec,pitchpar_vec,kin_energy_eV_vec,hamiltonian_time_vec,gyrophase_vec)
         deallocate(alpha_0_vec)
 !
     end subroutine make_reversibility_test
@@ -386,7 +386,7 @@ if(boole_diag_reversibility_test) print *, 'lambda', vpar/vmod_func(energy_eV,x,
 !
     subroutine gorilla_integration(perpinv,perpinv2,t_total,n_steps, &
                                 & x,vpar,energy_eV,ind_tetr,iface, &
-                                & x1_vec,x2_vec,x3_vec,pitchpar_vec,energy_eV_vec,hamiltonian_time_vec,gyrophase_vec, &
+                                & x1_vec,x2_vec,x3_vec,pitchpar_vec,kin_energy_eV_vec,hamiltonian_time_vec,gyrophase_vec, &
                                 & starting_values)
 !
         use constants, only: ev2erg
@@ -407,7 +407,7 @@ if(boole_diag_reversibility_test) print *, 'lambda', vpar/vmod_func(energy_eV,x,
         integer, intent(inout)                                  :: ind_tetr, iface
 !
         double precision,dimension(:),intent(out)               :: x1_vec, x2_vec, x3_vec, pitchpar_vec, &
-                                                                & energy_eV_vec, &
+                                                                & kin_energy_eV_vec, &
                                                                 & hamiltonian_time_vec, gyrophase_vec
 !
         double precision                                        :: t_step, vmod
@@ -459,7 +459,7 @@ if(boole_diag_reversibility_test) print *, 'lambda', vpar/vmod_func(energy_eV,x,
             energy_eV = E_tot_eV_func(x,vpar,perpinv,ind_tetr)
             vmod=vmod_func(energy_eV,x,ind_tetr)
             pitchpar_vec(i) = vpar/vmod
-            energy_eV_vec(i) = energy_eV
+            kin_energy_eV_vec(i) = particle_mass*vmod**2/2/ev2erg
             hamiltonian_time_vec(i) = t_hamiltonian
             gyrophase_vec(i) = gyrophase
 !
@@ -511,7 +511,7 @@ if(boole_diag_reversibility_test) stop
         energy_eV = E_tot_eV_func(x,vpar,perpinv,ind_tetr)
         vmod = vmod_func(energy_eV,x,ind_tetr)
         pitchpar_vec(i) = vpar/vmod
-        energy_eV_vec(i) = energy_eV
+        kin_energy_eV_vec(i) = particle_mass*vmod**2/2/ev2erg
         hamiltonian_time_vec(i) = t_hamiltonian
         gyrophase_vec(i) = gyrophase
 !
