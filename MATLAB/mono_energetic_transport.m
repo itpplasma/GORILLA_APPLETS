@@ -329,6 +329,8 @@ gorilla.GORILLANML.helical_pert_n_fourier = 2;
 
 gorilla.GORILLANML.boole_time_Hamiltonian = false;
 gorilla.GORILLANML.boole_gyrophase = false;
+gorilla.GORILLANML.vpar_int = false;
+gorilla.GORILLANML.vpar2_int = false;
 %%
 %
 %

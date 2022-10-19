@@ -119,8 +119,10 @@
 !------------------------------------------------------------------------------------------------------------!
 !
  !Switches to calculate optional quantities
- boole_time_Hamiltonian = .false. ,
- boole_gyrophase = .false. ,
+ boole_time_hamiltonian = .true. ,
+ boole_gyrophase = .true. , !only turn this on if boole_time_hamiltonian is also on
+ boole_vpar_int = .true. ,
+ boole_vpar2_int = .true. ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !

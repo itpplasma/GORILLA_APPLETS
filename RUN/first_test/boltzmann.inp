@@ -3,13 +3,13 @@
 &boltzmann_nml
 !
   !time for tracing particles
-  time_step = 1.0d-3 ,
+  time_step = 1.0d-30 ,
 !
   !Kinetic energy of particles
-  energy_max_eV = 3.5d6 ,
+  energy_max_eV = 3.5d5 ,
 !
   !Number of particles to be traced
-  n_particles = 10,
+  n_particles = 1d4,
 !
   !Set integrator type
   !(must be 1, otherwise it currently does not work)
@@ -26,7 +26,7 @@
   boole_random_precalc = .true. ,
 !
   !Filename for total dwell times of particles
-  filename_total_dwell_times = 'total_dwell_times.dat' ,
+  filename_dwell_times = 'dwell_times.dat' ,
 !
   !Filename for total dwell times of particles
   filename_starting_conditions = 'starting_conditions.dat' ,
@@ -37,8 +37,8 @@
   !Filename for vertex indices
   filename_vertex_indices = 'vertex_indices.dat'  ,
 !
-  !Number of time measurements
-  n_t_measurements = 10;
+  ! !Number of time measurements
+  !n_t_measurements = 10;
 !
   !Filename for vertex coordinates
   filename_vertex_coordinates = 'vertex_coordinates.dat' ,
