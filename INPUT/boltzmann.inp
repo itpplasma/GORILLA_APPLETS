@@ -11,6 +11,9 @@
   !Number of particles to be traced
   n_particles = 40 ,
 !
+  !Simulated density of particles
+  density = 1,
+!
   !Set integrator type
   !(must be 1, otherwise it currently does not work)
   ! 1 ... GORILLA

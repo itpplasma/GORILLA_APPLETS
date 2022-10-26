@@ -14,10 +14,10 @@ OPTS= -g -J OBJS -O3 -fopenmp
 # Including performance test
 #OPTS= -g -J OBJS -pg -O3 -fopenmp 
 # The option below shows in which line the error occurs
-#OPTS= -J OBJS  -g -fbacktrace -ffpe-trap=zero,overflow,invalid  -fbounds-check -fcheck=all -fopenmp
-#OPTS= -J OBJS  -ffpe-trap=invalid,zero,overflow -g -fopenmp
+# OPTS= -J OBJS  -g -fbacktrace -ffpe-trap=zero,overflow,invalid  -fbounds-check -fcheck=all -fopenmp
+# OPTS= -J OBJS  -ffpe-trap=invalid,zero,overflow -g -fopenmp
 # Official Core module options
-#OPTS ?= -J OBJS  -g -fbacktrace -ffpe-trap=zero,overflow,invalid  -fbounds-check -fopenmp
+# OPTS ?= -J OBJS  -g -fbacktrace -ffpe-trap=zero,overflow,invalid  -fbounds-check -fopenmp
 
 UNAME_S	:= $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
@@ -72,6 +72,7 @@ SOURCES = SetWorkingPrecision.f90\
 	pusher_tetra_func_mod.f90 \
 	pusher_tetra_poly.f90 \
 	pusher_tetra_rk.f90 \
+	find_tetra_mod.f90 \
 	get_canonical_coordinates.f90 \
 	orbit_timestep_gorilla.f90 \
 	gorilla_plot_mod.f90 \

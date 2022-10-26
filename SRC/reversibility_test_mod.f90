@@ -327,7 +327,7 @@ module reversibility_test_mod
         use tetra_physics_mod, only: tetra_physics, particle_mass, particle_charge
         use orbit_timestep_gorilla_mod, only: check_coordinate_domain
         use supporting_functions_mod, only: bmod_func
-        use pusher_tetra_rk_mod, only: find_tetra
+        use find_tetra_mod, only: find_tetra
 !
         implicit none
 !
@@ -669,7 +669,7 @@ if(boole_diag_reversibility_test) stop
     subroutine apply_noise(rand_noise,t_total_sign,x,vpar,energy_eV,ind_tetr,iface,perpinv,perpinv2)
 !
         use tetra_physics_mod, only: tetra_physics
-        use pusher_tetra_rk_mod, only: find_tetra
+        use find_tetra_mod, only: find_tetra
         use orbit_timestep_gorilla_mod, only: check_coordinate_domain
         use supporting_functions_mod, only: bmod_func
         use reversibility_test_load_mod, only: noise_amplitude
