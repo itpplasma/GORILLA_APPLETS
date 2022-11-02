@@ -95,7 +95,7 @@ switch(grid_kind)
         error('Invalid grid_kind! Choose among 2, 3, or 4!');
 end
 
-if (boole_Strong_electric_field && grid_kind == 2)
+if (boole_strong_electric_field && grid_kind == 2)
         eps_Phi = -1.d-4;
         coord_system = 1;
         R_0 = 190.0d0;

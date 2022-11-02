@@ -508,7 +508,7 @@ subroutine orbit_timestep_gorilla_dwell_times(x,vpar,vperp,t_step,boole_initiali
     !
                 enddo !Loop for tetrahedron pushings
 !
-                !PRINT*, 'hamiltonian time = ', hamiltonian_time
+PRINT*, 'hamiltonian time = ', hamiltonian_time
                 !Compute vperp from position
                 vperp = vperp_func(z_save,perpinv,ind_tetr_save)
     !            

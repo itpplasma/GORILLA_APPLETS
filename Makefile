@@ -12,7 +12,7 @@ FC = gfortran
 # The developer repo option
 OPTS= -g -J OBJS -O3 -fopenmp 
 # Including performance test
-#OPTS= -g -J OBJS -pg -O3 -fopenmp 
+# OPTS= -g -J OBJS -pg -O3 -fopenmp 
 # The option below shows in which line the error occurs
 # OPTS= -J OBJS  -g -fbacktrace -ffpe-trap=zero,overflow,invalid  -fbounds-check -fcheck=all -fopenmp
 # OPTS= -J OBJS  -ffpe-trap=invalid,zero,overflow -g -fopenmp
