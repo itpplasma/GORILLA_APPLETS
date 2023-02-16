@@ -22,13 +22,13 @@ close all
 
 %Main options
 % grid_kind ... field-alligned axis-symmetric (2), non axis-symmetric (3) or EIRENE grid (4)
-grid_kind = 3;
+grid_kind = 4;
 % ipusher ... Runge-Kutta pusher (1) or Polynomial pusher (2)
 ipusher = 2;
 % poly_order ... order of approximation polynomial used (only for ipusher = 2)
-poly_order = 4;
+poly_order = 3;
 % i_time_tracing_option ... realisation of physical time dynamics in 0th (1) or corresponding polynomial order (2) to poly_order
-i_time_tracing_option = 1;
+i_time_tracing_option = 2;
 
 %Additional options
 % boole_apply_noise ... if true, applies random noise on orbit position before performing the backintegration
@@ -89,6 +89,8 @@ switch(grid_kind)
         noise_amplitude = 0.001d0;
         g_file_filename = 'MHD_EQUILIBRIA/g_file_for_test_WEST';
         convex_wall_filename = 'MHD_EQUILIBRIA/convex_wall_for_test_WEST.dat';
+    otherwise
+        error('Invalid grid_kind! Choose among 2, 3, or 4!');
 end
 
 if (boole_long_integration_time)
@@ -382,9 +384,9 @@ n_snapshots = reversibility_test.REVERSIBILITY_TEST_NML.n_snapshots;
 %Labeling scheme
 switch(coord_system)
     case(1)
-        ylabel_quantities = {'$t$','$R$','$\varphi$','$Z$','$\lambda$','$\phi$','$E_{kin}$'};
+        ylabel_quantities = {'$t$','$R$','$\varphi$','$Z$','$\lambda$','$\phi$','$E_\mathrm{kin}$'};
     case(2)
-        ylabel_quantities = {'$t$','$s$','$\vartheta$','$\varphi$','$\lambda$','$\phi$','$E_{kin}$'};
+        ylabel_quantities = {'$t$','$s$','$\vartheta$','$\varphi$','$\lambda$','$\phi$','$E_\mathrm{kin}$'};
 end
 if (ipusher==1)
     not_available_rk = {'$t$','$\phi$'};
@@ -400,6 +402,8 @@ has_normalized_limits = {'$\lambda$'};
 %Color scheme
 forwardColor = [215,25,28]/256;
 backwardColor = [44,123,182]/256;
+% forwardColor = [252,141,89]/256;
+% backwardColor = [5,113,176]/256;
 DiffColor = [0,0,0]/256;
 CentralLineColor = [100,100,100]/256;
 grid_color = [204,204,204]/256;
@@ -409,7 +413,7 @@ grid_thickness = 0.5;
 MarkerContour = '.';
 MarkerContourBack = 'o';
 MarkerDiff = '.';
-MarkerSizeContour = 8;
+MarkerSizeContour = 7;
 MarkerSizeContourBack = 5;
 MarkerSizeDiff = 8;
 CentralLineWidth = 2;
@@ -420,13 +424,13 @@ MarkerSizeBackWEST = 4;
 n_skip_contour = 1;
 
 %Font sizes
-FontSize = 25;
+FontSize = 22;
 FontSizeTitle = 20;
 axis_factor = 3/5;
 
 
 %% Plot contour evolution forwards/backwards
-xlabel_txt = '$k_{orbit}$';
+xlabel_txt = '$k_\mathrm{orbit}$';
 
 [ylimits] = get_ylimits(contour_data,contour_back_data,number_of_quantities);
 
@@ -445,8 +449,8 @@ for j = 1:(n_snapshots+1)
             plot(contour_labels,zeros(size(contour_labels)),'-','Color',CentralLineColor,'LineWidth',CentralLineWidth)
         end
         hold on
-        plot(contour_labels(1:n_skip_contour:end),plot_data(1:n_skip_contour:end,l+1),MarkerContour,'Color',forwardColor,'MarkerSize',MarkerSizeContour,'MarkerEdgeColor',forwardColor)
         plot(contour_labels(1:n_skip_contour:end),plot_data_back(1:n_skip_contour:end,l+1),MarkerContourBack,'Color',backwardColor,'MarkerSize',MarkerSizeContourBack,'MarkerEdgeColor',backwardColor)
+        plot(contour_labels(1:n_skip_contour:end),plot_data(1:n_skip_contour:end,l+1),MarkerContour,'Color',forwardColor,'MarkerSize',MarkerSizeContour,'MarkerEdgeColor',forwardColor)
         hold off
         if(ismember(ylabel_txt,has_normalized_limits))
             ylim([-1,1])
@@ -487,7 +491,7 @@ t.Padding = 'compact';
 
 
 %% Plot difference of the forward/backward integration
-xlabel_txt = '$k_{orbit}$';
+xlabel_txt = '$k_\mathrm{orbit}$';
 
 [ylimits] = get_ylimits(contour_data,contour_back_data,number_of_quantities);
 [contour_diff_data,ylimits_diff] = get_diff(contour_data,contour_back_data,number_of_quantities);
@@ -508,8 +512,8 @@ for j = [1:(n_snapshots+1)]
         if(ismember(ylabel_txt,['$t$']))
             plot(contour_labels,zeros(size(contour_labels)),'-','Color',CentralLineColor,'LineWidth',CentralLineWidth)
             hold on
-            plot(contour_labels(1:n_skip_contour:end),plot_data(1:n_skip_contour:end,l+1),MarkerContour,'Color',forwardColor,'MarkerSize',MarkerSizeContour,'MarkerEdgeColor',forwardColor)
             plot(contour_labels(1:n_skip_contour:end),plot_data_back(1:n_skip_contour:end,l+1),MarkerContourBack,'Color',backwardColor,'MarkerSize',MarkerSizeContourBack,'MarkerEdgeColor',backwardColor)
+            plot(contour_labels(1:n_skip_contour:end),plot_data(1:n_skip_contour:end,l+1),MarkerContour,'Color',forwardColor,'MarkerSize',MarkerSizeContour,'MarkerEdgeColor',forwardColor)
             hold off
             ylim(ylimits(:,l))
         else
