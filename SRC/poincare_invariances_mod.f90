@@ -531,7 +531,8 @@ print *, ''
 !
         use constants, only: ev2erg, pi
         use tetra_physics_mod, only: tetra_physics,particle_mass,hamiltonian_time,particle_charge,isinside
-        use orbit_timestep_gorilla_mod, only: check_coordinate_domain,bmod_func
+        use orbit_timestep_gorilla_mod, only: check_coordinate_domain
+        use supporting_functions_mod, only: bmod_func
         use pusher_tetra_rk_mod, only: find_tetra,pusher_tetra_rk,initialize_const_motion_rk
         use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
         use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
@@ -595,7 +596,7 @@ print *, ''
         !--- Take into account electrostatic potential energy
 !
         !Compute velocity module from kinetic energy dependent on particle species
-        vmod=sqrt(2.d0* (energy_eV*ev2erg - particle_charge * phi_elec_func(x,ind_tetr) ) / particle_mass)
+        vmod=sqrt(2.d0* (energy_eV*ev2erg - particle_charge * phi_elec_func_new(x,ind_tetr) ) / particle_mass)
 !
         vpar = pitchpar_0*vmod
         vperp = sqrt((1.d0-pitchpar_0**2)*vmod**2)
@@ -683,13 +684,13 @@ endif
             h_theta_vec(i) = tetra_physics(ind_tetr_save)%h2_1 + sum(tetra_physics(ind_tetr_save)%gh2*z_save)
             h_phi_vec(i) = tetra_physics(ind_tetr_save)%h3_1 + sum(tetra_physics(ind_tetr_save)%gh3*z_save)
 !
-            vmod=sqrt(2.d0* (energy_eV*ev2erg - particle_charge * phi_elec_func(x,ind_tetr_save) ) / particle_mass)
+            vmod=sqrt(2.d0* (energy_eV*ev2erg - particle_charge * phi_elec_func_new(x,ind_tetr_save) ) / particle_mass)
             pitchpar_vec(i) = vpar/vmod
 !
             hamiltonian_time_vec(i) = t_hamiltonian
             gyrophase_vec(i) = gyrophase
 !
-            ePhi_vec(i) = particle_charge * phi_elec_func(x,ind_tetr_save)/ev2erg
+            ePhi_vec(i) = particle_charge * phi_elec_func_new(x,ind_tetr_save)/ev2erg
 
 !if(.not.isinside(ind_tetr_save,x)) then
 !    print *, 'NOT inside'
@@ -768,7 +769,8 @@ endif
 !
         use constants, only: ev2erg
         use tetra_physics_mod, only: tetra_physics,particle_mass,particle_charge
-        use orbit_timestep_gorilla_mod, only: check_coordinate_domain,bmod_func
+        use orbit_timestep_gorilla_mod, only: check_coordinate_domain
+        use supporting_functions_mod, only: bmod_func
         use pusher_tetra_rk_mod, only: find_tetra
 !
         implicit none
@@ -808,7 +810,7 @@ endif
         !--- Take into account electrostatic potential energy
 !
         !Compute velocity module from kinetic energy dependent on particle species
-        vmod=sqrt(2.d0* (energy_eV_0*ev2erg - particle_charge * phi_elec_func(x,ind_tetr) ) / particle_mass)
+        vmod=sqrt(2.d0* (energy_eV_0*ev2erg - particle_charge * phi_elec_func_new(x,ind_tetr) ) / particle_mass)
 !
         vpar = pitchpar_0*vmod
         vperp = sqrt((1.d0-pitchpar_0**2)*vmod**2)
@@ -832,27 +834,28 @@ endif
         perpinv=-0.5d0*vperp2/bmod_func(z_save,ind_tetr)
         perpinv2 = perpinv**2
 !
-E_ePhi = particle_charge * phi_elec_func(x,ind_tetr)/ev2erg
+E_ePhi = particle_charge * phi_elec_func_new(x,ind_tetr)/ev2erg
 !
     end subroutine compute_perpinv_gorilla
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-    function phi_elec_func(x,ind_tetr)
+    function phi_elec_func_new(x,ind_tetr)
 !
         use tetra_physics_mod, only: tetra_physics
+        use supporting_functions_mod, only: phi_elec_func
 !
         implicit none
 !
-        double precision :: phi_elec_func
+        double precision :: phi_elec_func_new
         integer, intent(in) :: ind_tetr
         double precision, dimension(3),intent(in) :: x
         double precision, dimension(3) :: z
 !
         z = x-tetra_physics(ind_tetr)%x1
-        phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi * z)
+        phi_elec_func_new = phi_elec_func(z,ind_tetr)
 !
-    end function phi_elec_func
+    end function phi_elec_func_new
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !

@@ -325,7 +325,8 @@ module reversibility_test_mod
 !
         use constants, only: ev2erg
         use tetra_physics_mod, only: tetra_physics, particle_mass, particle_charge
-        use orbit_timestep_gorilla_mod, only: check_coordinate_domain, bmod_func
+        use orbit_timestep_gorilla_mod, only: check_coordinate_domain
+        use supporting_functions_mod, only: bmod_func
         use pusher_tetra_rk_mod, only: find_tetra
 !
         implicit none
@@ -378,7 +379,7 @@ if(boole_diag_reversibility_test) print*, 'total energy', energy_eV
 if(boole_diag_reversibility_test) print *, 'vpar', vpar
 if(boole_diag_reversibility_test) print *, 'vperp', vperp
 if(boole_diag_reversibility_test) print *, 'vmod', vmod
-if(boole_diag_reversibility_test) print *, 'lambda', vpar/vmod_func(energy_eV,x,ind_tetr)
+if(boole_diag_reversibility_test) print *, 'lambda', vpar/vmod_func_new(energy_eV,x,ind_tetr)
 !
     end subroutine gorilla_integration_setup
 !
@@ -391,7 +392,6 @@ if(boole_diag_reversibility_test) print *, 'lambda', vpar/vmod_func(energy_eV,x,
 !
         use constants, only: ev2erg
         use tetra_physics_mod, only: tetra_physics,particle_mass,particle_charge
-        use orbit_timestep_gorilla_mod, only: bmod_func
         use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
         use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
         use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
@@ -457,7 +457,7 @@ if(boole_diag_reversibility_test) print *, 'lambda', vpar/vmod_func(energy_eV,x,
             x2_vec(i) = x(2)
             x3_vec(i) = x(3)
             energy_eV = E_tot_eV_func(x,vpar,perpinv,ind_tetr)
-            vmod=vmod_func(energy_eV,x,ind_tetr)
+            vmod=vmod_func_new(energy_eV,x,ind_tetr)
             pitchpar_vec(i) = vpar/vmod
             kin_energy_eV_vec(i) = particle_mass*vmod**2/2/ev2erg
             hamiltonian_time_vec(i) = t_hamiltonian
@@ -509,7 +509,7 @@ if(boole_diag_reversibility_test) stop
         x2_vec(i) = x(2)
         x3_vec(i) = x(3)
         energy_eV = E_tot_eV_func(x,vpar,perpinv,ind_tetr)
-        vmod = vmod_func(energy_eV,x,ind_tetr)
+        vmod = vmod_func_new(energy_eV,x,ind_tetr)
         pitchpar_vec(i) = vpar/vmod
         kin_energy_eV_vec(i) = particle_mass*vmod**2/2/ev2erg
         hamiltonian_time_vec(i) = t_hamiltonian
@@ -519,29 +519,30 @@ if(boole_diag_reversibility_test) stop
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-    function phi_elec_func(x,ind_tetr)
-!
-        use tetra_physics_mod, only: tetra_physics
-!
-        implicit none
-!
-        double precision :: phi_elec_func
-        integer, intent(in) :: ind_tetr
-        double precision, dimension(3),intent(in) :: x
-        double precision, dimension(3) :: z
-!
-        z = x-tetra_physics(ind_tetr)%x1
-        phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi * z)
-!
-    end function phi_elec_func
+!     function phi_elec_func_new(x,ind_tetr)
+! !
+!         use tetra_physics_mod, only: tetra_physics
+!         use supporting_functions_mod, only: phi_elec_func
+! !
+!         implicit none
+! !
+!         double precision :: phi_elec_func_new
+!         integer, intent(in) :: ind_tetr
+!         double precision, dimension(3),intent(in) :: x
+!         double precision, dimension(3) :: z
+! !
+!         z = x-tetra_physics(ind_tetr)%x1
+!         phi_elec_func_new = phi_elec_func(z,ind_tetr)
+! !
+!     end function phi_elec_func_new
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
     function E_tot_eV_func(x,vpar,perpinv,ind_tetr)
 !
         use constants, only: ev2erg
-        use tetra_physics_mod, only: tetra_physics,particle_charge,particle_mass
-        use orbit_timestep_gorilla_mod, only: bmod_func
+        use tetra_physics_mod, only: tetra_physics
+        use supporting_functions_mod, only: energy_tot_func
 !
         implicit none
 !
@@ -551,41 +552,39 @@ if(boole_diag_reversibility_test) stop
         double precision, dimension(3),intent(in)   :: x
         double precision, intent(in)                :: perpinv,vpar
 !
-        double precision                            :: vperp
         double precision, dimension(3)              :: z
 !
         z = x-tetra_physics(ind_tetr)%x1
 !
-        if(perpinv.ne.0.d0) then
-            vperp = sqrt(2.d0*abs(perpinv)*bmod_func(z,ind_tetr))
-        else
-            vperp = 0.d0
-        endif
-!
-        E_tot_eV_func = 0.5d0*particle_mass*(vpar**2+vperp**2) + &
-                    & particle_charge*phi_elec_func(x,ind_tetr)
+        E_tot_eV_func = energy_tot_func([z,vpar],perpinv,ind_tetr)
         E_tot_eV_func = E_tot_eV_func/ev2erg
 !
     end function E_tot_eV_func
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-    function vmod_func(energy_eV,x,ind_tetr)
+    function vmod_func_new(energy_eV,x,ind_tetr)
 !
         use constants, only: ev2erg
-        use tetra_physics_mod, only: particle_charge, particle_mass
+        use tetra_physics_mod, only: tetra_physics
+        use supporting_functions_mod, only: vmod_func
 !
         implicit none
 !
-        double precision                            :: vmod_func
+        double precision                            :: vmod_func_new
 !
         double precision, intent(in)                :: energy_eV
         double precision, dimension(3),intent(in)   :: x
         integer, intent(in)                         :: ind_tetr
 !
-        vmod_func = sqrt(2.d0* (energy_eV*ev2erg - particle_charge * phi_elec_func(x,ind_tetr) ) / particle_mass)
+        double precision, dimension(3)              :: z123
+        double precision                            :: energy
 !
-    end function vmod_func
+        z123 = x-tetra_physics(ind_tetr)%x1
+        energy = energy_eV*ev2erg
+        vmod_func_new = vmod_func(energy,z123,ind_tetr)
+!
+    end function vmod_func_new
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
@@ -666,7 +665,8 @@ if(boole_diag_reversibility_test) stop
 !
         use tetra_physics_mod, only: tetra_physics
         use pusher_tetra_rk_mod, only: find_tetra
-        use orbit_timestep_gorilla_mod, only: check_coordinate_domain, bmod_func
+        use orbit_timestep_gorilla_mod, only: check_coordinate_domain
+        use supporting_functions_mod, only: bmod_func
         use reversibility_test_load_mod, only: noise_amplitude
 !
         implicit none
@@ -692,10 +692,10 @@ if(boole_diag_reversibility_test) print *, 'x', x
 if(boole_diag_reversibility_test) print *, 'vpar', vpar
 if(boole_diag_reversibility_test) print *, 'ind_tetr', ind_tetr
 if(boole_diag_reversibility_test) print *, 'iface', iface
-if(boole_diag_reversibility_test) print *, 'lambda', vpar/vmod_func(energy_eV,x,ind_tetr)
+if(boole_diag_reversibility_test) print *, 'lambda', vpar/vmod_func_new(energy_eV,x,ind_tetr)
 !
         !Get the UNTOUCHED vmod (aka before applying noise)
-        vmod = vmod_func(energy_eV,x,ind_tetr)
+        vmod = vmod_func_new(energy_eV,x,ind_tetr)
 !
         !Apply noise
         x_disturbed = x * (1 + noise_amplitude*rand_noise)
@@ -735,7 +735,7 @@ if(boole_diag_reversibility_test) print *, 'disturbed x', x
 if(boole_diag_reversibility_test) print *, 'disturbed vpar', vpar
 if(boole_diag_reversibility_test) print *, 'disturbed ind_tetr', ind_tetr
 if(boole_diag_reversibility_test) print *, 'disturbed iface', iface
-if(boole_diag_reversibility_test) print *, 'disturbed lambda', vpar/vmod_func(energy_eV,x,ind_tetr)
+if(boole_diag_reversibility_test) print *, 'disturbed lambda', vpar/vmod_func_new(energy_eV,x,ind_tetr)
 !
     end subroutine apply_noise
 !

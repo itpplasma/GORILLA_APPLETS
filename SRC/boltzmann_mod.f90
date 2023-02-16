@@ -352,7 +352,8 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                     & alloc_precomp_poly_perpinv
                 use tetra_physics_mod, only: tetra_physics,particle_charge,particle_mass
                 use gorilla_settings_mod, only: ipusher, poly_order
-                use orbit_timestep_gorilla_mod, only: bmod_func, vperp_func, check_coordinate_domain
+                use orbit_timestep_gorilla_mod, only: check_coordinate_domain
+                use supporting_functions_mod, only: bmod_func, vperp_func
 !
                 implicit none
 !
