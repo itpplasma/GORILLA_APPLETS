@@ -71,6 +71,14 @@
 !
 !------------------------------------------------------------------------------------------------------------!
 !
+ !Time tracing options
+ ! 1 ... Time tracing in 0th order approximation: dt / dtau = const. in each tetrahedral cell
+ ! 2 ... (Correct) Hamiltonian time tracing in adequate polynomial order
+ !       Dependencies:  ipusher must be 2 (Polynomial pusher)
+ i_time_tracing_option = 1 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
  !Processing of particle handover to tetrahedron neighbour
  ! 1 ... Processing with special treatment of periodic boundaries and manipulation of periodic position values
  ! 2 ... Position exchange via Cartesian variables (skew_coordinates) - Necessary precomputation is included
@@ -137,6 +145,17 @@
  !maximum number of intermediate steps allowed (while traveling from one face to another)
  !Minimum of 1 intermediate step (the full step is divided into two steps)
  max_n_intermediate_steps = 10000 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !In the guiding center theory of the default implementation the electric field is assumed to be weak 
+ !compared to the magnetic field. In case of the investigation of impurities in WEST geometry
+ !(Soledge3X-EIRENE, cylindrical coordinates only) additional terms have to be included in the dynamics
+!
+ !Switch for including strong electric field terms
+ !false ... no additional terms
+ !true ... includes polarization drift terms in dynamics
+ boole_strong_electric_field = .false. ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
