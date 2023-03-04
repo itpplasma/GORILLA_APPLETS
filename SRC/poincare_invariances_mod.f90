@@ -570,6 +570,7 @@ print *, ''
         t_step = t_total/dble(n_steps)
 !
         !Compute velocity module from kinetic energy dependent on particle species
+        !This initial energy is thought of as the kinetic energy viewed in the with ExB drift moving frame
         vmod=sqrt(2.d0*energy_eV*ev2erg/particle_mass)
 !
         !Define start position
@@ -595,9 +596,12 @@ print *, ''
 !
         !--- Take into account electrostatic potential energy
 !
-        !Compute velocity module from kinetic energy dependent on particle species
-        vmod=sqrt(2.d0* (energy_eV*ev2erg - particle_charge * phi_elec_func_new(x,ind_tetr) ) / particle_mass)
+        !Compute velocity module from TOTAL energy dependent on particle species
+        !In constrast to before, to make sure the orbit starts on a predescribed total energy,
+        !vmod (always viewed in the reference frame without E-field) is remainder after subtracting potential/drift term from energy
+        vmod = vmod_func_new(energy_eV,x,ind_tetr)
 !
+        !pitchpar is always viewed (like vmod) in the with ExB moving reference frame
         vpar = pitchpar_0*vmod
         vperp = sqrt((1.d0-pitchpar_0**2)*vmod**2)
 !
@@ -634,7 +638,7 @@ print *, ''
         vperp2 = -2.d0 * perpinv * bmod_func(z_save,ind_tetr)
 !
         if(vperp2.ge.vmod**2) then
-            print *, 'Please, choose a larger pitch parameter for starting orbit.'
+            print *, 'ERROR: Electrostatic potential/ExB drift energy term affects find_tetra! Choose a weaker electric field!'
             stop
         endif
 !
@@ -684,7 +688,10 @@ endif
             h_theta_vec(i) = tetra_physics(ind_tetr_save)%h2_1 + sum(tetra_physics(ind_tetr_save)%gh2*z_save)
             h_phi_vec(i) = tetra_physics(ind_tetr_save)%h3_1 + sum(tetra_physics(ind_tetr_save)%gh3*z_save)
 !
-            vmod=sqrt(2.d0* (energy_eV*ev2erg - particle_charge * phi_elec_func_new(x,ind_tetr_save) ) / particle_mass)
+            !Compute velocity module from TOTAL energy (which IS conserved in the exact solution) 
+            !dependent on particle species. Again, vmod (again viewed in the reference frame without E-field) 
+            !is remainder after subtracting potential/drift term from this TOTAL energy
+            vmod = vmod_func_new(energy_eV,x,ind_tetr_save)
             pitchpar_vec(i) = vpar/vmod
 !
             hamiltonian_time_vec(i) = t_hamiltonian
@@ -783,6 +790,7 @@ endif
         double precision, dimension(3)                  :: z_save
 !
         !Compute velocity module from kinetic energy dependent on particle species
+        !This initial energy is thought of as the kinetic energy viewed in the with ExB drift moving frame
         vmod=sqrt(2.d0*energy_eV_0*ev2erg/particle_mass)
 !
         !Define start position
@@ -809,8 +817,10 @@ endif
 !
         !--- Take into account electrostatic potential energy
 !
-        !Compute velocity module from kinetic energy dependent on particle species
-        vmod=sqrt(2.d0* (energy_eV_0*ev2erg - particle_charge * phi_elec_func_new(x,ind_tetr) ) / particle_mass)
+        !Compute velocity module from TOTAL energy dependent on particle species
+        !In constrast to before, to make sure the orbit starts on a predescribed total energy,
+        !vmod (always viewed in the reference frame without E-field) is remainder after subtracting potential/drift term from energy
+        vmod = vmod_func_new(energy_eV_0,x,ind_tetr)
 !
         vpar = pitchpar_0*vmod
         vperp = sqrt((1.d0-pitchpar_0**2)*vmod**2)
@@ -820,7 +830,7 @@ endif
         call find_tetra(x,vpar,vperp,ind_tetr,iface)
 !
         if(ind_tetr.ne.ind_tetr_save) then
-            print *, 'ERROR: Electrostatic potential energy term affects find_tetra'
+            print *, 'ERROR: Electrostatic potential/ExB drift energy term affects find_tetra! Choose a weaker electric field!'
             stop
         endif
 !
@@ -874,6 +884,31 @@ E_ePhi = particle_charge * phi_elec_func_new(x,ind_tetr)/ev2erg
         bmod_func_new = tetra_physics(ind_tetr)%bmod1+sum(tetra_physics(ind_tetr)%gb*z)
 !
     end function bmod_func_new
+!
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
+    function vmod_func_new(energy_eV,x,ind_tetr)
+!
+        use tetra_physics_mod, only: tetra_physics
+        use supporting_functions_mod, only: vmod_func
+        use constants, only: ev2erg
+
+        implicit none
+!
+        double precision :: vmod_func_new
+!
+        integer, intent(in) :: ind_tetr
+        double precision, intent(in) :: energy_eV
+        double precision, dimension(3), intent(in) :: x
+!
+        double precision, dimension(3) :: z
+        double precision               :: energy
+!
+        z = x-tetra_physics(ind_tetr)%x1
+        energy = energy_eV * ev2erg
+        vmod_func_new = vmod_func(energy,z,ind_tetr)
+!
+    end function vmod_func_new
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
