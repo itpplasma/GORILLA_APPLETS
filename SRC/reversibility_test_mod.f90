@@ -457,9 +457,14 @@ if(boole_diag_reversibility_test) print *, 'lambda', vpar/vmod_func_new(energy_e
             x2_vec(i) = x(2)
             x3_vec(i) = x(3)
             energy_eV = E_tot_eV_func(x,vpar,perpinv,ind_tetr)
+            !Compute velocity module from TOTAL energy (which IS conserved in the exact solution) 
+            !dependent on particle species. Here, vmod is viewed in the reference frame without E-field and
+            !therefore remainder after subtracting potential/drift term from this TOTAL energy
             vmod=vmod_func_new(energy_eV,x,ind_tetr)
+            !The kinetic energy and pitch parameter have to be understood in the same way aka viewed in with ExB drift MOVING FRAME
             pitchpar_vec(i) = vpar/vmod
             kin_energy_eV_vec(i) = particle_mass*vmod**2/2/ev2erg
+!
             hamiltonian_time_vec(i) = t_hamiltonian
             gyrophase_vec(i) = gyrophase
 !

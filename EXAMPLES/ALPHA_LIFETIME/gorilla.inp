@@ -157,6 +157,13 @@
  !true ... includes polarization drift terms in dynamics
  boole_strong_electric_field = .false. ,
 !
+ !Switch for saving electric field and drift to .dat-files
+ boole_save_electric = .false. ,
+
+ !Filenames for storing electric field and drift velocity
+ filename_electric_field = 'electric_field.dat',
+ filename_electric_drift = 'electric_drift.dat'
+!
 !------------------------------------------------------------------------------------------------------------!
 !
 /
