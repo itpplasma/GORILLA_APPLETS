@@ -37,6 +37,8 @@ boole_apply_noise = false;
 seed_option = 1;
 % boole_long_integration_time ... if true, performs integration over multiple toroidal turns to amplify noise effects/error accumulation
 boole_long_integration_time = false;
+% boole_strong_electric_field ... if true, includes additional terms in EOM to more accurately represent the effects of strong electric fields (only for cylindrical coordinates)
+boole_strong_electric_field = false;
 
 
 %% Setting parameters depending on case
@@ -91,6 +93,15 @@ switch(grid_kind)
         convex_wall_filename = 'MHD_EQUILIBRIA/convex_wall_for_test_WEST.dat';
     otherwise
         error('Invalid grid_kind! Choose among 2, 3, or 4!');
+end
+
+if (boole_Strong_electric_field && grid_kind == 2)
+        eps_Phi = -1.d-4;
+        coord_system = 1;
+        R_0 = 190.0d0;
+        dR_0 = 1.0d0;
+        Z_0 = +10.0d0;
+        dZ_0 = 1.0d0;
 end
 
 if (boole_long_integration_time)
@@ -203,6 +214,19 @@ reversibility_test.read();
         % false ... no adaptive scheme
         % true ... adaptive scheme to ensure energy conservation up to specified fluctuation
         gorilla.GORILLANML.boole_adaptive_time_steps = false;
+        
+    % Allowed relative fluctuation of energy between entry and exit of a tetrahedron
+    % Must not be smaller or equal zero!
+        gorilla.GORILLANML.desired_delta_energy = 1e-10;
+        
+    %In the guiding center theory of the default implementation the electric field is assumed to be weak 
+    %compared to the magnetic field. In case of the investigation of impurities in WEST geometry
+    %(Soledge3X-EIRENE, cylindrical coordinates only) additional terms have to be included in the dynamics
+    
+    %Switch for including strong electric field terms
+        %false ... no additional terms
+        %true ... includes polarization drift terms in dynamics
+        gorilla.GORILLANML.boole_strong_electric_field = boole_strong_electric_field;
 
 
 %Input file tetra_grid.inp
@@ -222,6 +246,11 @@ reversibility_test.read();
         %3 ... field-aligned grid for non-axisymmetric VMEC
         %4 ... SOLEDGE3X_EIRENE grid
         tetra_grid.TETRA_GRID_NML.grid_kind = grid_kind;
+        
+    %Option for $\theta$-variable being used in grid
+        % 1 ... theta scaling in symmetry flux coordinates
+        % 2 ... theta scaling in geometrical theta angle
+        tetra_grid.TETRA_GRID_NML.theta_geom_flux = mod(coord_system,2) + 1;
 
     %MHD equilibrium filename
         tetra_grid.TETRA_GRID_NML.g_file_filename = g_file_filename;
