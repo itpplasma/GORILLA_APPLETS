@@ -1,0 +1,33 @@
+! INPUT FILE FOR TOTAL DWELL TIME
+!
+&total_dwell_timesnml
+!
+  !time for tracing particles
+  time_step = 1.0d-3 ,
+!
+  !Kinetic energy of particles
+  energy_eV = 3.5d6 ,
+!
+  !Number of particles to be traced
+  n_particles = 20000 ,
+!
+  !Set integrator type
+  ! 1 ... GORILLA
+  ! 2 ... DIRECT
+  i_integrator_type = 1 ,
+!
+  !Option for precomputation of above random numbers
+  ! 1 ... compute seed with a random number
+  ! 2 ... load seed from file 'seed.dat'
+  seed_option = 2 ,
+!
+  !Boolean for precalculation of random numbers
+  boole_random_precalc = .true. ,
+!
+  !Filename for total dwell times of particles
+  filename_total_dwell_times = 'total_dwell_times.dat' ,
+
+  !Filename for total dwell times of particles
+  filename_starting_conditions = 'starting_conditions.dat' ,
+!
+/

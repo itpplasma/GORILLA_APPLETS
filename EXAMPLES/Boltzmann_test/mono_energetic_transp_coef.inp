@@ -1,0 +1,108 @@
+! INPUT FILE FOR COMPUTATION OF MONO-ENERGETIC TRANSPORT COEFFICIENT AND NUMERICAL DIFFUSION COEFFICIENT
+!
+! TRANSPORT COEFFICIENT NAMELIST 
+&TRANSPCOEFNML
+!
+ !Options for pre-computation of fluxtube volume
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Settings of simulation for transport coefficients
+!
+ !Type of integrator for transport coefficient computation
+ !0 ... No trajectory integration (for measuring overhead computation time)
+ !1 ... GORILLA
+ !2 ... Direct Integrator in VMEC coordinates
+ i_integrator_type = 1 ,
+!
+ !Number of particles for Monte Carlo simulation
+ n_particles = 200 ,
+!
+ !Model diffusion with collisions
+ !false ... without collisions
+ !true ... with collisions (Lorentz collision operator)
+ boole_collisions = .true. ,
+!
+ !Kinetic particle energy (in eV)
+ energy_eV = 3.d3 ,
+!
+ !Option for computation of evolution of $\psi$ (flux)
+ !.true. ... Full evolution of $\psi$ for every particle is saved in memory (psi_mat)
+ !.false. ... Evolution of $\psi$ for a single particle is NOT saved in memory
+ boole_psi_mat = .false. ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Settings for random numbers to model collisions
+!
+ !Precomputation of random numbers for pitch angle scattering
+ !false ... random numbers are calculated on the fly
+ !true ... random numbers are precomputed
+ boole_random_precalc = .false. ,
+!
+ !Option for precomputation of above random numbers
+ !1 ... compute seed with a random number
+ !2 ... load seed from file 'seed.dat'
+ seed_option = 2 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Settings for output of diffusion coefficient and standard deviation of diffusion coefficient
+!
+ !Write raw data of trend of $(\Delta s)^2$ and deviation OR computation of transport coefficient in Fortran
+ !1 ... Fortran computation of linear interpolation with least squares (Diffusion coefficient and deviation of mean value)
+ !2 ... Output of RAW data and further processing with Matlab
+ !3 ... BOTH 1 & 2
+ idiffcoef_output = 1 ,
+!
+ !Filename for evolution of mean value of $(\Delta s)^2$
+ filename_delta_s_squared = 'psi2.dat' ,
+!
+ !Filename for evolution of standard deviation of mean value of $(\Delta s)^2$
+ filename_std_dvt_delta_s_squared = 'std_psi2.dat' ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Settings for mono-energetic transport coefficient for given collisionality and Mach number
+!
+ !Filename for Fortran computation of diffusion coefficient and deviation of mean value (Transport with collisions)
+ filename_transp_diff_coef = 'nustar_diffcoef_std.dat' ,
+!
+ !Normalized collisionality $\nu^\ast$
+ nu_star = 1.d-1 ,
+!
+ !Normalized ExB-drift velocity $v_E$ (Mach number)
+ v_E = 0.d0 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Settings for scan over collisionality: Mono-energetic transport coefficent for constant Mach number (from above)
+!
+ !Starting value for normalized collisionality $\nu^\ast$ (Highest value --> Scan is towards smaller collisionalities)
+ nu_star_start = 1.d1 ,
+!
+ !Basis of negative exponential scan: nu_star = nu_star_start * nu_exp_basis^i
+ nu_exp_basis = 0.5d0 ,
+!
+ !Number of evaluations of nu_star for scan
+ n_nu_scans = 13 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Settings for numerical diffusion coefficient (no collisions)
+!
+  !Filename for Fortran computation of diffusion coefficient and deviation of mean value (numerical diffusion without collisions)
+ filename_numerical_diff_coef = 'numerical_diffcoef_std.dat' ,
+!
+ !Pitchparameter $\lambda = v_\parallel/v$ at the start for numerical diffusion coefficient
+ lambda_start = 0.9d0 ,
+!
+ !Total Monte Carlo physical orbit flight time per particle
+ total_MC_time = 1.d0 ,
+!
+ !Number of time steps for evolution of $(\Delta s)^2$
+ nt_steps_numerical_diff = 10000 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+/

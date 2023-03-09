@@ -4,7 +4,6 @@ module boltzmann_mod
     private
 !
     double precision :: time_step,energy_eV
-    integer :: t1, t2, clock_max, clock_rate1, clock_rate2
     double precision, dimension(3) :: vertex2, vertex3, vertex4
     integer, dimension(:,:), allocatable :: tetra_indices_per_prism
     double precision, dimension(:), allocatable :: prism_volumes, refined_prism_volumes, elec_pot_vec, elec_pot_inaccuracies, n_b
@@ -136,18 +135,9 @@ subroutine calc_starting_conditions(vmod,start_pos_pitch_mat)
     weights(:,1) = constant_part_of_weights
     if (boole_refined_sqrt_g.eqv..false.) weights(:,1) = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
 !
-!ccccccccccccccccccccccccccccccccccccccccccccc
-    ! start_pos_pitch_mat(1,:) = 173.5
-    ! start_pos_pitch_mat(2,:) = 0.3143
-    ! start_pos_pitch_mat(3,:) = -48.5
-!ccccccccccccccccccccccccccccccccccccccccccccc
-!
-!
-!
 !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc  
 ! 
 !     j = 0
-!     call system_clock (t1, clock_rate1, clock_max)
 !     !$OMP PARALLEL DEFAULT(NONE) &
 !     !$OMP& SHARED(num_particles,start_pos_pitch_mat,amin,amax,cmin,cmax,vmod,ind_a,ind_b,ind_c,j) &
 !     !$OMP& PRIVATE(i,inside,rand_scalar,vpar,vperp,x,ind_tetr_out,iface) &
@@ -188,9 +178,6 @@ subroutine calc_starting_conditions(vmod,start_pos_pitch_mat)
 !     enddo
 !     !$OMP END DO
 !     !$OMP END PARALLEL
-!     call system_clock (t2, clock_rate2, clock_max)
-!     print*, 'elapsed real time for find_tetra is: ', real(t2-t1)/real(clock_rate2)
-!     print*, clock_max, clock_rate1, clock_rate2
 ! !
 !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc  
 !
@@ -231,8 +218,7 @@ subroutine calc_boltzmann
 !
     implicit none
 !
-    !double precision, dimension(:), allocatable :: densities!, single_particle_dwell_times!, measuring_times
-    double precision, dimension(:,:), allocatable :: start_pos_pitch_mat!, fluid_velocities
+    double precision, dimension(:,:), allocatable :: start_pos_pitch_mat
     double precision :: vmod,pitchpar,vpar,vperp,t_remain,t_confined,tau_out_can, velocity
     integer :: kpart,i,n,l,m,k,ind_tetr,iface,n_lost_particles,ierr
     integer :: n_start, n_end, i_part
@@ -240,7 +226,6 @@ subroutine calc_boltzmann
     logical :: boole_initialized,boole_particle_lost
     double precision :: dtau, dphi,dtaumin
     double precision, dimension(5) :: z
-    !Character(LEN=50) :: format_time_resolved_energies
     Character(LEN=50) :: format_moments, format_fourier_moments
 !
     ! open(35, file = 'outliers.dat')
@@ -267,19 +252,10 @@ subroutine calc_boltzmann
         endif
     enddo
 !
-    !measuring_times = (/(i,i=n_t_measurements-1,0,-1)/)
-    !measuring_times = measuring_times/(n_t_measurements-1)*time_step
-!
     !Initialize GORILLA
     call initialize_gorilla()
 !
     n_prisms = ntetr/3
-    !allocate(dwell_times(1:ntetr))
-    !allocate(single_particle_dwell_times(1:ntetr))
-    !allocate(densities(1:ntetr))
-    !allocate(currents(1:3,1:ntetr))
-    !allocate(fluid_velocities(1:3,1:ntetr))
-    !allocate(time_resolved_energies(1:n_t_measurements,1:num_particles))
     allocate(tetr_moments(n_moments,ntetr,n_species))
     allocate(prism_moments(n_moments,n_prisms,n_species))
     !allocate(check_t_hamiltonian(num_particles))
@@ -288,12 +264,8 @@ subroutine calc_boltzmann
     allocate(n_b(n_prisms))
     allocate(elec_pot_inaccuracies(n_prisms))
 ! 
-    !time_resolved_energies = 0
-    !dwell_times = 0
-    !currents = 0
     tetr_moments = 0
     prism_moments = 0
-    !check_t_hamiltonian = 0
     elec_pot_vec = 0
     n_b = 0
     elec_pot_inaccuracies = 0
@@ -342,7 +314,6 @@ print*, 'calc_starting_conditions finished'
                 kpart = 0
                 n_lost_particles = 0
     !
-print*, 'now'
                 !$OMP PARALLEL DEFAULT(NONE) &
                 !$OMP& SHARED(num_particles,pos_fluxtv_mat,kpart,vmod,time_step,i_integrator_type, &
                 !$OMP& dtau,dtaumin,boole_random_precalc,n_start,n_end, &
@@ -400,11 +371,7 @@ endif
                         case(2)
                             z(5) = pitchpar
                     end select
-
-    !
-                    !time_resolved_energies(1,n) = particle_mass*vmod**2/2
-                    !single_particle_dwell_times = 0
-    !
+!
                     !Orbit integration
 !
                     select case(i_integrator_type)
@@ -414,15 +381,11 @@ endif
     !
                         case(1)
                             boole_initialized = .false.
-!print*, 'now'
                             call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,time_step,boole_initialized, &
-                            & ind_tetr,iface,t_remain,n,vmod,start_pos_pitch_mat)!,single_particle_dwell_times)
+                            & ind_tetr,iface,t_remain,n,vmod,start_pos_pitch_mat)
     !
                             !Confinement time of particles
                             t_confined = time_step - t_remain
-
-                            !dwell times of particles
-
     !
                             !Lost particle handling
                             if(ind_tetr.eq.-1) then
@@ -457,27 +420,9 @@ endif
     !
                     end select
     !
-                    !!$omp critical
-                    !dwell_times = dwell_times + single_particle_dwell_times
-                    !!$omp end critical
-    !
                 enddo !n
                 !$OMP END DO
                 !$OMP END PARALLEL
-print*, 'finished'
-    !
-    !            close(99)
-    !            
-                ! densities = dwell_times / time_step !compute densities
-                ! do l = 1,ntetr !compute fluid velocity
-                !         if (densities(l) .EQ. 0) then
-                !             fluid_velocities(:,l) = 0
-                !         else
-                !             do m = 1,3
-                !                 fluid_velocities(m,l) = currents(m,l)/(densities(l)*particle_charge)
-                !             enddo
-                !         endif
-                ! enddo
 !
                 prism_moments = (tetr_moments(:,tetra_indices_per_prism(:,1),:) + &
                                & tetr_moments(:,tetra_indices_per_prism(:,2),:) + &
@@ -511,28 +456,8 @@ print*, 'finished'
     print *, 'Number of lost particles',n_lost_particles
     print*, 'average number of pushings = ', n_pushings/n_particles
     print*, 'average number of toroidal revolutions = ', counter_phi_0_mappings/n_particles
-    print*, energy_eV*ev2erg
     ! open(99,file='confined_fraction.dat')
     ! write(99,*) 1.d0-dble(n_lost_particles)/dble(num_particles)
-!   
-    ! open(50, file = filename_dwell_times)
-    ! write(50,'(ES20.10E4)') dwell_times
-    ! close(50)
-    ! open(51, file = 'densities.dat')
-    ! write(51,'(ES20.10E4)') densities
-    ! close(51)
-    ! open(52, file = 'currents.dat')
-    ! write(52,'(3ES20.10E4)') currents
-    ! close(52)
-    ! open(53, file = 'fluid_velocities.dat')
-    ! write(53,'(3ES20.10E4)') fluid_velocities
-    ! close(53)
-    ! if (num_particles.gt.0) then
-    !     write(format_time_resolved_energies, *) '(',num_particles,'ES15.3E4)'
-    !     open(54, file = 'time_resolved_energies.dat')
-    !     write(54,format_time_resolved_energies) time_resolved_energies
-    !     close(54)
-    ! endif
 !
     101 format(1000(e21.14,x))
     ! if (coord_system.eq.1) then
@@ -597,10 +522,6 @@ print*, 'finished'
     enddo   
     close(62)
 !
-    ! open(64, file = 'check_t_hamiltonian.dat')
-    ! write(64,'(ES20.10E4)') check_t_hamiltonian
-    ! close(64)
-!
     open(65, file = 'sqrt_g.dat')
     do i = 1,ntetr
         write(65,*) sqrt_g(i,:)
@@ -629,7 +550,7 @@ print*, 'finished'
     write(70,'(ES20.10E4)') n_b
     close(70)
 !
-    deallocate(start_pos_pitch_mat, tetr_moments, prism_moments)!, dwell_times, currents, fluid_velocities, densities)
+    deallocate(start_pos_pitch_mat, tetr_moments, prism_moments)
 !
 PRINT*, 'particle mass = ', particle_mass
 ! PRINT*, 'large radius = ', mag_axis_R0
@@ -646,7 +567,7 @@ end subroutine calc_boltzmann
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
 subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, t_remain_out, n, &
-                                            & vmod,start_pos_pitch_mat)!,single_particle_dwell_times)
+                                            & vmod,start_pos_pitch_mat)
 !
     use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
@@ -674,9 +595,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     integer                                         :: ind_tetr_save,iper_phi,k, i,m, n
     double precision                                :: perpinv,perpinv2, speed, r, z, phi, B, phi_elec_func
     double precision, dimension(:,:)                :: start_pos_pitch_mat
-    !double precision, dimension(:), intent(inout)   :: measuring_times
     type(optional_quantities_type)                  :: optional_quantities
-    !double precision, dimension(:), intent(inout)   :: single_particle_dwell_times
 !
     !If orbit_timestep is called for the first time without grid position
     if(.not.boole_initialized) then
@@ -737,7 +656,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
             call initialize_const_motion_poly(perpinv,perpinv2)
     end select        
 !
-!             !NOT FULLY IMPLEMENTED YET: Precompute quatities dependent on perpinv
+!             !NOT FULLY IMPLEMENTED YET: Precompute quantities dependent on perpinv
 !             call alloc_precomp_poly_perpinv(1,ntetr)
 !             call initialize_boole_precomp_poly_perpinv()
 !             call make_precomp_poly_perpinv(perpinv,perpinv2)
@@ -790,18 +709,6 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
         t_remain = t_remain - t_pass
         if (iper_phi.ne.0) counter_phi_0_mappings = counter_phi_0_mappings + iper_phi
 !
-        ! if (t_remain .LE. measuring_times(i)) then
-        !     speed = sqrt((x(1)-x_save(1))**2+(x(2)-x_save(2))**2+(x(3)-x_save(3))**2)/t_pass                        
-        !     time_resolved_energies(i,n) = particle_mass*speed**2/2
-        !     i = i+1
-        ! endif
-!
-        !!$omp critical
-        !single_particle_dwell_times(ind_tetr_save) = single_particle_dwell_times(ind_tetr_save) + &
-                                                    !& optional_quantities%t_hamiltonian
-        !dwell_times(ind_tetr_save) = dwell_times(ind_tetr_save) + optional_quantities%t_hamiltonian
-        !currents(:,ind_tetr_save) = particle_charge*(x-x_save)/t_step ! /t_pass vor the speed but *t_pass to calculate the time averge together with /t_step
-!
         do m = 1,n_moments
         !print*, n_moments, moments_selector
             select case(moments_selector(m))
@@ -809,7 +716,6 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                     tetr_moments(m,ind_tetr_save,1) = tetr_moments(m,ind_tetr_save,1) + weights(n,1)* &
                                                         & optional_quantities%t_hamiltonian!* &
                                                         !& (exp(2*(0,1)*x(2))+exp(3*(0,1)*x(2)))
-                    !check_t_hamiltonian(n) = check_t_hamiltonian(n) + optional_quantities%t_hamiltonian
                 case(2)
                     tetr_moments(m,ind_tetr_save,1) = tetr_moments(m,ind_tetr_save,1) + weights(n,1)* &
                                                                 & optional_quantities%gyrophase
@@ -828,9 +734,6 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
             if( present(t_remain_out)) then
                 t_remain_out = t_remain
             endif
-            ! if ((check_t_hamiltonian.gt.1.1*t_step).or.(check_t_hamiltonian.lt.0.9*t_step)) then
-            !     print*, 'hamiltonian time and r are : ', check_t_hamiltonian, x(1)
-            ! endif
             exit
         endif
 !

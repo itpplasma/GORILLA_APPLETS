@@ -1,0 +1,58 @@
+! INPUT FILE FOR BOLTZMANN
+!
+&boltzmann_nml
+!
+  !time for tracing particles
+  time_step = 1.80d-30 ,
+!
+  !Kinetic energy of particles
+  energy_eV = 3.5d3 ,
+!
+  !Number of particles to be traced
+  n_particles = 1.0d6,
+!
+  !Simulated density of particles
+  density = 1,
+!
+  !refined jacobian determinant
+  boole_refined_sqrt_g = .true.,
+!
+  !work with boltzmann energies instead of with monoenergetic articles
+  boole_boltzmann_energies = .true.,
+!
+  !Set integrator type
+  !(must be 1, otherwise it currently does not work)
+  ! 1 ... GORILLA
+  ! 2 ... DIRECT
+  i_integrator_type = 1 ,
+!
+  !Option for precomputation of above random numbers
+  ! 1 ... compute seed with a random number
+  ! 2 ... load seed from file 'seed.inp'
+  seed_option = 2 ,
+!
+  !Boolean for precalculation of random numbers
+  boole_random_precalc = .true. ,
+!
+  !Filename for total dwell times of particles
+  filename_dwell_times = 'dwell_times.dat' ,
+!
+  !Filename for total dwell times of particles
+  filename_starting_conditions = 'starting_conditions.dat' ,
+!
+  !Filename for vertex coordinates 
+  filename_vertex_coordinates = 'vertex_coordinates.dat' ,
+!
+  !Filename for vertex indices
+  filename_vertex_indices = 'vertex_indices.dat'  ,
+!
+  ! !Number of time measurements
+  !n_t_measurements = 10;
+!
+  !Filename for vertex coordinates
+  filename_vertex_coordinates = 'vertex_coordinates.dat' ,
+!
+  !Filename for vertex indices
+  filename_vertex_indices = 'vertex_indices.dat' ,
+/
+
