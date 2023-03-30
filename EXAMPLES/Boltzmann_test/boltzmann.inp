@@ -45,14 +45,5 @@
 !
   !Filename for vertex indices
   filename_vertex_indices = 'vertex_indices.dat'  ,
-!
-  ! !Number of time measurements
-  !n_t_measurements = 10;
-!
-  !Filename for vertex coordinates
-  filename_vertex_coordinates = 'vertex_coordinates.dat' ,
-!
-  !Filename for vertex indices
-  filename_vertex_indices = 'vertex_indices.dat' ,
 /
 
