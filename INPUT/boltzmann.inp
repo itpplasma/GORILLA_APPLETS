@@ -11,6 +11,13 @@
   !Number of particles to be traced
   n_particles = 40 ,
 !
+  !Number of simulations 
+  !For usual purposes set this number to 1
+  !If you set it to a number bigger than 1, n_particles will be simulated n_simulations times,
+  !the results will be used for statistical comparisons of the different simulations
+  !The tetrahedron and prism moments written in the output files only refer to the very last simualation
+  n_simulations = 1,
+!
   !Simulated density of particles
   density = 1,
 !
