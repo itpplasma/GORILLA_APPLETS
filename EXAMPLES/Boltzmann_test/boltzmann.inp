@@ -11,12 +11,14 @@
   !Number of particles to be traced
   n_particles = 1.0d6,
 !
-  !Number of simulations 
-  !For usual purposes set this number to 1
-  !If you set it to a number bigger than 1, n_particles will be simulated n_simulations times,
-  !the results will be used for statistical comparisons of the different simulations
-  !The tetrahedron and prism moments written in the output files only refer to the very last simualation
-  n_simulations = 1,
+  !Compute squares of moments 
+  boole_squared_moments = .false.,
+!
+  !Start all particles from the same physical position
+  boole_point_source = .false.,
+!
+  !include a collision operator
+  boole_collisions = .false.,
 !
   !Simulated density of particles
   density = 1,
@@ -26,6 +28,16 @@
 !
   !work with boltzmann energies instead of with monoenergetic articles
   boole_boltzmann_energies = .true.,
+!
+  !make density a linear function of poloidal flux
+  boole_linear_density_simulation = .true.,
+!
+  !always initiate pairs of particles where both particles start at the same position but move
+  !in opposite direction, this helps to reduce statistical noise
+  boole_antithetic_variate = .true.,
+!
+  !make temperature a linear function of poloidal flux
+  boole_linear_temperature_simulation = .true.,
 !
   !Set integrator type
   !(must be 1, otherwise it currently does not work)
