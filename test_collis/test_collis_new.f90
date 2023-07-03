@@ -1,3 +1,78 @@
+!to compile, write "gfortran test_collis_new.f90 -fopenmp -o new_test"
+program test_collis
+  use collis_ions
+  use omp_lib, only: omp_get_thread_num, omp_get_num_threads, omp_set_num_threads
+
+  implicit none
+
+  integer, parameter :: n=3 !number of background particle species
+  double precision, dimension(5) :: z
+  double precision :: eion, eV, p_mass,nu_perp
+  double precision, dimension(n) :: dens,temp,efcolf,velrat,enrat
+  double precision, dimension(n-1) :: mass_num,charge_num
+  double precision :: v0,dtau
+  double precision :: m0=4.0d0, z0=2.0d0  ! Test particle mass and charge no.
+  double precision :: trace_time = 1.0d-1   ! Total trace time in seconds
+
+  integer, parameter :: num_t_step=100000 
+  integer :: i,j,k,ierr,num_particles
+  double precision, dimension(num_t_step) :: energy_of_t
+
+  p_mass=1.6726d-24
+  ev=1.6022d-12
+
+  mass_num = (/2.0d0,3.0d0/)
+  charge_num = (/1.0d0,1.0d0/)
+  dens = (/0.5d14,0.5d14,0.d0/)
+  temp = (/1.0d4,1.0d4,1.0d4/)
+  eion = 3.5d6
+
+  call collis_init(m0,z0,mass_num,charge_num,dens,temp,eion,v0,nu_perp,efcolf,velrat,enrat)
+
+  trace_time=1.d0
+
+  print *, 'v0 = ', v0, ' = ', sqrt(2.d0*eion*ev/(m0*p_mass))
+
+  dtau = trace_time*v0/dble(num_t_step-1)
+
+  print *, 'dtau = ', dtau
+
+  energy_of_t=0.d0
+  num_particles=10000
+  k = 0
+
+  !$OMP PARALLEL DEFAULT(NONE) &
+  !$OMP& SHARED(k,num_particles,efcolf,velrat,enrat,dtau) &
+  !$OMP& PRIVATE(i,z,j,ierr) &
+  !$OMP& REDUCTION(+:energy_of_t)
+  print*, 'get number of threads', omp_get_num_threads()
+  !$OMP DO
+  do i=1,num_particles
+    z = 0.0d0
+    z(4) = 1.0d0
+    energy_of_t(1)=energy_of_t(1)+1.d0
+    do j = 2, num_t_step
+      call stost(efcolf,velrat,enrat,z,dtau,1,ierr)
+  !    if(ierr.ne.0) print *,ierr
+      energy_of_t(j)=energy_of_t(j)+z(4)**2
+    enddo
+    !$omp critical
+      k = k+1
+      if (modulo(k,int(num_particles/100)).eq.0) print *,k,' of ',num_particles,' completed'
+    !$omp end critical
+  enddo
+  !$OMP END DO
+  !$OMP END PARALLEL
+
+energy_of_t=energy_of_t/dble(num_particles)
+  open(1, file='energy_average_new.dat')
+do i = 1, num_t_step
+    write (1,*) dble(i-1)*dtau/v0, energy_of_t(i)
+enddo
+  close(1)
+  print*, 'End of test of new version of collision operator'
+end program test_collis
+
 module collis_ions
     implicit none
   !
@@ -23,7 +98,6 @@ module collis_ions
   !                fpeff  - effective dimensionless drag force (prop. to linear
   !                         deviation in Fokker-Planck eq.)
   !
-    implicit none
     integer :: i, n
     double precision, dimension(:), intent(in) :: efcolf,velrat,enrat
     double precision, dimension(3) :: dpp_vec,dhh_vec,fpeff_vec
@@ -131,7 +205,6 @@ module collis_ions
   !                velrat        - ratio of v0 to the background particle thermal velocity $v_{t}=\sqrt(2T/m)$ (n entries)
   !                enrat         - ratio of eion to the background species energy (n entries)
   !
-    implicit none
     integer :: n,i
     double precision, dimension(:) :: m,Z,dens,temp,efcolf,velrat,enrat
     double precision, dimension(:), allocatable :: lambda
@@ -191,12 +264,12 @@ module collis_ions
     end
   !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
   !
-    subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr)
+    subroutine stost(efcolf,velrat,enrat,z,dtauc,iswmode,ierr)
   !
   !  z(1:5)   - phase space coordinates: z(1:3) - spatial position,
   !                                      z(4)   - normalized velocity module
   !                                      z(5)   - pitch parameter
-  !  dtau     - normalized time step: dtau=dtau*v0 - has the dimension of length
+  !  dtauc    - normalized time step: dtauc=dtau*v0 - has the dimension of length
   !  iswmode  - switch of the collision mode:
   !               1 - full operator (pitch-angle and energy scattering and drag)
   !               2 - energy scattering and drag only
@@ -212,13 +285,12 @@ module collis_ions
   !               10 or >10 - new momentum module is less then
   !                   prescribed minimum, reflection was performed.
   !
-    implicit none
     integer :: iswmode,ierr,n
     double precision, parameter :: pmin=1.e-8
-    double precision :: dtau,p,dpp,dhh,fpeff,alam,dalam,coala
+    double precision :: dtauc,p,dpp,dhh,fpeff,alam,dalam,coala
     double precision, dimension(5) :: z
-    double precision :: ur
-    double precision, dimension(:), intent(in) :: efcolf,velrat,enrat
+    real :: ur
+    double precision, dimension(:) :: efcolf,velrat,enrat
     double precision, dimension(:), allocatable :: dpp_vec,dhh_vec,fpeff_vec
   !
     n = size(efcolf)
@@ -244,15 +316,13 @@ module collis_ions
       endif
   !  
       call getran(1,ur)
-      ur = 1!remove this line afterwards
   !
-      dalam=sqrt(2.d0*dhh*coala*dtau)*dble(ur)-2.d0*alam*dhh*dtau
+      dalam=sqrt(2.d0*dhh*coala*dtauc)*dble(ur)-2.d0*alam*dhh*dtauc
   !
       if(abs(dalam).gt.1.d0) then
         ierr=2
   !
-      call random_number(ur)
-      ur = 1!remove this line afterwards    
+      call random_number(ur)   
   !
         alam=2.d0*(dble(ur)-0.5d0)
       else
@@ -273,11 +343,10 @@ module collis_ions
     if(iswmode.lt.3) then
   !
     call getran(0,ur)
-    ur = 1!remove this line afterwards
   !
-      z(4)=z(4)+sqrt(abs(2.d0*dpp*dtau))*dble(ur)+fpeff*dtau
+      z(4)=z(4)+sqrt(abs(2.d0*dpp*dtauc))*dble(ur)+fpeff*dtauc
     else
-      z(4)=z(4)+fpeff*dtau
+      z(4)=z(4)+fpeff*dtauc
     endif
   !
     if(z(4).lt.pmin) then
@@ -287,34 +356,35 @@ module collis_ions
   !
     return
     end
-  !
   !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-  !
-  subroutine getran(irand,ur)
-  !
-  ! Produces the random number with zero average and unit variance
-  !
-  ! Input parameters: irand - 0 for continious, 1 for +1 -1,
-  ! Output parameters: ur   - random number
-  !
-    implicit none
-    integer :: irand
-    double precision :: ur
-
-    call random_number(ur)
-  !
-    if(irand.eq.0) then !continuous random number, constant is sqrt(12)
-      ur=3.464102*(ur-.5)
-    else !discrete random number
-      if(ur.gt..5) then
-        ur=1.
-      else
-        ur=-1.
-      endif
-    endif
-    return
-  end
-  !
-  !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-  !
 end module collis_ions
+!
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
+  subroutine getran(irand,ur)
+!
+!  Produces the random number with zero average and unit variance
+!
+!  Input parameters: irand - 0 for continious, 1 for +1 -1,
+!  Output parameters: ur   - random number
+!
+  call random_number(ur)
+!
+  if(irand.eq.0) then
+!
+!  continiuos random number, constant is sqrt(12)
+!
+    ur=3.464102*(ur-.5)
+  else
+!
+!  discrete random number
+!
+    if(ur.gt..5) then
+      ur=1.
+    else
+      ur=-1.
+    endif
+  endif
+  return
+  end
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc

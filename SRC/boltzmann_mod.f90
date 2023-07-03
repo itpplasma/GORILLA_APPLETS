@@ -6,7 +6,7 @@ module boltzmann_mod
     double precision :: time_step,energy_eV, max_poloidal_flux, amax
     integer, dimension(:,:), allocatable :: tetra_indices_per_prism
     double precision, dimension(:), allocatable :: prism_volumes, refined_prism_volumes, elec_pot_vec, n_b
-    double precision, dimension(:,:), allocatable :: verts, sqrt_g, r_integrand_constants, dens_mat, temp_mat, vpar_mat
+    double precision, dimension(:,:), allocatable :: verts, sqrt_g, r_integrand_constants
     double complex, dimension(:,:), allocatable :: tetr_moments, prism_moments, &
                                                    & prism_moments_squared
     double complex, dimension(:,:,:), allocatable :: moments_in_frequency_space
@@ -155,9 +155,11 @@ subroutine calc_boltzmann
 !
     implicit none
 !
-    double precision, dimension(:,:), allocatable :: start_pos_pitch_mat
-    double precision :: v0,pitchpar,vpar,vperp,t_remain,t_confined,tau_out_can, v
-    integer :: kpart,i,n,l,m,k,p,ind_tetr,iface,n_lost_particles,ierr,err,iantithetic
+    double precision, dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
+                                                     velrat_mat, enrat_mat
+    double precision, dimension(:), allocatable :: nu_perp_vec
+    double precision :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v
+    integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,n_lost_particles,ierr,err,iantithetic, num_background_species
     integer :: n_start, n_end, i_part, count_integration_steps
     double precision, dimension(3) :: x_rand_beg,x
     logical :: boole_initialized,boole_particle_lost
@@ -165,8 +167,8 @@ subroutine calc_boltzmann
     double precision, dimension(5) :: z, zet
     Character(LEN=50) :: format_moments, format_fourier_moments
     double complex, dimension(:,:), allocatable :: single_particle_tetr_moments
-    double precision :: m0,z0,m1,m2,z1,z2,densi1,densi2,tempi1,tempi2,tempe,nu_perp, hamiltonian_time
-    double precision, dimension(3) :: efcolf,velrat,enrat
+    double precision :: m0,z0,nu_perp, hamiltonian_time
+    double precision, dimension(:), allocatable :: efcolf,velrat,enrat,mass_num,charge_num,dens,temp
 !
     ! open(35, file = 'outliers.dat')
     ! close(35,status='delete')
@@ -234,19 +236,46 @@ print*, 'calc_starting_conditions started'
     call calc_starting_conditions(v0,start_pos_pitch_mat)
 print*, 'calc_starting_conditions finished'
 !
-if (boole_collisions) then 
-    allocate(dens_mat(3,size(verts_rphiz(1,:))))
-    allocate(temp_mat(3,size(verts_rphiz(1,:))))
-    allocate(vpar_mat(3,size(verts_rphiz(1,:))))
-    !integration_steps = maxval((/int(time_step/(2*pi*amax/v0/100)),1/)) !number of collisions
-    m1 = 2
-    m2 = 3
-    z1 = 1
-    z2 = 2
-    dens_mat = density*1.0d-2
-    temp_mat = energy_eV
-    vpar_mat = v0*1.0d-1
-endif
+    if (boole_collisions) then
+        num_background_species = 3 
+        allocate(dens_mat(num_background_species,size(verts_rphiz(1,:))))
+        allocate(temp_mat(num_background_species,size(verts_rphiz(1,:))))
+        allocate(vpar_mat(num_background_species,size(verts_rphiz(1,:))))
+        allocate(efcolf_mat(num_background_species,ntetr))
+        allocate(velrat_mat(num_background_species,ntetr))
+        allocate(enrat_mat(num_background_species,ntetr))
+        allocate(nu_perp_vec(ntetr))
+        allocate(mass_num(num_background_species-1))
+        allocate(charge_num(num_background_species-1))
+        allocate(dens(num_background_species))
+        allocate(temp(num_background_species))
+        allocate(efcolf(num_background_species))
+        allocate(velrat(num_background_species))
+        allocate(enrat(num_background_species))
+        mass_num = 0
+        charge_num = 0
+        mass_num(1) = 2
+        mass_num(2) = 3
+        charge_num(1) = 1
+        charge_num(2) = 2
+        dens_mat = density*1.0d-2
+        temp_mat = energy_eV
+        vpar_mat = v0*1.0d-1 !ask Sergei when this will be needed!!!
+        m0 = particle_mass/amp
+        z0 = particle_charge/echarge
+        do i = 1, ntetr
+            do j = 1,num_background_species
+                !following if statement because electron density will be calculated in collis init
+                if (j.lt.num_background_species) dens(j) = sum(dens_mat(j,tetra_grid(i)%ind_knot([1,2,3,4])))/4
+                temp(j) = sum(temp_mat(j,tetra_grid(i)%ind_knot([1,2,3,4])))/4
+            enddo
+            call collis_init(m0,z0,mass_num,charge_num,dens,temp,energy_eV,v0,nu_perp,efcolf,velrat,enrat)
+            efcolf_mat(:,i) = efcolf
+            nu_perp_vec(i) = nu_perp
+            velrat_mat(:,i) = velrat
+            enrat_mat(:,i) = enrat
+        enddo
+    endif
 !
         kpart = 0
         n_lost_particles = 0
@@ -258,18 +287,21 @@ endif
         iantithetic = 1
         if (boole_antithetic_variate) iantithetic = 2
         count_integration_steps = 0
+        deallocate(efcolf,velrat,enrat)
 !
         !$OMP PARALLEL DEFAULT(NONE) &
         !$OMP& SHARED(num_particles,kpart,v0,time_step,i_integrator_type,boole_collisions, &
         !$OMP& dtau,dtaumin,n_start,n_end,tetra_indices_per_prism, prism_moments_squared,boole_squared_moments, &
         !$OMP& start_pos_pitch_mat,boole_boltzmann_energies, prism_moments,count_integration_steps, &
-        !$OMP& m1,m2,z1,z2,density,energy_eV,dens_mat,temp_mat,vpar_mat,tetra_grid,iantithetic,tetra_physics) &
+        !$OMP& density,energy_eV,dens_mat,temp_mat,vpar_mat,tetra_grid,iantithetic,tetra_physics, &
+        !$OMP& efcolf_mat,velrat_mat,enrat_mat,nu_perp_vec,num_background_species,q) &
         !$OMP& FIRSTPRIVATE(particle_mass, particle_charge) &
-        !$OMP& PRIVATE(p,n,boole_particle_lost,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
-        !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr,tau_out_can, v, single_particle_tetr_moments,q,hamiltonian_time, &
-        !$OMP& densi1,densi2,tempi1,tempi2,tempe,m0,z0,i,efcolf,velrat,enrat,nu_perp) &
+        !$OMP& PRIVATE(p,l,n,boole_particle_lost,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
+        !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr, v, single_particle_tetr_moments,hamiltonian_time, &
+        !$OMP& m0,z0,i,efcolf,velrat,enrat,nu_perp) &
         !$OMP& REDUCTION(+:n_lost_particles,tetr_moments, n_pushings, counter_phi_0_mappings)
         print*, 'get number of threads', omp_get_num_threads()
+        allocate(efcolf(num_background_species),velrat(num_background_species),enrat(num_background_species))
         !$OMP DO
 !
         !Loop over particles
@@ -322,28 +354,34 @@ endif
                     if (boole_collisions) then
                         if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
                         if (.not.(ind_tetr.eq.-1)) then
-                            densi1 = sum(dens_mat(1,tetra_grid(ind_tetr)%ind_knot([1,2,3,4])))/4
-                            densi2 = sum(dens_mat(2,tetra_grid(ind_tetr)%ind_knot([1,2,3,4])))/4
-                            tempi1 = sum(temp_mat(1,tetra_grid(ind_tetr)%ind_knot([1,2,3,4])))/4
-                            tempi2 = sum(temp_mat(2,tetra_grid(ind_tetr)%ind_knot([1,2,3,4])))/4
-                            tempe  = sum(temp_mat(3,tetra_grid(ind_tetr)%ind_knot([1,2,3,4])))/4
-! ! later on, use subroutine "differentiate" to compute exact values, do this outside the loop for each tetrahedron
-                            m0 = particle_mass/amp
-                            z0 = particle_charge/echarge
+                            nu_perp = nu_perp_vec(ind_tetr)
+                            efcolf = efcolf_mat(:,ind_tetr)
+                            velrat = velrat_mat(:,ind_tetr)
+                            enrat = enrat_mat(:,ind_tetr)
+!
+                            q = 0.5
+                            if (v.gt.q*v0) then
+                                nu_perp = nu_perp*(v**2/v0**2)**(-1.5)
+                            else
+                                nu_perp = nu_perp*((q*v0)**2/v0**2)**(-1.5)
+                            endif
+
+                            t_step = 0.1/(nu_perp)
+                            zet(1:3) = x !spatial position
+                            zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module
+                            zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
+!
+                            call stost(efcolf,velrat,enrat,zet,t_step*v0,1,err)
+!
+                            x = zet(1:3)
+                            vpar = zet(5)*zet(4)*v0
+                            vperp = sqrt(1-zet(5)**2)*zet(4)*v0
+!
+                            !optionally still change particle_mass, particle_charge and cm_over_e, e.g.:
+                            !particle_charge = particle_charge + echarge
+                            !particle_mass = particle_mass + ame - amp 
+                            !cm_over_e = clight*particle_mass/particle_charge
                         endif
-                        call collis_init(m0,z0,m1,m2,z1,z2,densi1,densi2,tempi1,tempi2,tempe,energy_eV,v0,nu_perp, &
-                                        efcolf,velrat,enrat)
-                        !if (i.eq.1) print*, nu_perp, 0.01/nu_perp, t_step/(0.01/nu_perp)
-                        q = 0.4
-                        if (v.gt.q*v0) then
-                            nu_perp = nu_perp*(v**2/v0**2)**(-1.5)
-                            !if(i.eq.1) print*, n, v/v0
-                        else
-                            nu_perp = nu_perp*((q*v0)**2/v0**2)**(-1.5)
-                            !if (i.eq.1) print*, 'xxx'!,n, v/v0
-                        endif
-                        t_step = 0.01/(nu_perp)
-                        !print*, nu_perp, t_step
                     endif
 !
                     call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface,t_remain, &
@@ -359,35 +397,16 @@ endif
                         exit
                     endif
 !
-                    !Write results in file
-                    ! !$omp critical
-                    !     write(99,*) n, boole_particle_lost , x_rand_beg ,pitchpar,x(1),t_confined
-                    ! !$omp end critical
-!
-!
-                    !collision subroutine
-                    if (boole_collisions) then
-                        zet(1:3) = x !spatial position
-                        zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module
-                        zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
-!
-                        call stost(efcolf,velrat,enrat,zet,t_step*v0,1,err)
-!
-                        x = zet(1:3)
-                        vpar = zet(5)*zet(4)*v0
-                        vperp = sqrt(1-zet(5)**2)*zet(4)*v0
-!
-                        !optionally still change particle_mass, particle_charge and cm_over_e, e.g.:
-                        !particle_charge = particle_charge + echarge
-                        !particle_mass = particle_mass + ame - amp 
-                        !cm_over_e = clight*particle_mass/particle_charge
-                    endif
+                    v = sqrt(vpar**2+vperp**2)
                 enddo
                 !$omp critical
                 !print*, i
                 count_integration_steps = count_integration_steps + i
+                !Write results in file
+                ! !$omp critical
+                !     write(99,*) n, boole_particle_lost , x_rand_beg ,pitchpar,x(1),t_confined
+                ! !$omp end critical
                 !$omp end critical
-                v = sqrt(vpar**2+vperp**2)
             enddo
 !
                 if (boole_squared_moments) then
@@ -712,7 +731,6 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                 call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_remain,&
                                                     & t_pass,boole_t_finished,iper_phi,optional_quantities)
         end select
-        if (ind_tetr.eq.-1) print*, 'error pushing particle ', n
 !
         t_remain = t_remain - t_pass
         if (iper_phi.ne.0) counter_phi_0_mappings = counter_phi_0_mappings + iper_phi
