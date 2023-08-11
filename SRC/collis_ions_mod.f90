@@ -27,23 +27,13 @@ module collis_ions
     integer :: i, n
     double precision, dimension(:), intent(in) :: efcolf,velrat,enrat
     double precision, dimension(3) :: dpp_vec,dhh_vec,fpeff_vec
-    double precision :: p,plim,xbeta,dp,dh,dpd,dpp,dhh,fpeff
+    double precision :: p,plim,xbeta,dpd
   !
     plim=max(p,1.d-8)
     n = size(efcolf)
   !
-    dpp=0.0d0
-    dhh=0.0d0
-    fpeff=0.0d0
-  !
     do i=1,n
       xbeta=p*velrat(i)
-  !
-      call onseff(xbeta,dp,dh,dpd)
-  !
-      dpp=dpp+dp*efcolf(i)
-      dhh=dhh+dh*efcolf(i)
-      fpeff=fpeff+(dpd/plim-2.0*dp*p*enrat(i))*efcolf(i)
   !
       call onseff(xbeta,dpp_vec(i),dhh_vec(i),dpd)
   !
@@ -52,7 +42,6 @@ module collis_ions
       dhh_vec(i) = dhh_vec(i)*efcolf(i)
     enddo
   !
-    dhh=dhh/plim**2
     dhh_vec = dhh_vec/plim**2
   !
     return
@@ -95,19 +84,7 @@ module collis_ions
     return
     end
   !
-  !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-  !      FUNCTION ERF(X)
-  !      PARAMETER  ( A1 = 0.07052 30784, A2 = 0.04228 20123,
-  !     ,             A3 = 0.00927 05272, A4 = 0.00015 10143,
-  !     ,             A5 = 0.00027 65672, A6 = 0.00004 30638 )
-  !      F(T) = 1./((1.+T*(A1+T*(A2+T*(A3+T*(A4+T*(A5+T*A6))))))**4)**4
-  !      W = 1. - F(ABS(X))
-  !      ERF = SIGN(W,X)
-  !      RETURN
-  !      END
-  !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-  !
-    subroutine collis_init(am0,Z0,m,Z,dens,temp,eion,v0,nu_perp0,efcolf,velrat,enrat)
+    subroutine collis_init(am0,Z0,m,Z,dens,temp,eion,v0,efcolf,velrat,enrat)
   !
   !   Performs precomputation of the constants for Coulomb collision
   !   operator for test particles colliding with n-1 sorts of ions and with electrons
@@ -138,7 +115,7 @@ module collis_ions
     double precision :: am0,Z0,eion
     double precision :: v0
     double precision :: pi,pmass,emass,e,ev,frecol_base
-    double precision :: x1,x2,xe,k,nu_perp0
+    double precision :: k
   !
     pi=3.14159265358979d0
     pmass=1.6726d-24
@@ -170,6 +147,7 @@ module collis_ions
       lambda(n)=24.d0-log(sqrt(dens(n))/temp(n))
     endif
   !
+  !print*, lambda
     frecol_base=2.d0*pi*dens(n)*e**4*Z0**2/((am0*pmass)**2*v0**3) !usual
     frecol_base=frecol_base/v0                                  !normalized
   !
@@ -180,18 +158,10 @@ module collis_ions
   !
     efcolf=efcolf*velrat
   !
-    x1 = m(1)*pmass*v0**2/(2*k*temp(1))
-    x2 = m(2)*pmass*v0**2/(2*k*temp(2))
-    xe =     emass*v0**2/(2*k*temp(3))
-    !since x1, x2 and xe are all much smaller than one (verify this within the subroutine), the approximation for fast particles 
-    !can be taken in nrl page 32
-    !(2018 edition) to evaluate nu_perp (do this in a more refined way, e.g. by using the exact formula on page 31 later)
-    nu_perp0 = Z0**2*sum(Z(1:n-1)**2*lambda(1:n-1)*dens(1:n-1))*1.8d-7*am0**(-0.5)*(ev*eion)**(-1.5)
-  !
     end
   !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
   !
-    subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr)
+    subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau)
   !
   !  z(1:5)   - phase space coordinates: z(1:3) - spatial position,
   !                                      z(4)   - normalized velocity module
@@ -215,12 +185,16 @@ module collis_ions
     implicit none
     integer :: iswmode,ierr,n
     double precision, parameter :: pmin=1.e-8
-    double precision :: dtau,p,dpp,dhh,fpeff,alam,dalam,coala
+    double precision :: dtau,p,dpp,dhh,fpeff,alam,dalam,coala, upper_limit
     double precision, dimension(5) :: z
-    double precision :: ur
+    double precision :: ur, epsilon, q
     double precision, dimension(:), intent(in) :: efcolf,velrat,enrat
     double precision, dimension(:), allocatable :: dpp_vec,dhh_vec,fpeff_vec
+    double precision, optional :: tau
   !
+    epsilon = 0.1
+    q = 0.3
+    upper_limit = 30
     n = size(efcolf)
     allocate(dpp_vec(n))
     allocate(dhh_vec(n))
@@ -232,7 +206,18 @@ module collis_ions
     dhh = sum(dhh_vec)
     fpeff = sum(fpeff_vec)
   !
+  !print*, 2*dhh*6036739
     ierr=0
+  !
+    if (present(tau)) then
+      dtau = min(epsilon**2/(2*dhh),tau,upper_limit)
+      !if (dtau.eq.upper_limit) print*, 'bingo'
+      !if (dtau.lt.upper_limit) print*, 'I see, I see ', dtau
+      if (z(4).lt.q) then
+        dtau = min(dtau*(q/z(4))**2,tau)
+        !if (dtau.gt.upper_limit) print*, 'how can this be?', dtau
+      endif
+    endif
   !
     if(iswmode.eq.1.or.iswmode.eq.4) then
       alam=z(5)
@@ -244,15 +229,13 @@ module collis_ions
       endif
   !  
       call getran(1,ur)
-      ur = 1!remove this line afterwards
   !
       dalam=sqrt(2.d0*dhh*coala*dtau)*dble(ur)-2.d0*alam*dhh*dtau
   !
       if(abs(dalam).gt.1.d0) then
         ierr=2
   !
-      call random_number(ur)
-      ur = 1!remove this line afterwards    
+      call random_number(ur)   
   !
         alam=2.d0*(dble(ur)-0.5d0)
       else
@@ -273,7 +256,6 @@ module collis_ions
     if(iswmode.lt.3) then
   !
     call getran(0,ur)
-    ur = 1!remove this line afterwards
   !
       z(4)=z(4)+sqrt(abs(2.d0*dpp*dtau))*dble(ur)+fpeff*dtau
     else
