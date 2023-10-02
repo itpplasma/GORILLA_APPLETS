@@ -168,7 +168,7 @@ subroutine calc_boltzmann
     implicit none
 !
     double precision, dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
-                                                     velrat_mat, enrat_mat
+                                                     velrat_mat, enrat_mat, dens_mat_tetr, temp_mat_tetr
     double precision :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v
     integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,n_lost_particles,ierr,err,iantithetic, num_background_species
     integer :: n_start, n_end, i_part, count_integration_steps
@@ -284,11 +284,41 @@ print*, 'calc_starting_conditions finished'
         m0 = particle_mass/amp
         z0 = particle_charge/echarge
         print*, 'm0 = ', m0, 'z0 = ', z0
+!
+!!!!!!!!!!!!!!!!!!!! Alternative route is taken because data is not available per vertex but per tetrahedron !!!!!!!!!!!!!!!!!!!!!!!
+!
+        allocate(dens_mat_tetr(num_background_species-1,ntetr))
+        allocate(temp_mat_tetr(num_background_species,ntetr))
+!
+        open(78, file = 'background/Te_d.dat')
+        read(78,'(e16.9)') (temp_mat_tetr(2,i),i=1,ntetr/grid_size(2),3)
+        close(78)
+!
+        open(79, file = 'background/Ti_d.dat')
+        read(79,'(e16.9)') (temp_mat_tetr(1,i),i=1,ntetr/grid_size(2),3)
+        close(79)
+!
+        open(80, file = 'background/ne_d.dat')
+        read(80,'(e16.9)') (dens_mat_tetr(1,i),i=1,ntetr/grid_size(2),3)
+        close(80)
+!
+        do i = 1,grid_size(2)-1
+            temp_mat_tetr(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = temp_mat_tetr(:,1:ntetr/grid_size(2):3)
+            dens_mat_tetr(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = dens_mat_tetr(:,1:ntetr/grid_size(2):3)
+        enddo
+        do i = 1,2
+            temp_mat_tetr(:,1+i:ntetr:3) = temp_mat_tetr(:,1:ntetr:3)
+            dens_mat_tetr(:,1+i:ntetr:3) = dens_mat_tetr(:,1:ntetr:3)
+        enddo
+        print*, temp_mat_tetr(2,1:7)
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!
         do i = 1, ntetr
             do j = 1,num_background_species
                 !following if statement because electron density will be calculated in collis init
-                if (j.lt.num_background_species) dens(j) = sum(dens_mat(j,tetra_grid(i)%ind_knot([1,2,3,4])))/4
-                temp(j) = sum(temp_mat(j,tetra_grid(i)%ind_knot([1,2,3,4])))/4
+                if (j.lt.num_background_species) dens(j) = sum(dens_mat_tetr(j,tetra_grid(i)%ind_knot([1,2,3,4])))/4
+                temp(j) = sum(temp_mat_tetr(j,tetra_grid(i)%ind_knot([1,2,3,4])))/4
             enddo
             call collis_init(m0,z0,mass_num,charge_num,dens,temp,energy_eV,v0,efcolf,velrat,enrat)
             efcolf_mat(:,i) = efcolf
