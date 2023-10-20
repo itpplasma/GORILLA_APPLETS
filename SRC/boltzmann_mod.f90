@@ -16,18 +16,20 @@ module boltzmann_mod
     integer, dimension(4) :: moments_selector
     double complex, dimension(:,:), allocatable :: weights
     double precision, dimension(:), allocatable :: J_perp, poloidal_flux, temperature_vector
-    logical :: boole_random_precalc, boole_refined_sqrt_g, boole_boltzmann_energies
+    logical :: boole_refined_sqrt_g, boole_boltzmann_energies
     character(1024) :: filename_dwell_times, filename_starting_conditions, filename_vertex_coordinates, &
     & filename_vertex_indices
     integer :: n_fourier_modes, n_triangles
     logical :: boole_linear_density_simulation, boole_antithetic_variate, boole_linear_temperature_simulation
-    logical :: boole_collisions, boole_squared_moments, boole_point_source
+    logical :: boole_collisions, boole_squared_moments, boole_point_source, boole_precalc_collisions
+    double precision, dimension(:,:,:), allocatable :: randcol
+    integer :: randcoli = int(1.0d5)
 !
     !Namelist for boltzmann input
-    NAMELIST /boltzmann_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions,density, &
-    & boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
-    & boole_linear_temperature_simulation,i_integrator_type,seed_option,boole_random_precalc,filename_dwell_times, &
-    & filename_starting_conditions,filename_vertex_coordinates, filename_vertex_indices
+    NAMELIST /boltzmann_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions, &
+    & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
+    & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, &
+    & filename_dwell_times,filename_starting_conditions,filename_vertex_coordinates, filename_vertex_indices
 !
     public :: calc_boltzmann
 !    
@@ -146,6 +148,10 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     weights(:,1) = constant_part_of_weights
     if (boole_refined_sqrt_g.eqv..false.) weights(:,1) = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
 !
+    if (boole_precalc_collisions) then
+        allocate(randcol(num_particles,randcoli,3))
+        call RANDOM_NUMBER(randcol)
+    endif
 end subroutine calc_starting_conditions
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -169,17 +175,17 @@ subroutine calc_boltzmann
 !
     double precision, dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
                                                      velrat_mat, enrat_mat, dens_mat_tetr, temp_mat_tetr
-    double precision :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v
-    integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,n_lost_particles,ierr,err,iantithetic, num_background_species
+    double precision :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v, maxcol
+    integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,n_lost_particles,ierr,err,iantithetic, num_background_species, inorout
     integer :: n_start, n_end, i_part, count_integration_steps
-    double precision, dimension(3) :: x_rand_beg,x
+    double precision, dimension(3) :: x_rand_beg,x, randnum
     logical :: boole_initialized,boole_particle_lost
     double precision :: dtau, dphi,dtaumin, t_step
     double precision, dimension(5) :: z, zet
     Character(LEN=50) :: format_moments, format_fourier_moments
     double complex, dimension(:,:), allocatable :: single_particle_tetr_moments
     double precision :: m0,z0,hamiltonian_time
-    double precision, dimension(:), allocatable :: efcolf,velrat,enrat,mass_num,charge_num,dens,temp
+    double precision, dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
 !
     ! open(35, file = 'outliers.dat')
     ! close(35,status='delete')
@@ -261,7 +267,7 @@ print*, 'calc_starting_conditions finished'
         num_background_species = 2 
         allocate(dens_mat(num_background_species-1,size(verts_rphiz(1,:))))
         allocate(temp_mat(num_background_species,size(verts_rphiz(1,:))))
-        allocate(vpar_mat(num_background_species,size(verts_rphiz(1,:))))
+        allocate(vpar_mat(num_background_species,ntetr))
         allocate(efcolf_mat(num_background_species,ntetr))
         allocate(velrat_mat(num_background_species,ntetr))
         allocate(enrat_mat(num_background_species,ntetr))
@@ -280,7 +286,7 @@ print*, 'calc_starting_conditions finished'
         !charge_num(2) = 2
         dens_mat = 5.0d13
         temp_mat = energy_eV
-        vpar_mat = v0*1.0d-1 !ask Sergei when this will be needed!!!
+        vpar_mat = 0 !ask Sergei when this will be needed!!!
         m0 = particle_mass/amp
         z0 = particle_charge/echarge
         print*, 'm0 = ', m0, 'z0 = ', z0
@@ -310,7 +316,6 @@ print*, 'calc_starting_conditions finished'
             temp_mat_tetr(:,1+i:ntetr:3) = temp_mat_tetr(:,1:ntetr:3)
             dens_mat_tetr(:,1+i:ntetr:3) = dens_mat_tetr(:,1:ntetr:3)
         enddo
-        print*, temp_mat_tetr(2,1:7)
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
@@ -329,6 +334,7 @@ print*, 'calc_starting_conditions finished'
 !
         kpart = 0
         n_lost_particles = 0
+        maxcol = 0
         lost_outside = 0
         lost_inside = 0
         n_pushings = 0
@@ -350,11 +356,11 @@ print*, 'calc_starting_conditions finished'
         !$OMP& dtau,dtaumin,n_start,n_end,tetra_indices_per_prism, prism_moments_squared,boole_squared_moments, &
         !$OMP& start_pos_pitch_mat,boole_boltzmann_energies, prism_moments,count_integration_steps, &
         !$OMP& density,energy_eV,dens_mat,temp_mat,vpar_mat,tetra_grid,iantithetic,tetra_physics, &
-        !$OMP& efcolf_mat,velrat_mat,enrat_mat,num_background_species) &
+        !$OMP& efcolf_mat,velrat_mat,enrat_mat,num_background_species,randcol,randcoli,maxcol,boole_precalc_collisions) &
         !$OMP& FIRSTPRIVATE(particle_mass, particle_charge) &
         !$OMP& PRIVATE(p,l,n,boole_particle_lost,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
         !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr, v, single_particle_tetr_moments,hamiltonian_time, &
-        !$OMP& m0,z0,i,efcolf,velrat,enrat) &
+        !$OMP& m0,z0,i,efcolf,velrat,enrat,vpar_background,inorout,randnum) &
         !$OMP& REDUCTION(+:n_lost_particles,tetr_moments, n_pushings, counter_phi_0_mappings)
         print*, 'get number of threads', omp_get_num_threads()
         if (boole_collisions) allocate(efcolf(num_background_species),velrat(num_background_species),enrat(num_background_species))
@@ -414,16 +420,29 @@ endif
                             efcolf = efcolf_mat(:,ind_tetr)
                             velrat = velrat_mat(:,ind_tetr)
                             enrat = enrat_mat(:,ind_tetr)
+                            vpar_background = vpar_mat(:,ind_tetr)
+                            !print*, vpar_background
 !
+                            vpar = vpar - vpar_background(1)
+                            !since vpar_background actually has num_background_particles entries, consider giving it as an extra
+                            !optional input variable to stost, before randnum (maybe also check if radnum could then be set by 
+                            !randnum = variable eve if vpar_background is not set and other variables are not set by name indexing)
+                            !since it came up when writing these lines: replace expressions like
+                            !"verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:)))" with "3,nvert"
                             zet(1:3) = x !spatial position
-                            zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module
+                            zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module 
                             zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
 !
-                            call stost(efcolf,velrat,enrat,zet,t_step,1,err,(time_step-t_confined)*v0)
+                            if (boole_precalc_collisions) then
+                                randnum = randcol(n,mod(i-1,randcoli)+1,:) 
+                                call stost(efcolf,velrat,enrat,zet,t_step,1,err,(time_step-t_confined)*v0,randnum)
+                            else
+                                call stost(efcolf,velrat,enrat,zet,t_step,1,err,(time_step-t_confined)*v0)
+                            endif
 !
                             t_step = t_step/v0
                             x = zet(1:3)
-                            vpar = zet(5)*zet(4)*v0
+                            vpar = zet(5)*zet(4)*v0+vpar_background(1)
                             vperp = sqrt(1-zet(5)**2)*zet(4)*v0
 !
                             !optionally still change particle_mass, particle_charge and cm_over_e, e.g.:
@@ -433,13 +452,17 @@ endif
                         endif
                     endif
 !
-                    call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface,t_remain, &
-                                    & n,v,start_pos_pitch_mat,single_particle_tetr_moments, hamiltonian_time)
+                    call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, &
+                                    & n,v,start_pos_pitch_mat,single_particle_tetr_moments, hamiltonian_time,inorout,t_remain)
 !
                     t_confined = t_confined + t_step - t_remain
                     !Lost particle handling
                     if(ind_tetr.eq.-1) then
-                        write(75,*) t_confined
+!write another if clause (if hole size = minimal .and. particle lost inside .and. boole_cut_out_hole = .true. 
+!(use extra variable m in orbit routine (0 normally, 1 when lost outside, -1 when lost inside))),
+!if m = 1 do as now, if m = -1 select arbitrary newp position and update x, vpar and vperp)
+                        write(75,*) t_confined, x, n
+                        !print*, t_confined, x
                         !$omp critical
                             n_lost_particles = n_lost_particles + 1
                             boole_particle_lost = .true.
@@ -452,13 +475,15 @@ endif
                 !$omp critical
                 !print*, i
                 count_integration_steps = count_integration_steps + i
+                !print*, dble(i)/dble(randcoli)
+                maxcol = max(dble(i)/dble(randcoli),maxcol)
                 !Write results in file
                 ! !$omp critical
                 !     write(99,*) n, boole_particle_lost , x_rand_beg ,pitchpar,x(1),t_confined
                 ! !$omp end critical
                 !$omp end critical
                 if (t_confined.eq.time_step) then
-                    write(76,*) x, v, vpar, vperp
+                    write(76,*) x, v, vpar, vperp, i, n
                 endif
             enddo
 !
@@ -501,6 +526,7 @@ endif
 !
     call fourier_transform_moments
 !
+    if (boole_precalc_collisions) print*, "maxcol = ", maxcol
     print*, 'Number of lost particles',n_lost_particles
     print*, 'max_poloidal_flux is', max_poloidal_flux
     print*, 'min_poloidal_flux is', min_poloidal_flux
@@ -669,8 +695,8 @@ end subroutine calc_boltzmann
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, t_remain_out, n, &
-                                            & v,start_pos_pitch_mat,single_particle_tetr_moments,hamiltonian_time)
+subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,v,start_pos_pitch_mat, &
+                                          & single_particle_tetr_moments,hamiltonian_time, inorout, t_remain_out)
 !
     use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
@@ -695,11 +721,11 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     double precision, dimension(3)                  :: z_save, x_save
     double precision                                :: vperp2,t_remain,t_pass,vpar_save, v, hamiltonian_time, aphi
     logical                                         :: boole_t_finished
-    integer                                         :: ind_tetr_save,iper_phi,k, m, n
+    integer                                         :: ind_tetr_save,iper_phi,k, m, n, inorout
     double precision                                :: perpinv,perpinv2, speed, r, z, phi, B, phi_elec_func
     double precision, dimension(:,:)                :: start_pos_pitch_mat
     type(optional_quantities_type)                  :: optional_quantities
-    double complex, dimension(:,:)                :: single_particle_tetr_moments
+    double complex, dimension(:,:)                  :: single_particle_tetr_moments
 !
     !If orbit_timestep is called for the first time without grid position
     if(.not.boole_initialized) then
@@ -712,6 +738,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 !
         !If particle doesn't lie inside any tetrahedron
         if(ind_tetr.eq.-1) then
+            t_remain_out = t_step
             return
         endif
 !
@@ -758,6 +785,8 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     !Exit the subroutine after initialization, if time step equals zero
     if(t_step.eq.0.d0) return
 !
+    inorout = 0
+!
     !Squared perpendicular velocity
     vperp2 = vperp**2
 !
@@ -797,8 +826,14 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
             !print *, 'WARNING: Particle lost.'
             aphi = tetra_physics(ind_tetr_save)%Aphi1+sum(tetra_physics(ind_tetr_save)%gAphi*z_save)
             !$omp critical
-            if (abs(aphi-max_poloidal_flux).lt.abs(aphi-min_poloidal_flux)) lost_outside = lost_outside + 1
-            if (abs(aphi-max_poloidal_flux).gt.abs(aphi-min_poloidal_flux)) lost_inside = lost_inside + 1
+            if (abs(aphi-max_poloidal_flux).lt.abs(aphi-min_poloidal_flux)) then
+                lost_outside = lost_outside + 1
+                inorout = 1
+            endif
+            if (abs(aphi-max_poloidal_flux).gt.abs(aphi-min_poloidal_flux)) then
+                lost_inside = lost_inside + 1
+                inorout = -1
+            endif
             !$omp end critical
             if( present(t_remain_out)) then
                 t_remain_out = t_remain

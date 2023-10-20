@@ -161,7 +161,7 @@ module collis_ions
     end
   !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
   !
-    subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau)
+    subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
   !
   !  z(1:5)   - phase space coordinates: z(1:3) - spatial position,
   !                                      z(4)   - normalized velocity module
@@ -191,6 +191,7 @@ module collis_ions
     double precision, dimension(:), intent(in) :: efcolf,velrat,enrat
     double precision, dimension(:), allocatable :: dpp_vec,dhh_vec,fpeff_vec
     double precision, optional :: tau
+    double precision, dimension(3), intent(in), optional :: randnum
   !
     epsilon = 0.1
     q = 0.3
@@ -215,7 +216,7 @@ module collis_ions
       !if (dtau.lt.upper_limit) print*, 'I see, I see ', dtau
       if (z(4).lt.q) then
         dtau = min(dtau*(q/z(4))**2,tau)
-        !if (dtau.gt.upper_limit) print*, 'how can this be?', dtau
+        !print*, dtau
       endif
     endif
   !
@@ -228,14 +229,16 @@ module collis_ions
         return
       endif
   !  
-      call getran(1,ur)
+      if (present(randnum)) ur = randnum(1)
+      if (.not.present(randnum)) call getran(1,ur)
   !
       dalam=sqrt(2.d0*dhh*coala*dtau)*dble(ur)-2.d0*alam*dhh*dtau
   !
       if(abs(dalam).gt.1.d0) then
         ierr=2
   !
-      call random_number(ur)   
+      if (present(randnum)) ur = randnum(2)
+      if (.not.present(randnum)) call random_number(ur)
   !
         alam=2.d0*(dble(ur)-0.5d0)
       else
@@ -255,7 +258,8 @@ module collis_ions
   !
     if(iswmode.lt.3) then
   !
-    call getran(0,ur)
+    if (present(randnum)) ur = randnum(3)
+    if (.not.present(randnum)) call getran(0,ur)
   !
       z(4)=z(4)+sqrt(abs(2.d0*dpp*dtau))*dble(ur)+fpeff*dtau
     else

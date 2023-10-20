@@ -20,6 +20,9 @@
   !include a collision operator
   boole_collisions = .false.,
 !
+  !precalcualte random numbers for collisions
+  boole_precalc_collisions = .false.,
+!
   !Simulated density of particles
   density = 1,
 !
@@ -49,9 +52,6 @@
   ! 1 ... compute seed with a random number
   ! 2 ... load seed from file 'seed.inp'
   seed_option = 2 ,
-!
-  !Boolean for precalculation of random numbers
-  boole_random_precalc = .true. ,
 !
   !Filename for total dwell times of particles
   filename_dwell_times = 'dwell_times.dat' ,

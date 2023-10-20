@@ -603,19 +603,19 @@ if (grid_kind == 4)
     triangles = cell2mat(triangles);
     n_triangles = length(triangles);
 
-    grid = nan*ones(n_triangles*5,2);
+    calculation_grid = nan*ones(n_triangles*5,2);
     for t = [1:n_triangles]
         for k = [1:3]
-            grid((t-1)*5 + k,:) = coordinates(triangles(t,k),:);
+            calculation_grid((t-1)*5 + k,:) = coordinates(triangles(t,k),:);
         end
-        grid((t-1)*5 + 4,:) = coordinates(triangles(t,1),:);
-        grid((t-1)*5 + 5,:) = nan;
+        calculation_grid((t-1)*5 + 4,:) = coordinates(triangles(t,1),:);
+        calculation_grid((t-1)*5 + 5,:) = nan;
     end
 
     RZ_index = find(ismember(ylabel_quantities,{'$R$','$Z$'})) + 1;
     
     figure('Renderer', 'painters', 'Position', [1400 200 1100 900])
-    grid_plot = plot(grid(:,1),grid(:,2),'Color',grid_color);
+    grid_plot = plot(calculation_grid(:,1),calculation_grid(:,2),'Color',grid_color);
     grid_plot.LineWidth = grid_thickness;
     grid_plot.DisplayName = 'SOLEDGE3X-EIRENE mesh';
     contour_handles = cell(1,n_snapshots+1);
