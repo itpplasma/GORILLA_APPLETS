@@ -128,7 +128,7 @@
 !
  !Switches to calculate optional quantities
  boole_time_hamiltonian = .true. ,
- boole_gyrophase = .true. , !only turn this on if boole_time_hamiltonian is also on
+ boole_gyrophase = .true. ,
  boole_vpar_int = .true. ,
  boole_vpar2_int = .true. ,
 !
@@ -157,6 +157,29 @@
   a_factor = 2 ,
   b_factor = 0 ,!if either b_factor or c_factor are set to zero, they are calculated automatically such as to make delta_b and delta_c to be about in the range of delta_a (see module find tetra)
   c_factor = 0 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+!In the guiding center theory of the default implementation the electric field is assumed to be weak 
+ !compared to the magnetic field. In case of the investigation of impurities in WEST geometry
+ !(Soledge3X-EIRENE, cylindrical coordinates only) additional terms have to be included in the dynamics
+!
+ !Switch for including strong electric field terms
+ !false ... no additional terms
+ !true ... includes polarization drift terms in dynamics
+ boole_strong_electric_field = .false. ,
+!
+ !Switch for saving electric field and drift to .dat-files
+ boole_save_electric = .false. ,
+
+ !Filenames for storing electric field and drift velocity
+ filename_electric_field = 'electric_field.dat',
+ filename_electric_drift = 'electric_drift.dat'
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !perturbations to the fields can optionally be delivered by Mephit
+ boole_pert_from_mephit = .false.
 !
 !------------------------------------------------------------------------------------------------------------!
 !
