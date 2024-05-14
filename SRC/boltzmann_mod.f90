@@ -151,6 +151,8 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     if (boole_precalc_collisions) then
         allocate(randcol(num_particles,randcoli,3))
         call RANDOM_NUMBER(randcol)
+        !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
+        randcol(:,:,1:2:3) =  3.464102*(randcol(:,:,1:2:3)-.5)
     endif
 end subroutine calc_starting_conditions
 !
@@ -178,7 +180,7 @@ subroutine calc_boltzmann
     double precision :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v, maxcol
     integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,n_lost_particles,ierr,err,iantithetic, num_background_species, inorout
     integer :: n_start, n_end, i_part, count_integration_steps
-    double precision, dimension(3) :: x_rand_beg,x, randnum
+    double precision, dimension(3) :: x_rand_beg,x,randnum
     logical :: boole_initialized,boole_particle_lost
     double precision :: dtau, dphi,dtaumin, t_step
     double precision, dimension(5) :: z, zet
