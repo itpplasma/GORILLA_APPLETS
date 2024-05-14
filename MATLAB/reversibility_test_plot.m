@@ -463,7 +463,7 @@ xlabel_txt = '$k_\mathrm{orbit}$';
 
 [ylimits] = get_ylimits(contour_data,contour_back_data,number_of_quantities);
 
-figure('Renderer', 'painters', 'Position', [5 50 1300 1300])
+figure('Renderer', 'painters')%, 'Position', [5 50 1300 1300])
 t = tiledlayout(number_of_quantities,n_snapshots +1);
 
 for j = 1:(n_snapshots+1)

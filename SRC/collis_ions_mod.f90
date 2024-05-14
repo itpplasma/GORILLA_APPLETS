@@ -236,9 +236,8 @@ module collis_ions
   !
       if(abs(dalam).gt.1.d0) then
         ierr=2
-  !
-      if (present(randnum)) ur = randnum(2)
-      if (.not.present(randnum)) call random_number(ur)
+        if (present(randnum)) ur = randnum(2)
+        if (.not.present(randnum)) call random_number(ur)
   !
         alam=2.d0*(dble(ur)-0.5d0)
       else
@@ -278,9 +277,9 @@ module collis_ions
   !
   subroutine getran(irand,ur)
   !
-  ! Produces the random number with zero average and unit variance
+  ! Produces a random number with zero average and unit variance
   !
-  ! Input parameters: irand - 0 for continious, 1 for +1 -1,
+  ! Input parameters: irand - 0 for continuous, 1 for +1 -1,
   ! Output parameters: ur   - random number
   !
     implicit none
