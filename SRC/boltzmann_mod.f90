@@ -56,6 +56,7 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     use tetra_grid_settings_mod, only: grid_kind
     use tetra_physics_mod, only: coord_system
     use collis_ions, only: collis_init, stost
+    use gorilla_settings_mod, only: boole_field_line_tracing
 !
     implicit none
     double precision, intent(in)                                   :: v0
@@ -132,6 +133,7 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
 !
     call RANDOM_NUMBER(rand_matrix2)
     start_pos_pitch_mat(4,:) = 2*rand_matrix2(1,:)-1 !pitch parameter
+    if (boole_field_line_tracing.eqv..true.) start_pos_pitch_mat(4,:) = 1 !delete this once i have a proper subroutine for field line tracing
 !
     if (boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
         start_pos_pitch_mat(5,:) = 5*energy_eV*rand_matrix2(2,:) !boltzmann energy distribution
@@ -349,8 +351,11 @@ print*, 'calc_starting_conditions finished'
         count_integration_steps = 0
         call unlink('exit_times.dat')
         call unlink('remaining_particles.dat')
+        call unlink('field_line_points.dat')
         open(75, file = 'exit_times.dat')
         open(76, file = 'remaining_particles.dat')
+        !open(81, file = 'field_line_points.dat')
+
         if (boole_collisions) deallocate(efcolf,velrat,enrat)
 !
         !$OMP PARALLEL DEFAULT(NONE) &
@@ -507,6 +512,7 @@ endif
 !
         close(75)
         close(76)
+        !close(81)
         if(.not.boole_squared_moments) then
             prism_moments = (tetr_moments(:,tetra_indices_per_prism(:,1)) + &
                         & tetr_moments(:,tetra_indices_per_prism(:,2)) + &
@@ -863,6 +869,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                 call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_remain,&
                                                     & t_pass,boole_t_finished,iper_phi,optional_quantities)
         end select
+        !write(81,*) x
 !
         t_remain = t_remain - t_pass
         if (iper_phi.ne.0) counter_phi_0_mappings = counter_phi_0_mappings + iper_phi

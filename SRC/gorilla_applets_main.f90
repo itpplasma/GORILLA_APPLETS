@@ -14,6 +14,7 @@
   use reversibility_test_mod, only: make_reversibility_test
   use total_dwell_times_mod, only: calc_total_dwell_times
   use boltzmann_mod, only: calc_boltzmann
+  use field_line_tracing_mod, only: calc_field_lines
 !
   implicit none
 !
@@ -122,6 +123,12 @@
         case(10) !Do the boltzmanntest
 !
             call calc_boltzmann
+!
+!-------------------------------------------------------------------------------------------!
+!
+        case(11) !Do the boltzmanntest
+!
+            call calc_field_lines
 !
 !-------------------------------------------------------------------------------------------!
 !
