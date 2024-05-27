@@ -86,6 +86,7 @@ SOURCES = SetWorkingPrecision.f90\
 	reversibility_test_mod.f90 \
 	collis_ions_mod.f90 \
 	boltzmann_mod.f90 \
+	field_line_tracing_mod.f90 \
 	total_dwell_times_mod.f90 \
 	gorilla_applets_main.f90
 

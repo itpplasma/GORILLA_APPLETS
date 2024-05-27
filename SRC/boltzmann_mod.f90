@@ -56,7 +56,6 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     use tetra_grid_settings_mod, only: grid_kind
     use tetra_physics_mod, only: coord_system
     use collis_ions, only: collis_init, stost
-    use gorilla_settings_mod, only: boole_field_line_tracing
 !
     implicit none
     double precision, intent(in)                                   :: v0
@@ -133,7 +132,6 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
 !
     call RANDOM_NUMBER(rand_matrix2)
     start_pos_pitch_mat(4,:) = 2*rand_matrix2(1,:)-1 !pitch parameter
-    if (boole_field_line_tracing.eqv..true.) start_pos_pitch_mat(4,:) = 1 !delete this once i have a proper subroutine for field line tracing
 !
     if (boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
         start_pos_pitch_mat(5,:) = 5*energy_eV*rand_matrix2(2,:) !boltzmann energy distribution
