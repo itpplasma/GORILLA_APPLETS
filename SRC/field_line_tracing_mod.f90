@@ -552,8 +552,7 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     double precision                                               :: rand_scalar, vpar, vperp
     double precision                                               :: amin, cmin, cmax !amax is set globally
     double precision, dimension(:), allocatable                    :: rand_vector
-    double precision, dimension(:,:), allocatable                  :: rand_matrix1
-    double precision, dimension(:), allocatable                  :: rand_matrix2
+    double precision, dimension(:), allocatable                    :: rand_matrix2
     integer                                                        :: i
     double precision, dimension(3)                                 :: x
     integer                                                        :: ind_tetr_out,iface
@@ -575,7 +574,6 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
 !
     allocate(start_pos_pitch_mat(5,num_particles))
     allocate(rand_vector(num_particles))
-    allocate(rand_matrix1(3,num_particles))
     allocate(rand_matrix2(num_particles))
 !
     start_pos_pitch_mat = 0
@@ -614,11 +612,25 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
         endif
         if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
     else
-        call RANDOM_NUMBER(rand_matrix1)
-        start_pos_pitch_mat(ind_a,:) = amin + (amax - amin)*rand_matrix1(ind_a,:) !r in cylindrical, s in flux coordinates
-        start_pos_pitch_mat(ind_b,:) = 2*pi*rand_matrix1(ind_b,:) !phi in cylindrical and flux coordinates
-        start_pos_pitch_mat(ind_c,:) = cmin + (cmax - cmin)*rand_matrix1(ind_c,:) !z in cylindrical, theta in flux coordinates
+        start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r 
+        start_pos_pitch_mat(ind_b,:) = 0.d0 !phi in cylindrical and flux coordinates
+        start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
+        print*, maxval(start_pos_pitch_mat(ind_a,:))
     endif
+
+!     nsurf=5000 !1000
+!     nmap=3000 !300 !00
+!     nskip=1
+!     icount_begplot = 10
+!     rbeg=214.d0
+!   !  rend=216.d0 !216.d0
+!     rend=216.d0
+!   !
+!   !
+!     do isurf=1,nsurf
+!       rrr=rbeg+(rend-rbeg)*isurf/nsurf
+!       z=12d0
+!       phi = 0.d0
 !
     
     start_pos_pitch_mat(4,:) = 1 !delete this once i have a proper subroutine for field line tracing
@@ -675,7 +687,7 @@ subroutine calc_field_lines
     logical :: boole_initialized,boole_particle_lost
     double precision :: dtau, dphi,dtaumin, t_step
     double precision, dimension(5) :: z, zet
-    double precision :: m0,z0,hamiltonian_time
+    double precision :: m0,z0
     double precision, dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
 !
     ! open(35, file = 'outliers.dat')
@@ -836,7 +848,7 @@ print*, 'calc_starting_conditions finished'
         !$OMP& efcolf_mat,velrat_mat,enrat_mat,num_background_species,randcol,randcoli,maxcol,boole_precalc_collisions) &
         !$OMP& FIRSTPRIVATE(particle_mass, particle_charge) &
         !$OMP& PRIVATE(p,l,n,boole_particle_lost,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
-        !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr, v,hamiltonian_time, &
+        !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr, v, &
         !$OMP& m0,z0,i,efcolf,velrat,enrat,vpar_background,inorout,randnum) &
         !$OMP& REDUCTION(+:n_lost_particles, n_pushings, counter_phi_0_mappings)
         print*, 'get number of threads', omp_get_num_threads()
@@ -927,7 +939,7 @@ endif
                     endif
 !
                     call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, &
-                                    & n,v,start_pos_pitch_mat, hamiltonian_time,inorout,t_remain)
+                                    & n,v,start_pos_pitch_mat,inorout,t_remain)
 !
                     t_confined = t_confined + t_step - t_remain
                     !Lost particle handling
@@ -1056,7 +1068,7 @@ end subroutine calc_field_lines
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
 subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,v,start_pos_pitch_mat, &
-                                          & hamiltonian_time, inorout, t_remain_out)
+                                          & inorout, t_remain_out)
 !
     use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
@@ -1080,9 +1092,10 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     integer, intent(inout)                          :: ind_tetr,iface
     double precision, intent(out), optional         :: t_remain_out
     double precision, dimension(3)                  :: z_save, x_save
-    double precision                                :: vperp2,t_remain,t_pass,vpar_save, v, hamiltonian_time, aphi
+    double precision                                :: vperp2,t_remain,t_pass,vpar_save, v, aphi
     logical                                         :: boole_t_finished
     integer                                         :: ind_tetr_save,iper_phi,k, m, n, inorout
+    integer                                         :: single_particle_counter_phi_0_mappings
     double precision                                :: perpinv,speed, r, z, phi, B, phi_elec_func
     double precision, dimension(:,:)                :: start_pos_pitch_mat
 !
@@ -1160,6 +1173,8 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 !
     !Logical for handling time integration
     boole_t_finished = .false.
+
+    single_particle_counter_phi_0_mappings = 0
 !
     n_pushings = n_pushings-1 !set n_pushings to -1 because when entering the loop it wil go back to one without pushing
     !Loop for tetrahedron pushings until t_step is reached
@@ -1200,16 +1215,23 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 !
         !Calculate trajectory
         call pusher_tetra_field_lines(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper_phi)
-        write(81,*) x
 !
         t_remain = t_remain - t_pass
-        if (iper_phi.ne.0) counter_phi_0_mappings = counter_phi_0_mappings + iper_phi
-        hamiltonian_time = 0
+        if (iper_phi.ne.0) then
+            !$omp critical
+            counter_phi_0_mappings = counter_phi_0_mappings + 1!iper_phi
+            if (single_particle_counter_phi_0_mappings.gt.10) write(81,*) x
+            !$omp end critical
+            single_particle_counter_phi_0_mappings = single_particle_counter_phi_0_mappings + 1
+            if (single_particle_counter_phi_0_mappings.eq.3000) then
+                boole_t_finished = .true.
+            endif
+        endif
 !
         !Orbit stops within cell, because "flight"-time t_step has finished
         if(boole_t_finished) then
             if( present(t_remain_out)) then
-                t_remain_out = t_remain
+                t_remain_out = 0
             endif
             exit
         endif
