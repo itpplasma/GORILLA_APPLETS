@@ -33,7 +33,7 @@ module field_line_tracing_mod
     & boole_antithetic_variate,boole_linear_temperature_simulation,seed_option
 !
     public :: calc_field_lines
-!    
+!
 contains
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -43,7 +43,7 @@ subroutine field_line_tracing_inp()
     open(unit=71, file='field_line_tracing.inp', status='unknown')
     read(71,nml=field_line_tracing_nml)
     close(71)
-!    
+!
     print *,'GORILLA: Loaded input data from field_line_tracing.inp'
 end subroutine field_line_tracing_inp
 !
@@ -123,11 +123,11 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
         endif
         if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
     else
-        start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r 
+        start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r
         start_pos_pitch_mat(ind_b,:) = 1d-1 !phi in cylindrical and flux coordinates
         start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
     endif
-! 
+!
     start_pos_pitch_mat(4,:) = 1 !delete this once i have a proper subroutine for field line tracing
 !
     call RANDOM_NUMBER(rand_matrix2)
@@ -173,7 +173,7 @@ subroutine calc_field_lines
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
 !
-    
+
 !
     double precision, dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
                                                      velrat_mat, enrat_mat, dens_mat_tetr, temp_mat_tetr
@@ -235,7 +235,7 @@ print*, 'calc_starting_conditions finished'
     enddo
 !
     if (boole_collisions) then
-        num_background_species = 2 
+        num_background_species = 2
         allocate(dens_mat(num_background_species-1,size(verts_rphiz(1,:))))
         allocate(temp_mat(num_background_species,size(verts_rphiz(1,:))))
         allocate(vpar_mat(num_background_species,ntetr))
@@ -344,13 +344,13 @@ if (n_end.gt.10) then
     if (modulo(kpart,int(n_end/10)).eq.0) then
         print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
     endif
-else 
+else
     print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
 endif
                 !$omp end critical
 
-        !set counter variables to zero
-        call set_counters_zero(counter_loop)
+                !set counter variables to zero
+                call set_counters_zero(counter_loop)
 
                 t_step = time_step
                 t_confined = 0
@@ -386,16 +386,16 @@ endif
 !
                             vpar = vpar - vpar_background(1)
                             !since vpar_background actually has num_background_particles entries, consider giving it as an extra
-                            !optional input variable to stost, before randnum (maybe also check if radnum could then be set by 
+                            !optional input variable to stost, before randnum (maybe also check if radnum could then be set by
                             !randnum = variable eve if vpar_background is not set and other variables are not set by name indexing)
                             !since it came up when writing these lines: replace expressions like
                             !"verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:)))" with "3,nvert"
                             zet(1:3) = x !spatial position
-                            zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module 
+                            zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module
                             zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
 !
                             if (boole_precalc_collisions) then
-                                randnum = randcol(n,mod(i-1,randcoli)+1,:) 
+                                randnum = randcol(n,mod(i-1,randcoli)+1,:)
                                 call stost(efcolf,velrat,enrat,zet,t_step,1,err,(time_step-t_confined)*v0,randnum)
                             else
                                 call stost(efcolf,velrat,enrat,zet,t_step,1,err,(time_step-t_confined)*v0)
@@ -408,7 +408,7 @@ endif
 !
                             !optionally still change particle_mass, particle_charge and cm_over_e, e.g.:
                             !particle_charge = particle_charge + echarge
-                            !particle_mass = particle_mass + ame - amp 
+                            !particle_mass = particle_mass + ame - amp
                             !cm_over_e = clight*particle_mass/particle_charge
                         endif
                     endif
@@ -419,7 +419,7 @@ endif
                     t_confined = t_confined + t_step - t_remain
                     !Lost particle handling
                     if(ind_tetr.eq.-1) then
-!write another if clause (if hole size = minimal .and. particle lost inside .and. boole_cut_out_hole = .true. 
+!write another if clause (if hole size = minimal .and. particle lost inside .and. boole_cut_out_hole = .true.
 !(use extra variable m in orbit routine (0 normally, 1 when lost outside, -1 when lost inside))),
 !if m = 1 do as now, if m = -1 select arbitrary newp position and update x, vpar and vperp)
                         write(75,*) t_confined, x, n
@@ -478,7 +478,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     use constants, only: pi, ev2erg
     use tetra_grid_mod, only: tetra_grid, ntetr
 !
-    
+
 !
     double precision, dimension(3), intent(inout)   :: x
     double precision, intent(inout)                 :: vpar,vperp
@@ -529,7 +529,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
         if (boole_linear_density_simulation) then
             weights(n,1) = weights(n,1)*(max_poloidal_flux*1.1-poloidal_flux(n))/(max_poloidal_flux*1.1)
         endif
-!       
+!
         if (boole_boltzmann_energies) then
             !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
             phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*(/r,phi,z/))
@@ -550,7 +550,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 !
         boole_initialized = .true.
     endif
-!           
+!
     !Exit the subroutine after initialization, if time step equals zero
     if(t_step.eq.0.d0) return
 !
@@ -571,7 +571,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     !Logical for handling time integration
     boole_t_finished = .false.
 !
-    counter_loop%tetr_pushings = counter_loop%tetr_pushings - 1 !set tetr_pushings to -1 because when entering the loop 
+    counter_loop%tetr_pushings = counter_loop%tetr_pushings - 1 !set tetr_pushings to -1 because when entering the loop
     !it wil go back to one without pushing
 
     !Loop for tetrahedron pushings until t_step is reached
@@ -597,9 +597,9 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
             endif
             exit
         endif
-!                
+!
         ind_tetr_save = ind_tetr
-        vpar_save = vpar   
+        vpar_save = vpar
         x_save = x
 !
         !Calculate trajectory
@@ -614,7 +614,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                     write(81,*) x
                 !$omp end critical
             endif
-            
+
             if ((boole_poincare_plot).and.(counter_loop%phi_0_mappings.eq.n_poincare_mappings)) then
                 boole_t_finished = .true.
                 !print*, n, counter_loop%phi_0_mappings, x
@@ -650,14 +650,14 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 !
     !Compute vperp from position
     vperp = vperp_func(z_save,perpinv,ind_tetr_save)
-!         
+!
 end subroutine orbit_timestep_gorilla_boltzmann
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
 subroutine calc_divertor_intersection(x_save,x,z_div_plate)
 !
-    
+
 !
     double precision, dimension(3), intent(in) :: x_save
     double precision, dimension(3), intent(inout) :: x
@@ -684,7 +684,7 @@ end subroutine calc_divertor_intersection
 !
 subroutine set_counters_zero(counter_loop)
 !
-    
+
 !
     type(counter_array), intent(inout) :: counter_loop
 
@@ -701,7 +701,7 @@ end subroutine set_counters_zero
 !
 subroutine add_counter_loop_to_counter(counter_loop,counter)
 !
-        
+
 !
         type(counter_array), intent(in) :: counter_loop
         type(counter_array), intent(inout) :: counter
@@ -722,7 +722,7 @@ subroutine calc_square_root_g
     use tetra_physics_mod, only: tetra_physics, hamiltonian_time
     use tetra_grid_mod, only: ntetr, tetra_grid, verts_rphiz
 !
-    
+
 !
     integer            :: ind_tetr
 !
