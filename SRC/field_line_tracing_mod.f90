@@ -58,7 +58,6 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     use tetra_physics_mod, only: coord_system
     use collis_ions, only: collis_init, stost
 !
-    implicit none
     double precision, intent(in)                                   :: v0
     double precision, dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
     double precision                                               :: rand_scalar, vpar, vperp
@@ -174,7 +173,7 @@ subroutine calc_field_lines
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
 !
-    implicit none
+    
 !
     double precision, dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
                                                      velrat_mat, enrat_mat, dens_mat_tetr, temp_mat_tetr
@@ -479,7 +478,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     use constants, only: pi, ev2erg
     use tetra_grid_mod, only: tetra_grid, ntetr
 !
-    implicit none
+    
 !
     double precision, dimension(3), intent(inout)   :: x
     double precision, intent(inout)                 :: vpar,vperp
@@ -658,7 +657,7 @@ end subroutine orbit_timestep_gorilla_boltzmann
 !
 subroutine calc_divertor_intersection(x_save,x,z_div_plate)
 !
-    implicit none
+    
 !
     double precision, dimension(3), intent(in) :: x_save
     double precision, dimension(3), intent(inout) :: x
@@ -685,7 +684,7 @@ end subroutine calc_divertor_intersection
 !
 subroutine set_counters_zero(counter_loop)
 !
-    implicit none
+    
 !
     type(counter_array), intent(inout) :: counter_loop
 
@@ -702,7 +701,7 @@ end subroutine set_counters_zero
 !
 subroutine add_counter_loop_to_counter(counter_loop,counter)
 !
-        implicit none
+        
 !
         type(counter_array), intent(in) :: counter_loop
         type(counter_array), intent(inout) :: counter
@@ -723,7 +722,7 @@ subroutine calc_square_root_g
     use tetra_physics_mod, only: tetra_physics, hamiltonian_time
     use tetra_grid_mod, only: ntetr, tetra_grid, verts_rphiz
 !
-    implicit none
+    
 !
     integer            :: ind_tetr
 !
@@ -756,8 +755,6 @@ end subroutine calc_square_root_g
 !
 subroutine unlink_files
 !
-    implicit none
-!
     call unlink('field_line_points.dat')
 !
 end subroutine unlink_files
@@ -766,8 +763,6 @@ end subroutine unlink_files
 !
 subroutine open_files
 !
-    implicit none
-!
     open(81, file = 'field_line_points.dat')
 !
 end subroutine open_files
@@ -775,8 +770,6 @@ end subroutine open_files
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
 subroutine close_files
-!
-    implicit none
 !
     close(81)
 !
