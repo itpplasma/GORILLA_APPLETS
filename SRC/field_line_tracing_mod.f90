@@ -624,7 +624,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 
            if ((counter_loop%phi_0_mappings.gt.n_mappings_ignored)) then
 !
-            call calc_divertor_intersection(x_save,x,z_div_plate)
+            call calc_plane_intersection(x_save,x,z_div_plate)
             !$omp critical
                 write(81,*) x, n
             !$omp end critical
@@ -655,36 +655,50 @@ end subroutine orbit_timestep_gorilla_boltzmann
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-subroutine calc_divertor_intersection(x_save,x,z_div_plate)
+subroutine calc_plane_intersection(xcyl_save,xcyl,z_plane)
 !
-
+    double precision, dimension(3), intent(in) :: xcyl_save
+    double precision, dimension(3), intent(inout) :: xcyl
+    double precision, intent(in) :: z_plane
+    double precision, dimension(3) :: xcart_save,xcart
+    double precision :: rel_dist_z
 !
-    double precision, dimension(3), intent(in) :: x_save
-    double precision, dimension(3), intent(inout) :: x
-    double precision, intent(in) :: z_div_plate
-    double precision, dimension(3) :: xyz_save,xyz
-    double precision :: wlin
+    cyl_to_cart(xcyl_save,xcart_save)
+    cyl_to_cart(xcyl,xcart)
 !
-    xyz_save(1) = x_save(1)*cos(x_save(2))
-    xyz_save(2) = x_save(1)*sin(x_save(2))
-    xyz_save(3) = x_save(3)
-    xyz(1) = x(1)*cos(x(2))
-    xyz(2) = x(1)*sin(x(2))
-    xyz(3) = x(3)
+    rel_dist_z = (z_plane-xcyl_save(3))/(xcyl(3)-xcyl_save(3))
+    xcart = xcart_save + rel_dist_z*(xcart-xcart_save)
+    cart_to_cyl(xcart,xcyl)
 !
-    wlin = (z_div_plate-x_save(3))/(x(3)-x_save(3))
-    xyz = xyz_save + wlin*(xyz-xyz_save)
-    x(1) = sqrt(xyz(1)**2+xyz(2)**2)
-    x(2) = atan2(xyz(2),xyz(1))
-    x(3) = xyz(3)
-!
-end subroutine calc_divertor_intersection
+end subroutine calc_plane_intersection
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-subroutine set_counters_zero(counter_loop)
+subroutine cyl_to_cart(xcyl,xcart)
 !
-
+    double precision, dimension(3), intent(in) :: xcyl
+    double precision, dimension(3), intent(out) :: xcart
+!
+    xcart(1) = xcyl(1)*cos(xcyl(2))
+    xcart(2) = xcyl(1)*sin(xcyl(2))
+    xcart(3) = xcyl(3)
+!
+end subroutine cyl_to_cart
+!
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
+subroutine cart_to_cyl(xcart,xcyl)
+!
+    double precision, dimension(3), intent(in) :: xcart
+    double precision, dimension(3), intent(out) :: xcyl
+!
+    xcyl(1) = hypot(xcart(1),xcart(2))
+    xcyl(2) = atan2(xcart(2),xcart(1))
+    xcyl(3) = xcart(3)
+end subroutine cart_to_cyl
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
+subroutine set_counters_zero(counter_loop)
 !
     type(counter_array), intent(inout) :: counter_loop
 
@@ -700,8 +714,6 @@ end subroutine set_counters_zero
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
 subroutine add_counter_loop_to_counter(counter_loop,counter)
-!
-
 !
         type(counter_array), intent(in) :: counter_loop
         type(counter_array), intent(inout) :: counter
@@ -721,8 +733,6 @@ subroutine calc_square_root_g
 !
     use tetra_physics_mod, only: tetra_physics, hamiltonian_time
     use tetra_grid_mod, only: ntetr, tetra_grid, verts_rphiz
-!
-
 !
     integer            :: ind_tetr
 !
