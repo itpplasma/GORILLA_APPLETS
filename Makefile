@@ -10,7 +10,7 @@ FC = gfortran
 #OPTS = -J OBJS -g
 
 # The developer repo option
-OPTS= -g -J OBJS -O3 -fopenmp 
+OPTS= -g -J OBJS -O3 -fopenmp
 # Including performance test
 # OPTS= -g -J OBJS -pg -O3 -fopenmp 
 # The option below shows in which line the error occurs
@@ -86,6 +86,7 @@ SOURCES = SetWorkingPrecision.f90\
 	reversibility_test_mod.f90 \
 	collis_ions_mod.f90 \
 	boltzmann_mod.f90 \
+	pusher_tetra_field_lines_mod.f90 \
 	field_line_tracing_mod.f90 \
 	total_dwell_times_mod.f90 \
 	gorilla_applets_main.f90
