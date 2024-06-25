@@ -6,7 +6,7 @@ module field_line_tracing_mod
     double precision :: time_step,energy_eV, min_poloidal_flux, max_poloidal_flux
     double precision, dimension(:,:), allocatable :: verts
     integer :: seed_option, num_particles,&
-               & ind_a, ind_b, ind_c, lost_outside, lost_inside
+               & ind_a, ind_b, ind_c
     double precision :: n_particles, density, constant_part_of_weights, z_div_plate
     double complex, dimension(:,:), allocatable :: weights
     double precision, dimension(:,:), allocatable :: sqrt_g
@@ -18,14 +18,15 @@ module field_line_tracing_mod
     integer :: randcoli = int(1.0d5)
     integer :: n_poincare_mappings, n_mappings_ignored
     integer :: pm_unit, di_unit, check_unit !file units
-    type counter_array
+    type counter_t
         integer :: lost_particles = 0
         integer :: tetr_pushings = 0
         integer :: phi_0_mappings = 0
         integer :: divertor_intersections = 0
         integer :: survived_particles = 0
         integer :: ignored_particles = 0
-    end type counter_array
+        integer :: integration_steps = 0
+    end type counter_t
 !
     !Namelist for field_line_tracing input
     NAMELIST /field_line_tracing_nml/ time_step,energy_eV,n_particles,boole_poincare_plot,n_poincare_mappings,n_mappings_ignored, &
@@ -172,15 +173,15 @@ subroutine calc_field_lines
     double precision, dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
                                                      velrat_mat, enrat_mat, dens_mat_tetr, temp_mat_tetr
     double precision :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v, maxcol
-    integer :: kpart,i,j,n,m,k,ind_tetr,iface,ierr,err,num_background_species, inorout
-    integer :: n_start, n_end, i_part, count_integration_steps
+    integer :: kpart,i,j,n,m,k,ind_tetr,iface,ierr,err,num_background_species
+    integer :: n_start, n_end, i_part
     double precision, dimension(3) :: x_rand_beg,x,randnum
     logical :: boole_initialized,boole_particle_lost
     double precision :: dtau, dphi,dtaumin, t_step
     double precision, dimension(5) :: z, zet
     double precision :: m0,z0
     double precision, dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
-    type(counter_array) counter, counter_loop
+    type(counter_t) counter, local_counter
 !
     !Load input for boltzmann computation
     call field_line_tracing_inp()
@@ -300,9 +301,6 @@ print*, 'calc_starting_conditions finished'
 !
         kpart = 0
         maxcol = 0
-        lost_outside = 0
-        lost_inside = 0
-        count_integration_steps = 0
 !
         call unlink_files
         call open_files
@@ -312,13 +310,13 @@ print*, 'calc_starting_conditions finished'
         !$OMP PARALLEL DEFAULT(NONE) &
         !$OMP& SHARED(num_particles,kpart,v0,time_step,boole_collisions, &
         !$OMP& dtau,dtaumin,n_start,n_end, &
-        !$OMP& start_pos_pitch_mat,boole_boltzmann_energies,count_integration_steps, &
+        !$OMP& start_pos_pitch_mat,boole_boltzmann_energies, &
         !$OMP& density,energy_eV,dens_mat,temp_mat,vpar_mat,tetra_grid,tetra_physics, &
         !$OMP& efcolf_mat,velrat_mat,enrat_mat,num_background_species,randcol,randcoli,maxcol,boole_precalc_collisions, counter) &
         !$OMP& FIRSTPRIVATE(particle_mass, particle_charge) &
         !$OMP& PRIVATE(n,boole_particle_lost,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
         !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr,v, &
-        !$OMP& i,efcolf,velrat,enrat,vpar_background,inorout,randnum,j,counter_loop)
+        !$OMP& i,efcolf,velrat,enrat,vpar_background,randnum,j,local_counter)
 !
         print*, 'get number of threads', omp_get_num_threads()
         if (boole_collisions) allocate(efcolf(num_background_species),velrat(num_background_species),enrat(num_background_species))
@@ -341,7 +339,7 @@ endif
             !$omp end critical
 
             !set counter variables to zero
-            call set_counters_zero(counter_loop)
+            call set_counters_zero(local_counter)
 
             t_step = time_step
             t_confined = 0
@@ -401,8 +399,8 @@ endif
                     endif
                 endif
 !
-                call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, &
-                                & n,v,start_pos_pitch_mat,inorout,counter_loop,t_remain)
+                call orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, &
+                                & n,v,start_pos_pitch_mat,local_counter,t_remain)
 !
                 t_confined = t_confined + t_step - t_remain
                 !Lost particle handling
@@ -412,7 +410,7 @@ endif
 !if m = 1 do as now, if m = -1 select arbitrary newp position and update x, vpar and vperp)
                     write(75,*) t_confined, x, n
                     !print*, t_confined, x
-                        counter_loop%lost_particles = 1
+                        local_counter%lost_particles = 1
                         boole_particle_lost = .true.
                     exit
                 endif
@@ -420,9 +418,9 @@ endif
                 v = sqrt(vpar**2+vperp**2)
             enddo
             !$omp critical
-            count_integration_steps = count_integration_steps + i
+            counter%integration_steps = counter%integration_steps + i
             maxcol = max(dble(i)/dble(randcoli),maxcol)
-            call add_counter_loop_to_counter(counter_loop,counter)
+            call add_local_counter_to_counter(local_counter,counter)
             !$omp end critical
         enddo !n
         !$OMP END DO
@@ -431,14 +429,16 @@ endif
         call close_files
 !
 if (boole_precalc_collisions) print*, "maxcol = ", maxcol
-print*, 'Number of lost particles',counter%lost_particles
 print*, 'average number of pushings = ', counter%tetr_pushings/n_particles
 print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/n_particles
-print*, 'number of particles having hit the divertor = ', counter%divertor_intersections
-print*, 'number of particles having hit the z-value of the divertor plate within the first 10 revolutions = ', &
-         & counter%ignored_particles
-print*, 'number of particles still in orbit after tracing time has passed = ', counter%survived_particles
+if (boole_divertor_intersection) then
+    print*, 'number of particles having hit the divertor = ', counter%divertor_intersections
+    print*, 'number of particles having hit the z-value of the divertor plate within the first 10 revolutions = ', &
+            & counter%ignored_particles
+endif
 print*, 'tracing time in seconds = ', time_step
+print*, 'Number of lost particles',counter%lost_particles
+print*, 'number of particles still in orbit after tracing time has passed = ', counter%survived_particles
 !
 deallocate(start_pos_pitch_mat)
 !
@@ -446,8 +446,8 @@ end subroutine calc_field_lines
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,v,start_pos_pitch_mat, &
-                                          & inorout, counter_loop,t_remain_out)
+subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,v,start_pos_pitch_mat, &
+                                          & local_counter,t_remain_out)
 !
     use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
@@ -471,13 +471,13 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     integer, intent(inout)                          :: ind_tetr,iface
     double precision, intent(out), optional         :: t_remain_out
     double precision, dimension(3)                  :: z_save, x_save
-    double precision                                :: vperp2,t_remain,t_pass,vpar_save, v, aphi
+    double precision                                :: vperp2,t_remain,t_pass,vpar_save, v
     logical                                         :: boole_t_finished
-    integer                                         :: ind_tetr_save,iper_phi,k, m, n, inorout
+    integer                                         :: ind_tetr_save,iper_phi,k, m, n
     double precision                                :: perpinv,speed, r, z, phi, B, phi_elec_func, wlin
     double precision, dimension(:,:)                :: start_pos_pitch_mat
     double precision, dimension(3)                  :: xyz, xyz_save
-    type(counter_array), intent(inout)              :: counter_loop
+    type(counter_t), intent(inout)              :: local_counter
 
 !
     !If orbit_timestep is called for the first time without grid position
@@ -538,8 +538,6 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     !Exit the subroutine after initialization, if time step equals zero
     if(t_step.eq.0.d0) return
 !
-    inorout = 0
-!
     !Squared perpendicular velocity
     vperp2 = vperp**2
 !
@@ -555,27 +553,16 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     !Logical for handling time integration
     boole_t_finished = .false.
 !
-    counter_loop%tetr_pushings = counter_loop%tetr_pushings - 1 !set tetr_pushings to -1 because when entering the loop
+    local_counter%tetr_pushings = local_counter%tetr_pushings - 1 !set tetr_pushings to -1 because when entering the loop
     !it wil go back to one without pushing
 
     !Loop for tetrahedron pushings until t_step is reached
     do
 !
-        counter_loop%tetr_pushings = counter_loop%tetr_pushings + 1
+        local_counter%tetr_pushings = local_counter%tetr_pushings + 1
         !Domain Boundary
         if(ind_tetr.eq.-1) then
-            aphi = tetra_physics(ind_tetr_save)%Aphi1+sum(tetra_physics(ind_tetr_save)%gAphi*z_save)
             print *, 'WARNING: Particle lost.'
-            !$omp critical
-            if (abs(aphi-max_poloidal_flux).lt.abs(aphi-min_poloidal_flux)) then
-                lost_outside = lost_outside + 1
-                inorout = 1
-            endif
-            if (abs(aphi-max_poloidal_flux).gt.abs(aphi-min_poloidal_flux)) then
-                lost_inside = lost_inside + 1
-                inorout = -1
-            endif
-            !$omp end critical
             if( present(t_remain_out)) then
                 t_remain_out = t_remain
             endif
@@ -588,37 +575,41 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 !
         !Calculate trajectory
         call pusher_tetra_field_lines(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper_phi)
-        if (boole_t_finished) counter_loop%survived_particles = 1
 
         t_remain = t_remain - t_pass
         if (iper_phi.ne.0) then
-            counter_loop%phi_0_mappings = counter_loop%phi_0_mappings + 1!iper_phi
-            ! if ((counter_loop%phi_0_mappings.gt.n_mappings_ignored).and. &
+            local_counter%phi_0_mappings = local_counter%phi_0_mappings + 1!iper_phi
+            ! if ((local_counter%phi_0_mappings.gt.n_mappings_ignored).and. &
             !   & (any(n.eq.(/31997,8046,16148,35518,12921,16318,3807,652,15296,19990,16976,6843,2603/)))) then
             !     !$omp critical
             !         write(check_unit,*) n, x
             !     !$omp end critical
             ! endif
-            if ((boole_poincare_plot).and.(counter_loop%phi_0_mappings.gt.n_mappings_ignored)) then
+            if ((boole_poincare_plot).and.(local_counter%phi_0_mappings.gt.n_mappings_ignored) &
+                                     .and.(local_counter%phi_0_mappings.le.n_poincare_mappings)) then
                 !$omp critical
                     write(pm_unit,*) x
                 !$omp end critical
             endif
-            if ((boole_poincare_plot).and.(counter_loop%phi_0_mappings.eq.n_poincare_mappings)) then
+            if ((boole_poincare_plot).and.(.not.boole_divertor_intersection) &
+                 .and.(local_counter%phi_0_mappings.eq.n_poincare_mappings)) then
                 boole_t_finished = .true.
             endif
         endif
+
+        if (boole_t_finished) local_counter%survived_particles = 1
+
         if ((boole_divertor_intersection).and.(x(3).lt.z_div_plate)) then
             boole_t_finished = .true.
-           if ((counter_loop%phi_0_mappings.gt.n_mappings_ignored)) then
+           if ((local_counter%phi_0_mappings.gt.n_mappings_ignored)) then
             call calc_plane_intersection(x_save,x,z_div_plate)
 
             !$omp critical
                 write(di_unit,*) x, n
             !$omp end critical
-                counter_loop%divertor_intersections = 1
+                local_counter%divertor_intersections = 1
            else
-            counter_loop%ignored_particles  = 1
+            local_counter%ignored_particles  = 1
            endif
         endif
 !
@@ -627,7 +618,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
             if(present(t_remain_out)) then
                 t_remain_out = 0
             endif
-            if (x(3).gt.z_div_plate) print*, n, x, ind_tetr
+            !if (x(3).gt.z_div_plate) print*, n, x, ind_tetr
             exit
         endif
 !
@@ -636,7 +627,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     !Compute vperp from position
     vperp = vperp_func(z_save,perpinv,ind_tetr_save)
 !
-end subroutine orbit_timestep_gorilla_boltzmann
+end subroutine orbit_timestep_gorilla_field_lines
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
@@ -686,34 +677,34 @@ subroutine cart_to_cyl(xcart,xcyl)
 end subroutine cart_to_cyl
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-subroutine set_counters_zero(counter_loop)
+subroutine set_counters_zero(local_counter)
 !
-    type(counter_array), intent(inout) :: counter_loop
+    type(counter_t), intent(inout) :: local_counter
 
-    counter_loop%lost_particles = 0
-    counter_loop%tetr_pushings = 0
-    counter_loop%phi_0_mappings = 0
-    counter_loop%divertor_intersections = 0
-    counter_loop%survived_particles = 0
-    counter_loop%ignored_particles = 0
+    local_counter%lost_particles = 0
+    local_counter%tetr_pushings = 0
+    local_counter%phi_0_mappings = 0
+    local_counter%divertor_intersections = 0
+    local_counter%survived_particles = 0
+    local_counter%ignored_particles = 0
 
 end subroutine set_counters_zero
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-subroutine add_counter_loop_to_counter(counter_loop,counter)
+subroutine add_local_counter_to_counter(local_counter,counter)
 !
-        type(counter_array), intent(in) :: counter_loop
-        type(counter_array), intent(inout) :: counter
+        type(counter_t), intent(in) :: local_counter
+        type(counter_t), intent(inout) :: counter
 !
-        counter%lost_particles = counter%lost_particles + counter_loop%lost_particles
-        counter%tetr_pushings = counter%tetr_pushings + counter_loop%tetr_pushings
-        counter%phi_0_mappings = counter%phi_0_mappings + counter_loop%phi_0_mappings
-        counter%divertor_intersections = counter%divertor_intersections + counter_loop%divertor_intersections
-        counter%survived_particles = counter%survived_particles + counter_loop%survived_particles
-        counter%ignored_particles = counter%ignored_particles + counter_loop%ignored_particles
+        counter%lost_particles = counter%lost_particles + local_counter%lost_particles
+        counter%tetr_pushings = counter%tetr_pushings + local_counter%tetr_pushings
+        counter%phi_0_mappings = counter%phi_0_mappings + local_counter%phi_0_mappings
+        counter%divertor_intersections = counter%divertor_intersections + local_counter%divertor_intersections
+        counter%survived_particles = counter%survived_particles + local_counter%survived_particles
+        counter%ignored_particles = counter%ignored_particles + local_counter%ignored_particles
 !
-end subroutine add_counter_loop_to_counter
+end subroutine add_local_counter_to_counter
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
