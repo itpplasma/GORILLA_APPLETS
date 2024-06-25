@@ -11,12 +11,13 @@ module field_line_tracing_mod
     double complex, dimension(:,:), allocatable :: weights
     double precision, dimension(:,:), allocatable :: sqrt_g
     double precision, dimension(:), allocatable :: J_perp, poloidal_flux, temperature_vector
-    logical :: boole_linear_density_simulation, boole_antithetic_variate, boole_linear_temperature_simulation, &
+    logical :: boole_linear_density_simulation, boole_linear_temperature_simulation, &
              & boole_poincare_plot, boole_divertor_intersection, boole_collisions, boole_point_source, boole_precalc_collisions, &
              & boole_refined_sqrt_g, boole_boltzmann_energies
     double precision, dimension(:,:,:), allocatable :: randcol
     integer :: randcoli = int(1.0d5)
     integer :: n_poincare_mappings, n_mappings_ignored
+    integer :: pm_unit, di_unit, check_unit !file units
     type counter_array
         integer :: lost_particles = 0
         integer :: tetr_pushings = 0
@@ -30,7 +31,7 @@ module field_line_tracing_mod
     NAMELIST /field_line_tracing_nml/ time_step,energy_eV,n_particles,boole_poincare_plot,n_poincare_mappings,n_mappings_ignored, &
     & boole_divertor_intersection, z_div_plate,boole_point_source,boole_collisions, &
     & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
-    & boole_antithetic_variate,boole_linear_temperature_simulation,seed_option
+    & boole_linear_temperature_simulation,seed_option
 !
     public :: calc_field_lines
 !
@@ -124,7 +125,7 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
         if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
     else
         start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r
-        start_pos_pitch_mat(ind_b,:) = 1d-1 !phi in cylindrical and flux coordinates
+        start_pos_pitch_mat(ind_b,:) = 0.0d0  !1d-1 !phi in cylindrical and flux coordinates
         start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
     endif
 !
@@ -136,13 +137,6 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
         constant_part_of_weights = constant_part_of_weights*10/sqrt(pi)*energy_eV*ev2erg
     endif
 !
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! start antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    if (boole_antithetic_variate) then
-        start_pos_pitch_mat(:,1:num_particles:2) = start_pos_pitch_mat(:,2:num_particles:2)
-        start_pos_pitch_mat(4,1:num_particles:2) = -start_pos_pitch_mat(4,2:num_particles:2)
-    endif
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! end antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     weights(:,1) = constant_part_of_weights
     if (boole_refined_sqrt_g.eqv..false.) weights(:,1) = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
 !
@@ -178,7 +172,7 @@ subroutine calc_field_lines
     double precision, dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
                                                      velrat_mat, enrat_mat, dens_mat_tetr, temp_mat_tetr
     double precision :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v, maxcol
-    integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,ierr,err,iantithetic, num_background_species, inorout
+    integer :: kpart,i,j,n,m,k,ind_tetr,iface,ierr,err,num_background_species, inorout
     integer :: n_start, n_end, i_part, count_integration_steps
     double precision, dimension(3) :: x_rand_beg,x,randnum
     logical :: boole_initialized,boole_particle_lost
@@ -234,6 +228,7 @@ print*, 'calc_starting_conditions finished'
         min_poloidal_flux = min(min_poloidal_flux,tetra_physics(i)%Aphi1)
     enddo
 !
+    !write subroutine collis_precomp
     if (boole_collisions) then
         num_background_species = 2
         allocate(dens_mat(num_background_species-1,size(verts_rphiz(1,:))))
@@ -307,8 +302,6 @@ print*, 'calc_starting_conditions finished'
         maxcol = 0
         lost_outside = 0
         lost_inside = 0
-        iantithetic = 1
-        if (boole_antithetic_variate) iantithetic = 2
         count_integration_steps = 0
 !
         call unlink_files
@@ -320,10 +313,10 @@ print*, 'calc_starting_conditions finished'
         !$OMP& SHARED(num_particles,kpart,v0,time_step,boole_collisions, &
         !$OMP& dtau,dtaumin,n_start,n_end, &
         !$OMP& start_pos_pitch_mat,boole_boltzmann_energies,count_integration_steps, &
-        !$OMP& density,energy_eV,dens_mat,temp_mat,vpar_mat,tetra_grid,iantithetic,tetra_physics, &
+        !$OMP& density,energy_eV,dens_mat,temp_mat,vpar_mat,tetra_grid,tetra_physics, &
         !$OMP& efcolf_mat,velrat_mat,enrat_mat,num_background_species,randcol,randcoli,maxcol,boole_precalc_collisions, counter) &
         !$OMP& FIRSTPRIVATE(particle_mass, particle_charge) &
-        !$OMP& PRIVATE(p,l,n,boole_particle_lost,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
+        !$OMP& PRIVATE(n,boole_particle_lost,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
         !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr,v, &
         !$OMP& i,efcolf,velrat,enrat,vpar_background,inorout,randnum,j,counter_loop)
 !
@@ -332,112 +325,103 @@ print*, 'calc_starting_conditions finished'
         !$OMP DO
 !
         !Loop over particles
-        do p = n_start,n_end/iantithetic !1,num_particles/iantithetic
-            do l = 1,iantithetic
-!
-                n = (p-1)*iantithetic+l
-               !$omp critical
-                !Counter for particles
-                kpart = kpart+1 !in general not equal to n becuase of parallelisation
-                boole_particle_lost = .false.
+        do n = n_start,n_end !1,num_particles
+            !if (.not.any(n.eq.(/31997,8046,16148,35518,12921,16318,3807,652,15296,19990,16976,6843,2603/))) cycle
+            !$omp critical
+            !Counter for particles
+            kpart = kpart+1 !in general not equal to n becuase of parallelisation
+            boole_particle_lost = .false.
 if (n_end.gt.10) then
-    if (modulo(kpart,int(n_end/10)).eq.0) then
-        print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
-    endif
-else
+if (modulo(kpart,int(n_end/10)).eq.0) then
     print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
 endif
-                !$omp end critical
+else
+print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
+endif
+            !$omp end critical
 
-                !set counter variables to zero
-                call set_counters_zero(counter_loop)
+            !set counter variables to zero
+            call set_counters_zero(counter_loop)
 
-                t_step = time_step
-                t_confined = 0
+            t_step = time_step
+            t_confined = 0
 !
-                !You need x_rand_beg(1,3), pitchpar(1) (between -1 and 1), energy is already given
-                x_rand_beg = start_pos_pitch_mat(1:3,n)
-                pitchpar = start_pos_pitch_mat(4,n)
+            !You need x_rand_beg(1,3), pitchpar(1) (between -1 and 1), energy is already given
+            x_rand_beg = start_pos_pitch_mat(1:3,n)
+            pitchpar = start_pos_pitch_mat(4,n)
 !
-                x = x_rand_beg
-                vpar = pitchpar * v0
-                vperp = sqrt(v0**2-vpar**2)
-                if (boole_boltzmann_energies) then
-                    v = sqrt(start_pos_pitch_mat(5,n)*ev2erg*2/particle_mass)
-                    vpar = pitchpar * v
-                    vperp = sqrt(v**2-vpar**2)
+            x = x_rand_beg
+            vpar = pitchpar * v0
+            vperp = sqrt(v0**2-vpar**2)
+            if (boole_boltzmann_energies) then
+                v = sqrt(start_pos_pitch_mat(5,n)*ev2erg*2/particle_mass)
+                vpar = pitchpar * v
+                vperp = sqrt(v**2-vpar**2)
+            endif
+!
+            i = 0
+            do while (t_confined.lt.time_step)
+                i = i+1
+                !Orbit integration
+                if (i.eq.1) then
+                    boole_initialized = .false.
                 endif
 !
-                i = 0
-                do while (t_confined.lt.time_step)
-                    i = i+1
-                    !Orbit integration
-                    if (i.eq.1) then
-                        boole_initialized = .false.
-                    endif
-                    if (boole_collisions) then
-                        if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
-                        if (.not.(ind_tetr.eq.-1)) then
-                            efcolf = efcolf_mat(:,ind_tetr)
-                            velrat = velrat_mat(:,ind_tetr)
-                            enrat = enrat_mat(:,ind_tetr)
-                            vpar_background = vpar_mat(:,ind_tetr)
-                            !print*, vpar_background
-!
-                            vpar = vpar - vpar_background(1)
-                            !since vpar_background actually has num_background_particles entries, consider giving it as an extra
-                            !optional input variable to stost, before randnum (maybe also check if radnum could then be set by
-                            !randnum = variable eve if vpar_background is not set and other variables are not set by name indexing)
-                            !since it came up when writing these lines: replace expressions like
-                            !"verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:)))" with "3,nvert"
-                            zet(1:3) = x !spatial position
-                            zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module
-                            zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
-!
-                            if (boole_precalc_collisions) then
-                                randnum = randcol(n,mod(i-1,randcoli)+1,:)
-                                call stost(efcolf,velrat,enrat,zet,t_step,1,err,(time_step-t_confined)*v0,randnum)
-                            else
-                                call stost(efcolf,velrat,enrat,zet,t_step,1,err,(time_step-t_confined)*v0)
-                            endif
-!
-                            t_step = t_step/v0
-                            x = zet(1:3)
-                            vpar = zet(5)*zet(4)*v0+vpar_background(1)
-                            vperp = sqrt(1-zet(5)**2)*zet(4)*v0
-!
-                            !optionally still change particle_mass, particle_charge and cm_over_e, e.g.:
-                            !particle_charge = particle_charge + echarge
-                            !particle_mass = particle_mass + ame - amp
-                            !cm_over_e = clight*particle_mass/particle_charge
+                if (boole_collisions) then
+                    if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
+                    if (.not.(ind_tetr.eq.-1)) then
+                        efcolf = efcolf_mat(:,ind_tetr)
+                        velrat = velrat_mat(:,ind_tetr)
+                        enrat = enrat_mat(:,ind_tetr)
+                        vpar_background = vpar_mat(:,ind_tetr)
+                        !print*, vpar_background
+                        vpar = vpar - vpar_background(1)
+                        !since vpar_background actually has num_background_particles entries, consider giving it as an extra
+                        !optional input variable to stost, before randnum (maybe also check if radnum could then be set by
+                        !randnum = variable eve if vpar_background is not set and other variables are not set by name indexing)
+                        !since it came up when writing these lines: replace expressions like
+                        !"verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:)))" with "3,nvert"
+                        zet(1:3) = x !spatial position
+                        zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module
+                        zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
+                        if (boole_precalc_collisions) then
+                            randnum = randcol(n,mod(i-1,randcoli)+1,:)
+                            call stost(efcolf,velrat,enrat,zet,t_step,1,err,(time_step-t_confined)*v0,randnum)
+                        else
+                            call stost(efcolf,velrat,enrat,zet,t_step,1,err,(time_step-t_confined)*v0)
                         endif
+                        t_step = t_step/v0
+                        x = zet(1:3)
+                        vpar = zet(5)*zet(4)*v0+vpar_background(1)
+                        vperp = sqrt(1-zet(5)**2)*zet(4)*v0
+                        !optionally still change particle_mass, particle_charge and cm_over_e, e.g.:
+                        !particle_charge = particle_charge + echarge
+                        !particle_mass = particle_mass + ame - amp
+                        !cm_over_e = clight*particle_mass/particle_charge
                     endif
+                endif
 !
-                    call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, &
-                                    & n,v,start_pos_pitch_mat,inorout,counter_loop,t_remain)
+                call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, &
+                                & n,v,start_pos_pitch_mat,inorout,counter_loop,t_remain)
 !
-                    t_confined = t_confined + t_step - t_remain
-                    !Lost particle handling
-                    if(ind_tetr.eq.-1) then
+                t_confined = t_confined + t_step - t_remain
+                !Lost particle handling
+                if(ind_tetr.eq.-1) then
 !write another if clause (if hole size = minimal .and. particle lost inside .and. boole_cut_out_hole = .true.
 !(use extra variable m in orbit routine (0 normally, 1 when lost outside, -1 when lost inside))),
 !if m = 1 do as now, if m = -1 select arbitrary newp position and update x, vpar and vperp)
-                        write(75,*) t_confined, x, n
-                        !print*, t_confined, x
-                            counter_loop%lost_particles = 1
-                            boole_particle_lost = .true.
-                        exit
-                    endif
+                    write(75,*) t_confined, x, n
+                    !print*, t_confined, x
+                        counter_loop%lost_particles = 1
+                        boole_particle_lost = .true.
+                    exit
+                endif
 !
-                    v = sqrt(vpar**2+vperp**2)
-                enddo
-                !$omp critical
-                count_integration_steps = count_integration_steps + i
-                maxcol = max(dble(i)/dble(randcoli),maxcol)
-                !$omp end critical
+                v = sqrt(vpar**2+vperp**2)
             enddo
-
             !$omp critical
+            count_integration_steps = count_integration_steps + i
+            maxcol = max(dble(i)/dble(randcoli),maxcol)
             call add_counter_loop_to_counter(counter_loop,counter)
             !$omp end critical
         enddo !n
@@ -609,32 +593,33 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
         t_remain = t_remain - t_pass
         if (iper_phi.ne.0) then
             counter_loop%phi_0_mappings = counter_loop%phi_0_mappings + 1!iper_phi
+            ! if ((counter_loop%phi_0_mappings.gt.n_mappings_ignored).and. &
+            !   & (any(n.eq.(/31997,8046,16148,35518,12921,16318,3807,652,15296,19990,16976,6843,2603/)))) then
+            !     !$omp critical
+            !         write(check_unit,*) n, x
+            !     !$omp end critical
+            ! endif
             if ((boole_poincare_plot).and.(counter_loop%phi_0_mappings.gt.n_mappings_ignored)) then
                 !$omp critical
-                    write(81,*) x
+                    write(pm_unit,*) x
                 !$omp end critical
             endif
-
             if ((boole_poincare_plot).and.(counter_loop%phi_0_mappings.eq.n_poincare_mappings)) then
                 boole_t_finished = .true.
-                !print*, n, counter_loop%phi_0_mappings, x
             endif
         endif
         if ((boole_divertor_intersection).and.(x(3).lt.z_div_plate)) then
-
+            boole_t_finished = .true.
            if ((counter_loop%phi_0_mappings.gt.n_mappings_ignored)) then
-!
             call calc_plane_intersection(x_save,x,z_div_plate)
+
             !$omp critical
-                write(81,*) x, n
+                write(di_unit,*) x, n
             !$omp end critical
                 counter_loop%divertor_intersections = 1
-!
            else
             counter_loop%ignored_particles  = 1
            endif
-           boole_t_finished = .true.
-!
         endif
 !
         !Orbit stops within cell, because "flight"-time t_step has finished
@@ -655,20 +640,23 @@ end subroutine orbit_timestep_gorilla_boltzmann
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-subroutine calc_plane_intersection(xcyl_save,xcyl,z_plane)
+subroutine calc_plane_intersection(x_save,x,z_plane)
 !
-    double precision, dimension(3), intent(in) :: xcyl_save
-    double precision, dimension(3), intent(inout) :: xcyl
+    use constants, only : pi
+!
+    double precision, dimension(3), intent(in) :: x_save
+    double precision, dimension(3), intent(inout) :: x
     double precision, intent(in) :: z_plane
-    double precision, dimension(3) :: xcart_save,xcart
     double precision :: rel_dist_z
 !
-    cyl_to_cart(xcyl_save,xcart_save)
-    cyl_to_cart(xcyl,xcart)
-!
-    rel_dist_z = (z_plane-xcyl_save(3))/(xcyl(3)-xcyl_save(3))
-    xcart = xcart_save + rel_dist_z*(xcart-xcart_save)
-    cart_to_cyl(xcart,xcyl)
+    rel_dist_z = (z_plane-x_save(3))/(x(3)-x_save(3))
+    x(1) = x_save(1) + rel_dist_z*(x(1)-x_save(1))
+    if (abs(x(2)-x_save(2)).gt.pi) then
+        x(2) = modulo(x_save(2) + 2*pi-abs(x(2)-x_save(2)),2*pi)
+    else
+        x(2) = x_save(2) + rel_dist_z*(x(2)-x_save(2))
+    endif
+    x(3) = z_plane
 !
 end subroutine calc_plane_intersection
 !
@@ -765,7 +753,9 @@ end subroutine calc_square_root_g
 !
 subroutine unlink_files
 !
-    call unlink('field_line_points.dat')
+    call unlink('poincare_maps.dat')
+    call unlink('divertor_intersections.dat')
+    call unlink('check.dat')
 !
 end subroutine unlink_files
 !
@@ -773,7 +763,9 @@ end subroutine unlink_files
 !
 subroutine open_files
 !
-    open(81, file = 'field_line_points.dat')
+    open(newunit = pm_unit, file = 'poincare_maps.dat')
+    open(newunit = di_unit, file = 'divertor_intersections.dat')
+    open(newunit = check_unit, file = 'check.dat')
 !
 end subroutine open_files
 !
@@ -781,7 +773,9 @@ end subroutine open_files
 !
 subroutine close_files
 !
-    close(81)
+    close(pm_unit)
+    close(di_unit)
+    close(check_unit)
 !
 end subroutine close_files
 !
