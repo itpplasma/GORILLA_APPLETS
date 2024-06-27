@@ -40,14 +40,16 @@ contains
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-subroutine field_line_tracing_inp()
+subroutine read_field_line_tracing_inp()
 !
-    open(unit=71, file='field_line_tracing.inp', status='unknown')
-    read(71,nml=field_line_tracing_nml)
-    close(71)
+    integer :: flt_inp_unit
+
+    open(newunit = flt_inp_unit, file='field_line_tracing.inp', status='unknown')
+    read(flt_inp_unit,nml=field_line_tracing_nml)
+    close(flt_inp_unit)
 !
     print *,'GORILLA: Loaded input data from field_line_tracing.inp'
-end subroutine field_line_tracing_inp
+end subroutine read_field_line_tracing_inp
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
@@ -68,18 +70,18 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     double precision, dimension(:), allocatable                    :: rand_matrix2
     integer                                                        :: i
     double precision, dimension(3)                                 :: x
-    integer                                                        :: ind_tetr_out,iface
+    integer                                                        :: ind_tetr_out,iface, seed_inp_unit
 !
 !!!!comment out the following section to make starting conditions really random!!!
 !
     integer,dimension(:), allocatable                              :: seed
     integer                                                        :: n
 !
-    open(unit = 85, file='seed.inp', status='old',action = 'read')
-    read(85,*) n
+    open(newunit = seed_inp_unit, file='seed.inp', status='old',action = 'read')
+    read(seed_inp_unit,*) n
     allocate(seed(n))
-    read(85,*) seed
-    close(85)
+    read(seed_inp_unit,*) seed
+    close(seed_inp_unit)
     CALL RANDOM_SEED (PUT=seed)
     deallocate(seed)
 !
@@ -182,18 +184,19 @@ subroutine calc_field_lines
     double precision :: m0,z0
     double precision, dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
     type(counter_t) counter, local_counter
+    integer :: ipert_unit, Te_unit, Ti_unit, ne_unit
 !
     !Load input for boltzmann computation
-    call field_line_tracing_inp()
+    call read_field_line_tracing_inp()
 !
     num_particles = int(n_particles)
     n_start = 1
     n_end = num_particles
 !
 
-    open(83, file='field_divB0.inp')
-    read(83,*) ipert        ! 0=eq only, 1=vac, 2=vac+plas no derivatives,
-    close(83)
+    open(newunit = ipert_unit, file='field_divB0.inp')
+    read(ipert_unit,*) ipert        ! 0=eq only, 1=vac, 2=vac+plas no derivatives,
+    close(ipert_unit)
 
     !Initialize GORILLA
     call initialize_gorilla(i_option,ipert)
@@ -263,17 +266,17 @@ print*, 'calc_starting_conditions finished'
         allocate(dens_mat_tetr(num_background_species-1,ntetr))
         allocate(temp_mat_tetr(num_background_species,ntetr))
 !
-        open(78, file = 'background/Te_d.dat')
-        read(78,'(e16.9)') (temp_mat_tetr(2,i),i=1,ntetr/grid_size(2),3)
-        close(78)
+        open(newunit = Te_unit, file = 'background/Te_d.dat')
+        read(Te_unit,'(e16.9)') (temp_mat_tetr(2,i),i=1,ntetr/grid_size(2),3)
+        close(Te_unit)
 !
-        open(79, file = 'background/Ti_d.dat')
-        read(79,'(e16.9)') (temp_mat_tetr(1,i),i=1,ntetr/grid_size(2),3)
-        close(79)
+        open(newunit = Ti_unit, file = 'background/Ti_d.dat')
+        read(Ti_unit,'(e16.9)') (temp_mat_tetr(1,i),i=1,ntetr/grid_size(2),3)
+        close(Ti_unit)
 !
-        open(80, file = 'background/ne_d.dat')
-        read(80,'(e16.9)') (dens_mat_tetr(1,i),i=1,ntetr/grid_size(2),3)
-        close(80)
+        open(newunit = ne_unit, file = 'background/ne_d.dat')
+        read(ne_unit,'(e16.9)') (dens_mat_tetr(1,i),i=1,ntetr/grid_size(2),3)
+        close(ne_unit)
 !
         do i = 1,grid_size(2)-1
             temp_mat_tetr(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = temp_mat_tetr(:,1:ntetr/grid_size(2):3)
@@ -579,12 +582,6 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
         t_remain = t_remain - t_pass
         if (iper_phi.ne.0) then
             local_counter%phi_0_mappings = local_counter%phi_0_mappings + 1!iper_phi
-            ! if ((local_counter%phi_0_mappings.gt.n_mappings_ignored).and. &
-            !   & (any(n.eq.(/31997,8046,16148,35518,12921,16318,3807,652,15296,19990,16976,6843,2603/)))) then
-            !     !$omp critical
-            !         write(check_unit,*) n, x
-            !     !$omp end critical
-            ! endif
             if ((boole_poincare_plot).and.(local_counter%phi_0_mappings.gt.n_mappings_ignored) &
                                      .and.(local_counter%phi_0_mappings.le.n_poincare_mappings)) then
                 !$omp critical
@@ -601,7 +598,7 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
 
         if ((boole_divertor_intersection).and.(x(3).lt.z_div_plate)) then
             boole_t_finished = .true.
-           if ((local_counter%phi_0_mappings.gt.n_mappings_ignored)) then
+           if (local_counter%phi_0_mappings.gt.n_mappings_ignored) then
             call calc_plane_intersection(x_save,x,z_div_plate)
 
             !$omp critical
