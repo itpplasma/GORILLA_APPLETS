@@ -3,13 +3,13 @@
 &boltzmann_nml
 !
   !time for tracing particles
-  time_step = 1.80d-30 ,
+  time_step = 1.80d-6 ,
 !
   !Kinetic energy of particles
   energy_eV = 3.5d3 ,
 !
   !Number of particles to be traced
-  n_particles = 1.0d6,
+  n_particles = 1.0d4,
 !
   !Compute squares of moments 
   boole_squared_moments = .false.,
@@ -51,7 +51,7 @@
   seed_option = 2 ,
 !
   !Boolean for precalculation of random numbers
-  boole_random_precalc = .true. ,
+  !boole_random_precalc = .true. ,
 !
   !Filename for total dwell times of particles
   filename_dwell_times = 'dwell_times.dat' ,

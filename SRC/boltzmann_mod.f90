@@ -127,12 +127,12 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
         if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
     else
         call RANDOM_NUMBER(rand_matrix1)
-        ! start_pos_pitch_mat(ind_a,:) = amin + (amax - amin)*rand_matrix1(ind_a,:) !r in cylindrical, s in flux coordinates
-        ! start_pos_pitch_mat(ind_b,:) = 2*pi*rand_matrix1(ind_b,:) !phi in cylindrical and flux coordinates
-        ! start_pos_pitch_mat(ind_c,:) = cmin + (cmax - cmin)*rand_matrix1(ind_c,:) !z in cylindrical, theta in flux coordinates
-        start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r
-        start_pos_pitch_mat(ind_b,:) = 0.0d0  !1d-1 !phi in cylindrical and flux coordinates
-        start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
+        start_pos_pitch_mat(ind_a,:) = amin + (amax - amin)*rand_matrix1(ind_a,:) !r in cylindrical, s in flux coordinates
+        start_pos_pitch_mat(ind_b,:) = 2*pi*rand_matrix1(ind_b,:) !phi in cylindrical and flux coordinates
+        start_pos_pitch_mat(ind_c,:) = cmin + (cmax - cmin)*rand_matrix1(ind_c,:) !z in cylindrical, theta in flux coordinates
+        ! start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r
+        ! start_pos_pitch_mat(ind_b,:) = 0.0d0  !1d-1 !phi in cylindrical and flux coordinates
+        ! start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
     endif
 !
     call RANDOM_NUMBER(rand_matrix2)
@@ -197,6 +197,7 @@ subroutine calc_boltzmann
     double precision, dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
     integer :: pf_unit, Te_unit, Ti_unit, ne_unit, et_unit, rp_unit, dm_unit, pmss_unit, p_moments_unit , t_moments_unit, &
                vc_unit, pv_unit, vi_unit, rpv_unit, bd_unit, epv_unit, ipert_unit
+    !double precision :: rrr,ppp,zzz,Br,Bp,Bz,dBrdR,dBrdp,dBrdZ,dBpdR,dBpdp,dBpdZ,dBzdR,dBzdp,dBzdZ
 
 !
     ! open(35, file = 'outliers.dat')
@@ -227,6 +228,8 @@ subroutine calc_boltzmann
 
     !Initialize GORILLA
     call initialize_gorilla(i_option,ipert)
+    ! call field(215.d0,0.0d0,12.0d0,Br,Bp,Bz,dBrdR,dBrdp,dBrdZ,dBpdR,dBpdp,dBpdZ,dBzdR,dBzdp,dBzdZ)
+    ! print*, Br,Bp,Bz, sqrt(Br**2+Bp**2+Bz**2)
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! delete this again afterwards !!!!!!!!!!!!!!!!!!!!!!!
     if (ispecies.eq.4) particle_charge = 15*echarge
