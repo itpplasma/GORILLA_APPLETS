@@ -126,7 +126,7 @@
 !
 !-------------------------------------------------------------------------------------------!
 !
-        case(11) !Do the boltzmanntest
+        case(11) !Do field line tracing
 !
             call calc_field_lines
 !
