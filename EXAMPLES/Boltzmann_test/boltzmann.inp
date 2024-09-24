@@ -30,14 +30,14 @@
   boole_boltzmann_energies = .true.,
 !
   !make density a linear function of poloidal flux
-  boole_linear_density_simulation = .true.,
+  boole_linear_density_simulation = .false.,
 !
   !always initiate pairs of particles where both particles start at the same position but move
   !in opposite direction, this helps to reduce statistical noise
-  boole_antithetic_variate = .true.,
+  boole_antithetic_variate = .false.,
 !
   !make temperature a linear function of poloidal flux
-  boole_linear_temperature_simulation = .true.,
+  boole_linear_temperature_simulation = .false.,
 !
   !Set integrator type
   !(must be 1, otherwise it currently does not work)
