@@ -24,7 +24,18 @@ module boltzmann_mod
     logical :: boole_collisions, boole_squared_moments, boole_point_source, boole_precalc_collisions
     double precision, dimension(:,:,:), allocatable :: randcol
     integer :: randcoli = int(1.0d5)
-    integer :: pm_unit, di_unit
+    integer :: et_unit, rp_unit, pm_unit, p_moments_unit, pmss_unit, ti_unit, &
+               fm_unit, sqrtg_unit, rpv_unit, ric_unit, epv_unit, bd_unit, hp_unit, tn_unit, di_unit, tm_unit
+    type boole_writing_data_t
+        logical :: vertex_indices = .true.
+        logical :: vertex_coordinates = .false.
+        logical :: prism_volumes = .false.
+        logical :: refined_prism_volumes = .false.
+        logical :: boltzmann_density = .false.
+        logical :: electric_potential = .false.
+        logical :: moments = .false.
+        logical :: fourier_moments = .false.
+    end type boole_writing_data_t
 !
     !Namelist for boltzmann input
     NAMELIST /boltzmann_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions, &
@@ -59,7 +70,6 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     use tetra_physics_mod, only: coord_system
     use collis_ions, only: collis_init, stost
 !
-    implicit none
     double precision, intent(in)                                   :: v0
     double precision, dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
     double precision                                               :: rand_scalar, vpar, vperp
@@ -180,8 +190,6 @@ subroutine calc_boltzmann
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
 !
-    implicit none
-!
     double precision, dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
                                                      velrat_mat, enrat_mat, dens_mat_tetr, temp_mat_tetr
     double precision :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v, maxcol
@@ -195,13 +203,8 @@ subroutine calc_boltzmann
     double complex, dimension(:,:), allocatable :: single_particle_tetr_moments
     double precision :: m0,z0,hamiltonian_time
     double precision, dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
-    integer :: pf_unit, Te_unit, Ti_unit, ne_unit, et_unit, rp_unit, dm_unit, pmss_unit, p_moments_unit , t_moments_unit, &
-               vc_unit, pv_unit, vi_unit, rpv_unit, bd_unit, epv_unit, ipert_unit
-    !double precision :: rrr,ppp,zzz,Br,Bp,Bz,dBrdR,dBrdp,dBrdZ,dBpdR,dBpdp,dBpdZ,dBzdR,dBzdp,dBzdZ
+    integer :: Te_unit, Ti_unit, ne_unit, t_moments_unit, ipert_unit
 
-!
-    ! open(35, file = 'outliers.dat')
-    ! close(35,status='delete')
     !Load input for boltzmann computation
     call read_boltzmann_inp()
 !
@@ -267,20 +270,13 @@ print*, 'calc_starting_conditions started'
 print*, 'calc_starting_conditions finished'
 !
     !compute maximum poloidal flux
-    call unlink('poloidal_flux.dat')
-    open(newunit = pf_unit, file = 'poloidal_flux.dat')
     max_poloidal_flux = 0
     min_poloidal_flux = tetra_physics(1)%Aphi1
     do i = 1, ntetr
         max_poloidal_flux = max(max_poloidal_flux,tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi* &
                             & (verts([1,2,3],tetra_grid(i)%ind_knot(4))-verts([1,2,3],tetra_grid(i)%ind_knot(1)))))
         min_poloidal_flux = min(min_poloidal_flux,tetra_physics(i)%Aphi1)
-        write(pf_unit,*) tetra_physics(i)%Aphi1
     enddo
-    write(pf_unit,*) max_poloidal_flux
-    close(pf_unit)
-    !tetra_physics(i)%gAphi, 
-    !minval(verts(ind_a,tetra_grid(i)%ind_knot(4)))
 !
     if (boole_collisions) then
         num_background_species = 2 
@@ -364,13 +360,9 @@ print*, 'calc_starting_conditions finished'
         iantithetic = 1
         if (boole_antithetic_variate) iantithetic = 2
         count_integration_steps = 0
-        call unlink('exit_times.dat')
-        call unlink('remaining_particles.dat')
-        call unlink('poincare_maps.dat')
-        open(newunit = et_unit, file = 'exit_times.dat')
-        open(newunit = rp_unit, file = 'remaining_particles.dat')
-        open(newunit = pm_unit, file = 'poincare_maps.dat')
-        open(newunit = di_unit, file = 'divertor_intersections.dat')
+
+        call unlink_files
+        call open_files_before_main_loop
 
         if (boole_collisions) deallocate(efcolf,velrat,enrat)
 !
@@ -526,10 +518,7 @@ endif
         !$OMP END DO
         !$OMP END PARALLEL
 !
-        close(et_unit)
-        close(rp_unit)
-        close(pm_unit)
-        close(di_unit)
+
         if(.not.boole_squared_moments) then
             prism_moments = (tetr_moments(:,tetra_indices_per_prism(:,1)) + &
                         & tetr_moments(:,tetra_indices_per_prism(:,2)) + &
@@ -559,127 +548,81 @@ endif
     print*, 'average number of toroidal revolutions = ', counter_phi_0_mappings/n_particles
     print*, 'average number of integration steps = ', count_integration_steps/n_particles
 !
-    !delete all files before writing them to avoid confusion about files that are lying
-    !around from previous runs and are commented out in the current run
-    call unlink('data_mingle.dat')
-    call unlink('prism_moments.dat')
-    call unlink('prism_moments_summed_squares.dat')
-    call unlink(filename_vertex_coordinates)
-    call unlink(filename_vertex_indices)
-    call unlink('prism_volumes.dat')
-    call unlink('tetra_indices_per_prism.dat')
-    call unlink('fourier_moments.dat')
-    call unlink('sqrt_g.dat')
-    call unlink('refined_prism_volumes.dat')
-    call unlink('r_integrand_constants.dat')
-    call unlink('elec_pot_vec.dat')
-    call unlink('boltzmann_densities.dat')
-    call unlink('h_phi.dat')
-    call unlink('tetrahedron_neighbours.dat')
-!
-    open(newunit = dm_unit,file='data_mingle.dat')
-    write(dm_unit,*) 1.d0-dble(n_lost_particles)/dble(num_particles) !confined fraction
-    write(dm_unit,*) grid_size(1) !grid size in r/s direction
-    write(dm_unit,*) grid_size(2) !grid size in phi direction
-    write(dm_unit,*) grid_size(3) !grid size in z/theta direction
-    write(dm_unit,*) time_step !total tracing time
-    close(dm_unit)
-!
-    if (n_moments.gt.0) then
-        open(newunit = p_moments_unit, file = 'prism_moments.dat')
-        do l = 1,n_prisms
-            do i = 1,n_moments - 1
-                write(p_moments_unit,'(2ES20.10E4)',advance="no") real(prism_moments(i,l)), aimag(prism_moments(i,l))
-            enddo
-                write(p_moments_unit,'(2ES20.10E4)') real(prism_moments(n_moments,l)), aimag(prism_moments(n_moments,l))
-        enddo
-        close(p_moments_unit)
-        if (boole_squared_moments) then
-            open(newunit = pmss_unit, file = 'prism_moments_summed_squares.dat')
-            do l = 1,n_prisms
-                do i = 1,n_moments - 1
-                    write(pmss_unit,'(2ES20.10E4)',advance="no") real(prism_moments_squared(i,l)), &
-                                                                    & aimag(prism_moments_squared(i,l))
-                enddo
-                    write(pmss_unit,'(2ES20.10E4)') real(prism_moments_squared(n_moments,l)), &
-                                                       & aimag(prism_moments_squared(n_moments,l))
-            enddo
-            close(pmss_unit)
-        endif
-        open(newunit = t_moments_unit, file = 'tetr_moments.dat')
-        do l = 1,ntetr
-            do i = 1,n_moments - 1
-                write(t_moments_unit,'(2ES20.10E4)',advance="no") real(tetr_moments(i,l)), aimag(tetr_moments(i,l))
-            enddo
-                write(t_moments_unit,'(2ES20.10E4)') real(tetr_moments(n_moments,l)), aimag(tetr_moments(n_moments,l))
-        enddo
-        close(t_moments_unit)
-    endif
-!
-    101 format(1000(e21.14,x))
-    if (coord_system.eq.1) then
-        ![R,phi,Z]: Write vertex coordinates to File
-        open(newunit = vc_unit, file=filename_vertex_coordinates)
-        do i=1, nvert
-            write(vc_unit,101) verts_rphiz(1, i), verts_rphiz(2, i), verts_rphiz(3, i)
-        end do
-        close(vc_unit)
-    elseif (coord_system.eq.2) then
-        ![s,theta,phi]: Write vertex coordinates to File
-        open(newunit = vc_unit, file=filename_vertex_coordinates)
-        do i=1, nvert
-            write(vc_unit,101) verts_sthetaphi(1, i), verts_sthetaphi(2, i), verts_sthetaphi(3, i)
-        end do
-        close(vc_unit)
-    endif
-!
-    !Write vertex indices to File
-    open(newunit = vi_unit, file=filename_vertex_indices)
-    do i=1, ntetr
-        write(vi_unit, *) tetra_grid(i)%ind_knot([1, 2, 3, 4])
-    end do
-    close(vi_unit)
-! !
-    open(newunit = pv_unit, file = 'prism_volumes.dat')
-    write(pv_unit,'(ES20.10E4)') prism_volumes
-    close(pv_unit)
-!
-!     open(62, file = 'fourier_moments.dat')
-!     do l = 1,n_triangles
-!         do i = 1,n_fourier_modes-1
-!             write(62,'(2ES20.10E4)',advance="no") real(moments_in_frequency_space(1,l,i)), &
-!                                                   aimag(moments_in_frequency_space(1,l,i))!'(',real(moments_in_frequency_space(1,1,i,1)),',',aimag(moments_in_frequency_space(1,1,i,1)),')'
-!         enddo
-!             write(62,'(2ES20.10E4)') real(moments_in_frequency_space(1,l,n_fourier_modes)), &
-!                                      aimag(moments_in_frequency_space(1,l,n_fourier_modes))
-!     enddo   
-!     close(62)
+    !call write_data_to_files
 
-    open(newunit = rpv_unit, file = 'refined_prism_volumes.dat')
-    write(rpv_unit,'(ES20.10E4)') refined_prism_volumes
-    close(rpv_unit)
-!
-    open(newunit = epv_unit, file = 'elec_pot_vec.dat')
-    write(epv_unit,'(ES20.10E4)') elec_pot_vec
-    close(epv_unit)
+!     call open_files_for_writing_data_after_main_loop
 ! !
-    open(newunit = bd_unit, file = 'boltzmann_densities.dat')
-    write(bd_unit,'(ES20.10E4)') n_b
-    close(bd_unit)
+!     if (n_moments.gt.0) then
+!         do l = 1,n_prisms
+!             do i = 1,n_moments - 1
+!                 write(p_moments_unit,'(2ES20.10E4)',advance="no") real(prism_moments(i,l)), aimag(prism_moments(i,l))
+!             enddo
+!                 write(p_moments_unit,'(2ES20.10E4)') real(prism_moments(n_moments,l)), aimag(prism_moments(n_moments,l))
+!         enddo
+!         if (boole_squared_moments) then
+!             do l = 1,n_prisms
+!                 do i = 1,n_moments - 1
+!                     write(pmss_unit,'(2ES20.10E4)',advance="no") real(prism_moments_squared(i,l)), &
+!                                                                     & aimag(prism_moments_squared(i,l))
+!                 enddo
+!                     write(pmss_unit,'(2ES20.10E4)') real(prism_moments_squared(n_moments,l)), &
+!                                                        & aimag(prism_moments_squared(n_moments,l))
+!             enddo
+!         endif
+!         do l = 1,ntetr
+!             do i = 1,n_moments - 1
+!                 write(t_moments_unit,'(2ES20.10E4)',advance="no") real(tetr_moments(i,l)), aimag(tetr_moments(i,l))
+!             enddo
+!                 write(t_moments_unit,'(2ES20.10E4)') real(tetr_moments(n_moments,l)), aimag(tetr_moments(n_moments,l))
+!         enddo
+!     endif
+! !
+!     101 format(1000(e21.14,x))
+!     if (coord_system.eq.1) then
+!         ![R,phi,Z]: Write vertex coordinates to File
+!         do i=1, nvert
+!             write(vc_unit,101) verts_rphiz(1, i), verts_rphiz(2, i), verts_rphiz(3, i)
+!         end do
+!     elseif (coord_system.eq.2) then
+!         ![s,theta,phi]: Write vertex coordinates to File
+!         do i=1, nvert
+!             write(vc_unit,101) verts_sthetaphi(1, i), verts_sthetaphi(2, i), verts_sthetaphi(3, i)
+!         end do
+!     endif
+! !
+!     !Write vertex indices to File
+!     do i=1, ntetr
+!         write(vi_unit, *) tetra_grid(i)%ind_knot([1, 2, 3, 4])
+!     end do
+! ! !
+!     write(pv_unit,'(ES20.10E4)') prism_volumes
+! !
+! !     open(62, file = 'fourier_moments.dat')
+! !     do l = 1,n_triangles
+! !         do i = 1,n_fourier_modes-1
+! !             write(62,'(2ES20.10E4)',advance="no") real(moments_in_frequency_space(1,l,i)), &
+! !                                                   aimag(moments_in_frequency_space(1,l,i))!'(',real(moments_in_frequency_space(1,1,i,1)),',',aimag(moments_in_frequency_space(1,1,i,1)),')'
+! !         enddo
+! !             write(62,'(2ES20.10E4)') real(moments_in_frequency_space(1,l,n_fourier_modes)), &
+! !                                      aimag(moments_in_frequency_space(1,l,n_fourier_modes))
+! !     enddo   
+! !     close(62)
+
+
+!     write(rpv_unit,'(ES20.10E4)') refined_prism_volumes
+!     write(epv_unit,'(ES20.10E4)') elec_pot_vec
+!     write(bd_unit,'(ES20.10E4)') n_b
+
+!     call close_files
 !
 PRINT*, 'particle mass = ', particle_mass
-! PRINT*, 'large radius = ', mag_axis_R0
-! PRINT*, 'parallel velocity = ', vpar
 PRINT*, 'absolute value of velocity = ', v0
-! PRINT*, 'perpendicular velocity = ', vperp
-! PRINT*, 'pitch par =', pitchpar
 PRINT*, 'particle charge = ', particle_charge
 PRINT*, 'temperature = ', ev2erg*energy_eV
 print*, 'energy in eV = ', energy_eV
 print*, 'tracing time in seconds = ', time_step
 print*, 'number of particles left through the outside = ', lost_outside
 print*, 'number of particles left through the inside = ', lost_inside
-!PRINT*, 'boole_refined_sqrt_g = ', boole_refined_sqrt_g
 !
 deallocate(start_pos_pitch_mat, tetr_moments, prism_moments, single_particle_tetr_moments)
 if (boole_squared_moments) deallocate(prism_moments_squared)
@@ -702,8 +645,6 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     use find_tetra_mod, only: find_tetra
     use constants, only: pi, ev2erg
     use tetra_grid_mod, only: tetra_grid, ntetr
-!
-    implicit none
 !
     double precision, dimension(3), intent(inout)   :: x
     double precision, intent(inout)                 :: vpar,vperp
@@ -974,8 +915,6 @@ subroutine calc_volume_integrals
     use tetra_grid_settings_mod, only: grid_size, n_field_periods
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
 !
-    implicit none
-!
     integer                                     :: i,k
     integer, dimension(2)                       :: triangle_indices
     double precision, dimension(3)              :: r_values, z_values, r_values_intermediate, z_values_intermediate, gradient
@@ -1186,8 +1125,6 @@ subroutine fourier_transform_moments
     use constants, only: pi
     use tetra_grid_settings_mod, only: grid_size
 !
-    implicit none 
-!
     integer                                                        :: n,m,j,k,p,q,l
     integer                                                        :: pmff_unit
     complex                                                        :: i
@@ -1245,8 +1182,6 @@ subroutine calc_square_root_g
     use tetra_physics_mod, only: tetra_physics, hamiltonian_time
     use tetra_grid_mod, only: ntetr, tetra_grid, verts_rphiz
 !
-    implicit none
-!
     integer            :: ind_tetr
 !
     allocate(sqrt_g(ntetr,7))
@@ -1276,47 +1211,195 @@ end subroutine calc_square_root_g
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-!!!!!!!!!!!!!!!!! The following subroutine is currently not made use of !!!!!!!!!!!!
+subroutine write_data_to_files
+
+    type(boole_writing_data_t) :: boole_writing_data
+
+    if (boole_writing_data%vertex_indices) call write_vertex_indices
+    if (boole_writing_data%vertex_coordinates) call write_vertex_coordinates
+    if (boole_writing_data%prism_volumes) call write_prism_volumes
+    if (boole_writing_data%refined_prism_volumes) call write_refined_prism_volumes
+    if (boole_writing_data%boltzmann_density) call write_boltzmann_density
+    if (boole_writing_data%electric_potential) call write_electric_potential
+    if (boole_writing_data%moments) call write_moments
+    if (boole_writing_data%fourier_moments) call write_fourier_moments
+!
+    if (n_moments.gt.0) then
+        do l = 1,n_prisms
+            do i = 1,n_moments - 1
+                write(p_moments_unit,'(2ES20.10E4)',advance="no") real(prism_moments(i,l)), aimag(prism_moments(i,l))
+            enddo
+                write(p_moments_unit,'(2ES20.10E4)') real(prism_moments(n_moments,l)), aimag(prism_moments(n_moments,l))
+        enddo
+        if (boole_squared_moments) then
+            do l = 1,n_prisms
+                do i = 1,n_moments - 1
+                    write(pmss_unit,'(2ES20.10E4)',advance="no") real(prism_moments_squared(i,l)), &
+                                                                    & aimag(prism_moments_squared(i,l))
+                enddo
+                    write(pmss_unit,'(2ES20.10E4)') real(prism_moments_squared(n_moments,l)), &
+                                                       & aimag(prism_moments_squared(n_moments,l))
+            enddo
+        endif
+        do l = 1,ntetr
+            do i = 1,n_moments - 1
+                write(t_moments_unit,'(2ES20.10E4)',advance="no") real(tetr_moments(i,l)), aimag(tetr_moments(i,l))
+            enddo
+                write(t_moments_unit,'(2ES20.10E4)') real(tetr_moments(n_moments,l)), aimag(tetr_moments(n_moments,l))
+        enddo
+    endif
+!
+
+!
+
+!
+!     open(62, file = 'fourier_moments.dat')
+!     do l = 1,n_triangles
+!         do i = 1,n_fourier_modes-1
+!             write(62,'(2ES20.10E4)',advance="no") real(moments_in_frequency_space(1,l,i)), &
+!                                                   aimag(moments_in_frequency_space(1,l,i))!'(',real(moments_in_frequency_space(1,1,i,1)),',',aimag(moments_in_frequency_space(1,1,i,1)),')'
+!         enddo
+!             write(62,'(2ES20.10E4)') real(moments_in_frequency_space(1,l,n_fourier_modes)), &
+!                                      aimag(moments_in_frequency_space(1,l,n_fourier_modes))
+!     enddo   
+!     close(62)
+
+
+    write(rpv_unit,'(ES20.10E4)') refined_prism_volumes
+    write(epv_unit,'(ES20.10E4)') elec_pot_vec
+    write(bd_unit,'(ES20.10E4)') n_b
+
+    call close_files
+
+end subroutine write_data_to_files
+!
+subroutine write_vertex_indices
+
+    use tetra_grid_mod, only: ntetr, tetra_grid
+
+    integer :: vi_unit
+
+    open(newunit = vi_unit, file = filename_vertex_indices)
+    do i=1, ntetr
+        write(vi_unit, *) tetra_grid(i)%ind_knot([1, 2, 3, 4])
+    end do
+    close(vi_unit)
+
+end subroutine write_vertex_indices
+!
+subroutine write_vertex_coordinates
+
+    use tetra_physics_mod, only: coord_system
+    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
+
+    integer :: vc_unit
+
+    open(newunit = vc_unit, file = filename_vertex_coordinates)
+    101 format(1000(e21.14,x))
+    if (coord_system.eq.1) then
+        ![R,phi,Z]: Write vertex coordinates to file
+        do i=1, nvert
+            write(vc_unit,101) verts_rphiz(1, i), verts_rphiz(2, i), verts_rphiz(3, i)
+        end do
+    elseif (coord_system.eq.2) then
+        ![s,theta,phi]: Write vertex coordinates to file
+        do i=1, nvert
+            write(vc_unit,101) verts_sthetaphi(1, i), verts_sthetaphi(2, i), verts_sthetaphi(3, i)
+        end do
+    endif
+    close(vc_unit)
+
+end subroutine write_vertex_coordinates
+!
+subroutine write_prism_volumes(prism_volumes)
+
+    integer :: pv_unit
+
+    open(newunit = pv_unit, file = 'prism_volumes.dat')
+    write(pv_unit,'(ES20.10E4)') prism_volumes
+    close(pv_unit)
+
+end subroutine write_prism_volumes
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-    subroutine read_in_starting_conditions(start_pos_pitch_mat, n_start_pos)
-    double precision, dimension(:,:), allocatable, intent(out) :: start_pos_pitch_mat
-    integer, intent(out)                                       :: n_start_pos
-    integer                                                    :: file_id_read_start, i_os, i
-! 
-    file_id_read_start = 100
-    open(newunit=file_id_read_start, file = filename_starting_conditions, iostat=i_os, status='old')
-!
-        !Error, if file does not exist.
-        if ( i_os /= 0 ) then
-                !Symmetry flux coordinates
-                    print *, "Error opening file with starting positions and starting pitch parameter: ", &
-                    & filename_starting_conditions
-            stop
-        endif
-!
-        !Count number of lines
-            n_start_pos = 0
-!
-        do
-            read(file_id_read_start, '(A)', iostat=i_os)
-            if (i_os /= 0) exit
-            n_start_pos = n_start_pos + 1
-        end do
-!
-        print*, "File with starting positions and pitch parameter contains ", n_start_pos, "starting values."
-!
-        allocate(start_pos_pitch_mat(n_start_pos,4))
-!
-        rewind(file_id_read_start)
-!
-        do i = 1, n_start_pos
-            read(file_id_read_start,*) start_pos_pitch_mat(i,:)
-        end do
-!
-    close(file_id_read_start)
+subroutine unlink_files
 
-end subroutine read_in_starting_conditions
+    call unlink('poloidal_flux.dat')
+    call unlink('exit_times.dat')
+    call unlink('remaining_particles.dat')
+    call unlink('poincare_maps.dat')
+    call unlink('data_mingle.dat')
+    call unlink('prism_moments.dat')
+    call unlink('prism_moments_summed_squares.dat')
+    call unlink(filename_vertex_coordinates)
+    call unlink(filename_vertex_indices)
+    call unlink('prism_volumes.dat')
+    call unlink('tetra_indices_per_prism.dat')
+    call unlink('fourier_moments.dat')
+    call unlink('sqrt_g.dat')
+    call unlink('refined_prism_volumes.dat')
+    call unlink('r_integrand_constants.dat')
+    call unlink('elec_pot_vec.dat')
+    call unlink('boltzmann_densities.dat')
+    call unlink('h_phi.dat')
+    call unlink('tetrahedron_neighbours.dat')
+    call unlink('divertor_intersections.dat')
+    call unlink('tetr_moments.dat')
+
+end subroutine unlink_files
+!
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
+subroutine open_files_before_main_loop
+!
+    open(newunit = et_unit, file = 'exit_times.dat')
+    open(newunit = rp_unit, file = 'remaining_particles.dat')
+    open(newunit = pm_unit, file = 'poincare_maps.dat')
+    open(newunit = di_unit, file = 'divertor_intersections.dat')
+!
+end subroutine open_files_before_main_loop
+!
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
+subroutine open_files_for_writing_data_after_main_loop(boole_writing_data)
+
+    open(newunit = p_moments_unit, file = 'prism_moments.dat')
+    open(newunit = pmss_unit, file = 'prism_moments_summed_squares.dat')
+    open(newunit = ti_unit, file = 'tetra_indices_per_prism.dat')
+    open(newunit = fm_unit, file = 'fourier_moments.dat')
+    open(newunit = sqrtg_unit, file = 'sqrt_g.dat')
+    open(newunit = rpv_unit, file = 'refined_prism_volumes.dat')
+    open(newunit = ric_unit, file = 'r_integrand_constants.dat')
+    open(newunit = epv_unit, file = 'elec_pot_vec.dat')
+    open(newunit = bd_unit, file = 'boltzmann_densities.dat')
+    open(newunit = hp_unit, file = 'h_phi.dat')
+    open(newunit = tn_unit, file = 'tetrahedron_neighbours.dat')
+    open(newunit = tm_unit, file = 'tetr_moments.dat')
+!
+end subroutine open_files_for_writing_data_after_main_loop
+!
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
+subroutine close_files
+!
+    close(et_unit)
+    close(rp_unit)
+    close(pm_unit)
+    close(p_moments_unit)
+    close(pmss_unit)
+    close(ti_unit)
+    close(fm_unit)
+    close(sqrtg_unit)
+    close(rpv_unit)
+    close(ric_unit)
+    close(epv_unit)
+    close(bd_unit)
+    close(hp_unit)
+    close(tn_unit)
+    close(di_unit)
+    close(tm_unit)
+!
+end subroutine close_files
 !
 end module boltzmann_mod

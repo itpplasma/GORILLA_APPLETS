@@ -17,7 +17,7 @@ module field_line_tracing_mod
     double precision, dimension(:,:,:), allocatable :: randcol
     integer :: randcoli = int(1.0d5)
     integer :: n_poincare_mappings, n_mappings_ignored
-    integer :: pm_unit, di_unit, check_unit !file units
+    integer :: pm_unit, di_unit !file units
     type counter_t
         integer :: lost_particles = 0
         integer :: tetr_pushings = 0
@@ -183,7 +183,7 @@ subroutine calc_field_lines
     double precision, dimension(5) :: z, zet
     double precision :: m0,z0
     double precision, dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
-    type(counter_t) counter, local_counter
+    type(counter_t) :: counter, local_counter
     integer :: ipert_unit, Te_unit, Ti_unit, ne_unit
 !
     !Load input for boltzmann computation
@@ -480,7 +480,7 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
     double precision                                :: perpinv,speed, r, z, phi, B, phi_elec_func, wlin
     double precision, dimension(:,:)                :: start_pos_pitch_mat
     double precision, dimension(3)                  :: xyz, xyz_save
-    type(counter_t), intent(inout)              :: local_counter
+    type(counter_t), intent(inout)                  :: local_counter
 
 !
     !If orbit_timestep is called for the first time without grid position
@@ -753,7 +753,6 @@ subroutine open_files
 !
     open(newunit = pm_unit, file = 'poincare_maps.dat')
     open(newunit = di_unit, file = 'divertor_intersections.dat')
-    open(newunit = check_unit, file = 'check.dat')
 !
 end subroutine open_files
 !
@@ -763,7 +762,6 @@ subroutine close_files
 !
     close(pm_unit)
     close(di_unit)
-    close(check_unit)
 !
 end subroutine close_files
 !
