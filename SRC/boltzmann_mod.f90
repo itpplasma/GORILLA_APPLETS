@@ -6,7 +6,7 @@ module boltzmann_mod
     double precision :: time_step,energy_eV, min_poloidal_flux, max_poloidal_flux, amax
     integer, dimension(:,:), allocatable :: tetra_indices_per_prism
     double precision, dimension(:), allocatable :: prism_volumes, refined_prism_volumes, elec_pot_vec, n_b
-    double precision, dimension(:,:), allocatable :: verts, sqrt_g, r_integrand_constants
+    double precision, dimension(:,:), allocatable :: verts, r_integrand_constants
     double complex, dimension(:,:), allocatable :: tetr_moments, prism_moments, &
                                                    & prism_moments_squared
     double complex, dimension(:,:,:), allocatable :: moments_in_frequency_space
@@ -17,18 +17,15 @@ module boltzmann_mod
     double complex, dimension(:,:), allocatable :: weights
     double precision, dimension(:), allocatable :: J_perp, poloidal_flux, temperature_vector
     logical :: boole_refined_sqrt_g, boole_boltzmann_energies
-    character(1024) :: filename_dwell_times, filename_starting_conditions, filename_vertex_coordinates, &
-    & filename_vertex_indices
     integer :: n_fourier_modes, n_triangles
     logical :: boole_linear_density_simulation, boole_antithetic_variate, boole_linear_temperature_simulation
     logical :: boole_collisions, boole_squared_moments, boole_point_source, boole_precalc_collisions
     double precision, dimension(:,:,:), allocatable :: randcol
     integer :: randcoli = int(1.0d5)
-    integer :: et_unit, rp_unit, pm_unit, p_moments_unit, pmss_unit, ti_unit, &
-               fm_unit, sqrtg_unit, rpv_unit, ric_unit, epv_unit, bd_unit, hp_unit, tn_unit, di_unit, tm_unit
+    integer :: et_unit, rp_unit, pm_unit, di_unit
     type boole_writing_data_t
         logical :: vertex_indices = .true.
-        logical :: vertex_coordinates = .false.
+        logical :: vertex_coordinates = .true.
         logical :: prism_volumes = .false.
         logical :: refined_prism_volumes = .false.
         logical :: boltzmann_density = .false.
@@ -36,143 +33,32 @@ module boltzmann_mod
         logical :: moments = .false.
         logical :: fourier_moments = .false.
     end type boole_writing_data_t
+    type filenames_t
+        character(len=100) :: exit_times
+        character(len=100) :: remaining_particles
+        character(len=100) :: poincare_maps
+        character(len=100) :: prism_moments
+        character(len=100) :: prism_moments_summed_squares
+        character(len=100) :: vertex_coordinates
+        character(len=100) :: vertex_indices
+        character(len=100) :: prism_volumes
+        character(len=100) :: fourier_moments
+        character(len=100) :: refined_prism_volumes
+        character(len=100) :: electric_potential
+        character(len=100) :: boltzmann_densities
+        character(len=100) :: divertor_intersections
+        character(len=100) :: tetr_moments
+    end type filenames_t
 !
     !Namelist for boltzmann input
     NAMELIST /boltzmann_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions, &
     & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
-    & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, &
-    & filename_dwell_times,filename_starting_conditions,filename_vertex_coordinates, filename_vertex_indices
+    & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option
 !
     public :: calc_boltzmann
 !    
 contains
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
-subroutine read_boltzmann_inp()
-!
-    integer :: b_inp_unit
-    open(newunit = b_inp_unit, file='boltzmann.inp', status='unknown')
-    read(b_inp_unit,nml=boltzmann_nml)
-    close(b_inp_unit)
-!    
-    print *,'GORILLA: Loaded input data from boltzmann.inp'
-end subroutine read_boltzmann_inp
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
-subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
-!
-    use constants, only: pi, ev2erg
-    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, ntetr
-    use find_tetra_mod, only: find_tetra
-    use tetra_grid_settings_mod, only: grid_kind
-    use tetra_physics_mod, only: coord_system
-    use collis_ions, only: collis_init, stost
-!
-    double precision, intent(in)                                   :: v0
-    double precision, dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
-    double precision                                               :: rand_scalar, vpar, vperp
-    double precision                                               :: amin, cmin, cmax !amax is set globally
-    double precision, dimension(:), allocatable                    :: rand_vector
-    double precision, dimension(:,:), allocatable                  :: rand_matrix1, rand_matrix2
-    integer                                                        :: i
-    double precision, dimension(3)                                 :: x
-    integer                                                        :: ind_tetr_out,iface,seed_inp_unit
-!
-!!!!comment out the following section to make starting conditions really random!!!
-!
-    integer,dimension(:), allocatable                              :: seed
-    integer                                                        :: n
-!
-    open(newunit = seed_inp_unit, file='seed.inp', status='old',action = 'read')
-    read(seed_inp_unit,*) n
-    allocate(seed(n))
-    read(seed_inp_unit,*) seed
-    close(seed_inp_unit)
-    CALL RANDOM_SEED (PUT=seed)
-    deallocate(seed)
-!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!
-    allocate(start_pos_pitch_mat(5,num_particles))
-    allocate(rand_vector(num_particles))
-    allocate(rand_matrix1(3,num_particles))
-    allocate(rand_matrix2(2,num_particles))
-!
-    start_pos_pitch_mat = 0
-!
-    ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
-    ind_b = 2 !(phi in cylindrical and flux coordinates)
-    ind_c = 3 !(z in cylindrical coordinates, theta in flux coordinates)
-!
-    if (coord_system.eq.2) then
-        ind_b = 3
-        ind_c = 2
-    endif
-!
-    if (coord_system.eq.1) allocate(verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:))))
-    if (coord_system.eq.2) allocate(verts(size(verts_sthetaphi(:,1)),size(verts_sthetaphi(1,:))))
-    if (coord_system.eq.1) verts = verts_rphiz
-    if (coord_system.eq.2) verts = verts_sthetaphi
-!
-    amin = minval(verts(ind_a,:))
-    amax = maxval(verts(ind_a,:))
-    cmin = minval(verts(ind_c,:))
-    cmax = maxval(verts(ind_c,:))
-!
-    constant_part_of_weights = density*(amax-amin)*(cmax-cmin)*2*pi
-!
-    !compute starting conditions
-    if (boole_point_source) then
-        if (grid_kind.eq.2) then
-            start_pos_pitch_mat(1,:) = 160
-            start_pos_pitch_mat(2,:) = 0
-            start_pos_pitch_mat(3,:) = 70
-        elseif (grid_kind.eq.4) then
-            start_pos_pitch_mat(1,:) = 205
-            start_pos_pitch_mat(2,:) = 0
-            start_pos_pitch_mat(3,:) = 0
-        endif
-        if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
-    else
-        call RANDOM_NUMBER(rand_matrix1)
-        start_pos_pitch_mat(ind_a,:) = amin + (amax - amin)*rand_matrix1(ind_a,:) !r in cylindrical, s in flux coordinates
-        start_pos_pitch_mat(ind_b,:) = 2*pi*rand_matrix1(ind_b,:) !phi in cylindrical and flux coordinates
-        start_pos_pitch_mat(ind_c,:) = cmin + (cmax - cmin)*rand_matrix1(ind_c,:) !z in cylindrical, theta in flux coordinates
-        ! start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r
-        ! start_pos_pitch_mat(ind_b,:) = 0.0d0  !1d-1 !phi in cylindrical and flux coordinates
-        ! start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
-    endif
-!
-    call RANDOM_NUMBER(rand_matrix2)
-    !start_pos_pitch_mat(4,:) = 2*rand_matrix2(1,:)-1 !pitch parameter
-    start_pos_pitch_mat(4,:) = 0.7d0 !pitch parameter
-!
-    if (boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        start_pos_pitch_mat(5,:) = 5*energy_eV*rand_matrix2(2,:) !boltzmann energy distribution
-        constant_part_of_weights = constant_part_of_weights*10/sqrt(pi)*energy_eV*ev2erg
-    endif
-!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! start antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    if (boole_antithetic_variate) then
-        start_pos_pitch_mat(:,1:num_particles:2) = start_pos_pitch_mat(:,2:num_particles:2)
-        start_pos_pitch_mat(4,1:num_particles:2) = -start_pos_pitch_mat(4,2:num_particles:2)
-    endif
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! end antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    weights(:,1) = constant_part_of_weights
-    if (boole_refined_sqrt_g.eqv..false.) weights(:,1) = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
-!
-    if (boole_precalc_collisions) then
-        allocate(randcol(num_particles,randcoli,3))
-        call RANDOM_NUMBER(randcol)
-        !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
-        randcol(:,:,1:2:3) =  3.464102*(randcol(:,:,1:2:3)-.5)
-    endif
-end subroutine calc_starting_conditions
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
 subroutine calc_boltzmann
 !
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
@@ -204,6 +90,8 @@ subroutine calc_boltzmann
     double precision :: m0,z0,hamiltonian_time
     double precision, dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
     integer :: Te_unit, Ti_unit, ne_unit, t_moments_unit, ipert_unit
+    type(filenames_t) :: filenames
+    double precision, dimension(:,:), allocatable :: sqrt_g
 
     !Load input for boltzmann computation
     call read_boltzmann_inp()
@@ -231,8 +119,6 @@ subroutine calc_boltzmann
 
     !Initialize GORILLA
     call initialize_gorilla(i_option,ipert)
-    ! call field(215.d0,0.0d0,12.0d0,Br,Bp,Bz,dBrdR,dBrdp,dBrdZ,dBpdR,dBpdp,dBpdZ,dBzdR,dBzdp,dBzdZ)
-    ! print*, Br,Bp,Bz, sqrt(Br**2+Bp**2+Bz**2)
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! delete this again afterwards !!!!!!!!!!!!!!!!!!!!!!!
     if (ispecies.eq.4) particle_charge = 15*echarge
@@ -256,10 +142,10 @@ subroutine calc_boltzmann
     elec_pot_vec = 0
     n_b = 0 !boltzmann density for uniform spatial distribution
 !
-    call calc_square_root_g
+    call calc_square_root_g(sqrt_g)
 !
 print*, 'start calc_volume_integrals'
-    call calc_volume_integrals
+    call calc_volume_integrals(sqrt_g)
 print*, 'end calc_volume_integrals'
 !
     !Compute velocity module from kinetic energy dependent on particle species
@@ -361,13 +247,14 @@ print*, 'calc_starting_conditions finished'
         if (boole_antithetic_variate) iantithetic = 2
         count_integration_steps = 0
 
-        call unlink_files
+        call name_files(filenames)
+        call unlink_files(filenames)
         call open_files_before_main_loop
 
         if (boole_collisions) deallocate(efcolf,velrat,enrat)
 !
         !$OMP PARALLEL DEFAULT(NONE) &
-        !$OMP& SHARED(num_particles,kpart,v0,time_step,i_integrator_type,boole_collisions, &
+        !$OMP& SHARED(num_particles,kpart,v0,time_step,i_integrator_type,boole_collisions,sqrt_g, &
         !$OMP& dtau,dtaumin,n_start,n_end,tetra_indices_per_prism, prism_moments_squared,boole_squared_moments, &
         !$OMP& start_pos_pitch_mat,boole_boltzmann_energies, prism_moments,count_integration_steps, et_unit, &
         !$OMP& density,energy_eV,dens_mat,temp_mat,vpar_mat,tetra_grid,iantithetic,tetra_physics, di_unit, pm_unit, rp_unit, &
@@ -467,8 +354,8 @@ endif
                         endif
                     endif
 !
-                    call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, &
-                                    & n,v,start_pos_pitch_mat,single_particle_tetr_moments, hamiltonian_time,inorout,t_remain)
+                    call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface,n,v, &
+                                    & sqrt_g,start_pos_pitch_mat,single_particle_tetr_moments, hamiltonian_time,inorout,t_remain)
 !
                     t_confined = t_confined + t_step - t_remain
                     !Lost particle handling
@@ -548,73 +435,10 @@ endif
     print*, 'average number of toroidal revolutions = ', counter_phi_0_mappings/n_particles
     print*, 'average number of integration steps = ', count_integration_steps/n_particles
 !
-    !call write_data_to_files
-
-!     call open_files_for_writing_data_after_main_loop
-! !
-!     if (n_moments.gt.0) then
-!         do l = 1,n_prisms
-!             do i = 1,n_moments - 1
-!                 write(p_moments_unit,'(2ES20.10E4)',advance="no") real(prism_moments(i,l)), aimag(prism_moments(i,l))
-!             enddo
-!                 write(p_moments_unit,'(2ES20.10E4)') real(prism_moments(n_moments,l)), aimag(prism_moments(n_moments,l))
-!         enddo
-!         if (boole_squared_moments) then
-!             do l = 1,n_prisms
-!                 do i = 1,n_moments - 1
-!                     write(pmss_unit,'(2ES20.10E4)',advance="no") real(prism_moments_squared(i,l)), &
-!                                                                     & aimag(prism_moments_squared(i,l))
-!                 enddo
-!                     write(pmss_unit,'(2ES20.10E4)') real(prism_moments_squared(n_moments,l)), &
-!                                                        & aimag(prism_moments_squared(n_moments,l))
-!             enddo
-!         endif
-!         do l = 1,ntetr
-!             do i = 1,n_moments - 1
-!                 write(t_moments_unit,'(2ES20.10E4)',advance="no") real(tetr_moments(i,l)), aimag(tetr_moments(i,l))
-!             enddo
-!                 write(t_moments_unit,'(2ES20.10E4)') real(tetr_moments(n_moments,l)), aimag(tetr_moments(n_moments,l))
-!         enddo
-!     endif
-! !
-!     101 format(1000(e21.14,x))
-!     if (coord_system.eq.1) then
-!         ![R,phi,Z]: Write vertex coordinates to File
-!         do i=1, nvert
-!             write(vc_unit,101) verts_rphiz(1, i), verts_rphiz(2, i), verts_rphiz(3, i)
-!         end do
-!     elseif (coord_system.eq.2) then
-!         ![s,theta,phi]: Write vertex coordinates to File
-!         do i=1, nvert
-!             write(vc_unit,101) verts_sthetaphi(1, i), verts_sthetaphi(2, i), verts_sthetaphi(3, i)
-!         end do
-!     endif
-! !
-!     !Write vertex indices to File
-!     do i=1, ntetr
-!         write(vi_unit, *) tetra_grid(i)%ind_knot([1, 2, 3, 4])
-!     end do
-! ! !
-!     write(pv_unit,'(ES20.10E4)') prism_volumes
-! !
-! !     open(62, file = 'fourier_moments.dat')
-! !     do l = 1,n_triangles
-! !         do i = 1,n_fourier_modes-1
-! !             write(62,'(2ES20.10E4)',advance="no") real(moments_in_frequency_space(1,l,i)), &
-! !                                                   aimag(moments_in_frequency_space(1,l,i))!'(',real(moments_in_frequency_space(1,1,i,1)),',',aimag(moments_in_frequency_space(1,1,i,1)),')'
-! !         enddo
-! !             write(62,'(2ES20.10E4)') real(moments_in_frequency_space(1,l,n_fourier_modes)), &
-! !                                      aimag(moments_in_frequency_space(1,l,n_fourier_modes))
-! !     enddo   
-! !     close(62)
+    call close_files
+    call write_data_to_files(filenames)
 
 
-!     write(rpv_unit,'(ES20.10E4)') refined_prism_volumes
-!     write(epv_unit,'(ES20.10E4)') elec_pot_vec
-!     write(bd_unit,'(ES20.10E4)') n_b
-
-!     call close_files
-!
 PRINT*, 'particle mass = ', particle_mass
 PRINT*, 'absolute value of velocity = ', v0
 PRINT*, 'particle charge = ', particle_charge
@@ -628,10 +452,128 @@ deallocate(start_pos_pitch_mat, tetr_moments, prism_moments, single_particle_tet
 if (boole_squared_moments) deallocate(prism_moments_squared)
 !
 end subroutine calc_boltzmann
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
-subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,v,start_pos_pitch_mat, &
+
+subroutine read_boltzmann_inp()
+
+    integer :: b_inp_unit
+    open(newunit = b_inp_unit, file='boltzmann.inp', status='unknown')
+    read(b_inp_unit,nml=boltzmann_nml)
+    close(b_inp_unit)
+  
+    print *,'GORILLA: Loaded input data from boltzmann.inp'
+end subroutine read_boltzmann_inp
+
+subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
+    !
+        use constants, only: pi, ev2erg
+        use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, ntetr
+        use find_tetra_mod, only: find_tetra
+        use tetra_grid_settings_mod, only: grid_kind
+        use tetra_physics_mod, only: coord_system
+        use collis_ions, only: collis_init, stost
+    !
+        double precision, intent(in)                                   :: v0
+        double precision, dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
+        double precision                                               :: rand_scalar, vpar, vperp
+        double precision                                               :: amin, cmin, cmax !amax is set globally
+        double precision, dimension(:), allocatable                    :: rand_vector
+        double precision, dimension(:,:), allocatable                  :: rand_matrix1, rand_matrix2
+        integer                                                        :: i
+        double precision, dimension(3)                                 :: x
+        integer                                                        :: ind_tetr_out,iface,seed_inp_unit
+    !
+    !!!!comment out the following section to make starting conditions really random!!!
+    !
+        integer,dimension(:), allocatable                              :: seed
+        integer                                                        :: n
+    !
+        open(newunit = seed_inp_unit, file='seed.inp', status='old',action = 'read')
+        read(seed_inp_unit,*) n
+        allocate(seed(n))
+        read(seed_inp_unit,*) seed
+        close(seed_inp_unit)
+        CALL RANDOM_SEED (PUT=seed)
+        deallocate(seed)
+    !
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !
+        allocate(start_pos_pitch_mat(5,num_particles))
+        allocate(rand_vector(num_particles))
+        allocate(rand_matrix1(3,num_particles))
+        allocate(rand_matrix2(2,num_particles))
+    !
+        start_pos_pitch_mat = 0
+    !
+        ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
+        ind_b = 2 !(phi in cylindrical and flux coordinates)
+        ind_c = 3 !(z in cylindrical coordinates, theta in flux coordinates)
+    !
+        if (coord_system.eq.2) then
+            ind_b = 3
+            ind_c = 2
+        endif
+    !
+        if (coord_system.eq.1) allocate(verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:))))
+        if (coord_system.eq.2) allocate(verts(size(verts_sthetaphi(:,1)),size(verts_sthetaphi(1,:))))
+        if (coord_system.eq.1) verts = verts_rphiz
+        if (coord_system.eq.2) verts = verts_sthetaphi
+    !
+        amin = minval(verts(ind_a,:))
+        amax = maxval(verts(ind_a,:))
+        cmin = minval(verts(ind_c,:))
+        cmax = maxval(verts(ind_c,:))
+    !
+        constant_part_of_weights = density*(amax-amin)*(cmax-cmin)*2*pi
+    !
+        !compute starting conditions
+        if (boole_point_source) then
+            if (grid_kind.eq.2) then
+                start_pos_pitch_mat(1,:) = 160
+                start_pos_pitch_mat(2,:) = 0
+                start_pos_pitch_mat(3,:) = 70
+            elseif (grid_kind.eq.4) then
+                start_pos_pitch_mat(1,:) = 205
+                start_pos_pitch_mat(2,:) = 0
+                start_pos_pitch_mat(3,:) = 0
+            endif
+            if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
+        else
+            call RANDOM_NUMBER(rand_matrix1)
+            start_pos_pitch_mat(ind_a,:) = amin + (amax - amin)*rand_matrix1(ind_a,:) !r in cylindrical, s in flux coordinates
+            start_pos_pitch_mat(ind_b,:) = 2*pi*rand_matrix1(ind_b,:) !phi in cylindrical and flux coordinates
+            start_pos_pitch_mat(ind_c,:) = cmin + (cmax - cmin)*rand_matrix1(ind_c,:) !z in cylindrical, theta in flux coordinates
+            ! start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r
+            ! start_pos_pitch_mat(ind_b,:) = 0.0d0  !1d-1 !phi in cylindrical and flux coordinates
+            ! start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
+        endif
+    !
+        call RANDOM_NUMBER(rand_matrix2)
+        !start_pos_pitch_mat(4,:) = 2*rand_matrix2(1,:)-1 !pitch parameter
+        start_pos_pitch_mat(4,:) = 0.7d0 !pitch parameter
+    !
+        if (boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+            start_pos_pitch_mat(5,:) = 5*energy_eV*rand_matrix2(2,:) !boltzmann energy distribution
+            constant_part_of_weights = constant_part_of_weights*10/sqrt(pi)*energy_eV*ev2erg
+        endif
+    !
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! start antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        if (boole_antithetic_variate) then
+            start_pos_pitch_mat(:,1:num_particles:2) = start_pos_pitch_mat(:,2:num_particles:2)
+            start_pos_pitch_mat(4,1:num_particles:2) = -start_pos_pitch_mat(4,2:num_particles:2)
+        endif
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! end antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        weights(:,1) = constant_part_of_weights
+        if (boole_refined_sqrt_g.eqv..false.) weights(:,1) = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
+    !
+        if (boole_precalc_collisions) then
+            allocate(randcol(num_particles,randcoli,3))
+            call RANDOM_NUMBER(randcol)
+            !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
+            randcol(:,:,1:2:3) =  3.464102*(randcol(:,:,1:2:3)-.5)
+        endif
+end subroutine calc_starting_conditions
+
+subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,v,sqrt_g,start_pos_pitch_mat, &
                                           & single_particle_tetr_moments,hamiltonian_time, inorout, t_remain_out)
 !
     use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
@@ -661,6 +603,8 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     type(optional_quantities_type)                  :: optional_quantities
     double complex, dimension(:,:)                  :: single_particle_tetr_moments
     integer                                         :: single_particle_counter_phi0_mappings
+    double precision, dimension(:,:)                :: sqrt_g
+    
 !
     !If orbit_timestep is called for the first time without grid position
     if(.not.boole_initialized) then
@@ -883,9 +827,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 !print*, 'number of pushings is', n_pushings
 !         
 end subroutine orbit_timestep_gorilla_boltzmann
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
 subroutine calc_plane_intersection(x_save,x,z_plane)
     !
         use constants, only : pi
@@ -905,10 +847,8 @@ subroutine calc_plane_intersection(x_save,x,z_plane)
         x(3) = z_plane
     !
 end subroutine calc_plane_intersection
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
-subroutine calc_volume_integrals
+
+subroutine calc_volume_integrals(sqrt_g)
 !
     use constants, only: pi, ev2erg
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
@@ -921,6 +861,7 @@ subroutine calc_volume_integrals
     double precision, dimension(2)              :: r, z, limits
     double precision                            :: z_star, alpha, beta, gamma, delta, epsilon, capital_gamma, capital_delta, &
                                                    a, a_dash, b, b_dash, c, c_dash, rmin, delta_r, delta_z, phi_0, eta
+    double precision, dimension(:,:)            :: sqrt_g
 !
     allocate(tetra_indices_per_prism(n_prisms,3))    
     allocate(prism_volumes(n_prisms))
@@ -1117,9 +1058,7 @@ subroutine calc_volume_integrals
     n_b = abs(n_b)*2*pi/(grid_size(2)**n_field_periods*prism_volumes)
 !
 end subroutine calc_volume_integrals
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
 subroutine fourier_transform_moments
 !
     use constants, only: pi
@@ -1174,56 +1113,156 @@ print*, 'fourier transform started'
 print*, 'fourier transform finished'
 !
 end subroutine fourier_transform_moments
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
-subroutine calc_square_root_g
-!
+
+subroutine calc_square_root_g(sqrt_g)
+
     use tetra_physics_mod, only: tetra_physics, hamiltonian_time
     use tetra_grid_mod, only: ntetr, tetra_grid, verts_rphiz
-!
+
+    double precision, dimension(:,:), allocatable, intent(out) :: sqrt_g
     integer            :: ind_tetr
-!
+
     allocate(sqrt_g(ntetr,7))
     !compare first 6 entries with chapter 4.5 of master thesis from Jonatan Schatzlmayr, entry 7 is the radius (old metric determinant)
-!
+
     do ind_tetr = 1, ntetr
         sqrt_g(ind_tetr,1) = hamiltonian_time(ind_tetr)%h1_in_curlA
-!
+
         sqrt_g(ind_tetr,2) = tetra_physics(ind_tetr)%gh1(1)*tetra_physics(ind_tetr)%curlA(1) + &
                            & tetra_physics(ind_tetr)%gh2(1)*tetra_physics(ind_tetr)%curlA(2) + &
                            & tetra_physics(ind_tetr)%gh3(1)*tetra_physics(ind_tetr)%curlA(3)
-!
+
         sqrt_g(ind_tetr,3) = tetra_physics(ind_tetr)%gh1(3)*tetra_physics(ind_tetr)%curlA(1) + &
                            & tetra_physics(ind_tetr)%gh2(3)*tetra_physics(ind_tetr)%curlA(2) + &
                            & tetra_physics(ind_tetr)%gh3(3)*tetra_physics(ind_tetr)%curlA(3)
-!
+
         sqrt_g(ind_tetr,4) = tetra_physics(ind_tetr)%bmod1
-!
+
         sqrt_g(ind_tetr,5) = tetra_physics(ind_tetr)%gB(1)
-!
+
         sqrt_g(ind_tetr,6) = tetra_physics(ind_tetr)%gB(3)
-!
+
         sqrt_g(ind_tetr,7) = verts_rphiz(1,tetra_grid(ind_tetr)%ind_knot(1))
     enddo
-!
-end subroutine calc_square_root_g
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
-subroutine write_data_to_files
 
+end subroutine calc_square_root_g
+
+subroutine write_data_to_files(filenames)
+
+    type(filenames_t) :: filenames
     type(boole_writing_data_t) :: boole_writing_data
 
-    if (boole_writing_data%vertex_indices) call write_vertex_indices
-    if (boole_writing_data%vertex_coordinates) call write_vertex_coordinates
-    if (boole_writing_data%prism_volumes) call write_prism_volumes
-    if (boole_writing_data%refined_prism_volumes) call write_refined_prism_volumes
-    if (boole_writing_data%boltzmann_density) call write_boltzmann_density
-    if (boole_writing_data%electric_potential) call write_electric_potential
-    if (boole_writing_data%moments) call write_moments
-    if (boole_writing_data%fourier_moments) call write_fourier_moments
-!
+    if (boole_writing_data%vertex_indices) call write_vertex_indices(filenames%vertex_indices)
+    if (boole_writing_data%vertex_coordinates) call write_vertex_coordinates(filenames%vertex_coordinates)
+    if (boole_writing_data%prism_volumes) call write_prism_volumes(filenames%prism_volumes)
+    if (boole_writing_data%refined_prism_volumes) call write_refined_prism_volumes(filenames%refined_prism_volumes)
+    if (boole_writing_data%boltzmann_density) call write_boltzmann_densities(filenames%boltzmann_densities)
+    if (boole_writing_data%electric_potential) call write_electric_potential(filenames%electric_potential)
+    if (boole_writing_data%moments) call write_moments(filenames%prism_moments, &
+                                                       filenames%prism_moments_summed_squares, &
+                                                       filenames%tetr_moments)
+    if (boole_writing_data%fourier_moments) call write_fourier_moments(filenames%fourier_moments)
+
+end subroutine write_data_to_files
+
+subroutine write_vertex_indices(filename_vertex_indices)
+
+    use tetra_grid_mod, only: ntetr, tetra_grid
+
+    character(len=100) :: filename_vertex_indices
+    integer :: vi_unit
+    integer :: i
+
+    open(newunit = vi_unit, file = filename_vertex_indices)
+    do i=1, ntetr
+        write(vi_unit, *) tetra_grid(i)%ind_knot([1, 2, 3, 4])
+    end do
+    close(vi_unit)
+
+end subroutine write_vertex_indices
+
+subroutine write_vertex_coordinates(filename_vertex_coordinates)
+
+    use tetra_physics_mod, only: coord_system
+    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
+
+    character(len=100) :: filename_vertex_coordinates
+    integer :: vc_unit
+    integer :: i
+
+    open(newunit = vc_unit, file = filename_vertex_coordinates)
+    101 format(1000(e21.14,x))
+    if (coord_system.eq.1) then
+        ![R,phi,Z]: Write vertex coordinates to file
+        do i=1, nvert
+            write(vc_unit,101) verts_rphiz(1, i), verts_rphiz(2, i), verts_rphiz(3, i)
+        end do
+    elseif (coord_system.eq.2) then
+        ![s,theta,phi]: Write vertex coordinates to file
+        do i=1, nvert
+            write(vc_unit,101) verts_sthetaphi(1, i), verts_sthetaphi(2, i), verts_sthetaphi(3, i)
+        end do
+    endif
+    close(vc_unit)
+
+end subroutine write_vertex_coordinates
+
+subroutine write_prism_volumes(filename_prism_volumes)
+
+    character(len=100) :: filename_prism_volumes
+    integer :: pv_unit
+
+    open(newunit = pv_unit, file = filename_prism_volumes)
+    write(pv_unit,'(ES20.10E4)') prism_volumes
+    close(pv_unit)
+
+end subroutine write_prism_volumes
+
+subroutine write_refined_prism_volumes(filename_refined_prism_volumes)
+
+    character(len=100) :: filename_refined_prism_volumes
+    integer :: rpv_unit
+
+    open(newunit = rpv_unit, file = filename_refined_prism_volumes)
+    write(rpv_unit,'(ES20.10E4)') refined_prism_volumes
+    close(rpv_unit)
+
+end subroutine write_refined_prism_volumes
+
+subroutine write_boltzmann_densities(filename_boltzmann_densities)
+
+    character(len=100) :: filename_boltzmann_densities
+    integer :: bd_unit
+
+    open(newunit = bd_unit, file = filename_boltzmann_densities)
+    write(bd_unit,'(ES20.10E4)') n_b
+    close(bd_unit)
+
+end subroutine write_boltzmann_densities
+
+subroutine write_electric_potential(filename_electric_potential)
+
+    character(len=100) :: filename_electric_potential
+    integer :: epv_unit
+
+    open(newunit = epv_unit, file = filename_electric_potential)
+    write(epv_unit,'(ES20.10E4)') elec_pot_vec
+    close(epv_unit)
+
+end subroutine write_electric_potential
+
+subroutine write_moments(filename_prism_moments, filename_prism_moments_summed_squares, filename_tetr_moments)
+
+    use tetra_grid_mod, only: ntetr
+
+    character(len=100) :: filename_prism_moments, filename_prism_moments_summed_squares, filename_tetr_moments
+    integer :: p_moments_unit, pmss_unit, t_moments_unit
+    integer :: l, i
+
+    open(newunit = p_moments_unit, file = filename_prism_moments)
+    open(newunit = pmss_unit, file = filename_prism_moments_summed_squares)
+    open(newunit = t_moments_unit, file = filename_tetr_moments)
+
     if (n_moments.gt.0) then
         do l = 1,n_prisms
             do i = 1,n_moments - 1
@@ -1248,109 +1287,73 @@ subroutine write_data_to_files
                 write(t_moments_unit,'(2ES20.10E4)') real(tetr_moments(n_moments,l)), aimag(tetr_moments(n_moments,l))
         enddo
     endif
-!
 
-!
+    close(p_moments_unit)
+    close(pmss_unit)
+    close(t_moments_unit)
 
-!
-!     open(62, file = 'fourier_moments.dat')
-!     do l = 1,n_triangles
-!         do i = 1,n_fourier_modes-1
-!             write(62,'(2ES20.10E4)',advance="no") real(moments_in_frequency_space(1,l,i)), &
-!                                                   aimag(moments_in_frequency_space(1,l,i))!'(',real(moments_in_frequency_space(1,1,i,1)),',',aimag(moments_in_frequency_space(1,1,i,1)),')'
-!         enddo
-!             write(62,'(2ES20.10E4)') real(moments_in_frequency_space(1,l,n_fourier_modes)), &
-!                                      aimag(moments_in_frequency_space(1,l,n_fourier_modes))
-!     enddo   
-!     close(62)
+end subroutine write_moments
 
+subroutine write_fourier_moments(filename_fourier_moments)
 
-    write(rpv_unit,'(ES20.10E4)') refined_prism_volumes
-    write(epv_unit,'(ES20.10E4)') elec_pot_vec
-    write(bd_unit,'(ES20.10E4)') n_b
+    character(len=100) :: filename_fourier_moments
+    integer :: fm_unit, l, i
 
-    call close_files
+    open(newunit = fm_unit, file = filename_fourier_moments)
+    do l = 1,n_triangles
+        do i = 1,n_fourier_modes-1
+            write(fm_unit,'(2ES20.10E4)',advance="no") real(moments_in_frequency_space(1,l,i)), &
+                                                       aimag(moments_in_frequency_space(1,l,i))
+        enddo
+            write(fm_unit,'(2ES20.10E4)') real(moments_in_frequency_space(1,l,n_fourier_modes)), &
+                                          aimag(moments_in_frequency_space(1,l,n_fourier_modes))
+    enddo
+    close(fm_unit)
 
-end subroutine write_data_to_files
-!
-subroutine write_vertex_indices
+end subroutine write_fourier_moments
 
-    use tetra_grid_mod, only: ntetr, tetra_grid
+subroutine name_files(filenames)
 
-    integer :: vi_unit
+    type(filenames_t), intent(out) :: filenames
 
-    open(newunit = vi_unit, file = filename_vertex_indices)
-    do i=1, ntetr
-        write(vi_unit, *) tetra_grid(i)%ind_knot([1, 2, 3, 4])
-    end do
-    close(vi_unit)
+    filenames%exit_times = 'exit_times.dat'
+    filenames%remaining_particles = 'remaining_particles.dat'
+    filenames%poincare_maps = 'poincare_maps.dat'
+    filenames%prism_moments = 'prism_moments.dat'
+    filenames%prism_moments_summed_squares = 'prism_moments_summed_squares.dat'
+    filenames%vertex_coordinates = 'vertex_coordinates.dat'
+    filenames%vertex_indices = 'vertex_indices.dat'
+    filenames%prism_volumes = 'prism_volumes.dat'
+    filenames%fourier_moments = 'fourier_moments.dat'
+    filenames%refined_prism_volumes = 'refined_prism_volumes.dat'
+    filenames%electric_potential = 'elec_pot_vec.dat'
+    filenames%boltzmann_densities = 'boltzmann_densities.dat'
+    filenames%divertor_intersections = 'divertor_intersections.dat'
+    filenames%tetr_moments = 'tetr_moments.dat'
 
-end subroutine write_vertex_indices
-!
-subroutine write_vertex_coordinates
+end subroutine name_files
 
-    use tetra_physics_mod, only: coord_system
-    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
+subroutine unlink_files(filenames)
 
-    integer :: vc_unit
+    type(filenames_t) :: filenames
 
-    open(newunit = vc_unit, file = filename_vertex_coordinates)
-    101 format(1000(e21.14,x))
-    if (coord_system.eq.1) then
-        ![R,phi,Z]: Write vertex coordinates to file
-        do i=1, nvert
-            write(vc_unit,101) verts_rphiz(1, i), verts_rphiz(2, i), verts_rphiz(3, i)
-        end do
-    elseif (coord_system.eq.2) then
-        ![s,theta,phi]: Write vertex coordinates to file
-        do i=1, nvert
-            write(vc_unit,101) verts_sthetaphi(1, i), verts_sthetaphi(2, i), verts_sthetaphi(3, i)
-        end do
-    endif
-    close(vc_unit)
-
-end subroutine write_vertex_coordinates
-!
-subroutine write_prism_volumes(prism_volumes)
-
-    integer :: pv_unit
-
-    open(newunit = pv_unit, file = 'prism_volumes.dat')
-    write(pv_unit,'(ES20.10E4)') prism_volumes
-    close(pv_unit)
-
-end subroutine write_prism_volumes
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
-subroutine unlink_files
-
-    call unlink('poloidal_flux.dat')
-    call unlink('exit_times.dat')
-    call unlink('remaining_particles.dat')
-    call unlink('poincare_maps.dat')
-    call unlink('data_mingle.dat')
-    call unlink('prism_moments.dat')
-    call unlink('prism_moments_summed_squares.dat')
-    call unlink(filename_vertex_coordinates)
-    call unlink(filename_vertex_indices)
-    call unlink('prism_volumes.dat')
-    call unlink('tetra_indices_per_prism.dat')
-    call unlink('fourier_moments.dat')
-    call unlink('sqrt_g.dat')
-    call unlink('refined_prism_volumes.dat')
-    call unlink('r_integrand_constants.dat')
-    call unlink('elec_pot_vec.dat')
-    call unlink('boltzmann_densities.dat')
-    call unlink('h_phi.dat')
-    call unlink('tetrahedron_neighbours.dat')
-    call unlink('divertor_intersections.dat')
-    call unlink('tetr_moments.dat')
+    call unlink(filenames%exit_times)
+    call unlink(filenames%remaining_particles)
+    call unlink(filenames%poincare_maps)
+    call unlink(filenames%prism_moments)
+    call unlink(filenames%prism_moments_summed_squares)
+    call unlink(filenames%vertex_coordinates)
+    call unlink(filenames%vertex_indices)
+    call unlink(filenames%prism_volumes)
+    call unlink(filenames%fourier_moments)
+    call unlink(filenames%refined_prism_volumes)
+    call unlink(filenames%electric_potential)
+    call unlink(filenames%boltzmann_densities)
+    call unlink(filenames%divertor_intersections)
+    call unlink(filenames%tetr_moments)
 
 end subroutine unlink_files
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
 subroutine open_files_before_main_loop
 !
     open(newunit = et_unit, file = 'exit_times.dat')
@@ -1359,46 +1362,13 @@ subroutine open_files_before_main_loop
     open(newunit = di_unit, file = 'divertor_intersections.dat')
 !
 end subroutine open_files_before_main_loop
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
-subroutine open_files_for_writing_data_after_main_loop(boole_writing_data)
 
-    open(newunit = p_moments_unit, file = 'prism_moments.dat')
-    open(newunit = pmss_unit, file = 'prism_moments_summed_squares.dat')
-    open(newunit = ti_unit, file = 'tetra_indices_per_prism.dat')
-    open(newunit = fm_unit, file = 'fourier_moments.dat')
-    open(newunit = sqrtg_unit, file = 'sqrt_g.dat')
-    open(newunit = rpv_unit, file = 'refined_prism_volumes.dat')
-    open(newunit = ric_unit, file = 'r_integrand_constants.dat')
-    open(newunit = epv_unit, file = 'elec_pot_vec.dat')
-    open(newunit = bd_unit, file = 'boltzmann_densities.dat')
-    open(newunit = hp_unit, file = 'h_phi.dat')
-    open(newunit = tn_unit, file = 'tetrahedron_neighbours.dat')
-    open(newunit = tm_unit, file = 'tetr_moments.dat')
-!
-end subroutine open_files_for_writing_data_after_main_loop
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
 subroutine close_files
 !
     close(et_unit)
     close(rp_unit)
     close(pm_unit)
-    close(p_moments_unit)
-    close(pmss_unit)
-    close(ti_unit)
-    close(fm_unit)
-    close(sqrtg_unit)
-    close(rpv_unit)
-    close(ric_unit)
-    close(epv_unit)
-    close(bd_unit)
-    close(hp_unit)
-    close(tn_unit)
     close(di_unit)
-    close(tm_unit)
 !
 end subroutine close_files
 !
