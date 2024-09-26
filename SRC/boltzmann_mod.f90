@@ -1,34 +1,37 @@
 module boltzmann_mod
+
+    use, intrinsic :: iso_fortran_env, only: dp => real64
+
     implicit none
-!
+
     private
-!
-    double precision :: time_step,energy_eV, min_poloidal_flux, max_poloidal_flux, amax
+
+    real(dp) :: time_step,energy_eV, min_poloidal_flux, max_poloidal_flux, amax
     integer, dimension(:,:), allocatable :: tetra_indices_per_prism
-    double precision, dimension(:), allocatable :: prism_volumes, refined_prism_volumes, elec_pot_vec, n_b
-    double precision, dimension(:,:), allocatable :: verts, r_integrand_constants
+    real(dp), dimension(:), allocatable :: prism_volumes, refined_prism_volumes, elec_pot_vec, n_b
+    real(dp), dimension(:,:), allocatable :: verts, r_integrand_constants
     double complex, dimension(:,:), allocatable :: tetr_moments, prism_moments, &
                                                    & prism_moments_squared
     double complex, dimension(:,:,:), allocatable :: moments_in_frequency_space
     integer :: i_integrator_type, seed_option, n_moments, n_prisms, num_particles,&
                & ind_a, ind_b, ind_c, n_pushings, counter_phi_0_mappings, lost_outside, lost_inside
-    double precision :: n_particles, density, constant_part_of_weights
+    real(dp) :: n_particles, density, constant_part_of_weights
     integer, dimension(4) :: moments_selector
     double complex, dimension(:,:), allocatable :: weights
-    double precision, dimension(:), allocatable :: J_perp, poloidal_flux, temperature_vector
+    real(dp), dimension(:), allocatable :: J_perp, poloidal_flux, temperature_vector
     logical :: boole_refined_sqrt_g, boole_boltzmann_energies
     integer :: n_fourier_modes, n_triangles
     logical :: boole_linear_density_simulation, boole_antithetic_variate, boole_linear_temperature_simulation
     logical :: boole_collisions, boole_squared_moments, boole_point_source, boole_precalc_collisions
-    double precision, dimension(:,:,:), allocatable :: randcol
+    real(dp), dimension(:,:,:), allocatable :: randcol
     integer :: randcoli = int(1.0d5)
     integer :: et_unit, rp_unit, pm_unit, di_unit
     type boole_writing_data_t
         logical :: vertex_indices = .true.
         logical :: vertex_coordinates = .true.
         logical :: prism_volumes = .false.
-        logical :: refined_prism_volumes = .false.
-        logical :: boltzmann_density = .false.
+        logical :: refined_prism_volumes = .true.
+        logical :: boltzmann_density = .true.
         logical :: electric_potential = .false.
         logical :: moments = .false.
         logical :: fourier_moments = .false.
@@ -49,18 +52,18 @@ module boltzmann_mod
         character(len=100) :: divertor_intersections
         character(len=100) :: tetr_moments
     end type filenames_t
-!
+
     !Namelist for boltzmann input
     NAMELIST /boltzmann_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions, &
     & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
     & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option
-!
+
     public :: calc_boltzmann
-!    
+   
 contains
 
 subroutine calc_boltzmann
-!
+
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
     use constants, only: ev2erg,pi,echarge,ame,amp,clight
     use tetra_physics_mod, only: particle_mass,particle_charge,cm_over_e,mag_axis_R0, coord_system, tetra_physics
@@ -75,34 +78,35 @@ subroutine calc_boltzmann
     use find_tetra_mod, only: find_tetra
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
-!
-    double precision, dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
+    use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
+
+    real(dp), dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
                                                      velrat_mat, enrat_mat, dens_mat_tetr, temp_mat_tetr
-    double precision :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v, maxcol
+    real(dp) :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v, maxcol
     integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,n_lost_particles,ierr,err,iantithetic, num_background_species, inorout
     integer :: n_start, n_end, i_part, count_integration_steps
-    double precision, dimension(3) :: x_rand_beg,x,randnum
+    real(dp), dimension(3) :: x_rand_beg,x,randnum
     logical :: boole_initialized,boole_particle_lost
-    double precision :: dtau, dphi,dtaumin, t_step
-    double precision, dimension(5) :: z, zet
+    real(dp) :: dtau, dphi,dtaumin, t_step
+    real(dp), dimension(5) :: z, zet
     Character(LEN=50) :: format_moments, format_fourier_moments
     double complex, dimension(:,:), allocatable :: single_particle_tetr_moments
-    double precision :: m0,z0,hamiltonian_time
-    double precision, dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
+    real(dp) :: m0,z0,hamiltonian_time
+    real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
     integer :: Te_unit, Ti_unit, ne_unit, t_moments_unit, ipert_unit
     type(filenames_t) :: filenames
-    double precision, dimension(:,:), allocatable :: sqrt_g
+    real(dp), dimension(:,:), allocatable :: sqrt_g
 
     !Load input for boltzmann computation
     call read_boltzmann_inp()
-!
+
     !call read_in_starting_conditions(start_pos_pitch_mat, num_particles)
-!
+
     num_particles = int(n_particles)
     n_start = 1
     n_end = num_particles
     n_fourier_modes = 5
-!
+
     !prepare moment calculation
     n_moments = 0
     moments_selector = 0
@@ -112,19 +116,19 @@ subroutine calc_boltzmann
             moments_selector(n_moments) = i
         endif
     enddo
-!
+
     open(newunit = ipert_unit, file='field_divB0.inp')
     read(ipert_unit,*) ipert        ! 0=eq only, 1=vac, 2=vac+plas no derivatives,
     close(ipert_unit)
 
     !Initialize GORILLA
     call initialize_gorilla(i_option,ipert)
-!
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! delete this again afterwards !!!!!!!!!!!!!!!!!!!!!!!
     if (ispecies.eq.4) particle_charge = 15*echarge
     print*, 'particle charge number = ', particle_charge/echarge
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!
+
     n_prisms = ntetr/3
     allocate(tetr_moments(n_moments,ntetr))
     allocate(single_particle_tetr_moments(n_moments,ntetr))
@@ -135,26 +139,34 @@ subroutine calc_boltzmann
     allocate(poloidal_flux(num_particles))
     allocate(temperature_vector(num_particles))
     allocate(elec_pot_vec(n_prisms))
+    allocate(prism_volumes(n_prisms))
+    allocate(refined_prism_volumes(n_prisms))
     allocate(n_b(n_prisms))
-!
+    allocate(tetra_indices_per_prism(n_prisms,3))
+
+    do i = 1,3
+        tetra_indices_per_prism(:,i) = (/(i+3*k,k = 0,n_prisms-1)/)
+    enddo
+
     poloidal_flux = 0
     temperature_vector = 0
     elec_pot_vec = 0
     n_b = 0 !boltzmann density for uniform spatial distribution
-!
+
     call calc_square_root_g(sqrt_g)
-!
+
 print*, 'start calc_volume_integrals'
-    call calc_volume_integrals(sqrt_g)
+    call calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, density, energy_eV, &
+                               prism_volumes, refined_prism_volumes, elec_pot_vec, n_b)
 print*, 'end calc_volume_integrals'
-!
+
     !Compute velocity module from kinetic energy dependent on particle species
     v0=sqrt(2.d0*energy_eV*ev2erg/particle_mass)
-!
+
 print*, 'calc_starting_conditions started'
     call calc_starting_conditions(v0,start_pos_pitch_mat)
 print*, 'calc_starting_conditions finished'
-!
+
     !compute maximum poloidal flux
     max_poloidal_flux = 0
     min_poloidal_flux = tetra_physics(1)%Aphi1
@@ -163,7 +175,7 @@ print*, 'calc_starting_conditions finished'
                             & (verts([1,2,3],tetra_grid(i)%ind_knot(4))-verts([1,2,3],tetra_grid(i)%ind_knot(1)))))
         min_poloidal_flux = min(min_poloidal_flux,tetra_physics(i)%Aphi1)
     enddo
-!
+
     if (boole_collisions) then
         num_background_species = 2 
         allocate(dens_mat(num_background_species-1,size(verts_rphiz(1,:))))
@@ -191,24 +203,24 @@ print*, 'calc_starting_conditions finished'
         m0 = particle_mass/amp
         z0 = particle_charge/echarge
         print*, 'm0 = ', m0, 'z0 = ', z0
-!
+
 !!!!!!!!!!!!!!!!!!!! Alternative route is taken because data is not available per vertex but per tetrahedron !!!!!!!!!!!!!!!!!!!!!!!
-!
+
         allocate(dens_mat_tetr(num_background_species-1,ntetr))
         allocate(temp_mat_tetr(num_background_species,ntetr))
-!
+
         open(newunit = Te_unit, file = 'background/Te_d.dat')
         read(Te_unit,'(e16.9)') (temp_mat_tetr(2,i),i=1,ntetr/grid_size(2),3)
         close(Te_unit)
-!
+
         open(newunit = Ti_unit, file = 'background/Ti_d.dat')
         read(Ti_unit,'(e16.9)') (temp_mat_tetr(1,i),i=1,ntetr/grid_size(2),3)
         close(Ti_unit)
-!
+
         open(newunit = ne_unit, file = 'background/ne_d.dat')
         read(ne_unit,'(e16.9)') (dens_mat_tetr(1,i),i=1,ntetr/grid_size(2),3)
         close(ne_unit)
-!
+
         do i = 1,grid_size(2)-1
             temp_mat_tetr(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = temp_mat_tetr(:,1:ntetr/grid_size(2):3)
             dens_mat_tetr(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = dens_mat_tetr(:,1:ntetr/grid_size(2):3)
@@ -217,9 +229,9 @@ print*, 'calc_starting_conditions finished'
             temp_mat_tetr(:,1+i:ntetr:3) = temp_mat_tetr(:,1:ntetr:3)
             dens_mat_tetr(:,1+i:ntetr:3) = dens_mat_tetr(:,1:ntetr:3)
         enddo
-!
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!
+
         do i = 1, ntetr
             do j = 1,num_background_species
                 !following if statement because electron density will be calculated in collis init
@@ -232,7 +244,7 @@ print*, 'calc_starting_conditions finished'
             enrat_mat(:,i) = enrat
         enddo
     endif
-!
+
         kpart = 0
         n_lost_particles = 0
         maxcol = 0
@@ -252,7 +264,7 @@ print*, 'calc_starting_conditions finished'
         call open_files_before_main_loop
 
         if (boole_collisions) deallocate(efcolf,velrat,enrat)
-!
+
         !$OMP PARALLEL DEFAULT(NONE) &
         !$OMP& SHARED(num_particles,kpart,v0,time_step,i_integrator_type,boole_collisions,sqrt_g, &
         !$OMP& dtau,dtaumin,n_start,n_end,tetra_indices_per_prism, prism_moments_squared,boole_squared_moments, &
@@ -267,11 +279,11 @@ print*, 'calc_starting_conditions finished'
         print*, 'get number of threads', omp_get_num_threads()
         if (boole_collisions) allocate(efcolf(num_background_species),velrat(num_background_species),enrat(num_background_species))
         !$OMP DO
-!
+
         !Loop over particles
         do p = n_start,n_end/iantithetic !1,num_particles/iantithetic
             do l = 1,iantithetic
-!
+
                 n = (p-1)*iantithetic+l
                 !$omp critical
                 !Counter for particles
@@ -285,19 +297,18 @@ else
     print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
 endif
                 !$omp end critical
-!print*, kpart
-!
+
 !if (abs(start_pos_pitch_mat(4,n)).lt.0.5) cycle !only trace particles for which vpar > vperp
                 t_step = time_step
                 t_confined = 0
                 if (l.eq.1) single_particle_tetr_moments = 0
-!
+
                 !You need x_rand_beg(1,3), pitchpar(1) (between -1 and 1), energy is already given
                 x_rand_beg = start_pos_pitch_mat(1:3,n)
                 pitchpar = start_pos_pitch_mat(4,n)
                 ! print*, start_pos_pitch_mat(5,n)
                 ! if (n.eq.972) print*, x_rand_beg,start_pos_pitch_mat(5,n),pitchpar
-!
+
                 if (i_integrator_type.eq.2) print*, 'Error: i_integratpr_type set to 2, this module only works with &
                                                     & i_integrator_type set to 1'
                 x = x_rand_beg
@@ -308,7 +319,7 @@ endif
                     vpar = pitchpar * v
                     vperp = sqrt(v**2-vpar**2)
                 endif
-!
+
                 i = 0
                 do while (t_confined.lt.time_step)
                     i = i+1
@@ -324,7 +335,7 @@ endif
                             enrat = enrat_mat(:,ind_tetr)
                             vpar_background = vpar_mat(:,ind_tetr)
                             !print*, vpar_background
-!
+
                             vpar = vpar - vpar_background(1)
                             !since vpar_background actually has num_background_particles entries, consider giving it as an extra
                             !optional input variable to stost, before randnum (maybe also check if radnum could then be set by 
@@ -334,29 +345,29 @@ endif
                             zet(1:3) = x !spatial position
                             zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module 
                             zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
-!
+
                             if (boole_precalc_collisions) then
                                 randnum = randcol(n,mod(i-1,randcoli)+1,:) 
                                 call stost(efcolf,velrat,enrat,zet,t_step,1,err,(time_step-t_confined)*v0,randnum)
                             else
                                 call stost(efcolf,velrat,enrat,zet,t_step,1,err,(time_step-t_confined)*v0)
                             endif
-!
+
                             t_step = t_step/v0
                             x = zet(1:3)
                             vpar = zet(5)*zet(4)*v0+vpar_background(1)
                             vperp = sqrt(1-zet(5)**2)*zet(4)*v0
-!
+
                             !optionally still change particle_mass, particle_charge and cm_over_e, e.g.:
                             !particle_charge = particle_charge + echarge
                             !particle_mass = particle_mass + ame - amp 
                             !cm_over_e = clight*particle_mass/particle_charge
                         endif
                     endif
-!
+
                     call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface,n,v, &
                                     & sqrt_g,start_pos_pitch_mat,single_particle_tetr_moments, hamiltonian_time,inorout,t_remain)
-!
+
                     t_confined = t_confined + t_step - t_remain
                     !Lost particle handling
                     if(ind_tetr.eq.-1) then
@@ -371,7 +382,7 @@ endif
                         !$omp end critical
                         exit
                     endif
-!
+
                     v = sqrt(vpar**2+vperp**2)
                 enddo
                 !$omp critical
@@ -388,7 +399,7 @@ endif
                     write(rp_unit,*) x, v, vpar, vperp, i, n
                 endif
             enddo
-!
+
                 if (boole_squared_moments) then
                     !$omp critical
                     prism_moments_squared = prism_moments_squared + &
@@ -404,14 +415,14 @@ endif
         enddo !n
         !$OMP END DO
         !$OMP END PARALLEL
-!
+
 
         if(.not.boole_squared_moments) then
             prism_moments = (tetr_moments(:,tetra_indices_per_prism(:,1)) + &
                         & tetr_moments(:,tetra_indices_per_prism(:,2)) + &
                         & tetr_moments(:,tetra_indices_per_prism(:,3)))
         endif
-!
+
         do n = 1,n_moments
             prism_moments(n,:) = prism_moments(n,:)/(prism_volumes*time_step*n_particles) !do normalisations
             if (boole_squared_moments) then
@@ -424,9 +435,9 @@ endif
                     endif
             endif
         enddo
-!
+
     call fourier_transform_moments
-!
+
     if (boole_precalc_collisions) print*, "maxcol = ", maxcol
     print*, 'Number of lost particles',n_lost_particles
     print*, 'max_poloidal_flux is', max_poloidal_flux
@@ -434,7 +445,7 @@ endif
     print*, 'average number of pushings = ', n_pushings/n_particles
     print*, 'average number of toroidal revolutions = ', counter_phi_0_mappings/n_particles
     print*, 'average number of integration steps = ', count_integration_steps/n_particles
-!
+
     call close_files
     call write_data_to_files(filenames)
 
@@ -447,10 +458,10 @@ print*, 'energy in eV = ', energy_eV
 print*, 'tracing time in seconds = ', time_step
 print*, 'number of particles left through the outside = ', lost_outside
 print*, 'number of particles left through the inside = ', lost_inside
-!
+
 deallocate(start_pos_pitch_mat, tetr_moments, prism_moments, single_particle_tetr_moments)
 if (boole_squared_moments) deallocate(prism_moments_squared)
-!
+
 end subroutine calc_boltzmann
 
 subroutine read_boltzmann_inp()
@@ -464,118 +475,118 @@ subroutine read_boltzmann_inp()
 end subroutine read_boltzmann_inp
 
 subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
-    !
-        use constants, only: pi, ev2erg
-        use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, ntetr
-        use find_tetra_mod, only: find_tetra
-        use tetra_grid_settings_mod, only: grid_kind
-        use tetra_physics_mod, only: coord_system
-        use collis_ions, only: collis_init, stost
-    !
-        double precision, intent(in)                                   :: v0
-        double precision, dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
-        double precision                                               :: rand_scalar, vpar, vperp
-        double precision                                               :: amin, cmin, cmax !amax is set globally
-        double precision, dimension(:), allocatable                    :: rand_vector
-        double precision, dimension(:,:), allocatable                  :: rand_matrix1, rand_matrix2
-        integer                                                        :: i
-        double precision, dimension(3)                                 :: x
-        integer                                                        :: ind_tetr_out,iface,seed_inp_unit
-    !
-    !!!!comment out the following section to make starting conditions really random!!!
-    !
-        integer,dimension(:), allocatable                              :: seed
-        integer                                                        :: n
-    !
-        open(newunit = seed_inp_unit, file='seed.inp', status='old',action = 'read')
-        read(seed_inp_unit,*) n
-        allocate(seed(n))
-        read(seed_inp_unit,*) seed
-        close(seed_inp_unit)
-        CALL RANDOM_SEED (PUT=seed)
-        deallocate(seed)
-    !
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !
-        allocate(start_pos_pitch_mat(5,num_particles))
-        allocate(rand_vector(num_particles))
-        allocate(rand_matrix1(3,num_particles))
-        allocate(rand_matrix2(2,num_particles))
-    !
-        start_pos_pitch_mat = 0
-    !
-        ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
-        ind_b = 2 !(phi in cylindrical and flux coordinates)
-        ind_c = 3 !(z in cylindrical coordinates, theta in flux coordinates)
-    !
-        if (coord_system.eq.2) then
-            ind_b = 3
-            ind_c = 2
+    
+    use constants, only: pi, ev2erg
+    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, ntetr
+    use find_tetra_mod, only: find_tetra
+    use tetra_grid_settings_mod, only: grid_kind
+    use tetra_physics_mod, only: coord_system
+    use collis_ions, only: collis_init, stost
+
+    real(dp), intent(in)                                   :: v0
+    real(dp), dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
+    real(dp)                                               :: rand_scalar, vpar, vperp
+    real(dp)                                               :: amin, cmin, cmax !amax is set globally
+    real(dp), dimension(:), allocatable                    :: rand_vector
+    real(dp), dimension(:,:), allocatable                  :: rand_matrix1, rand_matrix2
+    integer                                                        :: i
+    real(dp), dimension(3)                                 :: x
+    integer                                                        :: ind_tetr_out,iface,seed_inp_unit
+
+!!!!comment out the following section to make starting conditions really random!!!
+
+    integer,dimension(:), allocatable                              :: seed
+    integer                                                        :: n
+
+    open(newunit = seed_inp_unit, file='seed.inp', status='old',action = 'read')
+    read(seed_inp_unit,*) n
+    allocate(seed(n))
+    read(seed_inp_unit,*) seed
+    close(seed_inp_unit)
+    CALL RANDOM_SEED (PUT=seed)
+    deallocate(seed)
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    allocate(start_pos_pitch_mat(5,num_particles))
+    allocate(rand_vector(num_particles))
+    allocate(rand_matrix1(3,num_particles))
+    allocate(rand_matrix2(2,num_particles))
+
+    start_pos_pitch_mat = 0
+
+    ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
+    ind_b = 2 !(phi in cylindrical and flux coordinates)
+    ind_c = 3 !(z in cylindrical coordinates, theta in flux coordinates)
+
+    if (coord_system.eq.2) then
+        ind_b = 3
+        ind_c = 2
+    endif
+
+    if (coord_system.eq.1) allocate(verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:))))
+    if (coord_system.eq.2) allocate(verts(size(verts_sthetaphi(:,1)),size(verts_sthetaphi(1,:))))
+    if (coord_system.eq.1) verts = verts_rphiz
+    if (coord_system.eq.2) verts = verts_sthetaphi
+
+    amin = minval(verts(ind_a,:))
+    amax = maxval(verts(ind_a,:))
+    cmin = minval(verts(ind_c,:))
+    cmax = maxval(verts(ind_c,:))
+
+    constant_part_of_weights = density*(amax-amin)*(cmax-cmin)*2*pi
+
+    !compute starting conditions
+    if (boole_point_source) then
+        if (grid_kind.eq.2) then
+            start_pos_pitch_mat(1,:) = 160
+            start_pos_pitch_mat(2,:) = 0
+            start_pos_pitch_mat(3,:) = 70
+        elseif (grid_kind.eq.4) then
+            start_pos_pitch_mat(1,:) = 205
+            start_pos_pitch_mat(2,:) = 0
+            start_pos_pitch_mat(3,:) = 0
         endif
-    !
-        if (coord_system.eq.1) allocate(verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:))))
-        if (coord_system.eq.2) allocate(verts(size(verts_sthetaphi(:,1)),size(verts_sthetaphi(1,:))))
-        if (coord_system.eq.1) verts = verts_rphiz
-        if (coord_system.eq.2) verts = verts_sthetaphi
-    !
-        amin = minval(verts(ind_a,:))
-        amax = maxval(verts(ind_a,:))
-        cmin = minval(verts(ind_c,:))
-        cmax = maxval(verts(ind_c,:))
-    !
-        constant_part_of_weights = density*(amax-amin)*(cmax-cmin)*2*pi
-    !
-        !compute starting conditions
-        if (boole_point_source) then
-            if (grid_kind.eq.2) then
-                start_pos_pitch_mat(1,:) = 160
-                start_pos_pitch_mat(2,:) = 0
-                start_pos_pitch_mat(3,:) = 70
-            elseif (grid_kind.eq.4) then
-                start_pos_pitch_mat(1,:) = 205
-                start_pos_pitch_mat(2,:) = 0
-                start_pos_pitch_mat(3,:) = 0
-            endif
-            if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
-        else
-            call RANDOM_NUMBER(rand_matrix1)
-            start_pos_pitch_mat(ind_a,:) = amin + (amax - amin)*rand_matrix1(ind_a,:) !r in cylindrical, s in flux coordinates
-            start_pos_pitch_mat(ind_b,:) = 2*pi*rand_matrix1(ind_b,:) !phi in cylindrical and flux coordinates
-            start_pos_pitch_mat(ind_c,:) = cmin + (cmax - cmin)*rand_matrix1(ind_c,:) !z in cylindrical, theta in flux coordinates
-            ! start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r
-            ! start_pos_pitch_mat(ind_b,:) = 0.0d0  !1d-1 !phi in cylindrical and flux coordinates
-            ! start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
-        endif
-    !
-        call RANDOM_NUMBER(rand_matrix2)
-        !start_pos_pitch_mat(4,:) = 2*rand_matrix2(1,:)-1 !pitch parameter
-        start_pos_pitch_mat(4,:) = 0.7d0 !pitch parameter
-    !
-        if (boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-            start_pos_pitch_mat(5,:) = 5*energy_eV*rand_matrix2(2,:) !boltzmann energy distribution
-            constant_part_of_weights = constant_part_of_weights*10/sqrt(pi)*energy_eV*ev2erg
-        endif
-    !
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! start antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        if (boole_antithetic_variate) then
-            start_pos_pitch_mat(:,1:num_particles:2) = start_pos_pitch_mat(:,2:num_particles:2)
-            start_pos_pitch_mat(4,1:num_particles:2) = -start_pos_pitch_mat(4,2:num_particles:2)
-        endif
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! end antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        weights(:,1) = constant_part_of_weights
-        if (boole_refined_sqrt_g.eqv..false.) weights(:,1) = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
-    !
-        if (boole_precalc_collisions) then
-            allocate(randcol(num_particles,randcoli,3))
-            call RANDOM_NUMBER(randcol)
-            !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
-            randcol(:,:,1:2:3) =  3.464102*(randcol(:,:,1:2:3)-.5)
-        endif
+        if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
+    else
+        call RANDOM_NUMBER(rand_matrix1)
+        start_pos_pitch_mat(ind_a,:) = amin + (amax - amin)*rand_matrix1(ind_a,:) !r in cylindrical, s in flux coordinates
+        start_pos_pitch_mat(ind_b,:) = 2*pi*rand_matrix1(ind_b,:) !phi in cylindrical and flux coordinates
+        start_pos_pitch_mat(ind_c,:) = cmin + (cmax - cmin)*rand_matrix1(ind_c,:) !z in cylindrical, theta in flux coordinates
+        ! start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r
+        ! start_pos_pitch_mat(ind_b,:) = 0.0d0  !1d-1 !phi in cylindrical and flux coordinates
+        ! start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
+    endif
+
+    call RANDOM_NUMBER(rand_matrix2)
+    !start_pos_pitch_mat(4,:) = 2*rand_matrix2(1,:)-1 !pitch parameter
+    start_pos_pitch_mat(4,:) = 0.7d0 !pitch parameter
+
+    if (boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+        start_pos_pitch_mat(5,:) = 5*energy_eV*rand_matrix2(2,:) !boltzmann energy distribution
+        constant_part_of_weights = constant_part_of_weights*10/sqrt(pi)*energy_eV*ev2erg
+    endif
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! start antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    if (boole_antithetic_variate) then
+        start_pos_pitch_mat(:,1:num_particles:2) = start_pos_pitch_mat(:,2:num_particles:2)
+        start_pos_pitch_mat(4,1:num_particles:2) = -start_pos_pitch_mat(4,2:num_particles:2)
+    endif
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! end antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    weights(:,1) = constant_part_of_weights
+    if (boole_refined_sqrt_g.eqv..false.) weights(:,1) = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
+
+    if (boole_precalc_collisions) then
+        allocate(randcol(num_particles,randcoli,3))
+        call RANDOM_NUMBER(randcol)
+        !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
+        randcol(:,:,1:2:3) =  3.464102*(randcol(:,:,1:2:3)-.5)
+    endif
 end subroutine calc_starting_conditions
 
 subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,v,sqrt_g,start_pos_pitch_mat, &
                                           & single_particle_tetr_moments,hamiltonian_time, inorout, t_remain_out)
-!
+
     use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
     use tetra_physics_poly_precomp_mod , only: make_precomp_poly_perpinv, initialize_boole_precomp_poly_perpinv, &
@@ -587,50 +598,50 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     use find_tetra_mod, only: find_tetra
     use constants, only: pi, ev2erg
     use tetra_grid_mod, only: tetra_grid, ntetr
-!
-    double precision, dimension(3), intent(inout)   :: x
-    double precision, intent(inout)                 :: vpar,vperp
-    double precision, intent(in)                    :: t_step
+
+    real(dp), dimension(3), intent(inout)   :: x
+    real(dp), intent(inout)                 :: vpar,vperp
+    real(dp), intent(in)                    :: t_step
     logical, intent(inout)                          :: boole_initialized
     integer, intent(inout)                          :: ind_tetr,iface
-    double precision, intent(out), optional         :: t_remain_out
-    double precision, dimension(3)                  :: z_save, x_save
-    double precision                                :: vperp2,t_remain,t_pass,vpar_save, v, hamiltonian_time, aphi
+    real(dp), intent(out), optional         :: t_remain_out
+    real(dp), dimension(3)                  :: z_save, x_save
+    real(dp)                                :: vperp2,t_remain,t_pass,vpar_save, v, hamiltonian_time, aphi
     logical                                         :: boole_t_finished
     integer                                         :: ind_tetr_save,iper_phi,k, m, n, inorout
-    double precision                                :: perpinv,perpinv2, speed, r, z, phi, B, phi_elec_func
-    double precision, dimension(:,:)                :: start_pos_pitch_mat
+    real(dp)                                :: perpinv,perpinv2, speed, r, z, phi, B, phi_elec_func
+    real(dp), dimension(:,:)                :: start_pos_pitch_mat
     type(optional_quantities_type)                  :: optional_quantities
     double complex, dimension(:,:)                  :: single_particle_tetr_moments
     integer                                         :: single_particle_counter_phi0_mappings
-    double precision, dimension(:,:)                :: sqrt_g
+    real(dp), dimension(:,:)                :: sqrt_g
     
-!
+
     !If orbit_timestep is called for the first time without grid position
     if(.not.boole_initialized) then
-!
+
         !Check coordinate domain (optionally perform modulo operation)
         call check_coordinate_domain(x)
-!
+
         !Find tetrahedron index and face index for position x
         call find_tetra(x,vpar,vperp,ind_tetr,iface)
-!
+
         !If particle doesn't lie inside any tetrahedron
         if(ind_tetr.eq.-1) then
             t_remain_out = t_step
             return
         endif
-!
+
         r = x(1) - verts(1, tetra_grid(ind_tetr)%ind_knot(1))
         z = x(3) - verts(3,tetra_grid(ind_tetr)%ind_knot(1))
         phi = x(2) - verts(2,tetra_grid(ind_tetr)%ind_knot(1))
-!
+
         if (boole_refined_sqrt_g) then
             weights(n,1) = weights(n,1)* &
                                     &  (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
                                     &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
         endif
-!
+
         if (boole_linear_density_simulation.or.boole_linear_temperature_simulation) then
             poloidal_flux(n) = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*(/r,phi,z/)) + &
                                              & cm_over_e*vpar*&
@@ -639,7 +650,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
         if (boole_linear_density_simulation) then
             weights(n,1) = weights(n,1)*(max_poloidal_flux*1.1-poloidal_flux(n))/(max_poloidal_flux*1.1)
         endif
-!       
+      
         if (boole_boltzmann_energies) then
             !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
             phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*(/r,phi,z/))
@@ -652,30 +663,30 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                 & exp(-(start_pos_pitch_mat(5,n)*ev2erg+particle_charge*phi_elec_func)/temperature_vector(n))
             endif
         endif
-!
+
         !compute J_perp for perpendicular pressure
         B = tetra_physics(ind_tetr)%bmod1+sum(tetra_physics(ind_tetr)%gb*(/r,phi,z/))
         J_perp(n) = particle_mass*v**2*(1-start_pos_pitch_mat(4,n)**2)*cm_over_e/(2*B)*(-1)
         !-1 because of negative gyrophase
-!
+
         boole_initialized = .true.
     endif
-!           
+          
     !Exit the subroutine after initialization, if time step equals zero
     if(t_step.eq.0.d0) return
-!
+
     inorout = 0
-!
+
     !Squared perpendicular velocity
     vperp2 = vperp**2
-!
+
     !Compute relative particle position
     z_save = x-tetra_physics(ind_tetr)%x1
-!
+
     !Compute perpendicular invariant of particle
     perpinv=-0.5d0*vperp2/bmod_func(z_save,ind_tetr)
     perpinv2 = perpinv**2
-!               
+             
     !Initialize constants of motion in particle-private module
     select case(ipusher)
         case(1)
@@ -691,16 +702,16 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 !
     !Integrate particle orbit for given time step
     t_remain = t_step
-!
+
     !Logical for handling time integration
     boole_t_finished = .false.
-!
+
     single_particle_counter_phi0_mappings = 0
-!
+
     n_pushings = n_pushings-1 !set n_pushings to -1 because when entering the loop it wil go back to one without pushing
     !Loop for tetrahedron pushings until t_step is reached
     do
-!
+
         n_pushings = n_pushings + 1
         !Domain Boundary
         if(ind_tetr.eq.-1) then
@@ -721,19 +732,19 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
             endif
             exit
         endif
-!                
+          
         !Save the tetrahedron index for computation of vperp in the last step
         ind_tetr_save = ind_tetr
-!
+
         !Save vpar for the computation of the parallel adiabatic invariant
         vpar_save = vpar
-!  
+
         !t_remain (in) ... remaining time until t_step is finished
         !t_pass (out) ... time to pass the tetrahdron
 
         !Save x for the computation of the current
         x_save = x
-!
+
         !Calculate trajectory
         select case(ipusher)
             case(1)
@@ -742,7 +753,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                 call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_remain,&
                                                     & t_pass,boole_t_finished,iper_phi,optional_quantities)
         end select
-!
+
         t_remain = t_remain - t_pass
         if (iper_phi.ne.0) then
             counter_phi_0_mappings = counter_phi_0_mappings + iper_phi
@@ -754,7 +765,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                 !$omp end critical
             endif
         endif
-!
+
         if (x(3).lt.-105d0) then
             boole_t_finished = .true.
            if (single_particle_counter_phi0_mappings.gt.10) then
@@ -766,7 +777,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
         endif
 
         hamiltonian_time = 0
-!
+
         if (.not.boole_squared_moments) then
             do m = 1,n_moments
             !print*, n_moments, moments_selector
@@ -808,7 +819,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                 end select
             enddo
         endif
-!
+
         !Orbit stops within cell, because "flight"-time t_step has finished
         if(boole_t_finished) then
             if( present(t_remain_out)) then
@@ -816,276 +827,65 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
             endif
             exit
         endif
-!
+
     enddo !Loop for tetrahedron pushings
-!
+
     !Compute vperp from position
     vperp = vperp_func(z_save,perpinv,ind_tetr_save)
-!            
+        
 !             !NOT FULLY IMPLEMENTED YET: Deallocate precomputed quantities dependent on perpinv
 !             call alloc_precomp_poly_perpinv(2,ntetr)
 !print*, 'number of pushings is', n_pushings
-!         
+
 end subroutine orbit_timestep_gorilla_boltzmann
 
 subroutine calc_plane_intersection(x_save,x,z_plane)
-    !
-        use constants, only : pi
-    !
-        double precision, dimension(3), intent(in) :: x_save
-        double precision, dimension(3), intent(inout) :: x
-        double precision, intent(in) :: z_plane
-        double precision :: rel_dist_z
-    !
-        rel_dist_z = (z_plane-x_save(3))/(x(3)-x_save(3))
-        x(1) = x_save(1) + rel_dist_z*(x(1)-x_save(1))
-        if (abs(x(2)-x_save(2)).gt.pi) then
-            x(2) = modulo(x_save(2) + 2*pi-abs(x(2)-x_save(2)),2*pi)
-        else
-            x(2) = x_save(2) + rel_dist_z*(x(2)-x_save(2))
-        endif
-        x(3) = z_plane
-    !
+
+    use constants, only : pi
+
+    real(dp), dimension(3), intent(in) :: x_save
+    real(dp), dimension(3), intent(inout) :: x
+    real(dp), intent(in) :: z_plane
+    real(dp) :: rel_dist_z
+
+    rel_dist_z = (z_plane-x_save(3))/(x(3)-x_save(3))
+    x(1) = x_save(1) + rel_dist_z*(x(1)-x_save(1))
+    if (abs(x(2)-x_save(2)).gt.pi) then
+        x(2) = modulo(x_save(2) + 2*pi-abs(x(2)-x_save(2)),2*pi)
+    else
+        x(2) = x_save(2) + rel_dist_z*(x(2)-x_save(2))
+    endif
+    x(3) = z_plane
+
 end subroutine calc_plane_intersection
 
-subroutine calc_volume_integrals(sqrt_g)
-!
-    use constants, only: pi, ev2erg
-    use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
-    use tetra_grid_settings_mod, only: grid_size, n_field_periods
-    use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
-!
-    integer                                     :: i,k
-    integer, dimension(2)                       :: triangle_indices
-    double precision, dimension(3)              :: r_values, z_values, r_values_intermediate, z_values_intermediate, gradient
-    double precision, dimension(2)              :: r, z, limits
-    double precision                            :: z_star, alpha, beta, gamma, delta, epsilon, capital_gamma, capital_delta, &
-                                                   a, a_dash, b, b_dash, c, c_dash, rmin, delta_r, delta_z, phi_0, eta
-    double precision, dimension(:,:)            :: sqrt_g
-!
-    allocate(tetra_indices_per_prism(n_prisms,3))    
-    allocate(prism_volumes(n_prisms))
-    allocate(refined_prism_volumes(n_prisms))
-    allocate(r_integrand_constants(n_prisms,22)) !collects all constants used for integration in order to print them on a file
-!
-    refined_prism_volumes = 0
-    r_integrand_constants = 0
-!
-    do i = 1,3
-        tetra_indices_per_prism(:,i) = (/(i+3*k,k = 0,n_prisms-1)/)
-    enddo
-!
-    !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(n_prisms,verts_rphiz,tetra_grid,grid_size,tetra_indices_per_prism,prism_volumes, particle_charge,energy_ev, &
-    !$OMP& refined_prism_volumes,sqrt_g,r_integrand_constants, elec_pot_vec,n_b,tetra_physics,boole_boltzmann_energies,density, &
-    !$OMP& boole_refined_sqrt_g,n_field_periods) &
-    !$OMP& PRIVATE(r_values,z_values,rmin,triangle_indices,r_values_intermediate,z_values_intermediate, delta_r, delta_z, eta, &
-    !$OMP& r,z,gradient,z_star,alpha,beta,gamma,delta,epsilon,capital_gamma,capital_delta, limits,a,a_dash,b,b_dash,c,c_dash,phi_0)
-    !$OMP DO
-    do i = 1,n_prisms
-        !calculate prism volumes using the basic approach (compare with chapter 4.2 of master thesis from Jonatan Schatzlmayr)
-        r_values = verts_rphiz(1,tetra_grid(tetra_indices_per_prism(i,1))%ind_knot([1,2,3]))
-        z_values = verts_rphiz(3,tetra_grid(tetra_indices_per_prism(i,1))%ind_knot([1,2,3]))
-        rmin = minval(r_values)
-        r_values = r_values - rmin
-        z_values = z_values - z_values(minloc(r_values,1))
-!
-        triangle_indices(2) = maxloc(r_values,1)
-        r_values_intermediate = r_values
-        r_values_intermediate(triangle_indices(2)) = minval(r_values)
-        if (sum(r_values_intermediate).eq.0) then
-            z_values_intermediate = z_values
-            z_values_intermediate(triangle_indices(2)) = minval(z_values)
-            triangle_indices(1) = maxloc(abs(z_values_intermediate),1)
-        else
-            triangle_indices(1) = maxloc(r_values_intermediate,1)
-        endif
-!
-        r = (/r_values(triangle_indices(1)),r_values(triangle_indices(2))/)
-        z = (/z_values(triangle_indices(1)),z_values(triangle_indices(2))/)
-!
-        if (r(2).eq.0) then
-            gradient(1) = 0
-        else
-            gradient(1) = z(2)/r(2)
-        endif
-        if (r(1).eq.0) then
-            gradient(2) = 0
-        else
-            gradient(2) = z(1)/r(1)
-        endif
-        if ((r(2)-r(1)).eq.0) then
-            gradient(3) = 0
-        else
-            gradient(3) = (z(2)-z(1))/(r(2)-r(1))
-        endif
-!
-        r_integrand_constants(i,20:22) = (/minloc(r_values),triangle_indices(1),triangle_indices(2)/)
-!
-        z_star = z(1) - r(1)*gradient(3)
-        alpha = abs(gradient(2)-gradient(1))
-        beta = gradient(3) - gradient(1)
-!
-        r_integrand_constants(i,1:6) = (/r(1),r(2),alpha,rmin, z_star,beta/)
-!
-        prism_volumes(i) =  2*pi/(grid_size(2)*n_field_periods)*(alpha/3*r(1)**3+alpha*rmin/2*r(1)**2+ &
-                            abs(z_star*rmin*(r(2)-r(1))+(z_star+beta*rmin)/2*(r(2)**2-r(1)**2)+beta/3*(r(2)**3-r(1)**3)))
-!
-        !calculate other volme integrals (compare with appendix B of master thesis of Jonatan Schatzlmayr)
-        delta_r = verts_rphiz(1,tetra_grid(tetra_indices_per_prism(i,1))%ind_knot(1)) - &
-                & verts_rphiz(1,tetra_grid(tetra_indices_per_prism(i,1))%ind_knot(int(r_integrand_constants(i,20))))
-        delta_z = verts_rphiz(3,tetra_grid(tetra_indices_per_prism(i,1))%ind_knot(1)) - &
-                & verts_rphiz(3,tetra_grid(tetra_indices_per_prism(i,1))%ind_knot(int(r_integrand_constants(i,20))))
-!
-        if (boole_refined_sqrt_g) then
-            !Calculate prism volumes using the refined approach
-            !(compare with appendix B (introductory pages + B1) of master thesis from Jonatan Schatzlmayr)
-            a = sqrt_g(3*i-2,1) - sqrt_g(3*i-2,2)*delta_r - sqrt_g(3*i-2,3)*delta_z
-            a_dash = sqrt_g(3*i-2,4) - sqrt_g(3*i-2,5)*delta_r - sqrt_g(3*i-2,6)*delta_z
-            b = sqrt_g(3*i-2,2)
-            b_dash = sqrt_g(3*i-2,5)
-            c = sqrt_g(3*i-2,3)
-            c_dash = sqrt_g(3*i-2,6)
-    !
-            !calculate the contribution from 0 to r(1) to the prism volumes
-            limits = (/dble(0),r(1)/)
-    !
-            alpha = c/c_dash*(gradient(2)-gradient(1))
-            beta = b_dash+c_dash*gradient(2)
-            gamma = b_dash+c_dash*gradient(1)
-            delta = (c_dash*a-c*a_dash)/c_dash**2
-            epsilon = (c_dash*b-c*b_dash)/c_dash**2
-    !
-            r_integrand_constants(i,7:12) = (/alpha,beta,gamma,delta,epsilon,a_dash/)
-    !
-            refined_prism_volumes(i) = r(1)*epsilon*a_dash/(2*gamma*beta)*(gamma-beta) + &
-                    & r(1)**2*alpha/2 + &
-                    & log((a_dash+gamma*r(1))/a_dash)*(delta*a_dash/(gamma*beta)*(gamma-beta)+epsilon*a_dash**2/(2*gamma**2)) + &
-                    & log((a_dash+beta*r(1))/(a_dash+gamma*r(1)))*(delta/beta*(a_dash+beta*r(1))+epsilon/2*r(1)**2) - &
-                    & log((a_dash+beta*r(1))/a_dash)*epsilon*a_dash**2/(2*beta**2)
-    !
-            !calculate the contribution from r(1) to r(2) to the prism volumes
-            limits = (/r(1),r(2)/)
-    !
-            alpha = c/c_dash*(gradient(3)-gradient(1))
-            beta = b_dash+c_dash*gradient(3)
-            gamma = b_dash+c_dash*gradient(1)
-            delta = (c_dash*a-c*a_dash)/c_dash**2
-            epsilon = (c_dash*b-c*b_dash)/c_dash**2
-            capital_gamma = c/c_dash*z_star
-            capital_delta = a_dash + c_dash*z_star
-    !
-            r_integrand_constants(i,13:19) = (/alpha,beta,gamma,delta,epsilon,capital_gamma,capital_delta/)
-    !
-            refined_prism_volumes(i) = refined_prism_volumes(i) + &
-                    & (r(2)-r(1))*(capital_gamma+epsilon/(2*gamma*beta)*(gamma*capital_delta-beta*a_dash)) + &
-                    & (r(2)**2-r(1)**2)*alpha/2 + &
-                    & log((a_dash+gamma*r(2))/(a_dash+gamma*r(1)))*(delta/(gamma*beta)*(gamma*capital_delta-a_dash*beta) + &
-                                                                                            & epsilon*a_dash**2/(2*gamma**2)) + &
-                    & log((capital_delta+beta*r(2))/(a_dash+gamma*r(2))*(a_dash+gamma*r(1))/(capital_delta+beta*r(1))) * &
-                                                                    & (delta/beta*(capital_delta+beta*r(2))+epsilon/2*r(2)**2) + &
-                    & log((capital_delta+beta*r(1))/(a_dash+gamma*r(1)))*(delta*(r(2)-r(1))+epsilon/2*(r(2)**2-r(1)**2)) - &
-                    & log((capital_delta+beta*r(2))/(capital_delta+beta*r(1)))*epsilon*capital_delta**2/(2*beta**2)
-        endif
-!
-        if (boole_boltzmann_energies) then
-!
-            !calculate electric potential using the refined approach
-            !(compare with appendix B (introductory pages + B2) of master thesis from Jonatan Schatzlmayr)
-!
-            a = tetra_physics(3*i-2)%gPhi(1)
-            b = tetra_physics(3*i-2)%gPhi(3)
-            phi_0 = tetra_physics(3*i-2)%Phi1 - a*delta_r - b*delta_z
-!
-            !calculate the contribution from 0 to r(1) to the electric potential
-            alpha = phi_0*(gradient(2)-gradient(1))*rmin
-            beta = (a*rmin+phi_0)*(gradient(2)-gradient(1))+b/2*(gradient(2)**2-gradient(1)**2)*rmin
-            gamma = a*(gradient(2)-gradient(1))+b/2*(gradient(2)**2-gradient(1)**2)
-
-            elec_pot_vec(i) = elec_pot_vec(i) + alpha/2*r(1)**2+beta/3*r(1)**3+gamma/4*r(1)**4
-!
-            !calculate the contribution from r(1) to r(2) to the electric potential
-            alpha  = phi_0*z_star*rmin+b/2*z_star**2*rmin
-            beta = a*z_star*rmin+phi_0*(gradient(3)-gradient(1))*rmin+phi_0*z_star+b/2*z_star**2+b*z_star*gradient(3)*rmin
-            gamma = phi_0*(gradient(3)-gradient(1))+a*z_star+a*(gradient(3)-gradient(1))*rmin + &
-                    & b/2*(gradient(3)**2-gradient(1)**2)*rmin+b*z_star*gradient(3)
-            delta = a*(gradient(3)-gradient(1))+b/2*(gradient(3)**2-gradient(1)**2)
-
-            elec_pot_vec(i) = elec_pot_vec(i) + alpha*(r(2)-r(1))+beta/2*(r(2)**2-r(1)**2)+&
-                            & gamma/3*(r(2)**3-r(1)**3)+delta/4*(r(2)**4-r(1)**4)
-!
-            !calculate Boltzmann densiy using the refined approach
-            !(compare with appendix B (introductory pages + B3) of master thesis from Jonatan Schatzlmayr)
-!
-            !calculate contribution from 0 to r(1) to the boltzmann density    
-            alpha = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))*rmin*(gradient(2)-gradient(1))
-!
-            beta = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))*((gradient(2)-gradient(1))* &
-                 & (1-rmin*particle_charge*a/(energy_ev*ev2erg))- &
-                 & rmin*particle_charge*b/(2*energy_ev*ev2erg)*(gradient(2)**2-gradient(1)**2))
-!
-            gamma = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))* &
-                  & (-particle_charge*a/(energy_ev*ev2erg)*(gradient(2)-gradient(1))- &
-                  & particle_charge*b/(2*energy_ev*ev2erg)*(gradient(2)**2-gradient(1)**2))
-!
-            n_b(i) = n_b(i) + alpha/2*r(1)**2+beta/3*r(1)**3+gamma/4*r(1)**4
-!
-            !calculate contribution from r(1) to r(2) to the boltzmann density
-            alpha = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))*rmin*&
-                  & (z_star-particle_charge*b/(2*energy_ev*ev2erg)*z_star**2)
-!
-            beta = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))*(z_star- & 
-                 & rmin*particle_charge*a/(energy_ev*ev2erg)*z_star+rmin*(gradient(3)-gradient(1))- &
-                 & particle_charge*b/(2*energy_ev*ev2erg)*z_star**2-rmin*particle_charge*b/(energy_ev*ev2erg)*z_star*gradient(3))
-!
-            gamma = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))*((-rmin*particle_charge*a/(energy_eV*ev2erg)+1)* &
-                  & (gradient(3)-gradient(1))-particle_charge*a/(energy_ev*ev2erg)*z_star- &
-                  & rmin*particle_charge*b/(2*energy_ev*ev2erg)*(gradient(3)**2-gradient(1)**2)- &
-                  & particle_charge*b/(energy_eV*ev2erg)*z_star*gradient(3))
-!
-            delta = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))*(-particle_charge*a/(energy_eV*ev2erg)* &
-                  & (gradient(3)-gradient(1))-particle_charge*b/(2*energy_eV*ev2erg)*(gradient(3)**2-gradient(1)**2))
-!
-            n_b(i) = n_b(i) + alpha*(r(2)-r(1)) + beta/2*(r(2)**2-r(1)**2) + gamma/3*(r(2)**3-r(1)**3) + delta/4*(r(2)**4-r(1)**4)
-!
-        endif
-    enddo
-    !$OMP END DO
-    !$OMP END PARALLEL
-!
-    refined_prism_volumes = abs(refined_prism_volumes)*2*pi/(grid_size(2)*n_field_periods)
-    elec_pot_vec = abs(elec_pot_vec)*2*pi/(grid_size(2)*n_field_periods*prism_volumes)
-    n_b = abs(n_b)*2*pi/(grid_size(2)**n_field_periods*prism_volumes)
-!
-end subroutine calc_volume_integrals
-
 subroutine fourier_transform_moments
-!
+
     use constants, only: pi
     use tetra_grid_settings_mod, only: grid_size
-!
+
     integer                                                        :: n,m,j,k,p,q,l
     integer                                                        :: pmff_unit
     complex                                                        :: i
     complex, dimension(:,:,:), allocatable              :: prism_moments_ordered_for_ft
-!
+
 print*, 'fourier transform started'
-!
+
     n_triangles = n_prisms/grid_size(2)
     allocate(prism_moments_ordered_for_ft(n_moments,n_triangles,grid_size(2)))
     do q = 1,grid_size(2)
         prism_moments_ordered_for_ft(:,:,q) = prism_moments(:,n_triangles*(q-1)+1:n_triangles*q)
     enddo
-!
+
     if (n_fourier_modes.gt.grid_size(2)) then
         print*, 'n_fourier_modes was chosen to be bigger than n_phi, it is therefore reduced to n_phi'
         n_fourier_modes = grid_size(2)
     endif
-!
+
     allocate(moments_in_frequency_space(n_moments,n_triangles,n_fourier_modes))
     moments_in_frequency_space = 0
     i = (0,1)
-!
+
     do p = 1,n_triangles
         do n = 1,n_moments
             do k = 0,n_fourier_modes-1
@@ -1096,7 +896,7 @@ print*, 'fourier transform started'
             enddo
         enddo
     enddo
-!
+
     open(newunit = pmff_unit, file = 'prism_moments_for_fourier.dat')
     do l = 1,n_triangles
         do m = 1,grid_size(2)-1
@@ -1107,45 +907,12 @@ print*, 'fourier transform started'
                                      aimag(prism_moments_ordered_for_ft(1,l,grid_size(2)))
     enddo
     close(pmff_unit)
-!
+
     deallocate(prism_moments_ordered_for_ft)
-!
+
 print*, 'fourier transform finished'
-!
+
 end subroutine fourier_transform_moments
-
-subroutine calc_square_root_g(sqrt_g)
-
-    use tetra_physics_mod, only: tetra_physics, hamiltonian_time
-    use tetra_grid_mod, only: ntetr, tetra_grid, verts_rphiz
-
-    double precision, dimension(:,:), allocatable, intent(out) :: sqrt_g
-    integer            :: ind_tetr
-
-    allocate(sqrt_g(ntetr,7))
-    !compare first 6 entries with chapter 4.5 of master thesis from Jonatan Schatzlmayr, entry 7 is the radius (old metric determinant)
-
-    do ind_tetr = 1, ntetr
-        sqrt_g(ind_tetr,1) = hamiltonian_time(ind_tetr)%h1_in_curlA
-
-        sqrt_g(ind_tetr,2) = tetra_physics(ind_tetr)%gh1(1)*tetra_physics(ind_tetr)%curlA(1) + &
-                           & tetra_physics(ind_tetr)%gh2(1)*tetra_physics(ind_tetr)%curlA(2) + &
-                           & tetra_physics(ind_tetr)%gh3(1)*tetra_physics(ind_tetr)%curlA(3)
-
-        sqrt_g(ind_tetr,3) = tetra_physics(ind_tetr)%gh1(3)*tetra_physics(ind_tetr)%curlA(1) + &
-                           & tetra_physics(ind_tetr)%gh2(3)*tetra_physics(ind_tetr)%curlA(2) + &
-                           & tetra_physics(ind_tetr)%gh3(3)*tetra_physics(ind_tetr)%curlA(3)
-
-        sqrt_g(ind_tetr,4) = tetra_physics(ind_tetr)%bmod1
-
-        sqrt_g(ind_tetr,5) = tetra_physics(ind_tetr)%gB(1)
-
-        sqrt_g(ind_tetr,6) = tetra_physics(ind_tetr)%gB(3)
-
-        sqrt_g(ind_tetr,7) = verts_rphiz(1,tetra_grid(ind_tetr)%ind_knot(1))
-    enddo
-
-end subroutine calc_square_root_g
 
 subroutine write_data_to_files(filenames)
 
@@ -1355,21 +1122,21 @@ subroutine unlink_files(filenames)
 end subroutine unlink_files
 
 subroutine open_files_before_main_loop
-!
+
     open(newunit = et_unit, file = 'exit_times.dat')
     open(newunit = rp_unit, file = 'remaining_particles.dat')
     open(newunit = pm_unit, file = 'poincare_maps.dat')
     open(newunit = di_unit, file = 'divertor_intersections.dat')
-!
+
 end subroutine open_files_before_main_loop
 
 subroutine close_files
-!
+
     close(et_unit)
     close(rp_unit)
     close(pm_unit)
     close(di_unit)
-!
+
 end subroutine close_files
-!
+
 end module boltzmann_mod
