@@ -4,61 +4,42 @@ module boltzmann_mod
 
     implicit none
 
+    public :: calc_boltzmann
+
     private
 
-    real(dp) :: time_step,energy_eV, min_poloidal_flux, max_poloidal_flux, amax
-    integer, dimension(:,:), allocatable :: tetra_indices_per_prism
-    real(dp), dimension(:), allocatable :: prism_volumes, refined_prism_volumes, elec_pot_vec, n_b
-    real(dp), dimension(:,:), allocatable :: verts, r_integrand_constants
-    double complex, dimension(:,:), allocatable :: tetr_moments, prism_moments, &
-                                                   & prism_moments_squared
-    double complex, dimension(:,:,:), allocatable :: moments_in_frequency_space
-    integer :: i_integrator_type, seed_option, n_moments, n_prisms, num_particles,&
-               & ind_a, ind_b, ind_c, n_pushings, counter_phi_0_mappings, lost_outside, lost_inside
-    real(dp) :: n_particles, density, constant_part_of_weights
+    !variables from boltzmann_nml
+    real(dp) :: time_step,energy_eV,n_particles, density
+    logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
+               boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
+               boole_linear_temperature_simulation
+    integer :: i_integrator_type, seed_option
+
+    !moment specs
     integer, dimension(4) :: moments_selector
-    double complex, dimension(:,:), allocatable :: weights
+    integer :: n_moments, n_triangles, n_fourier_modes
+
+    !output
+    complex(dp), dimension(:,:), allocatable :: tetr_moments, prism_moments, prism_moments_squared
+    complex(dp), dimension(:,:,:), allocatable :: moments_in_frequency_space
+
+    !counter_variables
+    integer :: n_pushings, counter_phi_0_mappings, lost_outside, lost_inside
+
+    real(dp) :: min_poloidal_flux, max_poloidal_flux, amax, constant_part_of_weights
+    integer, dimension(:,:), allocatable :: tetra_indices_per_prism
+    real(dp), dimension(:,:), allocatable :: verts
+    integer :: n_prisms, num_particles, ind_a, ind_b, ind_c
+    complex(dp), dimension(:,:), allocatable :: weights
     real(dp), dimension(:), allocatable :: J_perp, poloidal_flux, temperature_vector
-    logical :: boole_refined_sqrt_g, boole_boltzmann_energies
-    integer :: n_fourier_modes, n_triangles
-    logical :: boole_linear_density_simulation, boole_antithetic_variate, boole_linear_temperature_simulation
-    logical :: boole_collisions, boole_squared_moments, boole_point_source, boole_precalc_collisions
     real(dp), dimension(:,:,:), allocatable :: randcol
     integer :: randcoli = int(1.0d5)
     integer :: et_unit, rp_unit, pm_unit, di_unit
-    type boole_writing_data_t
-        logical :: vertex_indices = .true.
-        logical :: vertex_coordinates = .true.
-        logical :: prism_volumes = .false.
-        logical :: refined_prism_volumes = .true.
-        logical :: boltzmann_density = .true.
-        logical :: electric_potential = .false.
-        logical :: moments = .false.
-        logical :: fourier_moments = .false.
-    end type boole_writing_data_t
-    type filenames_t
-        character(len=100) :: exit_times
-        character(len=100) :: remaining_particles
-        character(len=100) :: poincare_maps
-        character(len=100) :: prism_moments
-        character(len=100) :: prism_moments_summed_squares
-        character(len=100) :: vertex_coordinates
-        character(len=100) :: vertex_indices
-        character(len=100) :: prism_volumes
-        character(len=100) :: fourier_moments
-        character(len=100) :: refined_prism_volumes
-        character(len=100) :: electric_potential
-        character(len=100) :: boltzmann_densities
-        character(len=100) :: divertor_intersections
-        character(len=100) :: tetr_moments
-    end type filenames_t
 
     !Namelist for boltzmann input
     NAMELIST /boltzmann_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions, &
     & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
     & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option
-
-    public :: calc_boltzmann
    
 contains
 
@@ -68,8 +49,6 @@ subroutine calc_boltzmann
     use constants, only: ev2erg,pi,echarge,ame,amp,clight
     use tetra_physics_mod, only: particle_mass,particle_charge,cm_over_e,mag_axis_R0, coord_system, tetra_physics
     use omp_lib, only: omp_get_thread_num, omp_get_num_threads, omp_set_num_threads
-    use parmot_mod, only: rmu,ro0
-    use velo_mod, only: isw_field_type
     use supporting_functions_mod, only: theta_sym_flux2theta_vmec,theta_vmec2theta_sym_flux
     use tetra_grid_settings_mod, only: n_field_periods, grid_size
     use tetra_grid_mod, only: ntetr, nvert, verts_rphiz, tetra_grid, verts_sthetaphi
@@ -79,6 +58,7 @@ subroutine calc_boltzmann
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
+    use boltzmann_types_mod, only: filenames_t, output_t, moment_specs_t
 
     real(dp), dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
                                                      velrat_mat, enrat_mat, dens_mat_tetr, temp_mat_tetr
@@ -90,22 +70,21 @@ subroutine calc_boltzmann
     real(dp) :: dtau, dphi,dtaumin, t_step
     real(dp), dimension(5) :: z, zet
     Character(LEN=50) :: format_moments, format_fourier_moments
-    double complex, dimension(:,:), allocatable :: single_particle_tetr_moments
+    complex(dp), dimension(:,:), allocatable :: single_particle_tetr_moments
     real(dp) :: m0,z0,hamiltonian_time
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
     integer :: Te_unit, Ti_unit, ne_unit, t_moments_unit, ipert_unit
     type(filenames_t) :: filenames
+    type(output_t) :: output
+    type(moment_specs_t) :: moment_specs
     real(dp), dimension(:,:), allocatable :: sqrt_g
 
     !Load input for boltzmann computation
     call read_boltzmann_inp()
 
-    !call read_in_starting_conditions(start_pos_pitch_mat, num_particles)
-
     num_particles = int(n_particles)
     n_start = 1
     n_end = num_particles
-    n_fourier_modes = 5
 
     !prepare moment calculation
     n_moments = 0
@@ -130,19 +109,17 @@ subroutine calc_boltzmann
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     n_prisms = ntetr/3
-    allocate(tetr_moments(n_moments,ntetr))
-    allocate(single_particle_tetr_moments(n_moments,ntetr))
-    if (boole_squared_moments) allocate(prism_moments_squared(n_moments,n_prisms))
-    allocate(prism_moments(n_moments,n_prisms))
+    call set_moment_specifications(moment_specs, boole_squared_moments)
+    call initialise_output(output, moment_specs)
+    allocate(single_particle_tetr_moments(moment_specs%n_moments,ntetr))
     allocate(weights(num_particles,1))
     allocate(J_perp(num_particles))
     allocate(poloidal_flux(num_particles))
     allocate(temperature_vector(num_particles))
-    allocate(elec_pot_vec(n_prisms))
-    allocate(prism_volumes(n_prisms))
-    allocate(refined_prism_volumes(n_prisms))
-    allocate(n_b(n_prisms))
     allocate(tetra_indices_per_prism(n_prisms,3))
+    allocate(tetr_moments(moment_specs%n_moments,ntetr))
+    if (boole_squared_moments) allocate(prism_moments_squared(moment_specs%n_moments,n_prisms))
+    allocate(prism_moments(moment_specs%n_moments,n_prisms))
 
     do i = 1,3
         tetra_indices_per_prism(:,i) = (/(i+3*k,k = 0,n_prisms-1)/)
@@ -150,14 +127,11 @@ subroutine calc_boltzmann
 
     poloidal_flux = 0
     temperature_vector = 0
-    elec_pot_vec = 0
-    n_b = 0 !boltzmann density for uniform spatial distribution
 
     call calc_square_root_g(sqrt_g)
 
 print*, 'start calc_volume_integrals'
-    call calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, density, energy_eV, &
-                               prism_volumes, refined_prism_volumes, elec_pot_vec, n_b)
+    call calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, density, energy_eV,output)
 print*, 'end calc_volume_integrals'
 
     !Compute velocity module from kinetic energy dependent on particle species
@@ -268,7 +242,7 @@ print*, 'calc_starting_conditions finished'
         !$OMP PARALLEL DEFAULT(NONE) &
         !$OMP& SHARED(num_particles,kpart,v0,time_step,i_integrator_type,boole_collisions,sqrt_g, &
         !$OMP& dtau,dtaumin,n_start,n_end,tetra_indices_per_prism, prism_moments_squared,boole_squared_moments, &
-        !$OMP& start_pos_pitch_mat,boole_boltzmann_energies, prism_moments,count_integration_steps, et_unit, &
+        !$OMP& start_pos_pitch_mat,boole_boltzmann_energies, prism_moments,count_integration_steps, et_unit, moment_specs,&
         !$OMP& density,energy_eV,dens_mat,temp_mat,vpar_mat,tetra_grid,iantithetic,tetra_physics, di_unit, pm_unit, rp_unit, &
         !$OMP& efcolf_mat,velrat_mat,enrat_mat,num_background_species,randcol,randcoli,maxcol,boole_precalc_collisions) &
         !$OMP& FIRSTPRIVATE(particle_mass, particle_charge) &
@@ -365,8 +339,8 @@ endif
                         endif
                     endif
 
-                    call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface,n,v, &
-                                    & sqrt_g,start_pos_pitch_mat,single_particle_tetr_moments, hamiltonian_time,inorout,t_remain)
+                    call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface,n,v, sqrt_g,&
+                                & start_pos_pitch_mat,single_particle_tetr_moments, moment_specs, hamiltonian_time,inorout,t_remain)
 
                     t_confined = t_confined + t_step - t_remain
                     !Lost particle handling
@@ -423,20 +397,22 @@ endif
                         & tetr_moments(:,tetra_indices_per_prism(:,3)))
         endif
 
-        do n = 1,n_moments
-            prism_moments(n,:) = prism_moments(n,:)/(prism_volumes*time_step*n_particles) !do normalisations
+        do n = 1,moment_specs%n_moments
+            prism_moments(n,:) = prism_moments(n,:)/(output%prism_volumes*time_step*n_particles) !do normalisations
             if (boole_squared_moments) then
-                prism_moments_squared(n,:) = prism_moments_squared(n,:)/(prism_volumes**2*time_step**2*n_particles) !do normalisations
+                prism_moments_squared(n,:) = prism_moments_squared(n,:)/(output%prism_volumes**2*time_step**2*n_particles) !do normalisations
             endif
             if (boole_refined_sqrt_g) then
-                    prism_moments(n,:) = prism_moments(n,:)*prism_volumes/refined_prism_volumes
+                    prism_moments(n,:) = prism_moments(n,:)*output%prism_volumes/output%refined_prism_volumes
                     if (boole_squared_moments) then
-                    prism_moments_squared(n,:) = prism_moments_squared(n,:)*prism_volumes**2/refined_prism_volumes**2
+                    prism_moments_squared(n,:) = prism_moments_squared(n,:)*output%prism_volumes**2/output%refined_prism_volumes**2
                     endif
             endif
         enddo
 
-    call fourier_transform_moments
+    if (moment_specs%n_moments.gt.0) call fourier_transform_moments(moment_specs)
+    call close_files
+    call write_data_to_files(filenames,output,moment_specs)
 
     if (boole_precalc_collisions) print*, "maxcol = ", maxcol
     print*, 'Number of lost particles',n_lost_particles
@@ -445,24 +421,77 @@ endif
     print*, 'average number of pushings = ', n_pushings/n_particles
     print*, 'average number of toroidal revolutions = ', counter_phi_0_mappings/n_particles
     print*, 'average number of integration steps = ', count_integration_steps/n_particles
-
-    call close_files
-    call write_data_to_files(filenames)
-
-
-PRINT*, 'particle mass = ', particle_mass
-PRINT*, 'absolute value of velocity = ', v0
-PRINT*, 'particle charge = ', particle_charge
-PRINT*, 'temperature = ', ev2erg*energy_eV
-print*, 'energy in eV = ', energy_eV
-print*, 'tracing time in seconds = ', time_step
-print*, 'number of particles left through the outside = ', lost_outside
-print*, 'number of particles left through the inside = ', lost_inside
+    PRINT*, 'particle mass = ', particle_mass
+    PRINT*, 'absolute value of velocity = ', v0
+    PRINT*, 'particle charge = ', particle_charge
+    PRINT*, 'temperature = ', ev2erg*energy_eV
+    print*, 'energy in eV = ', energy_eV
+    print*, 'tracing time in seconds = ', time_step
+    print*, 'number of particles left through the outside = ', lost_outside
+    print*, 'number of particles left through the inside = ', lost_inside
 
 deallocate(start_pos_pitch_mat, tetr_moments, prism_moments, single_particle_tetr_moments)
 if (boole_squared_moments) deallocate(prism_moments_squared)
 
 end subroutine calc_boltzmann
+
+subroutine set_moment_specifications(moment_specs, boole_squared_moments)
+
+    use gorilla_settings_mod, only: boole_array_optional_quantities
+    use tetra_grid_settings_mod, only: grid_size
+    use tetra_grid_mod, only: ntetr
+    use boltzmann_types_mod, only: moment_specs_t
+
+    logical, intent(in) :: boole_squared_moments
+    type(moment_specs_t), intent(out) :: moment_specs
+    integer :: i, n_prisms
+
+    n_prisms = ntetr/3
+
+    moment_specs%boole_squared_moments = boole_squared_moments
+    moment_specs%n_triangles = n_prisms/grid_size(2)
+    moment_specs%n_fourier_modes = 5
+    moment_specs%n_moments = 0
+    moment_specs%moments_selector = 0
+    do i = 1,size(boole_array_optional_quantities)
+        if (boole_array_optional_quantities(i).eqv..true.) then
+            moment_specs%n_moments = moment_specs%n_moments + 1
+            moment_specs%moments_selector(moment_specs%n_moments) = i
+        endif
+    enddo
+
+end subroutine set_moment_specifications
+
+subroutine initialise_output(output, moment_specs)
+
+    use tetra_grid_mod, only: ntetr
+    use boltzmann_types_mod, only: moment_specs_t, output_t
+
+    type(moment_specs_t), intent(in) :: moment_specs
+    type(output_t),intent(out) :: output
+    integer :: n_prisms
+
+    n_prisms = ntetr/3
+
+    allocate(output%prism_volumes(n_prisms))
+    allocate(output%refined_prism_volumes(n_prisms))
+    allocate(output%electric_potential(n_prisms))
+    allocate(output%boltzmann_density(n_prisms))
+    allocate(output%tetr_moments(moment_specs%n_moments,ntetr))
+    allocate(output%prism_moments(moment_specs%n_moments,n_prisms))
+    if (moment_specs%boole_squared_moments) allocate(output%prism_moments_squared(moment_specs%n_moments,n_prisms))
+    allocate(output%moments_in_frequency_space(moment_specs%n_moments,moment_specs%n_triangles,moment_specs%n_fourier_modes))
+
+    output%prism_volumes = 0
+    output%refined_prism_volumes = 0
+    output%electric_potential = 0
+    output%boltzmann_density = 0
+    output%tetr_moments = 0
+    output%prism_moments = 0
+    if (moment_specs%boole_squared_moments) output%prism_moments_squared = 0
+    output%moments_in_frequency_space = 0
+
+end subroutine initialise_output
 
 subroutine read_boltzmann_inp()
 
@@ -585,7 +614,7 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
 end subroutine calc_starting_conditions
 
 subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,v,sqrt_g,start_pos_pitch_mat, &
-                                          & single_particle_tetr_moments,hamiltonian_time, inorout, t_remain_out)
+                                          & single_particle_tetr_moments,moment_specs, hamiltonian_time, inorout, t_remain_out)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
@@ -598,22 +627,24 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     use find_tetra_mod, only: find_tetra
     use constants, only: pi, ev2erg
     use tetra_grid_mod, only: tetra_grid, ntetr
+    use boltzmann_types_mod, only: moment_specs_t
 
+    type(moment_specs_t), intent(in)        :: moment_specs
     real(dp), dimension(3), intent(inout)   :: x
     real(dp), intent(inout)                 :: vpar,vperp
     real(dp), intent(in)                    :: t_step
-    logical, intent(inout)                          :: boole_initialized
-    integer, intent(inout)                          :: ind_tetr,iface
+    logical, intent(inout)                  :: boole_initialized
+    integer, intent(inout)                  :: ind_tetr,iface
     real(dp), intent(out), optional         :: t_remain_out
     real(dp), dimension(3)                  :: z_save, x_save
     real(dp)                                :: vperp2,t_remain,t_pass,vpar_save, v, hamiltonian_time, aphi
-    logical                                         :: boole_t_finished
-    integer                                         :: ind_tetr_save,iper_phi,k, m, n, inorout
+    logical                                 :: boole_t_finished
+    integer                                 :: ind_tetr_save,iper_phi,k, m, n, inorout
     real(dp)                                :: perpinv,perpinv2, speed, r, z, phi, B, phi_elec_func
     real(dp), dimension(:,:)                :: start_pos_pitch_mat
-    type(optional_quantities_type)                  :: optional_quantities
-    double complex, dimension(:,:)                  :: single_particle_tetr_moments
-    integer                                         :: single_particle_counter_phi0_mappings
+    type(optional_quantities_type)          :: optional_quantities
+    complex(dp), dimension(:,:)             :: single_particle_tetr_moments
+    integer                                 :: single_particle_counter_phi0_mappings
     real(dp), dimension(:,:)                :: sqrt_g
     
 
@@ -779,9 +810,8 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
         hamiltonian_time = 0
 
         if (.not.boole_squared_moments) then
-            do m = 1,n_moments
-            !print*, n_moments, moments_selector
-                select case(moments_selector(m))
+            do m = 1,moment_specs%n_moments
+                select case(moment_specs%moments_selector(m))
                     case(1)
                         tetr_moments(m,ind_tetr_save) = tetr_moments(m,ind_tetr_save) + weights(n,1)* &
                                                         & optional_quantities%t_hamiltonian!* &
@@ -799,9 +829,8 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                 end select
             enddo
         else
-            do m = 1,n_moments
-            !print*, n_moments, moments_selector
-                select case(moments_selector(m))
+            do m = 1,moment_specs%n_moments
+                select case(moment_specs%moments_selector(m))
                     case(1)
                         single_particle_tetr_moments(m,ind_tetr_save) = single_particle_tetr_moments(m,ind_tetr_save) + &
                                                                         & weights(n,1)*optional_quantities%t_hamiltonian!* &
@@ -859,20 +888,23 @@ subroutine calc_plane_intersection(x_save,x,z_plane)
 
 end subroutine calc_plane_intersection
 
-subroutine fourier_transform_moments
+subroutine fourier_transform_moments(moment_specs)
 
     use constants, only: pi
     use tetra_grid_settings_mod, only: grid_size
+    use boltzmann_types_mod, only: moment_specs_t
 
+    type(moment_specs_t), intent(in)                               :: moment_specs
     integer                                                        :: n,m,j,k,p,q,l
-    integer                                                        :: pmff_unit
+    integer                                                        :: n_triangles
     complex                                                        :: i
-    complex, dimension(:,:,:), allocatable              :: prism_moments_ordered_for_ft
+    complex, dimension(:,:,:), allocatable                         :: prism_moments_ordered_for_ft
 
 print*, 'fourier transform started'
 
+    n_fourier_modes = 5
     n_triangles = n_prisms/grid_size(2)
-    allocate(prism_moments_ordered_for_ft(n_moments,n_triangles,grid_size(2)))
+    allocate(prism_moments_ordered_for_ft(moment_specs%n_moments,n_triangles,grid_size(2)))
     do q = 1,grid_size(2)
         prism_moments_ordered_for_ft(:,:,q) = prism_moments(:,n_triangles*(q-1)+1:n_triangles*q)
     enddo
@@ -882,12 +914,12 @@ print*, 'fourier transform started'
         n_fourier_modes = grid_size(2)
     endif
 
-    allocate(moments_in_frequency_space(n_moments,n_triangles,n_fourier_modes))
+    allocate(moments_in_frequency_space(moment_specs%n_moments,n_triangles,n_fourier_modes))
     moments_in_frequency_space = 0
     i = (0,1)
 
     do p = 1,n_triangles
-        do n = 1,n_moments
+        do n = 1,moment_specs%n_moments
             do k = 0,n_fourier_modes-1
                 do j = 0,grid_size(2)-1
                     moments_in_frequency_space(n,p,k+1) = moments_in_frequency_space(n,p,k+1) + 1/dble(grid_size(2))* &
@@ -897,38 +929,57 @@ print*, 'fourier transform started'
         enddo
     enddo
 
-    open(newunit = pmff_unit, file = 'prism_moments_for_fourier.dat')
-    do l = 1,n_triangles
-        do m = 1,grid_size(2)-1
-            write(pmff_unit,'(2ES20.10E4)',advance="no") real(prism_moments_ordered_for_ft(1,l,m)), &
-                                                  aimag(prism_moments_ordered_for_ft(1,l,m))     
-        enddo
-            write(pmff_unit,'(2ES20.10E4)') real(prism_moments_ordered_for_ft(1,l,grid_size(2))), &
-                                     aimag(prism_moments_ordered_for_ft(1,l,grid_size(2)))
-    enddo
-    close(pmff_unit)
-
     deallocate(prism_moments_ordered_for_ft)
 
 print*, 'fourier transform finished'
 
 end subroutine fourier_transform_moments
 
-subroutine write_data_to_files(filenames)
+subroutine write_data_to_files(filenames,output,moment_specs)
 
-    type(filenames_t) :: filenames
+    use boltzmann_types_mod, only: filenames_t, boole_writing_data_t, output_t, moment_specs_t
+
+    type(filenames_t), intent(in) :: filenames
+    type(output_t), intent(in) :: output
+    type(moment_specs_t), intent(in) :: moment_specs
     type(boole_writing_data_t) :: boole_writing_data
 
-    if (boole_writing_data%vertex_indices) call write_vertex_indices(filenames%vertex_indices)
-    if (boole_writing_data%vertex_coordinates) call write_vertex_coordinates(filenames%vertex_coordinates)
-    if (boole_writing_data%prism_volumes) call write_prism_volumes(filenames%prism_volumes)
-    if (boole_writing_data%refined_prism_volumes) call write_refined_prism_volumes(filenames%refined_prism_volumes)
-    if (boole_writing_data%boltzmann_density) call write_boltzmann_densities(filenames%boltzmann_densities)
-    if (boole_writing_data%electric_potential) call write_electric_potential(filenames%electric_potential)
-    if (boole_writing_data%moments) call write_moments(filenames%prism_moments, &
-                                                       filenames%prism_moments_summed_squares, &
-                                                       filenames%tetr_moments)
-    if (boole_writing_data%fourier_moments) call write_fourier_moments(filenames%fourier_moments)
+    if (boole_writing_data%vertex_indices) &
+        call write_vertex_indices(filenames%vertex_indices)
+
+    if (boole_writing_data%vertex_coordinates) &
+        call write_vertex_coordinates(filenames%vertex_coordinates)
+
+    if (boole_writing_data%prism_volumes) &
+        call write_prism_volumes(filenames%prism_volumes,output%prism_volumes)
+
+    if (boole_writing_data%refined_prism_volumes) &
+        call write_refined_prism_volumes(filenames%refined_prism_volumes,output%refined_prism_volumes)
+
+    if (boole_writing_data%boltzmann_density) &
+        call write_boltzmann_densities(filenames%boltzmann_density,output%boltzmann_density)
+
+    if (boole_writing_data%electric_potential) &
+        call write_electric_potential(filenames%electric_potential,output%electric_potential)
+
+    if (boole_writing_data%moments) then
+        if (moment_specs%n_moments.gt.0) then
+            call write_moments(filenames%prism_moments,filenames%prism_moments_summed_squares,filenames%tetr_moments,moment_specs)
+        else
+            print*, "Error: moments are not written to file because no moment was computed. Turn computation of moments on in &
+                     gorilla.inp."
+        endif
+    endif
+
+    if (boole_writing_data%fourier_moments) then
+        if (moment_specs%n_moments.gt.0) then
+            call write_fourier_moments(filenames%fourier_moments)
+        else
+            print*, "Error: Fourier moments are not written to file because no moment was computed (and thus also no fourier &
+                     moment). Turn computation of moments on in gorilla.inp."
+        endif
+
+    endif
 
 end subroutine write_data_to_files
 
@@ -974,8 +1025,9 @@ subroutine write_vertex_coordinates(filename_vertex_coordinates)
 
 end subroutine write_vertex_coordinates
 
-subroutine write_prism_volumes(filename_prism_volumes)
+subroutine write_prism_volumes(filename_prism_volumes,prism_volumes)
 
+    real(dp),dimension(:), intent(in) :: prism_volumes
     character(len=100) :: filename_prism_volumes
     integer :: pv_unit
 
@@ -985,8 +1037,9 @@ subroutine write_prism_volumes(filename_prism_volumes)
 
 end subroutine write_prism_volumes
 
-subroutine write_refined_prism_volumes(filename_refined_prism_volumes)
+subroutine write_refined_prism_volumes(filename_refined_prism_volumes,refined_prism_volumes)
 
+    real(dp),dimension(:), intent(in) :: refined_prism_volumes
     character(len=100) :: filename_refined_prism_volumes
     integer :: rpv_unit
 
@@ -996,32 +1049,36 @@ subroutine write_refined_prism_volumes(filename_refined_prism_volumes)
 
 end subroutine write_refined_prism_volumes
 
-subroutine write_boltzmann_densities(filename_boltzmann_densities)
+subroutine write_boltzmann_densities(filename_boltzmann_density,boltzmann_density)
 
-    character(len=100) :: filename_boltzmann_densities
+    real(dp),dimension(:), intent(in) :: boltzmann_density
+    character(len=100) :: filename_boltzmann_density
     integer :: bd_unit
 
-    open(newunit = bd_unit, file = filename_boltzmann_densities)
-    write(bd_unit,'(ES20.10E4)') n_b
+    open(newunit = bd_unit, file = filename_boltzmann_density)
+    write(bd_unit,'(ES20.10E4)') boltzmann_density
     close(bd_unit)
 
 end subroutine write_boltzmann_densities
 
-subroutine write_electric_potential(filename_electric_potential)
+subroutine write_electric_potential(filename_electric_potential,electric_potential)
 
+    real(dp),dimension(:), intent(in) :: electric_potential
     character(len=100) :: filename_electric_potential
     integer :: epv_unit
 
     open(newunit = epv_unit, file = filename_electric_potential)
-    write(epv_unit,'(ES20.10E4)') elec_pot_vec
+    write(epv_unit,'(ES20.10E4)') electric_potential
     close(epv_unit)
 
 end subroutine write_electric_potential
 
-subroutine write_moments(filename_prism_moments, filename_prism_moments_summed_squares, filename_tetr_moments)
+subroutine write_moments(filename_prism_moments, filename_prism_moments_summed_squares, filename_tetr_moments, moment_specs)
 
     use tetra_grid_mod, only: ntetr
+    use boltzmann_types_mod, only: moment_specs_t
 
+    type(moment_specs_t), intent(in) :: moment_specs
     character(len=100) :: filename_prism_moments, filename_prism_moments_summed_squares, filename_tetr_moments
     integer :: p_moments_unit, pmss_unit, t_moments_unit
     integer :: l, i
@@ -1030,28 +1087,30 @@ subroutine write_moments(filename_prism_moments, filename_prism_moments_summed_s
     open(newunit = pmss_unit, file = filename_prism_moments_summed_squares)
     open(newunit = t_moments_unit, file = filename_tetr_moments)
 
-    if (n_moments.gt.0) then
+    if (moment_specs%n_moments.gt.0) then
         do l = 1,n_prisms
-            do i = 1,n_moments - 1
+            do i = 1,moment_specs%n_moments - 1
                 write(p_moments_unit,'(2ES20.10E4)',advance="no") real(prism_moments(i,l)), aimag(prism_moments(i,l))
             enddo
-                write(p_moments_unit,'(2ES20.10E4)') real(prism_moments(n_moments,l)), aimag(prism_moments(n_moments,l))
+                write(p_moments_unit,'(2ES20.10E4)') real(prism_moments(moment_specs%n_moments,l)), &
+                                                     aimag(prism_moments(moment_specs%n_moments,l))
         enddo
         if (boole_squared_moments) then
             do l = 1,n_prisms
-                do i = 1,n_moments - 1
+                do i = 1,moment_specs%n_moments - 1
                     write(pmss_unit,'(2ES20.10E4)',advance="no") real(prism_moments_squared(i,l)), &
                                                                     & aimag(prism_moments_squared(i,l))
                 enddo
-                    write(pmss_unit,'(2ES20.10E4)') real(prism_moments_squared(n_moments,l)), &
-                                                       & aimag(prism_moments_squared(n_moments,l))
+                    write(pmss_unit,'(2ES20.10E4)') real(prism_moments_squared(moment_specs%n_moments,l)), &
+                                                    aimag(prism_moments_squared(moment_specs%n_moments,l))
             enddo
         endif
         do l = 1,ntetr
-            do i = 1,n_moments - 1
+            do i = 1,moment_specs%n_moments - 1
                 write(t_moments_unit,'(2ES20.10E4)',advance="no") real(tetr_moments(i,l)), aimag(tetr_moments(i,l))
             enddo
-                write(t_moments_unit,'(2ES20.10E4)') real(tetr_moments(n_moments,l)), aimag(tetr_moments(n_moments,l))
+                write(t_moments_unit,'(2ES20.10E4)') real(tetr_moments(moment_specs%n_moments,l)), &
+                                                     aimag(tetr_moments(moment_specs%n_moments,l))
         enddo
     endif
 
@@ -1063,8 +1122,12 @@ end subroutine write_moments
 
 subroutine write_fourier_moments(filename_fourier_moments)
 
+    use tetra_grid_settings_mod, only: grid_size
+
     character(len=100) :: filename_fourier_moments
-    integer :: fm_unit, l, i
+    integer :: fm_unit, l, i, n_triangles
+
+    n_triangles = n_prisms/grid_size(2)
 
     open(newunit = fm_unit, file = filename_fourier_moments)
     do l = 1,n_triangles
@@ -1081,6 +1144,8 @@ end subroutine write_fourier_moments
 
 subroutine name_files(filenames)
 
+    use boltzmann_types_mod, only: filenames_t
+
     type(filenames_t), intent(out) :: filenames
 
     filenames%exit_times = 'exit_times.dat'
@@ -1093,14 +1158,16 @@ subroutine name_files(filenames)
     filenames%prism_volumes = 'prism_volumes.dat'
     filenames%fourier_moments = 'fourier_moments.dat'
     filenames%refined_prism_volumes = 'refined_prism_volumes.dat'
-    filenames%electric_potential = 'elec_pot_vec.dat'
-    filenames%boltzmann_densities = 'boltzmann_densities.dat'
+    filenames%electric_potential = 'electric_potential.dat'
+    filenames%boltzmann_density = 'boltzmann_density.dat'
     filenames%divertor_intersections = 'divertor_intersections.dat'
     filenames%tetr_moments = 'tetr_moments.dat'
 
 end subroutine name_files
 
 subroutine unlink_files(filenames)
+
+    use boltzmann_types_mod, only: filenames_t
 
     type(filenames_t) :: filenames
 
@@ -1115,7 +1182,7 @@ subroutine unlink_files(filenames)
     call unlink(filenames%fourier_moments)
     call unlink(filenames%refined_prism_volumes)
     call unlink(filenames%electric_potential)
-    call unlink(filenames%boltzmann_densities)
+    call unlink(filenames%boltzmann_density)
     call unlink(filenames%divertor_intersections)
     call unlink(filenames%tetr_moments)
 

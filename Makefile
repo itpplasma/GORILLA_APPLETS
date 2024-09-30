@@ -85,6 +85,7 @@ SOURCES = SetWorkingPrecision.f90\
 	poincare_invariances_mod.f90 \
 	reversibility_test_mod.f90 \
 	collis_ions_mod.f90 \
+	boltzmann_types_mod.f90 \
 	volume_integrals_and_sqrt_g_mod.f90 \
 	boltzmann_mod.f90 \
 	pusher_tetra_field_lines_mod.f90 \
