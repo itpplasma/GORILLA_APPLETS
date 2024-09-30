@@ -15,9 +15,6 @@ module boltzmann_mod
                boole_linear_temperature_simulation
     integer :: i_integrator_type, seed_option
 
-    !output
-    complex(dp), dimension(:,:), allocatable :: tetr_moments, prism_moments, prism_moments_squared
-
     !counter_variables
     integer :: n_pushings, counter_phi_0_mappings, lost_outside, lost_inside
 
@@ -102,9 +99,6 @@ subroutine calc_boltzmann
     allocate(poloidal_flux(num_particles))
     allocate(temperature_vector(num_particles))
     allocate(tetra_indices_per_prism(n_prisms,3))
-    allocate(tetr_moments(moment_specs%n_moments,ntetr))
-    if (boole_squared_moments) allocate(prism_moments_squared(moment_specs%n_moments,n_prisms))
-    allocate(prism_moments(moment_specs%n_moments,n_prisms))
 
     do i = 1,3
         tetra_indices_per_prism(:,i) = (/(i+3*k,k = 0,n_prisms-1)/)
@@ -211,9 +205,6 @@ print*, 'calc_starting_conditions finished'
     lost_inside = 0
     n_pushings = 0
     counter_phi_0_mappings = 0
-    tetr_moments = 0
-    if (boole_squared_moments) prism_moments_squared = 0
-    prism_moments = 0
     iantithetic = 1
     if (boole_antithetic_variate) iantithetic = 2
     count_integration_steps = 0
@@ -226,15 +217,15 @@ print*, 'calc_starting_conditions finished'
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(num_particles,kpart,v0,time_step,i_integrator_type,boole_collisions,sqrt_g, output, &
-    !$OMP& dtau,dtaumin,n_start,n_end,tetra_indices_per_prism, prism_moments_squared,boole_squared_moments, &
-    !$OMP& start_pos_pitch_mat,boole_boltzmann_energies, prism_moments,count_integration_steps, et_unit, moment_specs,&
+    !$OMP& dtau,dtaumin,n_start,n_end,tetra_indices_per_prism, boole_squared_moments, &
+    !$OMP& start_pos_pitch_mat,boole_boltzmann_energies, count_integration_steps, et_unit, moment_specs,&
     !$OMP& density,energy_eV,dens_mat,temp_mat,vpar_mat,tetra_grid,iantithetic,tetra_physics, di_unit, pm_unit, rp_unit, &
     !$OMP& efcolf_mat,velrat_mat,enrat_mat,num_background_species,randcol,randcoli,maxcol,boole_precalc_collisions) &
     !$OMP& FIRSTPRIVATE(particle_mass, particle_charge) &
     !$OMP& PRIVATE(p,l,n,boole_particle_lost,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
     !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr, v, local_tetr_moments,hamiltonian_time, &
     !$OMP& m0,z0,i,efcolf,velrat,enrat,vpar_background,inorout,randnum) &
-    !$OMP& REDUCTION(+:n_lost_particles,tetr_moments, n_pushings, counter_phi_0_mappings)
+    !$OMP& REDUCTION(+:n_lost_particles,n_pushings, counter_phi_0_mappings)
     print*, 'get number of threads', omp_get_num_threads()
     if (boole_collisions) allocate(efcolf(num_background_species),velrat(num_background_species),enrat(num_background_species))
     !$OMP DO
@@ -360,56 +351,21 @@ endif
         enddo
 
         !$omp critical
-        !!!!!!!!!!!!!!!!!!!!!!!! delete > !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            if (boole_squared_moments) then
-                prism_moments_squared = prism_moments_squared + &
-                                    & (local_tetr_moments(:,tetra_indices_per_prism(:,1)) + &
-                                    &  local_tetr_moments(:,tetra_indices_per_prism(:,2)) + &
-                                    &  local_tetr_moments(:,tetra_indices_per_prism(:,3)))**2
-                prism_moments = prism_moments + &
-                            & (local_tetr_moments(:,tetra_indices_per_prism(:,1)) + &
-                            &  local_tetr_moments(:,tetra_indices_per_prism(:,2)) + &
-                            &  local_tetr_moments(:,tetra_indices_per_prism(:,3)))
-            endif
-        !!!!!!!!!!!!!!!!!!!!!!!1 delete < !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-            output%tetr_moments = output%tetr_moments + local_tetr_moments
-            output%prism_moments = output%prism_moments + &
-                            & (local_tetr_moments(:,tetra_indices_per_prism(:,1)) + &
-                            &  local_tetr_moments(:,tetra_indices_per_prism(:,2)) + &
-                            &  local_tetr_moments(:,tetra_indices_per_prism(:,3)))
-            if (boole_squared_moments) then
-                output%prism_moments_squared = output%prism_moments_squared + &
-                                    & (local_tetr_moments(:,tetra_indices_per_prism(:,1)) + &
-                                    &  local_tetr_moments(:,tetra_indices_per_prism(:,2)) + &
-                                    &  local_tetr_moments(:,tetra_indices_per_prism(:,3)))**2
-            endif
-            !$omp end critical
+        output%tetr_moments = output%tetr_moments + local_tetr_moments
+        output%prism_moments = output%prism_moments + &
+                        & (local_tetr_moments(:,tetra_indices_per_prism(:,1)) + &
+                        &  local_tetr_moments(:,tetra_indices_per_prism(:,2)) + &
+                        &  local_tetr_moments(:,tetra_indices_per_prism(:,3)))
+        if (boole_squared_moments) then
+            output%prism_moments_squared = output%prism_moments_squared + &
+                                & (local_tetr_moments(:,tetra_indices_per_prism(:,1)) + &
+                                &  local_tetr_moments(:,tetra_indices_per_prism(:,2)) + &
+                                &  local_tetr_moments(:,tetra_indices_per_prism(:,3)))**2
+        endif
+        !$omp end critical
     enddo !n
     !$OMP END DO
     !$OMP END PARALLEL
-
-   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! delete > !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    if(.not.boole_squared_moments) then
-        prism_moments = (tetr_moments(:,tetra_indices_per_prism(:,1)) + &
-                    & tetr_moments(:,tetra_indices_per_prism(:,2)) + &
-                    & tetr_moments(:,tetra_indices_per_prism(:,3)))
-    endif
-
-    do n = 1,moment_specs%n_moments
-        prism_moments(n,:) = prism_moments(n,:)/(output%prism_volumes*time_step*n_particles) !do normalisations
-        if (boole_squared_moments) then
-            prism_moments_squared(n,:) = prism_moments_squared(n,:)/(output%prism_volumes**2*time_step**2*n_particles) !do normalisations
-        endif
-        if (boole_refined_sqrt_g) then
-                prism_moments(n,:) = prism_moments(n,:)*output%prism_volumes/output%refined_prism_volumes
-                if (boole_squared_moments) then
-                prism_moments_squared(n,:) = prism_moments_squared(n,:)*output%prism_volumes**2/output%refined_prism_volumes**2
-                endif
-        endif
-    enddo
-
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!! delete < !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     do n = 1,moment_specs%n_moments
         output%prism_moments(n,:) = output%prism_moments(n,:)/(output%prism_volumes*time_step*n_particles) !do normalisations
@@ -445,8 +401,7 @@ endif
     print*, 'number of particles left through the outside = ', lost_outside
     print*, 'number of particles left through the inside = ', lost_inside
 
-deallocate(start_pos_pitch_mat, tetr_moments, prism_moments, local_tetr_moments)
-if (boole_squared_moments) deallocate(prism_moments_squared)
+deallocate(start_pos_pitch_mat,local_tetr_moments)
 
 end subroutine calc_boltzmann
 
@@ -646,45 +601,25 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 
         hamiltonian_time = 0
 
-        if (.not.boole_squared_moments) then
-            do m = 1,moment_specs%n_moments
-                select case(moment_specs%moments_selector(m))
-                    case(1)
-                        tetr_moments(m,ind_tetr_save) = tetr_moments(m,ind_tetr_save) + weights(n,1)* &
-                                                        & optional_quantities%t_hamiltonian!* &
-                                                        !& (exp(2*(0,1)*x(2))+exp(3*(0,1)*x(2)))
-                        hamiltonian_time = optional_quantities%t_hamiltonian
-                    case(2)
-                        tetr_moments(m,ind_tetr_save) = tetr_moments(m,ind_tetr_save) + weights(n,1)* &
-                                                        & optional_quantities%gyrophase*J_perp(n)
-                    case(3)
-                        tetr_moments(m,ind_tetr_save) = tetr_moments(m,ind_tetr_save) + weights(n,1)* &
-                                                        & optional_quantities%vpar_int
-                    case(4)
-                        tetr_moments(m,ind_tetr_save) = tetr_moments(m,ind_tetr_save) + weights(n,1)* &
-                                                        & optional_quantities%vpar2_int
-                end select
-            enddo
-        else
-            do m = 1,moment_specs%n_moments
-                select case(moment_specs%moments_selector(m))
-                    case(1)
-                        local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
-                                                                        & weights(n,1)*optional_quantities%t_hamiltonian!* &
-                                                                       !& (exp(2*(0,1)*x(2))+exp(3*(0,1)*x(2)))
-                        hamiltonian_time = optional_quantities%t_hamiltonian
-                    case(2)
-                        local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
-                                                                        & weights(n,1)*optional_quantities%gyrophase*J_perp(n)
-                    case(3)
-                        local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
-                                                                        & weights(n,1)*optional_quantities%vpar_int
-                    case(4)
-                        local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
-                                                                        & weights(n,1)*optional_quantities%vpar2_int
-                end select
-            enddo
-        endif
+
+        do m = 1,moment_specs%n_moments
+            select case(moment_specs%moments_selector(m))
+                case(1)
+                    local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
+                                                                    & weights(n,1)*optional_quantities%t_hamiltonian!* &
+                                                                    !& (exp(2*(0,1)*x(2))+exp(3*(0,1)*x(2)))
+                    hamiltonian_time = optional_quantities%t_hamiltonian
+                case(2)
+                    local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
+                                                                    & weights(n,1)*optional_quantities%gyrophase*J_perp(n)
+                case(3)
+                    local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
+                                                                    & weights(n,1)*optional_quantities%vpar_int
+                case(4)
+                    local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
+                                                                    & weights(n,1)*optional_quantities%vpar2_int
+            end select
+        enddo
 
         !Orbit stops within cell, because "flight"-time t_step has finished
         if(boole_t_finished) then
@@ -977,12 +912,12 @@ subroutine write_electric_potential(filename_electric_potential,electric_potenti
 end subroutine write_electric_potential
 
 subroutine write_moments(filename_prism_moments, filename_prism_moments_summed_squares, filename_tetr_moments, moment_specs, &
-                         aprism_moments, aprism_moments_squared, atetr_moments)
+                         prism_moments, prism_moments_squared, tetr_moments)
 
     use tetra_grid_mod, only: ntetr
     use boltzmann_types_mod, only: moment_specs_t
 
-    complex(dp), dimension(:,:), intent(in) :: atetr_moments, aprism_moments, aprism_moments_squared
+    complex(dp), dimension(:,:), intent(in) :: tetr_moments, prism_moments, prism_moments_squared
     type(moment_specs_t), intent(in) :: moment_specs
     character(len=100) :: filename_prism_moments, filename_prism_moments_summed_squares, filename_tetr_moments
     integer :: p_moments_unit, pmss_unit, t_moments_unit
@@ -995,27 +930,27 @@ subroutine write_moments(filename_prism_moments, filename_prism_moments_summed_s
     if (moment_specs%n_moments.gt.0) then
         do l = 1,n_prisms
             do i = 1,moment_specs%n_moments - 1
-                write(p_moments_unit,'(2ES20.10E4)',advance="no") real(aprism_moments(i,l)), aimag(aprism_moments(i,l))
+                write(p_moments_unit,'(2ES20.10E4)',advance="no") real(prism_moments(i,l)), aimag(prism_moments(i,l))
             enddo
-                write(p_moments_unit,'(2ES20.10E4)') real(aprism_moments(moment_specs%n_moments,l)), &
-                                                     aimag(aprism_moments(moment_specs%n_moments,l))
+                write(p_moments_unit,'(2ES20.10E4)') real(prism_moments(moment_specs%n_moments,l)), &
+                                                     aimag(prism_moments(moment_specs%n_moments,l))
         enddo
         if (boole_squared_moments) then
             do l = 1,n_prisms
                 do i = 1,moment_specs%n_moments - 1
-                    write(pmss_unit,'(2ES20.10E4)',advance="no") real(aprism_moments_squared(i,l)), &
-                                                                    & aimag(aprism_moments_squared(i,l))
+                    write(pmss_unit,'(2ES20.10E4)',advance="no") real(prism_moments_squared(i,l)), &
+                                                                    & aimag(prism_moments_squared(i,l))
                 enddo
-                    write(pmss_unit,'(2ES20.10E4)') real(aprism_moments_squared(moment_specs%n_moments,l)), &
-                                                    aimag(aprism_moments_squared(moment_specs%n_moments,l))
+                    write(pmss_unit,'(2ES20.10E4)') real(prism_moments_squared(moment_specs%n_moments,l)), &
+                                                    aimag(prism_moments_squared(moment_specs%n_moments,l))
             enddo
         endif
         do l = 1,ntetr
             do i = 1,moment_specs%n_moments - 1
-                write(t_moments_unit,'(2ES20.10E4)',advance="no") real(atetr_moments(i,l)), aimag(atetr_moments(i,l))
+                write(t_moments_unit,'(2ES20.10E4)',advance="no") real(tetr_moments(i,l)), aimag(tetr_moments(i,l))
             enddo
-                write(t_moments_unit,'(2ES20.10E4)') real(atetr_moments(moment_specs%n_moments,l)), &
-                                                     aimag(atetr_moments(moment_specs%n_moments,l))
+                write(t_moments_unit,'(2ES20.10E4)') real(tetr_moments(moment_specs%n_moments,l)), &
+                                                     aimag(tetr_moments(moment_specs%n_moments,l))
         enddo
     endif
 
