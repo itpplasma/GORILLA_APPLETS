@@ -11,6 +11,7 @@ module boltzmann_types_mod
     integer :: n_triangles
     integer :: n_fourier_modes
     end type moment_specs_t
+
     type output_t
     real(dp), dimension(:), allocatable :: prism_volumes
     real(dp), dimension(:), allocatable :: refined_prism_volumes
@@ -21,6 +22,7 @@ module boltzmann_types_mod
     complex(dp), dimension(:,:), allocatable :: prism_moments_squared
     complex(dp), dimension(:,:,:), allocatable :: moments_in_frequency_space
     end type output_t
+
     type boole_writing_data_t
     logical :: vertex_indices = .false.
     logical :: vertex_coordinates = .false.
@@ -31,6 +33,7 @@ module boltzmann_types_mod
     logical :: moments = .false.
     logical :: fourier_moments = .true.
     end type boole_writing_data_t
+
     type filenames_t
     character(len=100) :: exit_times
     character(len=100) :: remaining_particles
@@ -47,5 +50,20 @@ module boltzmann_types_mod
     character(len=100) :: divertor_intersections
     character(len=100) :: tetr_moments
     end type filenames_t
+
+    type counter_t
+    integer :: lost_particles = 0
+    integer :: lost_inside = 0
+    integer :: lost_outside = 0
+    integer :: tetr_pushings = 0
+    integer :: phi_0_mappings = 0
+    integer :: integration_steps = 0
+    end type counter_t
+
+    type poloidal_flux_t
+    real(dp), dimension(:), allocatable :: particle
+    real(dp) :: min
+    real(dp) :: max
+    end type poloidal_flux_t
 
 end module boltzmann_types_mod

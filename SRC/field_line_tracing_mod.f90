@@ -38,113 +38,6 @@ module field_line_tracing_mod
 
 contains
 
-subroutine read_field_line_tracing_inp()
-
-    integer :: flt_inp_unit
-
-    open(newunit = flt_inp_unit, file='field_line_tracing.inp', status='unknown')
-    read(flt_inp_unit,nml=field_line_tracing_nml)
-    close(flt_inp_unit)
-
-    print *,'GORILLA: Loaded input data from field_line_tracing.inp'
-end subroutine read_field_line_tracing_inp
-
-subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
-
-    use constants, only: pi, ev2erg
-    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, ntetr
-    use find_tetra_mod, only: find_tetra
-    use tetra_grid_settings_mod, only: grid_kind
-    use tetra_physics_mod, only: coord_system
-    use collis_ions, only: collis_init, stost
-
-    double precision, intent(in)                                   :: v0
-    double precision, dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
-    double precision                                               :: rand_scalar, vpar, vperp
-    double precision                                               :: amin, cmin, cmax, amax !is set globally
-    double precision, dimension(:), allocatable                    :: rand_vector
-    double precision, dimension(:), allocatable                    :: rand_matrix2
-    integer                                                        :: i
-    double precision, dimension(3)                                 :: x
-    integer                                                        :: ind_tetr_out,iface, seed_inp_unit
-
-!!!!comment out the following section to make starting conditions really random!!!
-
-    integer,dimension(:), allocatable                              :: seed
-    integer                                                        :: n
-
-    open(newunit = seed_inp_unit, file='seed.inp', status='old',action = 'read')
-    read(seed_inp_unit,*) n
-    allocate(seed(n))
-    read(seed_inp_unit,*) seed
-    close(seed_inp_unit)
-    CALL RANDOM_SEED (PUT=seed)
-    deallocate(seed)
-
-    allocate(start_pos_pitch_mat(5,num_particles))
-    allocate(rand_vector(num_particles))
-    allocate(rand_matrix2(num_particles))
-
-    start_pos_pitch_mat = 0
-
-    ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
-    ind_b = 2 !(phi in cylindrical and flux coordinates)
-    ind_c = 3 !(z in cylindrical coordinates, theta in flux coordinates)
-
-    if (coord_system.eq.2) then
-        ind_b = 3
-        ind_c = 2
-    endif
-
-    if (coord_system.eq.1) allocate(verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:))))
-    if (coord_system.eq.2) allocate(verts(size(verts_sthetaphi(:,1)),size(verts_sthetaphi(1,:))))
-    if (coord_system.eq.1) verts = verts_rphiz
-    if (coord_system.eq.2) verts = verts_sthetaphi
-
-    amin = minval(verts(ind_a,:))
-    amax = maxval(verts(ind_a,:))
-    cmin = minval(verts(ind_c,:))
-    cmax = maxval(verts(ind_c,:))
-
-    constant_part_of_weights = density*(amax-amin)*(cmax-cmin)*2*pi
-
-    !compute starting conditions
-    if (boole_point_source) then
-        if (grid_kind.eq.2) then
-            start_pos_pitch_mat(1,:) = 160
-            start_pos_pitch_mat(2,:) = 0
-            start_pos_pitch_mat(3,:) = 70
-        elseif (grid_kind.eq.4) then
-            start_pos_pitch_mat(1,:) = 205
-            start_pos_pitch_mat(2,:) = 0
-            start_pos_pitch_mat(3,:) = 0
-        endif
-        if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
-    else
-        start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r
-        start_pos_pitch_mat(ind_b,:) = 0.0d0  !1d-1 !phi in cylindrical and flux coordinates
-        start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
-    endif
-
-    start_pos_pitch_mat(4,:) = 1 !delete this once i have a proper subroutine for field line tracing
-
-    call RANDOM_NUMBER(rand_matrix2)
-    if (boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        start_pos_pitch_mat(5,:) = 5*energy_eV*rand_matrix2(:) !boltzmann energy distribution
-        constant_part_of_weights = constant_part_of_weights*10/sqrt(pi)*energy_eV*ev2erg
-    endif
-
-    weights(:,1) = constant_part_of_weights
-    if (boole_refined_sqrt_g.eqv..false.) weights(:,1) = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
-
-    if (boole_precalc_collisions) then
-        allocate(randcol(num_particles,randcoli,3))
-        call RANDOM_NUMBER(randcol)
-        !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
-        randcol(:,:,1:2:3) =  3.464102*(randcol(:,:,1:2:3)-.5)
-    endif
-end subroutine calc_starting_conditions
-
 subroutine calc_field_lines
 
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
@@ -700,5 +593,112 @@ subroutine close_files
     close(di_unit)
 
 end subroutine close_files
+
+subroutine read_field_line_tracing_inp()
+
+    integer :: flt_inp_unit
+
+    open(newunit = flt_inp_unit, file='field_line_tracing.inp', status='unknown')
+    read(flt_inp_unit,nml=field_line_tracing_nml)
+    close(flt_inp_unit)
+
+    print *,'GORILLA: Loaded input data from field_line_tracing.inp'
+end subroutine read_field_line_tracing_inp
+
+subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
+
+    use constants, only: pi, ev2erg
+    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, ntetr
+    use find_tetra_mod, only: find_tetra
+    use tetra_grid_settings_mod, only: grid_kind
+    use tetra_physics_mod, only: coord_system
+    use collis_ions, only: collis_init, stost
+
+    double precision, intent(in)                                   :: v0
+    double precision, dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
+    double precision                                               :: rand_scalar, vpar, vperp
+    double precision                                               :: amin, cmin, cmax, amax !is set globally
+    double precision, dimension(:), allocatable                    :: rand_vector
+    double precision, dimension(:), allocatable                    :: rand_matrix2
+    integer                                                        :: i
+    double precision, dimension(3)                                 :: x
+    integer                                                        :: ind_tetr_out,iface, seed_inp_unit
+
+!!!!comment out the following section to make starting conditions really random!!!
+
+    integer,dimension(:), allocatable                              :: seed
+    integer                                                        :: n
+
+    open(newunit = seed_inp_unit, file='seed.inp', status='old',action = 'read')
+    read(seed_inp_unit,*) n
+    allocate(seed(n))
+    read(seed_inp_unit,*) seed
+    close(seed_inp_unit)
+    CALL RANDOM_SEED (PUT=seed)
+    deallocate(seed)
+
+    allocate(start_pos_pitch_mat(5,num_particles))
+    allocate(rand_vector(num_particles))
+    allocate(rand_matrix2(num_particles))
+
+    start_pos_pitch_mat = 0
+
+    ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
+    ind_b = 2 !(phi in cylindrical and flux coordinates)
+    ind_c = 3 !(z in cylindrical coordinates, theta in flux coordinates)
+
+    if (coord_system.eq.2) then
+        ind_b = 3
+        ind_c = 2
+    endif
+
+    if (coord_system.eq.1) allocate(verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:))))
+    if (coord_system.eq.2) allocate(verts(size(verts_sthetaphi(:,1)),size(verts_sthetaphi(1,:))))
+    if (coord_system.eq.1) verts = verts_rphiz
+    if (coord_system.eq.2) verts = verts_sthetaphi
+
+    amin = minval(verts(ind_a,:))
+    amax = maxval(verts(ind_a,:))
+    cmin = minval(verts(ind_c,:))
+    cmax = maxval(verts(ind_c,:))
+
+    constant_part_of_weights = density*(amax-amin)*(cmax-cmin)*2*pi
+
+    !compute starting conditions
+    if (boole_point_source) then
+        if (grid_kind.eq.2) then
+            start_pos_pitch_mat(1,:) = 160
+            start_pos_pitch_mat(2,:) = 0
+            start_pos_pitch_mat(3,:) = 70
+        elseif (grid_kind.eq.4) then
+            start_pos_pitch_mat(1,:) = 205
+            start_pos_pitch_mat(2,:) = 0
+            start_pos_pitch_mat(3,:) = 0
+        endif
+        if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
+    else
+        start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r
+        start_pos_pitch_mat(ind_b,:) = 0.0d0  !1d-1 !phi in cylindrical and flux coordinates
+        start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
+    endif
+
+    start_pos_pitch_mat(4,:) = 1 !delete this once i have a proper subroutine for field line tracing
+
+    call RANDOM_NUMBER(rand_matrix2)
+    if (boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+        start_pos_pitch_mat(5,:) = 5*energy_eV*rand_matrix2(:) !boltzmann energy distribution
+        constant_part_of_weights = constant_part_of_weights*10/sqrt(pi)*energy_eV*ev2erg
+    endif
+
+    weights(:,1) = constant_part_of_weights
+    if (boole_refined_sqrt_g.eqv..false.) weights(:,1) = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
+
+    if (boole_precalc_collisions) then
+        allocate(randcol(num_particles,randcoli,3))
+        call RANDOM_NUMBER(randcol)
+        !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
+        randcol(:,:,1:2:3) =  3.464102*(randcol(:,:,1:2:3)-.5)
+    endif
+end subroutine calc_starting_conditions
 
 end module field_line_tracing_mod
