@@ -98,4 +98,11 @@ module boltzmann_types_mod
     integer  :: num_particles
     end type boltzmann_input_t
 
+    type iunits_t
+    integer :: et
+    integer :: rp
+    integer :: pm
+    integer :: di
+    end type iunits_t
+
 end module boltzmann_types_mod
