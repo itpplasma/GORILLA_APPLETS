@@ -79,4 +79,22 @@ module boltzmann_types_mod
     real(dp), dimension(:), allocatable :: temp
     end type collisions_t
 
+    type boltzmann_input_t
+    real(dp) :: time_step
+    real(dp) :: energy_eV
+    real(dp) :: n_particles
+    real(dp) :: density
+    logical  :: boole_squared_moments
+    logical  :: boole_point_source
+    logical  :: boole_collisions
+    logical  :: boole_precalc_collisions
+    logical  :: boole_refined_sqrt_g
+    logical  :: boole_boltzmann_energies
+    logical  :: boole_linear_density_simulation
+    logical  :: boole_antithetic_variate
+    logical  :: boole_linear_temperature_simulation
+    integer  :: i_integrator_type
+    integer  :: seed_option
+    end type boltzmann_input_t
+
 end module boltzmann_types_mod
