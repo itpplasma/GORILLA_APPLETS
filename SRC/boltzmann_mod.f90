@@ -69,33 +69,22 @@ subroutine calc_boltzmann
                                    boltzmann_input_t, iunits_t
     use boltzmann_writing_data_mod, only: write_data_to_files, name_files, unlink_files
 
-    real(dp), dimension(:,:), allocatable :: start_pos_pitch_mat
-    real(dp) :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v, maxcol
-    integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,ierr,err,iantithetic, num_background_species, inorout
-    integer :: i_part
-    real(dp), dimension(3) :: x_rand_beg,x,randnum
-    logical :: boole_initialized,boole_particle_lost
-    real(dp) :: dtau, dphi,dtaumin, t_step
+    integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,err,iantithetic, num_background_species, inorout, i_part, n_prisms
+    real(dp) :: t_remain,t_confined,t_step,v0,pitchpar,vpar,vperp, v, weight, hamiltonian_time
+    real(dp), dimension(3) :: x,randnum
     real(dp), dimension(5) :: z, zet
-    Character(LEN=50) :: format_moments, format_fourier_moments
-    complex(dp), dimension(:,:), allocatable :: local_tetr_moments
-    real(dp) :: m0,z0,hamiltonian_time
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
-    integer :: Te_unit, Ti_unit, ne_unit, t_moments_unit, ipert_unit
+    real(dp), dimension(:,:), allocatable :: start_pos_pitch_mat, sqrt_g, verts
+    complex(dp), dimension(:,:), allocatable :: local_tetr_moments
+    logical :: boole_initialized,boole_particle_lost
     type(filenames_t) :: filenames
     type(output_t) :: output
     type(moment_specs_t) :: moment_specs
     type(counter_t) :: counter, local_counter
-    real(dp), dimension(:,:), allocatable :: sqrt_g
     type(poloidal_flux_t) :: poloidal_flux
     type(collisions_t) :: c
-    integer :: n_prisms
-    real(dp), dimension(:,:,:), allocatable :: randcol
-    integer :: randcoli = int(1.0d5)
     type(boltzmann_input_t) :: b
     type(iunits_t) :: iunits
-    real(dp) :: weight
-    real(dp), dimension(:,:), allocatable :: verts
 
     call read_boltzmann_inp_into_type(b)
     call get_ipert()
@@ -108,9 +97,7 @@ subroutine calc_boltzmann
 
     v0=sqrt(2.d0*b%energy_eV*ev2erg/particle_mass)
     n_prisms = ntetr/3
-    if (b%boole_precalc_collisions) allocate(randcol(b%num_particles,randcoli,3))
     kpart = 0
-    maxcol = 0
     iantithetic = 1
     if (b%boole_antithetic_variate) iantithetic = 2
 
@@ -118,23 +105,25 @@ subroutine calc_boltzmann
     call initialise_output(output, moment_specs)
     call calc_square_root_g(sqrt_g)
     call calc_volume_integrals(b%boole_boltzmann_energies,b%boole_refined_sqrt_g, b%density, b%energy_eV,output)
-    call calc_starting_conditions(b,v0,start_pos_pitch_mat,randcol, weight, verts)
+    call calc_starting_conditions(b,v0,start_pos_pitch_mat,weight, verts)
     call initialize_poloidal_flux(poloidal_flux,b%num_particles, verts)
-    call prepare_collisions(c,v0,b%energy_eV)
+    call prepare_collisions(b,c,v0,b%energy_eV)
     call name_files(filenames)
     call unlink_files(filenames)
     call open_files_before_main_loop(iunits)
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
     if (b%boole_collisions) allocate(efcolf(num_background_species),velrat(num_background_species),enrat(num_background_species))
+    if (b%i_integrator_type.eq.2) print*, 'Error: i_integratpr_type set to 2, this module only works with &
+                                    & i_integrator_type set to 1'
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(kpart,v0,sqrt_g,output,dtau,dtaumin,counter,start_pos_pitch_mat,iunits, moment_specs, poloidal_flux, b, c,&
-    !$OMP& tetra_grid,iantithetic,tetra_physics, num_background_species,randcol,randcoli,maxcol,weight, verts) &
+    !$OMP& SHARED(kpart,v0,sqrt_g,output,counter,start_pos_pitch_mat,iunits, moment_specs, poloidal_flux, b, c,&
+    !$OMP& tetra_grid,iantithetic,tetra_physics, num_background_species,weight, verts) &
     !$OMP& FIRSTPRIVATE(particle_mass, particle_charge) &
-    !$OMP& PRIVATE(p,l,n,boole_particle_lost,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
-    !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr, v, local_tetr_moments,hamiltonian_time, &
-    !$OMP& m0,z0,i,efcolf,velrat,enrat,vpar_background,inorout,randnum,local_counter)
+    !$OMP& PRIVATE(p,l,n,boole_particle_lost,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
+    !$OMP& ind_tetr,iface,t_remain,t_confined,z, v, local_tetr_moments,hamiltonian_time, &
+    !$OMP& i,efcolf,velrat,enrat,vpar_background,inorout,randnum,local_counter)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO
 
@@ -146,31 +135,17 @@ subroutine calc_boltzmann
             !$omp critical
             !Counter for particles
             kpart = kpart+1 !in general not equal to n becuase of parallelisation
-            boole_particle_lost = .false.
-if (b%num_particles.gt.10) then
-if (modulo(kpart,int(b%num_particles/10)).eq.0) then
-    print *, kpart, ' / ', b%num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
-endif
-else 
-print *, kpart, ' / ', b%num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
-endif
+            call print_progress(b%num_particles,kpart,n)
             !$omp end critical
 
-            call set_local_counter_zero(local_counter) 
-
+            !call initialise_loop_variables(local_counter,boole_particle_lost,t_step,t_confined,local_tetr_moments,pitchpar,x,vpar,vperp)
+            call set_local_counter_zero(local_counter)
+            boole_particle_lost = .false.
             t_step = b%time_step
             t_confined = 0
             if (l.eq.1) local_tetr_moments = 0
-
-            !You need x_rand_beg(1,3), pitchpar(1) (between -1 and 1), energy is already given
-            x_rand_beg = start_pos_pitch_mat(1:3,n)
             pitchpar = start_pos_pitch_mat(4,n)
-            ! print*, start_pos_pitch_mat(5,n)
-            ! if (n.eq.972) print*, x_rand_beg,start_pos_pitch_mat(5,n),pitchpar
-
-            if (b%i_integrator_type.eq.2) print*, 'Error: i_integratpr_type set to 2, this module only works with &
-                                                & i_integrator_type set to 1'
-            x = x_rand_beg
+            x = start_pos_pitch_mat(1:3,n)
             vpar = pitchpar * v0
             vperp = sqrt(v0**2-vpar**2)
             if (b%boole_boltzmann_energies) then
@@ -205,7 +180,7 @@ endif
                         zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
 
                         if (b%boole_precalc_collisions) then
-                            randnum = randcol(n,mod(i-1,randcoli)+1,:) 
+                            randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:) 
                             call stost(efcolf,velrat,enrat,zet,t_step,1,err,(b%time_step-t_confined)*v0,randnum)
                         else
                             call stost(efcolf,velrat,enrat,zet,t_step,1,err,(b%time_step-t_confined)*v0)
@@ -246,7 +221,7 @@ endif
             enddo
             !$omp critical
             counter%integration_steps = counter%integration_steps + i
-            maxcol = max(dble(i)/dble(randcoli),maxcol)
+            c%maxcol = max(dble(i)/dble(c%randcoli),c%maxcol)
             call add_local_counter_to_counter(local_counter,counter)
             !$omp end critical
             if (t_confined.eq.b%time_step) then
@@ -266,7 +241,7 @@ endif
     call close_files(iunits)
     call write_data_to_files(filenames,output,moment_specs)
 
-    if (b%boole_precalc_collisions) print*, "maxcol = ", maxcol
+    if (b%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
     print*, 'Number of lost particles',counter%lost_particles
     print*, 'average number of pushings = ', counter%tetr_pushings/b%n_particles
     print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/b%n_particles
@@ -526,6 +501,20 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 !             call alloc_precomp_poly_perpinv(2,ntetr)
 
 end subroutine orbit_timestep_gorilla_boltzmann
+
+subroutine print_progress(num_particles,kpart,n)
+
+    integer :: num_particles, kpart, n
+
+    if (num_particles.gt.10) then
+        if (modulo(kpart,int(num_particles/10)).eq.0) then
+            print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
+        endif
+    else 
+        print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
+    endif
+
+end subroutine print_progress
 
 subroutine add_local_tetr_moments_to_output(local_tetr_moments, output, moment_specs)
 
@@ -796,7 +785,7 @@ subroutine initialize_poloidal_flux(poloidal_flux,num_particles, verts)
 
 end subroutine initialize_poloidal_flux
 
-subroutine calc_starting_conditions(b, v0, start_pos_pitch_mat, randcol, constant_part_of_weight, verts)
+subroutine calc_starting_conditions(b, v0, start_pos_pitch_mat, constant_part_of_weight, verts)
     
     use constants, only: pi, ev2erg
     use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, ntetr
@@ -810,7 +799,6 @@ subroutine calc_starting_conditions(b, v0, start_pos_pitch_mat, randcol, constan
     real(dp), dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
     real(dp), intent(out)                                  :: constant_part_of_weight
     real(dp), dimension(:,:), allocatable, intent(out)     :: verts
-    real(dp), dimension(:,:,:)                             :: randcol
     real(dp)                                               :: rand_scalar, vpar, vperp
     real(dp)                                               :: amin, cmin, cmax !amax is set globally
     real(dp), dimension(:), allocatable                    :: rand_vector
@@ -903,18 +891,12 @@ subroutine calc_starting_conditions(b, v0, start_pos_pitch_mat, randcol, constan
         start_pos_pitch_mat(4,1:b%num_particles:2) = -start_pos_pitch_mat(4,2:b%num_particles:2)
     endif
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! end antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-    if (b%boole_precalc_collisions) then
-        call RANDOM_NUMBER(randcol)
-        !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
-        randcol(:,:,1:2:3) =  3.464102*(randcol(:,:,1:2:3)-.5)
-    endif
     print*, 'calc_starting_conditions finished'
 end subroutine calc_starting_conditions
 
-subroutine prepare_collisions(c,v0,energy_eV)
+subroutine prepare_collisions(b,c,v0,energy_eV)
 
-    use boltzmann_types_mod, only: collisions_t
+    use boltzmann_types_mod, only: collisions_t, boltzmann_input_t
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge
     use constants, only: ev2erg, echarge,amp
@@ -923,9 +905,10 @@ subroutine prepare_collisions(c,v0,energy_eV)
 
     real(dp), intent(in) :: v0, energy_eV
     type(collisions_t) :: c
+    type(boltzmann_input_t) :: b
     integer :: n
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
-    integer :: aTe_unit, aTi_unit, ane_unit
+    integer :: Te_unit, Ti_unit, ne_unit
     integer :: i, j
     real(dp) :: m0, z0
 
@@ -953,17 +936,17 @@ subroutine prepare_collisions(c,v0,energy_eV)
     m0 = particle_mass/amp
     z0 = particle_charge/echarge
 
-    open(newunit = aTe_unit, file = 'background/Te_d.dat')
-    read(aTe_unit,'(e16.9)') (c%temp_mat(2,i),i=1,ntetr/grid_size(2),3)
-    close(aTe_unit)
+    open(newunit = Te_unit, file = 'background/Te_d.dat')
+    read(Te_unit,'(e16.9)') (c%temp_mat(2,i),i=1,ntetr/grid_size(2),3)
+    close(Te_unit)
 
-    open(newunit = aTi_unit, file = 'background/Ti_d.dat')
-    read(aTi_unit,'(e16.9)') (c%temp_mat(1,i),i=1,ntetr/grid_size(2),3)
-    close(aTi_unit)
+    open(newunit = Ti_unit, file = 'background/Ti_d.dat')
+    read(Ti_unit,'(e16.9)') (c%temp_mat(1,i),i=1,ntetr/grid_size(2),3)
+    close(Ti_unit)
 
-    open(newunit = ane_unit, file = 'background/ne_d.dat')
-    read(ane_unit,'(e16.9)') (c%dens_mat(1,i),i=1,ntetr/grid_size(2),3)
-    close(ane_unit)
+    open(newunit = ne_unit, file = 'background/ne_d.dat')
+    read(ne_unit,'(e16.9)') (c%dens_mat(1,i),i=1,ntetr/grid_size(2),3)
+    close(ne_unit)
 
     do i = 1,grid_size(2)-1 !copy data from first phi slice to all other phi slices
         c%temp_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%temp_mat(:,1:ntetr/grid_size(2):3)
@@ -985,6 +968,13 @@ subroutine prepare_collisions(c,v0,energy_eV)
         c%velrat_mat(:,i) = velrat
         c%enrat_mat(:,i) = enrat
     enddo
+
+    if (b%boole_precalc_collisions) then
+        allocate(c%randcol(b%num_particles,c%randcoli,3))
+        call RANDOM_NUMBER(c%randcol)
+        !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
+        c%randcol(:,:,1:2:3) =  3.464102*(c%randcol(:,:,1:2:3)-.5)
+    endif
 end subroutine prepare_collisions
 
 end module boltzmann_mod

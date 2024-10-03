@@ -67,6 +67,7 @@ module boltzmann_types_mod
     end type poloidal_flux_t
 
     type collisions_t
+    real(dp), dimension(:,:,:), allocatable :: randcol
     real(dp), dimension(:,:), allocatable :: dens_mat
     real(dp), dimension(:,:), allocatable :: temp_mat
     real(dp), dimension(:,:), allocatable :: vpar_mat
@@ -77,6 +78,8 @@ module boltzmann_types_mod
     real(dp), dimension(:), allocatable :: charge_num
     real(dp), dimension(:), allocatable :: dens
     real(dp), dimension(:), allocatable :: temp
+    integer :: randcoli = int(1.0d5)
+    real(dp) :: maxcol = 0
     end type collisions_t
 
     type boltzmann_input_t
