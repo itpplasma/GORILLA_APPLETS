@@ -71,6 +71,7 @@ subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, 
     real(dp), dimension(:,:), allocatable            :: r_integrand_constants
     type(output_t)                                   :: output
 
+    print*, 'calc_volume_integrals started'
     n_prisms = ntetr/3
     allocate(tetra_indices_per_prism(n_prisms,3))    
     allocate(prism_volumes(n_prisms))
@@ -272,7 +273,7 @@ subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, 
     if(boole_refined_sqrt_g) results%refined_prism_volumes = refined_prism_volumes
     results%electric_potential = elec_pot_vec
     results%boltzmann_density = n_b
-
+    print*, 'calc_volume_integrals finished'
 end subroutine calc_volume_integrals
 
 end module volume_integrals_and_sqrt_g_mod

@@ -19,8 +19,7 @@ module boltzmann_mod
     integer, dimension(:,:), allocatable :: tetra_indices_per_prism
     real(dp), dimension(:,:), allocatable :: verts
     integer :: n_prisms, num_particles, ind_a, ind_b, ind_c
-    complex(dp), dimension(:,:), allocatable :: weights
-    real(dp), dimension(:), allocatable :: J_perp, temperature_vector
+    real(dp), dimension(:), allocatable :: weights, J_perp, temperature_vector
     real(dp), dimension(:,:,:), allocatable :: randcol
     integer :: randcoli = int(1.0d5)
     integer :: et_unit, rp_unit, pm_unit, di_unit
@@ -41,16 +40,15 @@ subroutine calc_boltzmann
     use tetra_grid_settings_mod, only: n_field_periods, grid_size
     use tetra_grid_mod, only: ntetr, nvert, verts_rphiz, tetra_grid
     use gorilla_settings_mod, only: ispecies
-    use collis_ions, only: collis_init, stost
+    use collis_ions, only: stost
     use find_tetra_mod, only: find_tetra
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use boltzmann_types_mod, only: filenames_t, output_t, moment_specs_t, counter_t, poloidal_flux_t
+    use boltzmann_types_mod, only: filenames_t, output_t, moment_specs_t, counter_t, poloidal_flux_t, collisions_t
     use boltzmann_writing_data_mod, only: write_data_to_files, name_files, unlink_files
 
-    real(dp), dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
-                                                     velrat_mat, enrat_mat, dens_mat_tetr, temp_mat_tetr
+    real(dp), dimension(:,:), allocatable :: start_pos_pitch_mat
     real(dp) :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v, maxcol
     integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,ierr,err,iantithetic, num_background_species, inorout
     integer :: i_part
@@ -61,7 +59,7 @@ subroutine calc_boltzmann
     Character(LEN=50) :: format_moments, format_fourier_moments
     complex(dp), dimension(:,:), allocatable :: local_tetr_moments
     real(dp) :: m0,z0,hamiltonian_time
-    real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
+    real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
     integer :: Te_unit, Ti_unit, ne_unit, t_moments_unit, ipert_unit
     type(filenames_t) :: filenames
     type(output_t) :: output
@@ -69,6 +67,7 @@ subroutine calc_boltzmann
     type(counter_t) :: counter, local_counter
     real(dp), dimension(:,:), allocatable :: sqrt_g
     type(poloidal_flux_t) :: poloidal_flux
+    type(collisions_t) :: c
 
     call read_boltzmann_inp()
     call get_ipert()
@@ -79,129 +78,47 @@ subroutine calc_boltzmann
     print*, 'particle charge number = ', particle_charge/echarge
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+    v0=sqrt(2.d0*energy_eV*ev2erg/particle_mass)
     num_particles = int(n_particles)
     n_prisms = ntetr/3
-    call set_moment_specifications(moment_specs, boole_squared_moments)
-    call initialise_output(output, moment_specs)
-    allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
-    allocate(weights(num_particles,1))
+    allocate(weights(num_particles))
     allocate(J_perp(num_particles))
-    
     allocate(temperature_vector(num_particles))
     temperature_vector = 0
-
     allocate(tetra_indices_per_prism(n_prisms,3))
     do i = 1,3
         tetra_indices_per_prism(:,i) = (/(i+3*k,k = 0,n_prisms-1)/)
     enddo
-
-    call calc_square_root_g(sqrt_g)
-
-print*, 'start calc_volume_integrals'
-    call calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, density, energy_eV,output)
-print*, 'end calc_volume_integrals'
-
-    !Compute velocity module from kinetic energy dependent on particle species
-    v0=sqrt(2.d0*energy_eV*ev2erg/particle_mass)
-
-print*, 'calc_starting_conditions started'
-    call calc_starting_conditions(v0,start_pos_pitch_mat)
-print*, 'calc_starting_conditions finished'
-
-    call initialize_poloidal_flux(poloidal_flux,num_particles)
-
-    if (boole_collisions) then
-        num_background_species = 2 
-        allocate(dens_mat(num_background_species-1,size(verts_rphiz(1,:))))
-        allocate(temp_mat(num_background_species,size(verts_rphiz(1,:))))
-        allocate(vpar_mat(num_background_species,ntetr))
-        allocate(efcolf_mat(num_background_species,ntetr))
-        allocate(velrat_mat(num_background_species,ntetr))
-        allocate(enrat_mat(num_background_species,ntetr))
-        allocate(mass_num(num_background_species-1))
-        allocate(charge_num(num_background_species-1))
-        allocate(dens(num_background_species))
-        allocate(temp(num_background_species))
-        allocate(efcolf(num_background_species))
-        allocate(velrat(num_background_species))
-        allocate(enrat(num_background_species))
-        mass_num = 0
-        charge_num = 0
-        mass_num(1) = 2
-        !mass_num(2) = 3
-        charge_num(1) = 1
-        !charge_num(2) = 2
-        dens_mat = 5.0d13
-        temp_mat = energy_eV
-        vpar_mat = 0 !ask Sergei when this will be needed!!!
-        m0 = particle_mass/amp
-        z0 = particle_charge/echarge
-        print*, 'm0 = ', m0, 'z0 = ', z0
-
-!!!!!!!!!!!!!!!!!!!! Alternative route is taken because data is not available per vertex but per tetrahedron !!!!!!!!!!!!!!!!!!!!!!!
-
-        allocate(dens_mat_tetr(num_background_species-1,ntetr))
-        allocate(temp_mat_tetr(num_background_species,ntetr))
-
-        open(newunit = Te_unit, file = 'background/Te_d.dat')
-        read(Te_unit,'(e16.9)') (temp_mat_tetr(2,i),i=1,ntetr/grid_size(2),3)
-        close(Te_unit)
-
-        open(newunit = Ti_unit, file = 'background/Ti_d.dat')
-        read(Ti_unit,'(e16.9)') (temp_mat_tetr(1,i),i=1,ntetr/grid_size(2),3)
-        close(Ti_unit)
-
-        open(newunit = ne_unit, file = 'background/ne_d.dat')
-        read(ne_unit,'(e16.9)') (dens_mat_tetr(1,i),i=1,ntetr/grid_size(2),3)
-        close(ne_unit)
-
-        do i = 1,grid_size(2)-1
-            temp_mat_tetr(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = temp_mat_tetr(:,1:ntetr/grid_size(2):3)
-            dens_mat_tetr(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = dens_mat_tetr(:,1:ntetr/grid_size(2):3)
-        enddo
-        do i = 1,2
-            temp_mat_tetr(:,1+i:ntetr:3) = temp_mat_tetr(:,1:ntetr:3)
-            dens_mat_tetr(:,1+i:ntetr:3) = dens_mat_tetr(:,1:ntetr:3)
-        enddo
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-        do i = 1, ntetr
-            do j = 1,num_background_species
-                !following if statement because electron density will be calculated in collis init
-                if (j.lt.num_background_species) dens(j) = sum(dens_mat_tetr(j,tetra_grid(i)%ind_knot([1,2,3,4])))/4
-                temp(j) = sum(temp_mat_tetr(j,tetra_grid(i)%ind_knot([1,2,3,4])))/4
-            enddo
-            call collis_init(m0,z0,mass_num,charge_num,dens,temp,energy_eV,v0,efcolf,velrat,enrat)
-            efcolf_mat(:,i) = efcolf
-            velrat_mat(:,i) = velrat
-            enrat_mat(:,i) = enrat
-        enddo
-    endif
-
     kpart = 0
     maxcol = 0
     iantithetic = 1
     if (boole_antithetic_variate) iantithetic = 2
 
+    call set_moment_specifications(moment_specs, boole_squared_moments)
+    call initialise_output(output, moment_specs)
+    call calc_square_root_g(sqrt_g)
+    call calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, density, energy_eV,output)
+    call calc_starting_conditions(v0,start_pos_pitch_mat)
+    call initialize_poloidal_flux(poloidal_flux,num_particles)
+    call prepare_collisions(c,v0)
     call name_files(filenames)
     call unlink_files(filenames)
     call open_files_before_main_loop
 
-    if (boole_collisions) deallocate(efcolf,velrat,enrat)
+    allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
+    if (boole_collisions) allocate(efcolf(num_background_species),velrat(num_background_species),enrat(num_background_species))
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(num_particles,kpart,v0,time_step,i_integrator_type,boole_collisions,sqrt_g, output, &
     !$OMP& dtau,dtaumin,tetra_indices_per_prism, boole_squared_moments, counter, &
-    !$OMP& start_pos_pitch_mat,boole_boltzmann_energies, et_unit, moment_specs, poloidal_flux, &
-    !$OMP& density,energy_eV,dens_mat,temp_mat,vpar_mat,tetra_grid,iantithetic,tetra_physics, di_unit, pm_unit, rp_unit, &
-    !$OMP& efcolf_mat,velrat_mat,enrat_mat,num_background_species,randcol,randcoli,maxcol,boole_precalc_collisions) &
+    !$OMP& start_pos_pitch_mat,boole_boltzmann_energies, et_unit, moment_specs, poloidal_flux, c,&
+    !$OMP& density,energy_eV,tetra_grid,iantithetic,tetra_physics, di_unit, pm_unit, rp_unit, &
+    !$OMP& num_background_species,randcol,randcoli,maxcol,boole_precalc_collisions) &
     !$OMP& FIRSTPRIVATE(particle_mass, particle_charge) &
     !$OMP& PRIVATE(p,l,n,boole_particle_lost,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
     !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr, v, local_tetr_moments,hamiltonian_time, &
     !$OMP& m0,z0,i,efcolf,velrat,enrat,vpar_background,inorout,randnum,local_counter)
     print*, 'get number of threads', omp_get_num_threads()
-    if (boole_collisions) allocate(efcolf(num_background_species),velrat(num_background_species),enrat(num_background_species))
     !$OMP DO
 
     !Loop over particles
@@ -255,10 +172,10 @@ endif
                 if (boole_collisions) then
                     if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
                     if (.not.(ind_tetr.eq.-1)) then
-                        efcolf = efcolf_mat(:,ind_tetr)
-                        velrat = velrat_mat(:,ind_tetr)
-                        enrat = enrat_mat(:,ind_tetr)
-                        vpar_background = vpar_mat(:,ind_tetr)
+                        efcolf = c%efcolf_mat(:,ind_tetr)
+                        velrat = c%velrat_mat(:,ind_tetr)
+                        enrat = c%enrat_mat(:,ind_tetr)
+                        vpar_background = c%vpar_mat(:,ind_tetr)
                         !print*, vpar_background
 
                         vpar = vpar - vpar_background(1)
@@ -370,8 +287,6 @@ endif
     print*, 'number of particles left through the outside = ', counter%lost_outside
     print*, 'number of particles left through the inside = ', counter%lost_inside
 
-deallocate(start_pos_pitch_mat,local_tetr_moments)
-
 end subroutine calc_boltzmann
 
 subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,v,sqrt_g,start_pos_pitch_mat, &
@@ -432,7 +347,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
         phi = x(2) - verts(2,tetra_grid(ind_tetr)%ind_knot(1))
 
         if (boole_refined_sqrt_g) then
-            weights(n,1) = weights(n,1)* &
+            weights(n) = weights(n)* &
                                     &  (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
                                     &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
         endif
@@ -443,18 +358,18 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
                                              & (tetra_physics(ind_tetr)%h2_1+sum(tetra_physics(ind_tetr)%gh2*(/r,phi,z/)))
         endif
         if (boole_linear_density_simulation) then
-            weights(n,1) = weights(n,1)*(poloidal_flux%max*1.1-poloidal_flux%particle(n))/(poloidal_flux%max*1.1)
+            weights(n) = weights(n)*(poloidal_flux%max*1.1-poloidal_flux%particle(n))/(poloidal_flux%max*1.1)
         endif
       
         if (boole_boltzmann_energies) then
             !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
             phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*(/r,phi,z/))
             if (.not. boole_linear_temperature_simulation) then
-                weights(n,1) = weights(n,1)*sqrt(start_pos_pitch_mat(5,n)*ev2erg)/(energy_eV*ev2erg)**1.5* &
+                weights(n) = weights(n)*sqrt(start_pos_pitch_mat(5,n)*ev2erg)/(energy_eV*ev2erg)**1.5* &
                             & exp(-(start_pos_pitch_mat(5,n)*ev2erg+particle_charge*phi_elec_func)/(energy_eV*ev2erg))
             else
                 temperature_vector(n) = energy_eV*ev2erg*(poloidal_flux%max*1.1-poloidal_flux%particle(n))/(poloidal_flux%max*1.1)
-                weights(n,1) = weights(n,1)*sqrt(start_pos_pitch_mat(5,n)*ev2erg)/temperature_vector(n)**1.5* &
+                weights(n) = weights(n)*sqrt(start_pos_pitch_mat(5,n)*ev2erg)/temperature_vector(n)**1.5* &
                 & exp(-(start_pos_pitch_mat(5,n)*ev2erg+particle_charge*phi_elec_func)/temperature_vector(n))
             endif
         endif
@@ -579,18 +494,18 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
             select case(moment_specs%moments_selector(m))
                 case(1)
                     local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
-                                                                    & weights(n,1)*optional_quantities%t_hamiltonian!* &
+                                                                    & weights(n)*optional_quantities%t_hamiltonian!* &
                                                                     !& (exp(2*(0,1)*x(2))+exp(3*(0,1)*x(2)))
                     hamiltonian_time = optional_quantities%t_hamiltonian
                 case(2)
                     local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
-                                                                    & weights(n,1)*optional_quantities%gyrophase*J_perp(n)
+                                                                    & weights(n)*optional_quantities%gyrophase*J_perp(n)
                 case(3)
                     local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
-                                                                    & weights(n,1)*optional_quantities%vpar_int
+                                                                    & weights(n)*optional_quantities%vpar_int
                 case(4)
                     local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
-                                                                    & weights(n,1)*optional_quantities%vpar2_int
+                                                                    & weights(n)*optional_quantities%vpar2_int
             end select
         enddo
 
@@ -831,7 +746,6 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     use find_tetra_mod, only: find_tetra
     use tetra_grid_settings_mod, only: grid_kind
     use tetra_physics_mod, only: coord_system
-    use collis_ions, only: collis_init, stost
 
     real(dp), intent(in)                                   :: v0
     real(dp), dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
@@ -848,6 +762,7 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     integer,dimension(:), allocatable                              :: seed
     integer                                                        :: n
 
+    print*, 'calc_starting_conditions started'
     open(newunit = seed_inp_unit, file='seed.inp', status='old',action = 'read')
     read(seed_inp_unit,*) n
     allocate(seed(n))
@@ -923,8 +838,8 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
         start_pos_pitch_mat(4,1:num_particles:2) = -start_pos_pitch_mat(4,2:num_particles:2)
     endif
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! end antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    weights(:,1) = constant_part_of_weights
-    if (boole_refined_sqrt_g.eqv..false.) weights(:,1) = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
+    weights = constant_part_of_weights
+    if (boole_refined_sqrt_g.eqv..false.) weights = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
 
     if (boole_precalc_collisions) then
         allocate(randcol(num_particles,randcoli,3))
@@ -932,6 +847,82 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
         !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
         randcol(:,:,1:2:3) =  3.464102*(randcol(:,:,1:2:3)-.5)
     endif
+    print*, 'calc_starting_conditions finished'
 end subroutine calc_starting_conditions
+
+subroutine prepare_collisions(c,v0)
+
+    use boltzmann_types_mod, only: collisions_t
+    use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
+    use tetra_physics_mod, only: particle_mass,particle_charge
+    use constants, only: ev2erg, echarge,amp
+    use tetra_grid_settings_mod, only: grid_size
+    use collis_ions, only: collis_init
+
+    real(dp), intent(in) :: v0
+    type(collisions_t) :: c
+    integer :: n
+    real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
+    integer :: aTe_unit, aTi_unit, ane_unit
+    integer :: i, j
+    real(dp) :: m0, z0
+
+    n = 2 !number of background species
+    allocate(c%dens_mat(n-1,ntetr))
+    allocate(c%temp_mat(n,ntetr))
+    allocate(c%vpar_mat(n,ntetr))
+    allocate(c%efcolf_mat(n,ntetr))
+    allocate(c%velrat_mat(n,ntetr))
+    allocate(c%enrat_mat(n,ntetr))
+    allocate(c%mass_num(n-1))
+    allocate(c%charge_num(n-1))
+    allocate(c%dens(n))
+    allocate(c%temp(n))
+    allocate(efcolf(n))
+    allocate(velrat(n))
+    allocate(enrat(n))
+    c%mass_num = 0
+    c%charge_num = 0
+    c%mass_num(1) = 2
+    !c%mass_num(2) = 3
+    c%charge_num(1) = 1
+    !c%charge_num(2) = 2
+    c%vpar_mat = 0 !ask Sergei when this will be needed!!!
+    m0 = particle_mass/amp
+    z0 = particle_charge/echarge
+
+    open(newunit = aTe_unit, file = 'background/Te_d.dat')
+    read(aTe_unit,'(e16.9)') (c%temp_mat(2,i),i=1,ntetr/grid_size(2),3)
+    close(aTe_unit)
+
+    open(newunit = aTi_unit, file = 'background/Ti_d.dat')
+    read(aTi_unit,'(e16.9)') (c%temp_mat(1,i),i=1,ntetr/grid_size(2),3)
+    close(aTi_unit)
+
+    open(newunit = ane_unit, file = 'background/ne_d.dat')
+    read(ane_unit,'(e16.9)') (c%dens_mat(1,i),i=1,ntetr/grid_size(2),3)
+    close(ane_unit)
+
+    do i = 1,grid_size(2)-1 !copy data from first phi slice to all other phi slices
+        c%temp_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%temp_mat(:,1:ntetr/grid_size(2):3)
+        c%dens_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%dens_mat(:,1:ntetr/grid_size(2):3)
+    enddo
+    do i = 1,2 !copy data from first tetrahedron of each triangular prism to the two other ones
+        c%temp_mat(:,1+i:ntetr:3) = c%temp_mat(:,1:ntetr:3)
+        c%dens_mat(:,1+i:ntetr:3) = c%dens_mat(:,1:ntetr:3)
+    enddo
+
+    do i = 1, ntetr
+        do j = 1,n
+            !> if statement because electron density will be calculated in collis init
+            if (j.lt.n) c%dens(j) = c%dens_mat(j,i)
+            c%temp(j) = c%temp_mat(j,i)
+        enddo
+        call collis_init(m0,z0,c%mass_num,c%charge_num,c%dens,c%temp,energy_eV,v0,efcolf,velrat,enrat)
+        c%efcolf_mat(:,i) = efcolf
+        c%velrat_mat(:,i) = velrat
+        c%enrat_mat(:,i) = enrat
+    enddo
+end subroutine prepare_collisions
 
 end module boltzmann_mod

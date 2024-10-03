@@ -66,4 +66,17 @@ module boltzmann_types_mod
     real(dp) :: max
     end type poloidal_flux_t
 
+    type collisions_t
+    real(dp), dimension(:,:), allocatable :: dens_mat
+    real(dp), dimension(:,:), allocatable :: temp_mat
+    real(dp), dimension(:,:), allocatable :: vpar_mat
+    real(dp), dimension(:,:), allocatable :: efcolf_mat
+    real(dp), dimension(:,:), allocatable :: velrat_mat
+    real(dp), dimension(:,:), allocatable :: enrat_mat
+    real(dp), dimension(:), allocatable :: mass_num
+    real(dp), dimension(:), allocatable :: charge_num
+    real(dp), dimension(:), allocatable :: dens
+    real(dp), dimension(:), allocatable :: temp
+    end type collisions_t
+
 end module boltzmann_types_mod
