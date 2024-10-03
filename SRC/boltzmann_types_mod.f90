@@ -95,6 +95,7 @@ module boltzmann_types_mod
     logical  :: boole_linear_temperature_simulation
     integer  :: i_integrator_type
     integer  :: seed_option
+    integer  :: num_particles
     end type boltzmann_input_t
 
 end module boltzmann_types_mod

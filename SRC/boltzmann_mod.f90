@@ -8,20 +8,13 @@ module boltzmann_mod
 
     private
 
-    !variables from boltzmann_nml
-    real(dp) :: n_particles, density
-    logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
-               boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
-               boole_linear_temperature_simulation
-    integer :: i_integrator_type, seed_option
-
     real(dp), dimension(:,:), allocatable :: verts
     real(dp), dimension(:), allocatable :: weights, J_perp, temperature_vector
     integer :: et_unit, rp_unit, pm_unit, di_unit
    
 contains
 
-subroutine read_boltzmann_inp(b)
+subroutine read_boltzmann_inp_into_type(b)
 
     use boltzmann_types_mod, only: boltzmann_input_t
 
@@ -42,7 +35,6 @@ subroutine read_boltzmann_inp(b)
     open(newunit = b_inp_unit, file='boltzmann.inp', status='unknown')
     read(b_inp_unit,nml=boltzmann_nml)
     close(b_inp_unit)
-    print *,'GORILLA: Loaded input data from boltzmann.inp'
 
     b%time_step = time_step
     b%energy_eV = energy_eV
@@ -59,8 +51,11 @@ subroutine read_boltzmann_inp(b)
     b%boole_linear_temperature_simulation = boole_linear_temperature_simulation
     b%i_integrator_type = i_integrator_type
     b%seed_option = seed_option
+    b%num_particles = int(n_particles)
 
-end subroutine read_boltzmann_inp
+    print *,'GORILLA: Loaded input data from boltzmann.inp'
+
+end subroutine read_boltzmann_inp_into_type
 
 subroutine calc_boltzmann
 
@@ -82,7 +77,7 @@ subroutine calc_boltzmann
     real(dp), dimension(:,:), allocatable :: start_pos_pitch_mat
     real(dp) :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v, maxcol
     integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,ierr,err,iantithetic, num_background_species, inorout
-    integer :: i_part, num_particles
+    integer :: i_part
     real(dp), dimension(3) :: x_rand_beg,x,randnum
     logical :: boole_initialized,boole_particle_lost
     real(dp) :: dtau, dphi,dtaumin, t_step
@@ -104,22 +99,7 @@ subroutine calc_boltzmann
     integer :: randcoli = int(1.0d5)
     type(boltzmann_input_t) :: b
 
-    call read_boltzmann_inp(b)
-
-    n_particles = b%n_particles
-    density = b%density
-    boole_squared_moments = b%boole_squared_moments
-    boole_point_source = b%boole_point_source
-    boole_collisions = b%boole_collisions
-    boole_precalc_collisions = b%boole_precalc_collisions
-    boole_refined_sqrt_g = b%boole_refined_sqrt_g
-    boole_boltzmann_energies = b%boole_boltzmann_energies
-    boole_linear_density_simulation = b%boole_linear_density_simulation
-    boole_antithetic_variate = b%boole_antithetic_variate
-    boole_linear_temperature_simulation = b%boole_linear_temperature_simulation
-    i_integrator_type = b%i_integrator_type
-    seed_option = b%seed_option
-
+    call read_boltzmann_inp_into_type(b)
     call get_ipert()
     call initialize_gorilla(i_option,ipert)
 
@@ -129,38 +109,37 @@ subroutine calc_boltzmann
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     v0=sqrt(2.d0*b%energy_eV*ev2erg/particle_mass)
-    num_particles = int(n_particles)
     n_prisms = ntetr/3
-    allocate(weights(num_particles))
-    allocate(J_perp(num_particles))
-    allocate(temperature_vector(num_particles))
-    if (boole_precalc_collisions) allocate(randcol(num_particles,randcoli,3))
+    allocate(weights(b%num_particles))
+    allocate(J_perp(b%num_particles))
+    allocate(temperature_vector(b%num_particles))
+    if (b%boole_precalc_collisions) allocate(randcol(b%num_particles,randcoli,3))
     temperature_vector = 0
     kpart = 0
     maxcol = 0
     iantithetic = 1
-    if (boole_antithetic_variate) iantithetic = 2
+    if (b%boole_antithetic_variate) iantithetic = 2
 
-    call set_moment_specifications(moment_specs, boole_squared_moments)
+    call set_moment_specifications(moment_specs, b%boole_squared_moments)
     call initialise_output(output, moment_specs)
     call calc_square_root_g(sqrt_g)
-    call calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, density, b%energy_eV,output)
-    call calc_starting_conditions(num_particles,v0,start_pos_pitch_mat,randcol,b%energy_ev)
-    call initialize_poloidal_flux(poloidal_flux,num_particles)
+    call calc_volume_integrals(b%boole_boltzmann_energies,b%boole_refined_sqrt_g, b%density, b%energy_eV,output)
+    call calc_starting_conditions(b,v0,start_pos_pitch_mat,randcol)
+    call initialize_poloidal_flux(poloidal_flux,b%num_particles)
     call prepare_collisions(c,v0,b%energy_eV)
     call name_files(filenames)
     call unlink_files(filenames)
     call open_files_before_main_loop
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
-    if (boole_collisions) allocate(efcolf(num_background_species),velrat(num_background_species),enrat(num_background_species))
+    if (b%boole_collisions) allocate(efcolf(num_background_species),velrat(num_background_species),enrat(num_background_species))
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(num_particles,kpart,v0,i_integrator_type,boole_collisions,sqrt_g, output, &
-    !$OMP& dtau,dtaumin,boole_squared_moments, counter, &
-    !$OMP& start_pos_pitch_mat,boole_boltzmann_energies, et_unit, moment_specs, poloidal_flux, b, c,&
-    !$OMP& density,tetra_grid,iantithetic,tetra_physics, di_unit, pm_unit, rp_unit, &
-    !$OMP& num_background_species,randcol,randcoli,maxcol,boole_precalc_collisions) &
+    !$OMP& SHARED(kpart,v0,sqrt_g, output, &
+    !$OMP& dtau,dtaumin,counter, &
+    !$OMP& start_pos_pitch_mat,et_unit, moment_specs, poloidal_flux, b, c,&
+    !$OMP& tetra_grid,iantithetic,tetra_physics, di_unit, pm_unit, rp_unit, &
+    !$OMP& num_background_species,randcol,randcoli,maxcol) &
     !$OMP& FIRSTPRIVATE(particle_mass, particle_charge) &
     !$OMP& PRIVATE(p,l,n,boole_particle_lost,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
     !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr, v, local_tetr_moments,hamiltonian_time, &
@@ -169,7 +148,7 @@ subroutine calc_boltzmann
     !$OMP DO
 
     !Loop over particles
-    do p = 1,num_particles/iantithetic
+    do p = 1,b%num_particles/iantithetic
         do l = 1,iantithetic
 
             n = (p-1)*iantithetic+l
@@ -177,12 +156,12 @@ subroutine calc_boltzmann
             !Counter for particles
             kpart = kpart+1 !in general not equal to n becuase of parallelisation
             boole_particle_lost = .false.
-if (num_particles.gt.10) then
-if (modulo(kpart,int(num_particles/10)).eq.0) then
-    print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
+if (b%num_particles.gt.10) then
+if (modulo(kpart,int(b%num_particles/10)).eq.0) then
+    print *, kpart, ' / ', b%num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
 endif
 else 
-print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
+print *, kpart, ' / ', b%num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
 endif
             !$omp end critical
 
@@ -198,12 +177,12 @@ endif
             ! print*, start_pos_pitch_mat(5,n)
             ! if (n.eq.972) print*, x_rand_beg,start_pos_pitch_mat(5,n),pitchpar
 
-            if (i_integrator_type.eq.2) print*, 'Error: i_integratpr_type set to 2, this module only works with &
+            if (b%i_integrator_type.eq.2) print*, 'Error: i_integratpr_type set to 2, this module only works with &
                                                 & i_integrator_type set to 1'
             x = x_rand_beg
             vpar = pitchpar * v0
             vperp = sqrt(v0**2-vpar**2)
-            if (boole_boltzmann_energies) then
+            if (b%boole_boltzmann_energies) then
                 v = sqrt(start_pos_pitch_mat(5,n)*ev2erg*2/particle_mass)
                 vpar = pitchpar * v
                 vperp = sqrt(v**2-vpar**2)
@@ -216,7 +195,7 @@ endif
                 if (i.eq.1) then
                     boole_initialized = .false.
                 endif
-                if (boole_collisions) then
+                if (b%boole_collisions) then
                     if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
                     if (.not.(ind_tetr.eq.-1)) then
                         efcolf = c%efcolf_mat(:,ind_tetr)
@@ -235,7 +214,7 @@ endif
                         zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module 
                         zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
 
-                        if (boole_precalc_collisions) then
+                        if (b%boole_precalc_collisions) then
                             randnum = randcol(n,mod(i-1,randcoli)+1,:) 
                             call stost(efcolf,velrat,enrat,zet,t_step,1,err,(b%time_step-t_confined)*v0,randnum)
                         else
@@ -286,22 +265,22 @@ endif
         enddo
 
         !$omp critical
-        call add_local_tetr_moments_to_output(local_tetr_moments, output)
+        call add_local_tetr_moments_to_output(local_tetr_moments, output, moment_specs)
         !$omp end critical
     enddo !n
     !$OMP END DO
     !$OMP END PARALLEL
 
-    call normalise_prism_moments_and_prism_moments_squared(moment_specs,output,b%time_step,n_particles)
+    call normalise_prism_moments_and_prism_moments_squared(moment_specs,output,b)
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments(output, moment_specs)
     call close_files
     call write_data_to_files(filenames,output,moment_specs)
 
-    if (boole_precalc_collisions) print*, "maxcol = ", maxcol
+    if (b%boole_precalc_collisions) print*, "maxcol = ", maxcol
     print*, 'Number of lost particles',counter%lost_particles
-    print*, 'average number of pushings = ', counter%tetr_pushings/n_particles
-    print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/n_particles
-    print*, 'average number of integration steps = ', counter%integration_steps/n_particles
+    print*, 'average number of pushings = ', counter%tetr_pushings/b%n_particles
+    print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/b%n_particles
+    print*, 'average number of integration steps = ', counter%integration_steps/b%n_particles
     PRINT*, 'particle mass = ', particle_mass
     PRINT*, 'absolute value of velocity = ', v0
     PRINT*, 'particle charge = ', particle_charge
@@ -310,7 +289,6 @@ endif
     print*, 'tracing time in seconds = ', b%time_step
     print*, 'number of particles left through the outside = ', counter%lost_outside
     print*, 'number of particles left through the inside = ', counter%lost_inside
-    print*, n_particles
 
 end subroutine calc_boltzmann
 
@@ -372,25 +350,25 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
         z = x(3) - verts(3,tetra_grid(ind_tetr)%ind_knot(1))
         phi = x(2) - verts(2,tetra_grid(ind_tetr)%ind_knot(1))
 
-        if (boole_refined_sqrt_g) then
+        if (b%boole_refined_sqrt_g) then
             weights(n) = weights(n)* &
                                     &  (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
                                     &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
         endif
 
-        if (boole_linear_density_simulation.or.boole_linear_temperature_simulation) then
+        if (b%boole_linear_density_simulation.or.b%boole_linear_temperature_simulation) then
             poloidal_flux%particle(n) = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*(/r,phi,z/)) + &
                                              & cm_over_e*vpar*&
                                              & (tetra_physics(ind_tetr)%h2_1+sum(tetra_physics(ind_tetr)%gh2*(/r,phi,z/)))
         endif
-        if (boole_linear_density_simulation) then
+        if (b%boole_linear_density_simulation) then
             weights(n) = weights(n)*(poloidal_flux%max*1.1-poloidal_flux%particle(n))/(poloidal_flux%max*1.1)
         endif
       
-        if (boole_boltzmann_energies) then
+        if (b%boole_boltzmann_energies) then
             !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
             phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*(/r,phi,z/))
-            if (.not. boole_linear_temperature_simulation) then
+            if (.not. b%boole_linear_temperature_simulation) then
                 weights(n) = weights(n)*sqrt(start_pos_pitch_mat(5,n)*ev2erg)/(b%energy_eV*ev2erg)**1.5* &
                             & exp(-(start_pos_pitch_mat(5,n)*ev2erg+particle_charge*phi_elec_func)/(b%energy_eV*ev2erg))
             else
@@ -553,12 +531,13 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 
 end subroutine orbit_timestep_gorilla_boltzmann
 
-subroutine add_local_tetr_moments_to_output(local_tetr_moments, output)
+subroutine add_local_tetr_moments_to_output(local_tetr_moments, output, moment_specs)
 
-    use boltzmann_types_mod, only: output_t
+    use boltzmann_types_mod, only: output_t, moment_specs_t
     use tetra_grid_mod, only: ntetr
 
     complex(dp), dimension(:,:), intent(in) :: local_tetr_moments
+    type(moment_specs_t), intent(in) :: moment_specs
     type(output_t) :: output
     integer :: k, n_prisms
 
@@ -569,7 +548,7 @@ subroutine add_local_tetr_moments_to_output(local_tetr_moments, output)
                     & (local_tetr_moments(:,(/(1+3*k,k = 0,n_prisms-1)/)) + &
                     &  local_tetr_moments(:,(/(2+3*k,k = 0,n_prisms-1)/)) + &
                     &  local_tetr_moments(:,(/(3+3*k,k = 0,n_prisms-1)/)))
-    if (boole_squared_moments) then
+    if (moment_specs%boole_squared_moments) then
         output%prism_moments_squared = output%prism_moments_squared + &
                             & (local_tetr_moments(:,(/(1+3*k,k = 0,n_prisms-1)/)) + &
                             &  local_tetr_moments(:,(/(2+3*k,k = 0,n_prisms-1)/)) + &
@@ -578,24 +557,25 @@ subroutine add_local_tetr_moments_to_output(local_tetr_moments, output)
 
 end subroutine add_local_tetr_moments_to_output
 
-subroutine normalise_prism_moments_and_prism_moments_squared(moment_specs,output,time_step,n_particles)
+subroutine normalise_prism_moments_and_prism_moments_squared(moment_specs,output,b)
 
-    use boltzmann_types_mod, only: moment_specs_t, output_t
+    use boltzmann_types_mod, only: moment_specs_t, output_t, boltzmann_input_t
 
-    real(dp), intent(in) :: time_step,n_particles
+    type(boltzmann_input_t), intent(in) :: b
     type(moment_specs_t), intent(inout) :: moment_specs
     type(output_t), intent(inout) :: output
     integer :: n
 
 
     do n = 1,moment_specs%n_moments
-        output%prism_moments(n,:) = output%prism_moments(n,:)/(output%prism_volumes*time_step*n_particles) !do normalisations
-        if (boole_squared_moments) then
-            output%prism_moments_squared(n,:) = output%prism_moments_squared(n,:)/(output%prism_volumes**2*time_step**2*n_particles) !do normalisations
+        output%prism_moments(n,:) = output%prism_moments(n,:)/(output%prism_volumes*b%time_step*b%n_particles)
+        if (moment_specs%boole_squared_moments) then
+            output%prism_moments_squared(n,:) = output%prism_moments_squared(n,:)/ &
+                                                (output%prism_volumes**2*b%time_step**2*b%n_particles)
         endif
-        if (boole_refined_sqrt_g) then
+        if (b%boole_refined_sqrt_g) then
             output%prism_moments(n,:) = output%prism_moments(n,:)*output%prism_volumes/output%refined_prism_volumes
-            if (boole_squared_moments) then
+            if (moment_specs%boole_squared_moments) then
                 output%prism_moments_squared(n,:) = output%prism_moments_squared(n,:)* &
                                         output%prism_volumes**2/output%refined_prism_volumes**2
             endif
@@ -811,16 +791,16 @@ subroutine initialize_poloidal_flux(poloidal_flux,num_particles)
 
 end subroutine initialize_poloidal_flux
 
-subroutine calc_starting_conditions(num_particles, v0, start_pos_pitch_mat, randcol, energy_ev)
+subroutine calc_starting_conditions(b, v0, start_pos_pitch_mat, randcol)
     
     use constants, only: pi, ev2erg
     use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, ntetr
     use find_tetra_mod, only: find_tetra
     use tetra_grid_settings_mod, only: grid_kind
     use tetra_physics_mod, only: coord_system
+    use boltzmann_types_mod, only: boltzmann_input_t
 
-    integer, intent(in)                                    :: num_particles
-    real(dp), intent(in)                                   :: energy_eV
+    type(boltzmann_input_t), intent(in)                    :: b
     real(dp), intent(in)                                   :: v0
     real(dp), dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
     real(dp), dimension(:,:,:)                             :: randcol
@@ -850,10 +830,10 @@ subroutine calc_starting_conditions(num_particles, v0, start_pos_pitch_mat, rand
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    allocate(start_pos_pitch_mat(5,num_particles))
-    allocate(rand_vector(num_particles))
-    allocate(rand_matrix1(3,num_particles))
-    allocate(rand_matrix2(2,num_particles))
+    allocate(start_pos_pitch_mat(5,b%num_particles))
+    allocate(rand_vector(b%num_particles))
+    allocate(rand_matrix1(3,b%num_particles))
+    allocate(rand_matrix2(2,b%num_particles))
 
     start_pos_pitch_mat = 0
 
@@ -876,10 +856,10 @@ subroutine calc_starting_conditions(num_particles, v0, start_pos_pitch_mat, rand
     cmin = minval(verts(ind_c,:))
     cmax = maxval(verts(ind_c,:))
 
-    constant_part_of_weights = density*(amax-amin)*(cmax-cmin)*2*pi
+    constant_part_of_weights = b%density*(amax-amin)*(cmax-cmin)*2*pi
 
     !compute starting conditions
-    if (boole_point_source) then
+    if (b%boole_point_source) then
         if (grid_kind.eq.2) then
             start_pos_pitch_mat(1,:) = 160
             start_pos_pitch_mat(2,:) = 0
@@ -895,7 +875,7 @@ subroutine calc_starting_conditions(num_particles, v0, start_pos_pitch_mat, rand
         start_pos_pitch_mat(ind_a,:) = amin + (amax - amin)*rand_matrix1(ind_a,:) !r in cylindrical, s in flux coordinates
         start_pos_pitch_mat(ind_b,:) = 2*pi*rand_matrix1(ind_b,:) !phi in cylindrical and flux coordinates
         start_pos_pitch_mat(ind_c,:) = cmin + (cmax - cmin)*rand_matrix1(ind_c,:) !z in cylindrical, theta in flux coordinates
-        ! start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r
+        ! start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,b%num_particles)/)!r
         ! start_pos_pitch_mat(ind_b,:) = 0.0d0  !1d-1 !phi in cylindrical and flux coordinates
         ! start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
     endif
@@ -904,21 +884,21 @@ subroutine calc_starting_conditions(num_particles, v0, start_pos_pitch_mat, rand
     !start_pos_pitch_mat(4,:) = 2*rand_matrix2(1,:)-1 !pitch parameter
     start_pos_pitch_mat(4,:) = 0.7d0 !pitch parameter
 
-    if (boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        start_pos_pitch_mat(5,:) = 5*energy_eV*rand_matrix2(2,:) !boltzmann energy distribution
-        constant_part_of_weights = constant_part_of_weights*10/sqrt(pi)*energy_eV*ev2erg
+    if (b%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+        start_pos_pitch_mat(5,:) = 5*b%energy_eV*rand_matrix2(2,:) !boltzmann energy distribution
+        constant_part_of_weights = constant_part_of_weights*10/sqrt(pi)*b%energy_eV*ev2erg
     endif
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! start antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    if (boole_antithetic_variate) then
-        start_pos_pitch_mat(:,1:num_particles:2) = start_pos_pitch_mat(:,2:num_particles:2)
-        start_pos_pitch_mat(4,1:num_particles:2) = -start_pos_pitch_mat(4,2:num_particles:2)
+    if (b%boole_antithetic_variate) then
+        start_pos_pitch_mat(:,1:b%num_particles:2) = start_pos_pitch_mat(:,2:b%num_particles:2)
+        start_pos_pitch_mat(4,1:b%num_particles:2) = -start_pos_pitch_mat(4,2:b%num_particles:2)
     endif
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! end antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     weights = constant_part_of_weights
-    if (boole_refined_sqrt_g.eqv..false.) weights = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
+    if (b%boole_refined_sqrt_g.eqv..false.) weights = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
 
-    if (boole_precalc_collisions) then
+    if (b%boole_precalc_collisions) then
         call RANDOM_NUMBER(randcol)
         !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
         randcol(:,:,1:2:3) =  3.464102*(randcol(:,:,1:2:3)-.5)
