@@ -4,20 +4,15 @@ module volume_integrals_and_sqrt_g_mod
     
     implicit none
 
-    private
-
     real(dp), dimension(:,:), allocatable :: sqrt_g
-
-    public :: calc_square_root_g, calc_volume_integrals
    
 contains
 
-subroutine calc_square_root_g(square_root_g)
+subroutine calc_square_root_g
 
     use tetra_physics_mod, only: tetra_physics, hamiltonian_time
     use tetra_grid_mod, only: ntetr, tetra_grid, verts_rphiz
 
-    real(dp), dimension(:,:), allocatable, intent(out) :: square_root_g
     integer :: ind_tetr
 
     allocate(sqrt_g(ntetr,7))
@@ -42,9 +37,6 @@ subroutine calc_square_root_g(square_root_g)
 
         sqrt_g(ind_tetr,7) = verts_rphiz(1,tetra_grid(ind_tetr)%ind_knot(1))
     enddo
-
-    allocate(square_root_g(ntetr,7))
-    square_root_g = sqrt_g
 
 end subroutine calc_square_root_g
 
