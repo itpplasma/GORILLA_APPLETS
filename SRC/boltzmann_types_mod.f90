@@ -79,6 +79,7 @@ module boltzmann_types_mod
     real(dp), dimension(:), allocatable :: dens
     real(dp), dimension(:), allocatable :: temp
     integer :: randcoli = int(1.0d5)
+    integer :: n !number of background species
     real(dp) :: maxcol = 0
     end type collisions_t
 

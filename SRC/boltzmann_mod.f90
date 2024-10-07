@@ -69,11 +69,9 @@ subroutine calc_boltzmann
                                    boltzmann_input_t, iunits_t
     use boltzmann_writing_data_mod, only: write_data_to_files, name_files, unlink_files
 
-    integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,err,iantithetic, num_background_species, inorout, i_part, n_prisms
+    integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,iantithetic, inorout, i_part, n_prisms
     real(dp) :: t_remain,t_confined,t_step,v0,pitchpar,vpar,vperp, v, weight, hamiltonian_time
-    real(dp), dimension(3) :: x,randnum
-    real(dp), dimension(5) :: z, zet
-    real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
+    real(dp), dimension(3) :: x
     real(dp), dimension(:,:), allocatable :: start_pos_pitch_mat, sqrt_g, verts
     complex(dp), dimension(:,:), allocatable :: local_tetr_moments
     logical :: boole_initialized,boole_particle_lost
@@ -107,23 +105,20 @@ subroutine calc_boltzmann
     call calc_volume_integrals(b%boole_boltzmann_energies,b%boole_refined_sqrt_g, b%density, b%energy_eV,output)
     call calc_starting_conditions(b,v0,start_pos_pitch_mat,weight, verts)
     call initialize_poloidal_flux(poloidal_flux,b%num_particles, verts)
-    call prepare_collisions(b,c,v0,b%energy_eV)
+    call calc_collision_coefficients_for_all_tetrahedra(b,c,v0,b%energy_eV)
     call name_files(filenames)
     call unlink_files(filenames)
     call open_files_before_main_loop(iunits)
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
-    if (b%boole_collisions) allocate(efcolf(num_background_species),velrat(num_background_species),enrat(num_background_species))
     if (b%i_integrator_type.eq.2) print*, 'Error: i_integratpr_type set to 2, this module only works with &
                                     & i_integrator_type set to 1'
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(kpart,v0,sqrt_g,output,counter,start_pos_pitch_mat,iunits, moment_specs, poloidal_flux, b, c,&
-    !$OMP& tetra_grid,iantithetic,tetra_physics, num_background_species,weight, verts) &
-    !$OMP& FIRSTPRIVATE(particle_mass, particle_charge) &
-    !$OMP& PRIVATE(p,l,n,boole_particle_lost,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
-    !$OMP& ind_tetr,iface,t_remain,t_confined,z, v, local_tetr_moments,hamiltonian_time, &
-    !$OMP& i,efcolf,velrat,enrat,vpar_background,inorout,randnum,local_counter)
+    !$OMP& tetra_grid,iantithetic,tetra_physics, weight, verts) &
+    !$OMP& PRIVATE(p,l,n,boole_particle_lost,x,pitchpar,vpar,vperp,boole_initialized,t_step,&
+    !$OMP& ind_tetr,iface,t_remain,t_confined,v, local_tetr_moments,hamiltonian_time,i,inorout,local_counter)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO
 
@@ -138,21 +133,8 @@ subroutine calc_boltzmann
             call print_progress(b%num_particles,kpart,n)
             !$omp end critical
 
-            !call initialise_loop_variables(local_counter,boole_particle_lost,t_step,t_confined,local_tetr_moments,pitchpar,x,vpar,vperp)
-            call set_local_counter_zero(local_counter)
-            boole_particle_lost = .false.
-            t_step = b%time_step
-            t_confined = 0
-            if (l.eq.1) local_tetr_moments = 0
-            pitchpar = start_pos_pitch_mat(4,n)
-            x = start_pos_pitch_mat(1:3,n)
-            vpar = pitchpar * v0
-            vperp = sqrt(v0**2-vpar**2)
-            if (b%boole_boltzmann_energies) then
-                v = sqrt(start_pos_pitch_mat(5,n)*ev2erg*2/particle_mass)
-                vpar = pitchpar * v
-                vperp = sqrt(v**2-vpar**2)
-            endif
+            call initialise_loop_variables(b, l, n, v0, start_pos_pitch_mat, local_counter,boole_particle_lost,t_step,t_confined, &
+                                           local_tetr_moments,pitchpar,x,v,vpar,vperp)
 
             i = 0
             do while (t_confined.lt.b%time_step)
@@ -161,42 +143,7 @@ subroutine calc_boltzmann
                 if (i.eq.1) then
                     boole_initialized = .false.
                 endif
-                if (b%boole_collisions) then
-                    if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
-                    if (.not.(ind_tetr.eq.-1)) then
-                        efcolf = c%efcolf_mat(:,ind_tetr)
-                        velrat = c%velrat_mat(:,ind_tetr)
-                        enrat = c%enrat_mat(:,ind_tetr)
-                        vpar_background = c%vpar_mat(:,ind_tetr)
-                        !print*, vpar_background
-
-                        vpar = vpar - vpar_background(1)
-                        !since vpar_background actually has num_background_particles entries, consider giving it as an extra
-                        !optional input variable to stost, before randnum (maybe also check if radnum could then be set by 
-                        !randnum = variable eve if vpar_background is not set and other variables are not set by name indexing)
-                        !since it came up when writing these lines: replace expressions like
-                        zet(1:3) = x !spatial position
-                        zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module 
-                        zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
-
-                        if (b%boole_precalc_collisions) then
-                            randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:) 
-                            call stost(efcolf,velrat,enrat,zet,t_step,1,err,(b%time_step-t_confined)*v0,randnum)
-                        else
-                            call stost(efcolf,velrat,enrat,zet,t_step,1,err,(b%time_step-t_confined)*v0)
-                        endif
-
-                        t_step = t_step/v0
-                        x = zet(1:3)
-                        vpar = zet(5)*zet(4)*v0+vpar_background(1)
-                        vperp = sqrt(1-zet(5)**2)*zet(4)*v0
-
-                        !optionally still change particle_mass, particle_charge and cm_over_e, e.g.:
-                        !particle_charge = particle_charge + echarge
-                        !particle_mass = particle_mass + ame - amp 
-                        !cm_over_e = clight*particle_mass/particle_charge
-                    endif
-                endif
+                if (b%boole_collisions) call carry_out_collisions(b, c, i, n, v0, t_step, t_confined, x, vpar,vperp,ind_tetr, iface)
 
                 call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface,n,v, sqrt_g,&
                             & start_pos_pitch_mat,local_tetr_moments, moment_specs, weight, verts, b, iunits, poloidal_flux, &
@@ -515,6 +462,40 @@ subroutine print_progress(num_particles,kpart,n)
     endif
 
 end subroutine print_progress
+
+subroutine initialise_loop_variables(b, l, n, v0, start_pos_pitch_mat, local_counter,boole_particle_lost,t_step,t_confined, &
+                                     local_tetr_moments,pitchpar,x,v,vpar,vperp)
+
+    use boltzmann_types_mod, only: boltzmann_input_t, counter_t
+    use constants, only: ev2erg
+    use tetra_physics_mod, only: particle_mass
+
+    type(boltzmann_input_t), intent(in) :: b
+    integer, intent(in) :: l, n
+    real(dp), dimension(:,:), intent(in) :: start_pos_pitch_mat
+    type(counter_t) :: local_counter
+    logical :: boole_particle_lost
+    real(dp) :: t_step, t_confined, pitchpar, v, vpar, vperp, v0
+    real(dp), dimension(3) :: x
+    complex(dp), dimension(:,:) :: local_tetr_moments
+
+
+    call set_local_counter_zero(local_counter)
+    boole_particle_lost = .false.
+    t_step = b%time_step
+    t_confined = 0
+    if (l.eq.1) local_tetr_moments = 0
+    pitchpar = start_pos_pitch_mat(4,n)
+    x = start_pos_pitch_mat(1:3,n)
+    vpar = pitchpar * v0
+    vperp = sqrt(v0**2-vpar**2)
+    if (b%boole_boltzmann_energies) then
+        v = sqrt(start_pos_pitch_mat(5,n)*ev2erg*2/particle_mass)
+        vpar = pitchpar * v
+        vperp = sqrt(v**2-vpar**2)
+    endif
+
+end subroutine initialise_loop_variables
 
 subroutine add_local_tetr_moments_to_output(local_tetr_moments, output, moment_specs)
 
@@ -894,7 +875,7 @@ subroutine calc_starting_conditions(b, v0, start_pos_pitch_mat, constant_part_of
     print*, 'calc_starting_conditions finished'
 end subroutine calc_starting_conditions
 
-subroutine prepare_collisions(b,c,v0,energy_eV)
+subroutine calc_collision_coefficients_for_all_tetrahedra(b,c,v0,energy_eV)
 
     use boltzmann_types_mod, only: collisions_t, boltzmann_input_t
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
@@ -906,26 +887,25 @@ subroutine prepare_collisions(b,c,v0,energy_eV)
     real(dp), intent(in) :: v0, energy_eV
     type(collisions_t) :: c
     type(boltzmann_input_t) :: b
-    integer :: n
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
     integer :: Te_unit, Ti_unit, ne_unit
     integer :: i, j
     real(dp) :: m0, z0
 
-    n = 2 !number of background species
-    allocate(c%dens_mat(n-1,ntetr))
-    allocate(c%temp_mat(n,ntetr))
-    allocate(c%vpar_mat(n,ntetr))
-    allocate(c%efcolf_mat(n,ntetr))
-    allocate(c%velrat_mat(n,ntetr))
-    allocate(c%enrat_mat(n,ntetr))
-    allocate(c%mass_num(n-1))
-    allocate(c%charge_num(n-1))
-    allocate(c%dens(n))
-    allocate(c%temp(n))
-    allocate(efcolf(n))
-    allocate(velrat(n))
-    allocate(enrat(n))
+    c%n = 2 !number of background species
+    allocate(c%dens_mat(c%n-1,ntetr))
+    allocate(c%temp_mat(c%n,ntetr))
+    allocate(c%vpar_mat(c%n,ntetr))
+    allocate(c%efcolf_mat(c%n,ntetr))
+    allocate(c%velrat_mat(c%n,ntetr))
+    allocate(c%enrat_mat(c%n,ntetr))
+    allocate(c%mass_num(c%n-1))
+    allocate(c%charge_num(c%n-1))
+    allocate(c%dens(c%n))
+    allocate(c%temp(c%n))
+    allocate(efcolf(c%n))
+    allocate(velrat(c%n))
+    allocate(enrat(c%n))
     c%mass_num = 0
     c%charge_num = 0
     c%mass_num(1) = 2
@@ -958,9 +938,9 @@ subroutine prepare_collisions(b,c,v0,energy_eV)
     enddo
 
     do i = 1, ntetr
-        do j = 1,n
+        do j = 1,c%n
             !> if statement because electron density will be calculated in collis init
-            if (j.lt.n) c%dens(j) = c%dens_mat(j,i)
+            if (j.lt.c%n) c%dens(j) = c%dens_mat(j,i)
             c%temp(j) = c%temp_mat(j,i)
         enddo
         call collis_init(m0,z0,c%mass_num,c%charge_num,c%dens,c%temp,energy_eV,v0,efcolf,velrat,enrat)
@@ -975,6 +955,66 @@ subroutine prepare_collisions(b,c,v0,energy_eV)
         !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
         c%randcol(:,:,1:2:3) =  3.464102*(c%randcol(:,:,1:2:3)-.5)
     endif
-end subroutine prepare_collisions
+end subroutine calc_collision_coefficients_for_all_tetrahedra
+
+subroutine carry_out_collisions(b, c, i, n, v0, t_step, t_confined, x, vpar, vperp, ind_tetr, iface)
+
+    use boltzmann_types_mod, only: boltzmann_input_t, collisions_t
+    use collis_ions, only: stost
+    use find_tetra_mod, only: find_tetra
+
+    type(boltzmann_input_t), intent(in) :: b
+    type(collisions_t), intent(in) :: c
+    integer, intent(in) :: i, n
+    real(dp), intent(in) :: v0, t_confined
+    real(dp), dimension(3), intent(inout) :: x
+    real(dp), intent(inout) :: vpar, vperp, t_step
+    integer :: ind_tetr, iface
+
+    real(dp), dimension(5) :: zet
+    real(dp), dimension(3) :: randnum
+    real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
+    integer :: err
+
+    allocate(efcolf(c%n))
+    allocate(velrat(c%n))
+    allocate(enrat(c%n))
+    allocate(vpar_background(c%n))
+
+    if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
+    if (.not.(ind_tetr.eq.-1)) then
+        efcolf = c%efcolf_mat(:,ind_tetr)
+        velrat = c%velrat_mat(:,ind_tetr)
+        enrat = c%enrat_mat(:,ind_tetr)
+        vpar_background = c%vpar_mat(:,ind_tetr)
+
+        vpar = vpar - vpar_background(1)
+        !since vpar_background actually has num_background_particles entries, consider giving it as an extra
+        !optional input variable to stost, before randnum (maybe also check if radnum could then be set by 
+        !randnum = variable eve if vpar_background is not set and other variables are not set by name indexing)
+        !since it came up when writing these lines: replace expressions like
+        zet(1:3) = x !spatial position
+        zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module 
+        zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
+
+        if (b%boole_precalc_collisions) then
+            randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:) 
+            call stost(efcolf,velrat,enrat,zet,t_step,1,err,(b%time_step-t_confined)*v0,randnum)
+        else
+            call stost(efcolf,velrat,enrat,zet,t_step,1,err,(b%time_step-t_confined)*v0)
+        endif
+
+        t_step = t_step/v0
+        x = zet(1:3)
+        vpar = zet(5)*zet(4)*v0+vpar_background(1)
+        vperp = sqrt(1-zet(5)**2)*zet(4)*v0
+
+        !optionally still change particle_mass, particle_charge and cm_over_e, e.g.:
+        !particle_charge = particle_charge + echarge
+        !particle_mass = particle_mass + ame - amp 
+        !cm_over_e = clight*particle_mass/particle_charge
+    endif
+
+end subroutine carry_out_collisions
 
 end module boltzmann_mod
