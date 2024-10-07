@@ -61,7 +61,6 @@ module boltzmann_types_mod
     end type counter_t
 
     type poloidal_flux_t
-    real(dp), dimension(:), allocatable :: particle
     real(dp) :: min
     real(dp) :: max
     end type poloidal_flux_t
@@ -113,6 +112,14 @@ module boltzmann_types_mod
     real(dp) :: step
     real(dp) :: remain
     real(dp) :: confined
-    end type time_t 
+    end type time_t
+
+    type start_t
+    real(dp), dimension(:,:), allocatable :: x
+    real(dp), dimension(:), allocatable :: pitch
+    real(dp), dimension(:), allocatable :: energy
+    real(dp), dimension(:), allocatable :: weight
+    real(dp), dimension(:), allocatable :: jperp
+    end type start_t
 
 end module boltzmann_types_mod
