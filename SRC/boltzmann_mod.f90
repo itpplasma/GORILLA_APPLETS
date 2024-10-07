@@ -66,11 +66,11 @@ subroutine calc_boltzmann
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
     use boltzmann_types_mod, only: filenames_t, output_t, moment_specs_t, counter_t, poloidal_flux_t, collisions_t, &
-                                   boltzmann_input_t, iunits_t
+                                   boltzmann_input_t, iunits_t, time_t
     use boltzmann_writing_data_mod, only: write_data_to_files, name_files, unlink_files
 
     integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,iantithetic, inorout, i_part, n_prisms
-    real(dp) :: t_remain,t_confined,t_step,v0,pitchpar,vpar,vperp, v, weight, hamiltonian_time
+    real(dp) :: v0,pitchpar,vpar,vperp, v, weight
     real(dp), dimension(3) :: x
     real(dp), dimension(:,:), allocatable :: start_pos_pitch_mat, sqrt_g, verts
     complex(dp), dimension(:,:), allocatable :: local_tetr_moments
@@ -83,6 +83,7 @@ subroutine calc_boltzmann
     type(collisions_t) :: c
     type(boltzmann_input_t) :: b
     type(iunits_t) :: iunits
+    type(time_t) :: t
 
     call read_boltzmann_inp_into_type(b)
     call get_ipert()
@@ -115,10 +116,10 @@ subroutine calc_boltzmann
                                     & i_integrator_type set to 1'
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(kpart,v0,sqrt_g,output,counter,start_pos_pitch_mat,iunits, moment_specs, poloidal_flux, b, c,&
+    !$OMP& SHARED(counter,kpart,v0,sqrt_g,output,start_pos_pitch_mat,iunits, moment_specs, poloidal_flux, b, c,&
     !$OMP& tetra_grid,iantithetic,tetra_physics, weight, verts) &
-    !$OMP& PRIVATE(p,l,n,boole_particle_lost,x,pitchpar,vpar,vperp,boole_initialized,t_step,&
-    !$OMP& ind_tetr,iface,t_remain,t_confined,v, local_tetr_moments,hamiltonian_time,i,inorout,local_counter)
+    !$OMP& PRIVATE(p,l,n,boole_particle_lost,x,pitchpar,vpar,vperp,boole_initialized,&
+    !$OMP& ind_tetr,iface,t,v, local_tetr_moments,i,inorout,local_counter)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO
 
@@ -128,50 +129,45 @@ subroutine calc_boltzmann
 
             n = (p-1)*iantithetic+l
             !$omp critical
-            !Counter for particles
             kpart = kpart+1 !in general not equal to n becuase of parallelisation
             call print_progress(b%num_particles,kpart,n)
             !$omp end critical
 
-            call initialise_loop_variables(b, l, n, v0, start_pos_pitch_mat, local_counter,boole_particle_lost,t_step,t_confined, &
+            call initialise_loop_variables(b, l, n, v0, start_pos_pitch_mat, local_counter,boole_particle_lost,t%step,t%confined, &
                                            local_tetr_moments,pitchpar,x,v,vpar,vperp)
 
             i = 0
-            do while (t_confined.lt.b%time_step)
+            do while (t%confined.lt.b%time_step)
                 i = i+1
-                !Orbit integration
                 if (i.eq.1) then
                     boole_initialized = .false.
                 endif
-                if (b%boole_collisions) call carry_out_collisions(b, c, i, n, v0, t_step, t_confined, x, vpar,vperp,ind_tetr, iface)
 
-                call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface,n,v, sqrt_g,&
+                if (b%boole_collisions) then
+                    call carry_out_collisions(b, c, i, n, v0, t, x, vpar,vperp,ind_tetr, iface)
+                    t%step = t%step/v0 !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
+                endif
+
+                call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t%step,boole_initialized,ind_tetr,iface,n,v, sqrt_g,&
                             & start_pos_pitch_mat,local_tetr_moments, moment_specs, weight, verts, b, iunits, poloidal_flux, &
-                              hamiltonian_time, inorout, local_counter,t_remain)
+                              inorout, local_counter,t%remain)
 
-                t_confined = t_confined + t_step - t_remain
-                !Lost particle handling
-                if(ind_tetr.eq.-1) then
-!write another if clause (if hole size = minimal .and. particle lost inside .and. boole_cut_out_hole = .true. 
-!(use extra variable m in orbit routine (0 normally, 1 when lost outside, -1 when lost inside))),
-!if m = 1 do as now, if m = -1 select arbitrary newp position and update x, vpar and vperp)
-                    write(iunits%et,*) t_confined, x, n
-                    !print*, t_confined, x
-                    !$omp critical
-                    local_counter%lost_particles = 1
-                    boole_particle_lost = .true.
-                    !$omp end critical
+                t%confined = t%confined + t%step - t%remain
+
+                if (ind_tetr.eq.-1) then
+                    call handle_lost_particles(iunits%et,t%confined, x, n, local_counter, boole_particle_lost)
                     exit
                 endif
 
                 v = sqrt(vpar**2+vperp**2)
             enddo
+
             !$omp critical
             counter%integration_steps = counter%integration_steps + i
             c%maxcol = max(dble(i)/dble(c%randcoli),c%maxcol)
             call add_local_counter_to_counter(local_counter,counter)
             !$omp end critical
-            if (t_confined.eq.b%time_step) then
+            if (t%confined.eq.b%time_step) then
                 write(iunits%rp,*) x, v, vpar, vperp, i, n
             endif
         enddo
@@ -206,7 +202,7 @@ end subroutine calc_boltzmann
 
 subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,v,sqrt_g,start_pos_pitch_mat, &
                                           & local_tetr_moments,moment_specs, weight, verts, b, iunits, poloidal_flux, &
-                                            hamiltonian_time, inorout, local_counter, t_remain_out)
+                                            inorout, local_counter, t_remain_out)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
@@ -235,7 +231,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     integer, intent(inout)                  :: ind_tetr,iface
     real(dp), intent(out), optional         :: t_remain_out
     real(dp), dimension(3)                  :: z_save, x_save
-    real(dp)                                :: vperp2,t_remain,t_pass,vpar_save, v, hamiltonian_time, aphi
+    real(dp)                                :: vperp2,t_remain,t_pass,vpar_save, v, aphi
     logical                                 :: boole_t_finished
     integer                                 :: ind_tetr_save,iper_phi,k, m, n, inorout
     real(dp)                                :: perpinv,perpinv2, speed, r, z, phi, B_field, phi_elec_func
@@ -409,16 +405,11 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
            endif
         endif
 
-        hamiltonian_time = 0
-
-
         do m = 1,moment_specs%n_moments
             select case(moment_specs%moments_selector(m))
                 case(1)
                     local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
-                                                                    & particle_weight*optional_quantities%t_hamiltonian!* &
-                                                                    !& (exp(2*(0,1)*x(2))+exp(3*(0,1)*x(2)))
-                    hamiltonian_time = optional_quantities%t_hamiltonian
+                                                                    & particle_weight*optional_quantities%t_hamiltonian
                 case(2)
                     local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
                                                                     & particle_weight*optional_quantities%gyrophase*J_perp
@@ -462,6 +453,27 @@ subroutine print_progress(num_particles,kpart,n)
     endif
 
 end subroutine print_progress
+
+subroutine handle_lost_particles(iunit,t_confined, x, n, local_counter, boole_particle_lost)
+
+    use boltzmann_types_mod, only: counter_t
+
+    integer, intent(in) :: iunit, n
+    real(dp), intent(in) :: t_confined
+    real(dp), dimension(3), intent(in) :: x
+    type(counter_t) :: local_counter
+    logical :: boole_particle_lost
+
+    !write another if clause (if hole size = minimal .and. particle lost inside .and. boole_cut_out_hole = .true. 
+    !(use extra variable m in orbit routine (0 normally, 1 when lost outside, -1 when lost inside))),
+    !if m = 1 do as now, if m = -1 select arbitrary newp position and update x, vpar and vperp)
+    write(iunit,*) t_confined, x, n
+    !$omp critical
+    local_counter%lost_particles = 1
+    boole_particle_lost = .true.
+    !$omp end critical
+
+end subroutine handle_lost_particles
 
 subroutine initialise_loop_variables(b, l, n, v0, start_pos_pitch_mat, local_counter,boole_particle_lost,t_step,t_confined, &
                                      local_tetr_moments,pitchpar,x,v,vpar,vperp)
@@ -957,18 +969,19 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(b,c,v0,energy_eV)
     endif
 end subroutine calc_collision_coefficients_for_all_tetrahedra
 
-subroutine carry_out_collisions(b, c, i, n, v0, t_step, t_confined, x, vpar, vperp, ind_tetr, iface)
+subroutine carry_out_collisions(b, c, i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
 
-    use boltzmann_types_mod, only: boltzmann_input_t, collisions_t
+    use boltzmann_types_mod, only: boltzmann_input_t, collisions_t, time_t
     use collis_ions, only: stost
     use find_tetra_mod, only: find_tetra
 
     type(boltzmann_input_t), intent(in) :: b
     type(collisions_t), intent(in) :: c
     integer, intent(in) :: i, n
-    real(dp), intent(in) :: v0, t_confined
+    real(dp), intent(in) :: v0
     real(dp), dimension(3), intent(inout) :: x
-    real(dp), intent(inout) :: vpar, vperp, t_step
+    real(dp), intent(inout) :: vpar, vperp
+    type(time_t) :: t
     integer :: ind_tetr, iface
 
     real(dp), dimension(5) :: zet
@@ -999,13 +1012,11 @@ subroutine carry_out_collisions(b, c, i, n, v0, t_step, t_confined, x, vpar, vpe
 
         if (b%boole_precalc_collisions) then
             randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:) 
-            call stost(efcolf,velrat,enrat,zet,t_step,1,err,(b%time_step-t_confined)*v0,randnum)
+            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(b%time_step-t%confined)*v0,randnum)
         else
-            call stost(efcolf,velrat,enrat,zet,t_step,1,err,(b%time_step-t_confined)*v0)
+            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(b%time_step-t%confined)*v0)
         endif
 
-        t_step = t_step/v0
-        x = zet(1:3)
         vpar = zet(5)*zet(4)*v0+vpar_background(1)
         vperp = sqrt(1-zet(5)**2)*zet(4)*v0
 

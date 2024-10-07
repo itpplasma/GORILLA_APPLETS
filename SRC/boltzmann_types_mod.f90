@@ -109,4 +109,10 @@ module boltzmann_types_mod
     integer :: di
     end type iunits_t
 
+    type time_t
+    real(dp) :: step
+    real(dp) :: remain
+    real(dp) :: confined
+    end type time_t 
+
 end module boltzmann_types_mod
