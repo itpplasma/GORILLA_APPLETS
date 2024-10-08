@@ -275,14 +275,13 @@ endif
 
 end subroutine initialise_loop_variables
 
-subroutine add_local_tetr_moments_to_output(local_tetr_moments, output, moment_specs)
+subroutine add_local_tetr_moments_to_output(local_tetr_moments, moment_specs)
 
-    use boltzmann_types_mod, only: output_t, moment_specs_t
+    use boltzmann_types_mod, only: moment_specs_t, output
     use tetra_grid_mod, only: ntetr
     
     complex(dp), dimension(:,:), intent(in) :: local_tetr_moments
     type(moment_specs_t), intent(in) :: moment_specs
-    type(output_t) :: output
     integer :: k, n_prisms
     
     n_prisms = ntetr/3
@@ -301,13 +300,12 @@ subroutine add_local_tetr_moments_to_output(local_tetr_moments, output, moment_s
     
 end subroutine add_local_tetr_moments_to_output
 
-subroutine normalise_prism_moments_and_prism_moments_squared(moment_specs,output,b)
+subroutine normalise_prism_moments_and_prism_moments_squared(moment_specs,b)
 
-    use boltzmann_types_mod, only: moment_specs_t, output_t, boltzmann_input_t
+    use boltzmann_types_mod, only: moment_specs_t, output, boltzmann_input_t
     
     type(boltzmann_input_t), intent(in) :: b
     type(moment_specs_t), intent(inout) :: moment_specs
-    type(output_t), intent(inout) :: output
     integer :: n
     
     
@@ -369,13 +367,12 @@ subroutine set_local_counter_zero(counter)
     
 end subroutine set_local_counter_zero
 
-subroutine initialise_output(output, moment_specs)
+subroutine initialise_output(moment_specs)
 
     use tetra_grid_mod, only: ntetr
-    use boltzmann_types_mod, only: moment_specs_t, output_t
+    use boltzmann_types_mod, only: moment_specs_t, output
     
     type(moment_specs_t), intent(in) :: moment_specs
-    type(output_t),intent(out) :: output
     integer :: n_prisms
     
     n_prisms = ntetr/3
@@ -400,14 +397,13 @@ subroutine initialise_output(output, moment_specs)
     
 end subroutine initialise_output
 
-subroutine fourier_transform_moments(output,moment_specs)
+subroutine fourier_transform_moments(moment_specs)
 
     use constants, only: pi
     use tetra_grid_settings_mod, only: grid_size
-    use boltzmann_types_mod, only: moment_specs_t, output_t
+    use boltzmann_types_mod, only: moment_specs_t, output
     use tetra_grid_mod, only: ntetr
     
-    type(output_t), intent(inout)               :: output
     type(moment_specs_t), intent(inout)         :: moment_specs
     integer                                     :: n,m,j,k,p,q,l
     complex                                     :: i
@@ -763,12 +759,11 @@ module boltzmann_writing_data_mod
 
 contains
 
-subroutine write_data_to_files(filenames,output,moment_specs)
+subroutine write_data_to_files(filenames,moment_specs)
 
-    use boltzmann_types_mod, only: filenames_t, boole_writing_data_t, output_t, moment_specs_t
+    use boltzmann_types_mod, only: filenames_t, boole_writing_data_t, output, moment_specs_t
 
     type(filenames_t), intent(in) :: filenames
-    type(output_t), intent(in) :: output
     type(moment_specs_t), intent(in) :: moment_specs
     type(boole_writing_data_t) :: boole_writing_data
 

@@ -63,7 +63,7 @@ subroutine calc_boltzmann
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use boltzmann_types_mod, only: filenames_t, output_t, moment_specs_t, counter_t, poloidal_flux_t, collisions_t, &
+    use boltzmann_types_mod, only: filenames_t, output, moment_specs_t, counter_t, poloidal_flux_t, collisions_t, &
                                    boltzmann_input_t, iunits_t, time_t, start_t
     use boltzmann_writing_data_mod, only: write_data_to_files, name_files, unlink_files, open_files_before_main_loop, close_files
     use main_routine_supporting_functions_mod, only: print_progress, handle_lost_particles, initialise_loop_variables, &
@@ -80,7 +80,6 @@ subroutine calc_boltzmann
     logical :: boole_initialized,boole_particle_lost
     type(start_t) :: start
     type(filenames_t) :: filenames
-    type(output_t) :: output
     type(moment_specs_t) :: moment_specs
     type(counter_t) :: counter, local_counter
     type(poloidal_flux_t) :: pflux
@@ -105,9 +104,9 @@ subroutine calc_boltzmann
     if (b%boole_antithetic_variate) iantithetic = 2
 
     call set_moment_specifications(moment_specs, b%boole_squared_moments)
-    call initialise_output(output, moment_specs)
+    call initialise_output(moment_specs)
     call calc_square_root_g
-    call calc_volume_integrals(b%boole_boltzmann_energies,b%boole_refined_sqrt_g, b%density, b%energy_eV,output)
+    call calc_volume_integrals(b%boole_boltzmann_energies,b%boole_refined_sqrt_g, b%density, b%energy_eV)
     call calc_starting_conditions(b,v0,start,verts)
     call calc_poloidal_flux(pflux, verts)
     call calc_collision_coefficients_for_all_tetrahedra(b,c,v0,b%energy_eV)
@@ -120,7 +119,7 @@ subroutine calc_boltzmann
                                     & i_integrator_type set to 1'
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter,kpart,v0,output,start, iunits, moment_specs, pflux, b, c, iantithetic) &
+    !$OMP& SHARED(counter,kpart,v0,start, iunits, moment_specs, pflux, b, c, iantithetic) &
     !$OMP& PRIVATE(p,l,n,boole_particle_lost,x,vpar,vperp,boole_initialized,ind_tetr,iface,t,v, local_tetr_moments,i,local_counter)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO
@@ -174,16 +173,16 @@ subroutine calc_boltzmann
         enddo
 
         !$omp critical
-        call add_local_tetr_moments_to_output(local_tetr_moments, output, moment_specs)
+        call add_local_tetr_moments_to_output(local_tetr_moments, moment_specs)
         !$omp end critical
     enddo !n
     !$OMP END DO
     !$OMP END PARALLEL
 
-    call normalise_prism_moments_and_prism_moments_squared(moment_specs,output,b)
-    if (moment_specs%n_moments.gt.0) call fourier_transform_moments(output, moment_specs)
+    call normalise_prism_moments_and_prism_moments_squared(moment_specs,b)
+    if (moment_specs%n_moments.gt.0) call fourier_transform_moments(moment_specs)
     call close_files(iunits)
-    call write_data_to_files(filenames,output,moment_specs)
+    call write_data_to_files(filenames,moment_specs)
 
     if (b%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
     print*, 'Number of lost particles',counter%lost_particles

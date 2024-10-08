@@ -40,18 +40,17 @@ subroutine calc_square_root_g
 
 end subroutine calc_square_root_g
 
-subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, density, energy_ev, results)
+subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, density, energy_ev)
 
     use constants, only: pi, ev2erg
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_grid_settings_mod, only: grid_size, n_field_periods
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
-    use boltzmann_types_mod, only: output_t
+    use boltzmann_types_mod, only: output
     
     real(dp), dimension(:), allocatable              :: prism_volumes, refined_prism_volumes, elec_pot_vec, n_b
     logical, intent(in)                              :: boole_boltzmann_energies, boole_refined_sqrt_g
     real(dp), intent(in)                             :: density, energy_ev
-    type(output_t), intent(inout)                    :: results
     integer                                          :: i,k
     integer                                          :: n_prisms
     integer, dimension(2)                            :: triangle_indices
@@ -61,7 +60,6 @@ subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, 
                                                         a, a_dash, b, b_dash, c, c_dash, rmin, delta_r, delta_z, phi_0, eta
     integer, dimension(:,:), allocatable             :: tetra_indices_per_prism
     real(dp), dimension(:,:), allocatable            :: r_integrand_constants
-    type(output_t)                                   :: output
 
     print*, 'calc_volume_integrals started'
     n_prisms = ntetr/3
@@ -261,10 +259,10 @@ subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, 
     elec_pot_vec = abs(elec_pot_vec)*2*pi/(grid_size(2)*n_field_periods*prism_volumes)
     n_b = abs(n_b)*2*pi/(grid_size(2)**n_field_periods*prism_volumes)
 
-    results%prism_volumes = prism_volumes
-    if(boole_refined_sqrt_g) results%refined_prism_volumes = refined_prism_volumes
-    results%electric_potential = elec_pot_vec
-    results%boltzmann_density = n_b
+    output%prism_volumes = prism_volumes
+    if(boole_refined_sqrt_g) output%refined_prism_volumes = refined_prism_volumes
+    output%electric_potential = elec_pot_vec
+    output%boltzmann_density = n_b
     print*, 'calc_volume_integrals finished'
 end subroutine calc_volume_integrals
 

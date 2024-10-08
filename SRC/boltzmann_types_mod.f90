@@ -23,6 +23,9 @@ module boltzmann_types_mod
     complex(dp), dimension(:,:,:), allocatable :: moments_in_frequency_space
     end type output_t
 
+    type(output_t) :: output
+
+
     type boole_writing_data_t
     logical :: vertex_indices = .false.
     logical :: vertex_coordinates = .false.
