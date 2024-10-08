@@ -6,9 +6,9 @@ module boltzmann_mod
    
 contains
 
-subroutine read_boltzmann_inp_into_type(b)
+subroutine read_boltzmann_inp_into_type
 
-    use boltzmann_types_mod, only: boltzmann_input_t
+    use boltzmann_types_mod, only: b
 
     real(dp) :: time_step,energy_eV,n_particles, density
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
@@ -17,7 +17,6 @@ subroutine read_boltzmann_inp_into_type(b)
     integer :: i_integrator_type, seed_option
 
     integer :: b_inp_unit
-    type(boltzmann_input_t) :: b
 
     !Namelist for boltzmann input
     NAMELIST /boltzmann_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions, &
@@ -63,8 +62,8 @@ subroutine calc_boltzmann
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use boltzmann_types_mod, only: filenames_t, output, moment_specs_t, counter_t, poloidal_flux_t, collisions_t, &
-                                   boltzmann_input_t, iunits_t, time_t, start_t
+    use boltzmann_types_mod, only: filenames_t, output, moment_specs, counter_t, counter, pflux, c, &
+                                   b, iunits_t, time_t, start
     use boltzmann_writing_data_mod, only: write_data_to_files, name_files, unlink_files, open_files_before_main_loop, close_files
     use main_routine_supporting_functions_mod, only: print_progress, handle_lost_particles, initialise_loop_variables, &
     add_local_tetr_moments_to_output, normalise_prism_moments_and_prism_moments_squared, set_moment_specifications, &
@@ -78,17 +77,12 @@ subroutine calc_boltzmann
     real(dp), dimension(:,:), allocatable :: verts
     complex(dp), dimension(:,:), allocatable :: local_tetr_moments
     logical :: boole_initialized,boole_particle_lost
-    type(start_t) :: start
     type(filenames_t) :: filenames
-    type(moment_specs_t) :: moment_specs
-    type(counter_t) :: counter, local_counter
-    type(poloidal_flux_t) :: pflux
-    type(collisions_t) :: c
-    type(boltzmann_input_t) :: b
+    type(counter_t) :: local_counter
     type(iunits_t) :: iunits
     type(time_t) :: t
 
-    call read_boltzmann_inp_into_type(b)
+    call read_boltzmann_inp_into_type
     call get_ipert()
     call initialize_gorilla(i_option,ipert)
 
@@ -103,13 +97,13 @@ subroutine calc_boltzmann
     iantithetic = 1
     if (b%boole_antithetic_variate) iantithetic = 2
 
-    call set_moment_specifications(moment_specs, b%boole_squared_moments)
-    call initialise_output(moment_specs)
+    call set_moment_specifications
+    call initialise_output
     call calc_square_root_g
     call calc_volume_integrals(b%boole_boltzmann_energies,b%boole_refined_sqrt_g, b%density, b%energy_eV)
-    call calc_starting_conditions(b,v0,start,verts)
-    call calc_poloidal_flux(pflux, verts)
-    call calc_collision_coefficients_for_all_tetrahedra(b,c,v0,b%energy_eV)
+    call calc_starting_conditions(v0,verts)
+    call calc_poloidal_flux(verts)
+    call calc_collision_coefficients_for_all_tetrahedra(v0)
     call name_files(filenames)
     call unlink_files(filenames)
     call open_files_before_main_loop(iunits)
@@ -119,7 +113,7 @@ subroutine calc_boltzmann
                                     & i_integrator_type set to 1'
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter,kpart,v0,start, iunits, moment_specs, pflux, b, c, iantithetic) &
+    !$OMP& SHARED(counter, kpart,v0,iunits, b, c, iantithetic) &
     !$OMP& PRIVATE(p,l,n,boole_particle_lost,x,vpar,vperp,boole_initialized,ind_tetr,iface,t,v, local_tetr_moments,i,local_counter)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO
@@ -134,7 +128,7 @@ subroutine calc_boltzmann
             call print_progress(b%num_particles,kpart,n)
             !$omp end critical
 
-            call initialise_loop_variables(b, l, n, v0, start, local_counter,boole_particle_lost,t%step, t%confined, &
+            call initialise_loop_variables(l, n, v0, local_counter,boole_particle_lost,t%step, t%confined, &
                                            local_tetr_moments,x,v,vpar,vperp)
 
             i = 0
@@ -145,12 +139,12 @@ subroutine calc_boltzmann
                 endif
 
                 if (b%boole_collisions) then
-                    call carry_out_collisions(b, c, i, n, v0, t, x, vpar,vperp,ind_tetr, iface)
+                    call carry_out_collisions(i, n, v0, t, x, vpar,vperp,ind_tetr, iface)
                     t%step = t%step/v0 !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 
-                call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t%step,boole_initialized,ind_tetr,iface,n, start,&
-                            & local_tetr_moments, moment_specs, b, iunits, pflux,local_counter,t%remain)
+                call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t%step,boole_initialized,ind_tetr,iface,n,&
+                            & local_tetr_moments, iunits, local_counter,t%remain)
 
                 t%confined = t%confined + t%step - t%remain
 
@@ -165,7 +159,7 @@ subroutine calc_boltzmann
             !$omp critical
             counter%integration_steps = counter%integration_steps + i
             c%maxcol = max(dble(i)/dble(c%randcoli),c%maxcol)
-            call add_local_counter_to_counter(local_counter,counter)
+            call add_local_counter_to_counter(local_counter)
             !$omp end critical
             if (t%confined.eq.b%time_step) then
                 write(iunits%rp,*) x, v, vpar, vperp, i, n
@@ -173,16 +167,16 @@ subroutine calc_boltzmann
         enddo
 
         !$omp critical
-        call add_local_tetr_moments_to_output(local_tetr_moments, moment_specs)
+        call add_local_tetr_moments_to_output(local_tetr_moments)
         !$omp end critical
     enddo !n
     !$OMP END DO
     !$OMP END PARALLEL
 
-    call normalise_prism_moments_and_prism_moments_squared(moment_specs,b)
-    if (moment_specs%n_moments.gt.0) call fourier_transform_moments(moment_specs)
+    call normalise_prism_moments_and_prism_moments_squared
+    if (moment_specs%n_moments.gt.0) call fourier_transform_moments
     call close_files(iunits)
-    call write_data_to_files(filenames,moment_specs)
+    call write_data_to_files(filenames)
 
     if (b%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
     print*, 'Number of lost particles',counter%lost_particles
@@ -202,8 +196,8 @@ subroutine calc_boltzmann
 
 end subroutine calc_boltzmann
 
-subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,start,local_tetr_moments, &
-                                            moment_specs, b, iunits, pflux, local_counter, t_remain_out)
+subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,local_tetr_moments, &
+                                            iunits, local_counter, t_remain_out)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly
@@ -213,17 +207,13 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
     use tetra_grid_mod, only: tetra_grid, ntetr
-    use boltzmann_types_mod, only: moment_specs_t, counter_t, poloidal_flux_t, boltzmann_input_t, iunits_t, start_t
+    use boltzmann_types_mod, only: moment_specs, counter_t, pflux, b, iunits_t, start
     use tetra_grid_settings_mod, only: grid_kind
     use orbit_timestep_gorilla_supporting_functions_mod, only: calc_and_write_poincare_mappings_and_divertor_intersections, &
             categorize_lost_particles, update_local_tetr_moments, initialize_constants_of_motion, calc_particle_weights_and_jperp
 
-    type(moment_specs_t), intent(in)             :: moment_specs
     type(iunits_t), intent(in)                   :: iunits
     type(counter_t), intent(inout)               :: local_counter
-    type(poloidal_flux_t)                        :: pflux
-    type(boltzmann_input_t)                      :: b
-    type(start_t)                                :: start
     real(dp), dimension(3), intent(inout)        :: x
     complex(dp), dimension(:,:), intent (inout)  :: local_tetr_moments
     real(dp), intent(inout)                      :: vpar,vperp
@@ -245,7 +235,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
             return
         endif
         z_save = x-tetra_physics(ind_tetr)%x1
-        call calc_particle_weights_and_jperp(b,n,z_save,vpar,vperp,ind_tetr,pflux,start)
+        call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
         boole_initialized = .true.
     endif
           
@@ -261,7 +251,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 
         if(ind_tetr.eq.-1) then
             if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-                call categorize_lost_particles(ind_tetr_save,z_save,pflux,local_counter,t_remain,t_remain_out)
+                call categorize_lost_particles(ind_tetr_save,z_save,local_counter,t_remain,t_remain_out)
             endif
             exit
         endif
@@ -280,7 +270,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
         t_remain = t_remain - t_pass
 
         call calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,iunits,boole_t_finished)
-        call update_local_tetr_moments(moment_specs,local_tetr_moments,ind_tetr_save,n,start,optional_quantities)
+        call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities)
         if(boole_t_finished) then !Orbit stops within cell, because "flight"-time t_step has finished
             if( present(t_remain_out)) t_remain_out = t_remain
             exit

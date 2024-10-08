@@ -12,6 +12,8 @@ module boltzmann_types_mod
     integer :: n_fourier_modes
     end type moment_specs_t
 
+    type(moment_specs_t) :: moment_specs
+
     type output_t
     real(dp), dimension(:), allocatable :: prism_volumes
     real(dp), dimension(:), allocatable :: refined_prism_volumes
@@ -25,6 +27,16 @@ module boltzmann_types_mod
 
     type(output_t) :: output
 
+    type start_t
+    real(dp), dimension(:,:), allocatable :: x
+    real(dp), dimension(:), allocatable :: pitch
+    real(dp), dimension(:), allocatable :: energy
+    real(dp), dimension(:), allocatable :: weight
+    real(dp), dimension(:), allocatable :: jperp
+    end type start_t
+
+    type(start_t) :: start
+
 
     type boole_writing_data_t
     logical :: vertex_indices = .false.
@@ -37,22 +49,7 @@ module boltzmann_types_mod
     logical :: fourier_moments = .true.
     end type boole_writing_data_t
 
-    type filenames_t
-    character(len=100) :: exit_times
-    character(len=100) :: remaining_particles
-    character(len=100) :: poincare_maps
-    character(len=100) :: prism_moments
-    character(len=100) :: prism_moments_summed_squares
-    character(len=100) :: vertex_coordinates
-    character(len=100) :: vertex_indices
-    character(len=100) :: prism_volumes
-    character(len=100) :: fourier_moments
-    character(len=100) :: refined_prism_volumes
-    character(len=100) :: electric_potential
-    character(len=100) :: boltzmann_density
-    character(len=100) :: divertor_intersections
-    character(len=100) :: tetr_moments
-    end type filenames_t
+    type(boole_writing_data_t) :: boole_writing_data
 
     type counter_t
     integer :: lost_particles = 0
@@ -63,10 +60,14 @@ module boltzmann_types_mod
     integer :: integration_steps = 0
     end type counter_t
 
+    type(counter_t) :: counter
+
     type poloidal_flux_t
     real(dp) :: min
     real(dp) :: max
     end type poloidal_flux_t
+
+    type(poloidal_flux_t) :: pflux
 
     type collisions_t
     real(dp), dimension(:,:,:), allocatable :: randcol
@@ -84,6 +85,8 @@ module boltzmann_types_mod
     integer :: n !number of background species
     real(dp) :: maxcol = 0
     end type collisions_t
+
+    type(collisions_t) :: c
 
     type boltzmann_input_t
     real(dp) :: time_step
@@ -104,6 +107,25 @@ module boltzmann_types_mod
     integer  :: num_particles
     end type boltzmann_input_t
 
+    type(boltzmann_input_t) :: b
+
+    type filenames_t
+    character(len=100) :: exit_times
+    character(len=100) :: remaining_particles
+    character(len=100) :: poincare_maps
+    character(len=100) :: prism_moments
+    character(len=100) :: prism_moments_summed_squares
+    character(len=100) :: vertex_coordinates
+    character(len=100) :: vertex_indices
+    character(len=100) :: prism_volumes
+    character(len=100) :: fourier_moments
+    character(len=100) :: refined_prism_volumes
+    character(len=100) :: electric_potential
+    character(len=100) :: boltzmann_density
+    character(len=100) :: divertor_intersections
+    character(len=100) :: tetr_moments
+    end type filenames_t
+
     type iunits_t
     integer :: et
     integer :: rp
@@ -116,13 +138,5 @@ module boltzmann_types_mod
     real(dp) :: remain
     real(dp) :: confined
     end type time_t
-
-    type start_t
-    real(dp), dimension(:,:), allocatable :: x
-    real(dp), dimension(:), allocatable :: pitch
-    real(dp), dimension(:), allocatable :: energy
-    real(dp), dimension(:), allocatable :: weight
-    real(dp), dimension(:), allocatable :: jperp
-    end type start_t
 
 end module boltzmann_types_mod

@@ -59,14 +59,13 @@ subroutine calc_plane_intersection(x_save,x,z_plane)
     
     end subroutine calc_plane_intersection
 
-subroutine categorize_lost_particles(ind_tetr,x,pflux,local_counter,t_remain,t_remain_out)
+subroutine categorize_lost_particles(ind_tetr,x,local_counter,t_remain,t_remain_out)
 
     use tetra_physics_mod, only: tetra_physics
-    use boltzmann_types_mod, only: counter_t, poloidal_flux_t
+    use boltzmann_types_mod, only: counter_t, pflux
 
     integer, intent(in) :: ind_tetr
     real(dp), dimension(3), intent(in) :: x
-    type(poloidal_flux_t), intent(in) :: pflux
     real(dp), intent(in) :: t_remain
     type(counter_t), intent(inout) :: local_counter
     real(dp), intent(out), optional              :: t_remain_out
@@ -86,13 +85,11 @@ subroutine categorize_lost_particles(ind_tetr,x,pflux,local_counter,t_remain,t_r
 
 end subroutine categorize_lost_particles
 
-subroutine update_local_tetr_moments(moment_specs,local_tetr_moments,ind_tetr,n,start,optional_quantities)
+subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quantities)
 
-    use boltzmann_types_mod, only: moment_specs_t, start_t
+    use boltzmann_types_mod, only: moment_specs, start
     use gorilla_settings_mod, only: optional_quantities_type
 
-    type(moment_specs_t), intent(in)             :: moment_specs
-    type(start_t), intent(in)                    :: start
     type(optional_quantities_type), intent(in)   :: optional_quantities
     integer, intent(in)                          :: ind_tetr, n
     complex(dp), dimension(:,:), intent (inout)  :: local_tetr_moments
@@ -141,20 +138,17 @@ subroutine initialize_constants_of_motion(vperp,z_save,ind_tetr,perpinv)
 
 end subroutine initialize_constants_of_motion
 
-subroutine calc_particle_weights_and_jperp(b,n,z_save,vpar,vperp,ind_tetr,pflux,start)
+subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
 
-    use boltzmann_types_mod, only: boltzmann_input_t, poloidal_flux_t, start_t
+    use boltzmann_types_mod, only: b, pflux, start
     use tetra_physics_mod, only: tetra_physics,particle_mass,particle_charge,cm_over_e
     use constants, only: ev2erg
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
 
-    type(boltzmann_input_t), intent(in) :: b
-    type(poloidal_flux_t), intent(in) :: pflux
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
     integer, intent(in) :: n,ind_tetr
-    type(start_t), intent(inout) :: start
     real(dp) :: local_poloidal_flux, phi_elec_func, temperature
     real(dp) :: r, phi, z
 
@@ -241,15 +235,13 @@ subroutine handle_lost_particles(iunit,t_confined, x, n, local_counter, boole_pa
 
 end subroutine handle_lost_particles
 
-subroutine initialise_loop_variables(b, l, n, v0, start, local_counter,boole_particle_lost,t_step,t_confined, &
+subroutine initialise_loop_variables(l, n, v0, local_counter,boole_particle_lost,t_step,t_confined, &
     local_tetr_moments,x,v,vpar,vperp)
 
-use boltzmann_types_mod, only: boltzmann_input_t, counter_t, start_t
+use boltzmann_types_mod, only: b, counter_t, start
 use constants, only: ev2erg
 use tetra_physics_mod, only: particle_mass
 
-type(boltzmann_input_t), intent(in) :: b
-type(start_t), intent(in) :: start
 integer, intent(in) :: l, n
 type(counter_t) :: local_counter
 logical :: boole_particle_lost
@@ -275,13 +267,12 @@ endif
 
 end subroutine initialise_loop_variables
 
-subroutine add_local_tetr_moments_to_output(local_tetr_moments, moment_specs)
+subroutine add_local_tetr_moments_to_output(local_tetr_moments)
 
-    use boltzmann_types_mod, only: moment_specs_t, output
+    use boltzmann_types_mod, only: moment_specs, output
     use tetra_grid_mod, only: ntetr
     
     complex(dp), dimension(:,:), intent(in) :: local_tetr_moments
-    type(moment_specs_t), intent(in) :: moment_specs
     integer :: k, n_prisms
     
     n_prisms = ntetr/3
@@ -300,12 +291,10 @@ subroutine add_local_tetr_moments_to_output(local_tetr_moments, moment_specs)
     
 end subroutine add_local_tetr_moments_to_output
 
-subroutine normalise_prism_moments_and_prism_moments_squared(moment_specs,b)
+subroutine normalise_prism_moments_and_prism_moments_squared
 
-    use boltzmann_types_mod, only: moment_specs_t, output, boltzmann_input_t
+    use boltzmann_types_mod, only: moment_specs, output, b
     
-    type(boltzmann_input_t), intent(in) :: b
-    type(moment_specs_t), intent(inout) :: moment_specs
     integer :: n
     
     
@@ -326,20 +315,18 @@ subroutine normalise_prism_moments_and_prism_moments_squared(moment_specs,b)
     
 end subroutine normalise_prism_moments_and_prism_moments_squared
 
-subroutine set_moment_specifications(moment_specs, boole_squared_moments)
+subroutine set_moment_specifications
 
     use gorilla_settings_mod, only: boole_array_optional_quantities
     use tetra_grid_settings_mod, only: grid_size
     use tetra_grid_mod, only: ntetr
-    use boltzmann_types_mod, only: moment_specs_t
+    use boltzmann_types_mod, only: moment_specs, b
     
-    logical, intent(in) :: boole_squared_moments
-    type(moment_specs_t), intent(out) :: moment_specs
     integer :: i, n_prisms
     
     n_prisms = ntetr/3
     
-    moment_specs%boole_squared_moments = boole_squared_moments
+    moment_specs%boole_squared_moments = b%boole_squared_moments
     moment_specs%n_triangles = n_prisms/grid_size(2)
     moment_specs%n_fourier_modes = 5
     moment_specs%n_moments = 0
@@ -367,12 +354,11 @@ subroutine set_local_counter_zero(counter)
     
 end subroutine set_local_counter_zero
 
-subroutine initialise_output(moment_specs)
+subroutine initialise_output
 
     use tetra_grid_mod, only: ntetr
-    use boltzmann_types_mod, only: moment_specs_t, output
+    use boltzmann_types_mod, only: moment_specs, output
     
-    type(moment_specs_t), intent(in) :: moment_specs
     integer :: n_prisms
     
     n_prisms = ntetr/3
@@ -397,14 +383,13 @@ subroutine initialise_output(moment_specs)
     
 end subroutine initialise_output
 
-subroutine fourier_transform_moments(moment_specs)
+subroutine fourier_transform_moments
 
     use constants, only: pi
     use tetra_grid_settings_mod, only: grid_size
-    use boltzmann_types_mod, only: moment_specs_t, output
+    use boltzmann_types_mod, only: moment_specs, output
     use tetra_grid_mod, only: ntetr
     
-    type(moment_specs_t), intent(inout)         :: moment_specs
     integer                                     :: n,m,j,k,p,q,l
     complex                                     :: i
     complex, dimension(:,:,:), allocatable      :: prism_moments_ordered_for_ft
@@ -444,12 +429,11 @@ subroutine fourier_transform_moments(moment_specs)
     
 end subroutine fourier_transform_moments
 
-subroutine add_local_counter_to_counter(local_counter,counter)
+subroutine add_local_counter_to_counter(local_counter)
 
-    use boltzmann_types_mod, only: counter_t
+    use boltzmann_types_mod, only: counter_t, counter
     
     type(counter_t), intent(in) :: local_counter
-    type(counter_t), intent(inout) :: counter
     
     counter%lost_particles = counter%lost_particles + local_counter%lost_particles
     counter%lost_inside = counter%lost_inside + local_counter%lost_inside
@@ -471,15 +455,14 @@ subroutine get_ipert()
     
 end subroutine get_ipert
 
-subroutine calc_poloidal_flux(pflux, verts)
+subroutine calc_poloidal_flux(verts)
 
-    use boltzmann_types_mod, only: poloidal_flux_t
+    use boltzmann_types_mod, only: pflux
     use tetra_physics_mod, only: tetra_physics
     use tetra_grid_mod, only: ntetr, tetra_grid
     
     real(dp), dimension(:,:), intent(in) :: verts
     integer :: i
-    type(poloidal_flux_t), intent(out) :: pflux
     
     pflux%max = 0
     pflux%min = tetra_physics(1)%Aphi1
@@ -491,17 +474,15 @@ subroutine calc_poloidal_flux(pflux, verts)
     
 end subroutine calc_poloidal_flux
 
-subroutine calc_starting_conditions(b, v0, start, verts)
+subroutine calc_starting_conditions(v0, verts)
 
     use constants, only: pi, ev2erg
     use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, ntetr
     use find_tetra_mod, only: find_tetra
     use tetra_grid_settings_mod, only: grid_kind
     use tetra_physics_mod, only: coord_system
-    use boltzmann_types_mod, only: boltzmann_input_t, start_t
+    use boltzmann_types_mod, only: b, start
     
-    type(boltzmann_input_t), intent(in)                    :: b
-    type(start_t)                                          :: start
     real(dp), intent(in)                                   :: v0
     real(dp), dimension(:,:), allocatable, intent(out)     :: verts
     real(dp)                                               :: constant_part_of_weight
@@ -604,18 +585,16 @@ subroutine calc_starting_conditions(b, v0, start, verts)
     print*, 'calc_starting_conditions finished'
 end subroutine calc_starting_conditions
 
-subroutine calc_collision_coefficients_for_all_tetrahedra(b,c,v0,energy_eV)
+subroutine calc_collision_coefficients_for_all_tetrahedra(v0)
 
-    use boltzmann_types_mod, only: collisions_t, boltzmann_input_t
+    use boltzmann_types_mod, only: b, c
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge
     use constants, only: echarge,amp
     use tetra_grid_settings_mod, only: grid_size
     use collis_ions, only: collis_init
     
-    real(dp), intent(in) :: v0, energy_eV
-    type(collisions_t) :: c
-    type(boltzmann_input_t) :: b
+    real(dp), intent(in) :: v0
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
     integer :: Te_unit, Ti_unit, ne_unit
     integer :: i, j
@@ -672,7 +651,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(b,c,v0,energy_eV)
     if (j.lt.c%n) c%dens(j) = c%dens_mat(j,i)
     c%temp(j) = c%temp_mat(j,i)
     enddo
-    call collis_init(m0,z0,c%mass_num,c%charge_num,c%dens,c%temp,energy_eV,v0,efcolf,velrat,enrat)
+    call collis_init(m0,z0,c%mass_num,c%charge_num,c%dens,c%temp,b%energy_eV,v0,efcolf,velrat,enrat)
     c%efcolf_mat(:,i) = efcolf
     c%velrat_mat(:,i) = velrat
     c%enrat_mat(:,i) = enrat
@@ -686,14 +665,12 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(b,c,v0,energy_eV)
     endif
 end subroutine calc_collision_coefficients_for_all_tetrahedra
 
-subroutine carry_out_collisions(b, c, i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
+subroutine carry_out_collisions(i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
 
-    use boltzmann_types_mod, only: boltzmann_input_t, collisions_t, time_t
+    use boltzmann_types_mod, only: b, c, time_t
     use collis_ions, only: stost
     use find_tetra_mod, only: find_tetra
     
-    type(boltzmann_input_t), intent(in) :: b
-    type(collisions_t), intent(in) :: c
     integer, intent(in) :: i, n
     real(dp), intent(in) :: v0
     real(dp), dimension(3), intent(inout) :: x
@@ -759,13 +736,11 @@ module boltzmann_writing_data_mod
 
 contains
 
-subroutine write_data_to_files(filenames,moment_specs)
+subroutine write_data_to_files(filenames)
 
-    use boltzmann_types_mod, only: filenames_t, boole_writing_data_t, output, moment_specs_t
+    use boltzmann_types_mod, only: filenames_t, boole_writing_data, output, moment_specs
 
     type(filenames_t), intent(in) :: filenames
-    type(moment_specs_t), intent(in) :: moment_specs
-    type(boole_writing_data_t) :: boole_writing_data
 
     if (boole_writing_data%vertex_indices) &
         call write_vertex_indices(filenames%vertex_indices)
@@ -787,7 +762,7 @@ subroutine write_data_to_files(filenames,moment_specs)
 
     if (boole_writing_data%moments) then
         if (moment_specs%n_moments.gt.0) then
-            call write_moments(filenames%prism_moments,filenames%prism_moments_summed_squares,filenames%tetr_moments,moment_specs, &
+            call write_moments(filenames%prism_moments,filenames%prism_moments_summed_squares,filenames%tetr_moments, &
                                output%prism_moments,output%prism_moments_squared,output%tetr_moments)
         else
             print*, "Error: moments are not written to file because no moment was computed. Turn computation of moments on in &
@@ -797,7 +772,7 @@ subroutine write_data_to_files(filenames,moment_specs)
 
     if (boole_writing_data%fourier_moments) then
         if (moment_specs%n_moments.gt.0) then
-            call write_fourier_moments(filenames%fourier_moments,moment_specs, output%moments_in_frequency_space)
+            call write_fourier_moments(filenames%fourier_moments, output%moments_in_frequency_space)
         else
             print*, "Error: Fourier moments are not written to file because no moment was computed (and thus also no fourier &
                      moment). Turn computation of moments on in gorilla.inp."
@@ -897,14 +872,13 @@ subroutine write_electric_potential(filename_electric_potential,electric_potenti
 
 end subroutine write_electric_potential
 
-subroutine write_moments(filename_prism_moments, filename_prism_moments_summed_squares, filename_tetr_moments, moment_specs, &
+subroutine write_moments(filename_prism_moments, filename_prism_moments_summed_squares, filename_tetr_moments, &
                          prism_moments, prism_moments_squared, tetr_moments)
 
     use tetra_grid_mod, only: ntetr
-    use boltzmann_types_mod, only: moment_specs_t
+    use boltzmann_types_mod, only: moment_specs
 
     complex(dp), dimension(:,:), intent(in) :: tetr_moments, prism_moments, prism_moments_squared
-    type(moment_specs_t), intent(in) :: moment_specs
     character(len=100) :: filename_prism_moments, filename_prism_moments_summed_squares, filename_tetr_moments
     integer :: p_moments_unit, pmss_unit, t_moments_unit
     integer :: l, i
@@ -949,13 +923,12 @@ subroutine write_moments(filename_prism_moments, filename_prism_moments_summed_s
 
 end subroutine write_moments
 
-subroutine write_fourier_moments(filename_fourier_moments,moment_specs,moments_in_frequency_space)
+subroutine write_fourier_moments(filename_fourier_moments,moments_in_frequency_space)
 
     use tetra_grid_settings_mod, only: grid_size
-    use boltzmann_types_mod, only: moment_specs_t
+    use boltzmann_types_mod, only: moment_specs
 
     complex(dp), dimension(:,:,:), intent(in) :: moments_in_frequency_space
-    type(moment_specs_t), intent(in) :: moment_specs
     character(len=100) :: filename_fourier_moments
     integer :: fm_unit, l, i
 
