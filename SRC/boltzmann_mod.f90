@@ -55,7 +55,7 @@ subroutine calc_boltzmann
     use constants, only: ev2erg,pi,echarge,ame,amp,clight
     use tetra_physics_mod, only: particle_mass,particle_charge,cm_over_e, coord_system, tetra_physics
     use omp_lib, only: omp_get_thread_num, omp_get_num_threads, omp_set_num_threads
-    use tetra_grid_settings_mod, only: n_field_periods, grid_size
+    use tetra_grid_settings_mod, only: n_field_periods, grid_size, grid_kind
     use tetra_grid_mod, only: ntetr, nvert, verts_rphiz, tetra_grid
     use gorilla_settings_mod, only: ispecies
     use collis_ions, only: stost
@@ -115,7 +115,7 @@ subroutine calc_boltzmann
                                     & i_integrator_type set to 1'
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter,kpart,v0,output,start, iunits, moment_specs, pflux, b, c, iantithetic, verts) &
+    !$OMP& SHARED(counter,kpart,v0,output,start, iunits, moment_specs, pflux, b, c, iantithetic) &
     !$OMP& PRIVATE(p,l,n,boole_particle_lost,x,vpar,vperp,boole_initialized,ind_tetr,iface,t,v, local_tetr_moments,i,local_counter)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO
@@ -145,8 +145,8 @@ subroutine calc_boltzmann
                     t%step = t%step/v0 !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 
-                call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t%step,boole_initialized,ind_tetr,iface,n,v, start,&
-                            & local_tetr_moments, moment_specs, verts, b, iunits, pflux,local_counter,t%remain)
+                call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t%step,boole_initialized,ind_tetr,iface,n, start,&
+                            & local_tetr_moments, moment_specs, b, iunits, pflux,local_counter,t%remain)
 
                 t%confined = t%confined + t%step - t%remain
 
@@ -191,129 +191,79 @@ subroutine calc_boltzmann
     PRINT*, 'temperature = ', ev2erg*b%energy_eV
     print*, 'energy in eV = ', b%energy_eV
     print*, 'tracing time in seconds = ', b%time_step
-    print*, 'number of particles left through the outside = ', counter%lost_outside
-    print*, 'number of particles left through the inside = ', counter%lost_inside
+    if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
+         print*, 'number of particles left through the outside = ', counter%lost_outside
+         print*, 'number of particles left through the inside = ', counter%lost_inside
+    endif
 
 end subroutine calc_boltzmann
 
-subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,v,start,local_tetr_moments, &
-                                            moment_specs, verts, b, iunits, pflux, local_counter, t_remain_out)
+subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,start,local_tetr_moments, &
+                                            moment_specs, b, iunits, pflux, local_counter, t_remain_out)
 
-    use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
-    use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
-    use tetra_physics_poly_precomp_mod , only: make_precomp_poly_perpinv, initialize_boole_precomp_poly_perpinv, &
-        & alloc_precomp_poly_perpinv
-    use tetra_physics_mod, only: tetra_physics,particle_charge,particle_mass,cm_over_e
+    use pusher_tetra_rk_mod, only: pusher_tetra_rk
+    use pusher_tetra_poly_mod, only: pusher_tetra_poly
+    use tetra_physics_mod, only: tetra_physics
     use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type, boole_array_optional_quantities
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
-    use supporting_functions_mod, only: bmod_func, vperp_func
+    use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use constants, only: pi, ev2erg
     use tetra_grid_mod, only: tetra_grid, ntetr
     use boltzmann_types_mod, only: moment_specs_t, counter_t, poloidal_flux_t, boltzmann_input_t, iunits_t, start_t
+    use tetra_grid_settings_mod, only: grid_kind
 
-    type(moment_specs_t), intent(in)        :: moment_specs
-    type(iunits_t), intent(in)              :: iunits
-    real(dp), dimension(:,:), intent(in)    :: verts
-    type(counter_t), intent(inout)          :: local_counter
-    type(poloidal_flux_t)                   :: pflux
-    type(boltzmann_input_t)                 :: b
-    type(start_t)                           :: start
-    real(dp), dimension(3), intent(inout)   :: x
-    real(dp), intent(inout)                 :: vpar,vperp
-    real(dp), intent(in)                    :: t_step
-    logical, intent(inout)                  :: boole_initialized
-    integer, intent(inout)                  :: ind_tetr,iface
-    real(dp), intent(out), optional         :: t_remain_out
-    real(dp), dimension(3)                  :: z_save, x_save
-    real(dp)                                :: t_remain,t_pass,vpar_save, v, aphi
-    logical                                 :: boole_t_finished
-    integer                                 :: ind_tetr_save,iper_phi,k, m, n
-    real(dp)                                :: perpinv,speed
-    type(optional_quantities_type)          :: optional_quantities
-    complex(dp), dimension(:,:)             :: local_tetr_moments
-    real(dp)                                :: temperature, J_perp
-    real(dp)                                :: particle_weight
+    type(moment_specs_t), intent(in)             :: moment_specs
+    type(iunits_t), intent(in)                   :: iunits
+    type(counter_t), intent(inout)               :: local_counter
+    type(poloidal_flux_t)                        :: pflux
+    type(boltzmann_input_t)                      :: b
+    type(start_t)                                :: start
+    real(dp), dimension(3), intent(inout)        :: x
+    complex(dp), dimension(:,:), intent (inout)  :: local_tetr_moments
+    real(dp), intent(inout)                      :: vpar,vperp
+    real(dp), intent(in)                         :: t_step
+    logical, intent(inout)                       :: boole_initialized
+    integer, intent(inout)                       :: ind_tetr,iface
+    real(dp), intent(out), optional              :: t_remain_out
+    real(dp), dimension(3)                       :: z_save, x_save
+    real(dp)                                     :: t_remain,t_pass,perpinv, aphi
+    logical                                      :: boole_t_finished
+    integer                                      :: ind_tetr_save,iper_phi,n
+    type(optional_quantities_type)               :: optional_quantities
     
-
-    !If orbit_timestep is called for the first time without grid position
-    if(.not.boole_initialized) then
-
-        !Check coordinate domain (optionally perform modulo operation)
-        call check_coordinate_domain(x)
-
-        !Find tetrahedron index and face index for position x
-        call find_tetra(x,vpar,vperp,ind_tetr,iface)
-
-        !If particle doesn't lie inside any tetrahedron
-        if(ind_tetr.eq.-1) then
+    if(.not.boole_initialized) then !If orbit_timestep is called for the first time without grid position
+        call check_coordinate_domain(x) !Check coordinate domain (optionally perform modulo operation)
+        call find_tetra(x,vpar,vperp,ind_tetr,iface) !Find tetrahedron index and face index for position x
+        if(ind_tetr.eq.-1) then !If particle doesn't lie inside any tetrahedron
             t_remain_out = t_step
             return
         endif
-
         z_save = x-tetra_physics(ind_tetr)%x1
-        call calc_particle_weights(b,n,z_save,vpar,ind_tetr,pflux,start)
-        start%jperp(n) = particle_mass*vperp**2*cm_over_e/(2*bmod_func(z_save,ind_tetr))*(-1) !-1 because of negative gyrophase
+        call calc_particle_weights_and_jperp(b,n,z_save,vpar,vperp,ind_tetr,pflux,start)
         boole_initialized = .true.
     endif
           
-    !Exit the subroutine after initialization, if time step equals zero
-    if(t_step.eq.0.d0) return
-
-    !Compute relative particle position
-    z_save = x-tetra_physics(ind_tetr)%x1
-
-    !Compute perpendicular invariant of particle
-    perpinv=-0.5d0*vperp**2/bmod_func(z_save,ind_tetr)
-             
-    !Initialize constants of motion in particle-private module
-    select case(ipusher)
-        case(1)
-            call initialize_const_motion_rk(perpinv,perpinv**2)
-        case(2)
-            call initialize_const_motion_poly(perpinv,perpinv**2)
-    end select        
-
+    if(t_step.eq.0.d0) return !Exit the subroutine after initialization, if time step equals zero
+    if(boole_initialized) z_save = x-tetra_physics(ind_tetr)%x1
+    call initialize_constants_of_motion(vperp,z_save,ind_tetr,perpinv)
     t_remain = t_step
     boole_t_finished = .false.
-    local_counter%tetr_pushings = local_counter%tetr_pushings -1 !set tetr_pushings to -1 because when entering the loop it will 
-    !go back to one without pushing
+    local_counter%tetr_pushings = local_counter%tetr_pushings -1 !set tetr_pushings to -1 because when entering the loop it will go back to one without pushing
 
-    !Loop for tetrahedron pushings until t_step is reached
-    do
+    do !Loop for tetrahedron pushings until t_step is reached
         local_counter%tetr_pushings = local_counter%tetr_pushings +1
-        !Domain Boundary
+
         if(ind_tetr.eq.-1) then
-            !print *, 'WARNING: Particle lost.'
-            aphi = tetra_physics(ind_tetr_save)%Aphi1+sum(tetra_physics(ind_tetr_save)%gAphi*z_save)
-            !$omp critical
-            if (abs(aphi-pflux%max).lt.abs(aphi-pflux%min)) then
-                local_counter%lost_outside = local_counter%lost_outside + 1
-            endif
-            if (abs(aphi-pflux%max).gt.abs(aphi-pflux%min)) then
-                local_counter%lost_inside = local_counter%lost_inside + 1
-            endif
-            !$omp end critical
-            if( present(t_remain_out)) then
-                t_remain_out = t_remain
+            if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
+                call categorize_lost_particles(ind_tetr_save,z_save,pflux,local_counter,t_remain,t_remain_out)
             endif
             exit
         endif
-          
-        !Save the tetrahedron index for computation of vperp in the last step
+
         ind_tetr_save = ind_tetr
-
-        !Save vpar for the computation of the parallel adiabatic invariant
-        vpar_save = vpar
-
-        !t_remain (in) ... remaining time until t_step is finished
-        !t_pass (out) ... time to pass the tetrahdron
-
-        !Save x for the computation of the current
         x_save = x
 
-        !Calculate trajectory
-        select case(ipusher)
+        select case(ipusher) !Calculate trajectory
             case(1)
                 call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper_phi)
             case(2)
@@ -322,68 +272,146 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
         end select
 
         t_remain = t_remain - t_pass
-        if (iper_phi.ne.0) then
-            local_counter%phi_0_mappings = local_counter%phi_0_mappings + 1!iper_phi
-            if ((local_counter%phi_0_mappings.gt.10) &
-                .and.(local_counter%phi_0_mappings.le.3000)) then
-                !$omp critical
-                    write(iunits%pm,*) x
-                !$omp end critical
-            endif
-        endif
 
-        if (x(3).lt.-105d0) then
-            boole_t_finished = .true.
-           if (local_counter%phi_0_mappings.gt.10) then
-            call calc_plane_intersection(x_save,x,-105d0)
-            !$omp critical
-                write(iunits%di,*) x, n
-            !$omp end critical
-           endif
-        endif
-
-        do m = 1,moment_specs%n_moments
-            select case(moment_specs%moments_selector(m))
-                case(1)
-                    local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
-                                                                    & start%weight(n)*optional_quantities%t_hamiltonian
-                case(2)
-                    local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
-                                                                    & start%weight(n)*optional_quantities%gyrophase*start%jperp(n)
-                case(3)
-                    local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
-                                                                    & start%weight(n)*optional_quantities%vpar_int
-                case(4)
-                    local_tetr_moments(m,ind_tetr_save) = local_tetr_moments(m,ind_tetr_save) + &
-                                                                    & start%weight(n)*optional_quantities%vpar2_int
-            end select
-        enddo
-
-        !Orbit stops within cell, because "flight"-time t_step has finished
-        if(boole_t_finished) then
-            if( present(t_remain_out)) then
-                t_remain_out = t_remain
-            endif
+        call calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,iunits,boole_t_finished)
+        call update_local_tetr_moments(moment_specs,local_tetr_moments,ind_tetr_save,n,start,optional_quantities)
+        if(boole_t_finished) then !Orbit stops within cell, because "flight"-time t_step has finished
+            if( present(t_remain_out)) t_remain_out = t_remain
             exit
         endif
 
     enddo !Loop for tetrahedron pushings
 
-    !Compute vperp from position
-    vperp = vperp_func(z_save,perpinv,ind_tetr_save)
+    vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
 
 end subroutine orbit_timestep_gorilla_boltzmann
 
-subroutine calc_particle_weights(b,n,z_save,vpar,ind_tetr,pflux,start)
+subroutine calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,iunits,boole_t_finished)
+
+    use boltzmann_types_mod, only: counter_t, iunits_t
+
+    real(dp), dimension(3), intent(in)  :: x, x_save
+    integer, intent(in)                 :: n, iper_phi
+    type(iunits_t), intent(in)          :: iunits
+    type(counter_t), intent(inout)      :: local_counter
+    logical, intent(out)                :: boole_t_finished
+    real(dp), dimension(3)              :: x_intersection
+
+    if (iper_phi.ne.0) then
+        local_counter%phi_0_mappings = local_counter%phi_0_mappings + 1!iper_phi
+        if ((local_counter%phi_0_mappings.gt.10) &
+            .and.(local_counter%phi_0_mappings.le.3000)) then
+            !$omp critical
+                write(iunits%pm,*) x
+            !$omp end critical
+        endif
+    endif
+
+    if (x(3).lt.-105d0) then
+        boole_t_finished = .true.
+       if (local_counter%phi_0_mappings.gt.10) then
+        x_intersection = x
+        call calc_plane_intersection(x_save,x_intersection,-105d0)
+        !$omp critical
+            write(iunits%di,*) x, n
+        !$omp end critical
+       endif
+    endif
+end subroutine
+
+subroutine categorize_lost_particles(ind_tetr,x,pflux,local_counter,t_remain,t_remain_out)
+
+    use tetra_physics_mod, only: tetra_physics
+    use boltzmann_types_mod, only: counter_t, poloidal_flux_t
+
+    integer, intent(in) :: ind_tetr
+    real(dp), dimension(3), intent(in) :: x
+    type(poloidal_flux_t), intent(in) :: pflux
+    real(dp), intent(in) :: t_remain
+    type(counter_t), intent(inout) :: local_counter
+    real(dp), intent(out), optional              :: t_remain_out
+    real(dp) :: aphi
+
+    !print *, 'WARNING: Particle lost.'
+    aphi = tetra_physics(ind_tetr)%Aphi1+sum(tetra_physics(ind_tetr)%gAphi*x)
+    if (abs(aphi-pflux%max).lt.abs(aphi-pflux%min)) then
+        local_counter%lost_outside = local_counter%lost_outside + 1
+    endif
+    if (abs(aphi-pflux%max).gt.abs(aphi-pflux%min)) then
+        local_counter%lost_inside = local_counter%lost_inside + 1
+    endif
+    if( present(t_remain_out)) then
+        t_remain_out = t_remain
+    endif
+
+end subroutine categorize_lost_particles
+
+subroutine update_local_tetr_moments(moment_specs,local_tetr_moments,ind_tetr,n,start,optional_quantities)
+
+    use boltzmann_types_mod, only: moment_specs_t, start_t
+    use gorilla_settings_mod, only: optional_quantities_type
+
+    type(moment_specs_t), intent(in)             :: moment_specs
+    type(start_t), intent(in)                    :: start
+    type(optional_quantities_type), intent(in)   :: optional_quantities
+    integer, intent(in)                          :: ind_tetr, n
+    complex(dp), dimension(:,:), intent (inout)  :: local_tetr_moments
+    integer                                      :: m
+
+    do m = 1,moment_specs%n_moments
+        select case(moment_specs%moments_selector(m))
+            case(1)
+                local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
+                                                                & start%weight(n)*optional_quantities%t_hamiltonian
+            case(2)
+                local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
+                                                                & start%weight(n)*optional_quantities%gyrophase*start%jperp(n)
+            case(3)
+                local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
+                                                                & start%weight(n)*optional_quantities%vpar_int
+            case(4)
+                local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
+                                                                & start%weight(n)*optional_quantities%vpar2_int
+        end select
+    enddo
+
+end subroutine update_local_tetr_moments
+
+subroutine initialize_constants_of_motion(vperp,z_save,ind_tetr,perpinv)
+
+    use pusher_tetra_rk_mod, only: initialize_const_motion_rk
+    use pusher_tetra_poly_mod, only: initialize_const_motion_poly
+    use gorilla_settings_mod, only: ipusher
+    use supporting_functions_mod, only: bmod_func
+
+    real(dp), intent(in)               :: vperp
+    real(dp), dimension(3), intent(in) :: z_save
+    integer, intent(in)                :: ind_tetr
+    real(dp), intent(out)              :: perpinv
+
+    perpinv=-0.5d0*vperp**2/bmod_func(z_save,ind_tetr)
+             
+    !Initialize constants of motion in particle-private module
+    select case(ipusher)
+        case(1)
+            call initialize_const_motion_rk(perpinv,perpinv**2)
+        case(2)
+            call initialize_const_motion_poly(perpinv,perpinv**2)
+    end select
+
+end subroutine initialize_constants_of_motion
+
+subroutine calc_particle_weights_and_jperp(b,n,z_save,vpar,vperp,ind_tetr,pflux,start)
 
     use boltzmann_types_mod, only: boltzmann_input_t, poloidal_flux_t, start_t
     use tetra_physics_mod, only: tetra_physics,particle_mass,particle_charge,cm_over_e
     use constants, only: ev2erg
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
+    use supporting_functions_mod, only: bmod_func
 
     type(boltzmann_input_t), intent(in) :: b
     type(poloidal_flux_t), intent(in) :: pflux
-    real(dp), intent(in) :: vpar
+    real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
     integer, intent(in) :: n,ind_tetr
     type(start_t), intent(inout) :: start
@@ -422,7 +450,9 @@ subroutine calc_particle_weights(b,n,z_save,vpar,ind_tetr,pflux,start)
         endif
     endif
 
-end subroutine calc_particle_weights
+    start%jperp(n) = particle_mass*vperp**2*cm_over_e/(2*bmod_func(z_save,ind_tetr))*(-1) !-1 because of negative gyrophase
+
+end subroutine calc_particle_weights_and_jperp
 
 subroutine print_progress(num_particles,kpart,n)
 
