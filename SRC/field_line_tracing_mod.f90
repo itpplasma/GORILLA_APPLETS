@@ -1,5 +1,7 @@
 module field_line_tracing_mod
 
+    use volume_integrals_and_sqrt_g_mod, only: sqrt_g
+
     implicit none
 
     private
@@ -10,7 +12,6 @@ module field_line_tracing_mod
                & ind_a, ind_b, ind_c
     double precision :: n_particles, density, constant_part_of_weights, z_div_plate
     double complex, dimension(:,:), allocatable :: weights
-    double precision, dimension(:,:), allocatable :: sqrt_g
     double precision, dimension(:), allocatable :: J_perp, poloidal_flux, temperature_vector
     logical :: boole_linear_density_simulation, boole_linear_temperature_simulation, &
              & boole_poincare_plot, boole_divertor_intersection, boole_collisions, boole_point_source, boole_precalc_collisions, &
@@ -100,7 +101,7 @@ subroutine calc_field_lines
     poloidal_flux = 0
     temperature_vector = 0
 
-    call calc_square_root_g(sqrt_g)
+    call calc_square_root_g
 
     !Compute velocity module from kinetic energy dependent on particle species
     v0=sqrt(2.d0*energy_eV*ev2erg/particle_mass)
