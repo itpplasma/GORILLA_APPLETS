@@ -6,13 +6,12 @@ module orbit_timestep_gorilla_supporting_functions_mod
    
 contains
 
-subroutine calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,iunits,boole_t_finished)
+subroutine calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,boole_t_finished)
 
-    use boltzmann_types_mod, only: counter_t, iunits_t
+    use boltzmann_types_mod, only: counter_t, iunits
 
     real(dp), dimension(3), intent(in)  :: x, x_save
     integer, intent(in)                 :: n, iper_phi
-    type(iunits_t), intent(in)          :: iunits
     type(counter_t), intent(inout)      :: local_counter
     logical, intent(out)                :: boole_t_finished
     real(dp), dimension(3)              :: x_intersection
@@ -214,11 +213,11 @@ subroutine print_progress(num_particles,kpart,n)
 
 end subroutine print_progress
 
-subroutine handle_lost_particles(iunit,t_confined, x, n, local_counter, boole_particle_lost)
+subroutine handle_lost_particles(t_confined, x, n, local_counter, boole_particle_lost)
 
-    use boltzmann_types_mod, only: counter_t
+    use boltzmann_types_mod, only: counter_t, iunits
 
-    integer, intent(in) :: iunit, n
+    integer, intent(in) :: n
     real(dp), intent(in) :: t_confined
     real(dp), dimension(3), intent(in) :: x
     type(counter_t) :: local_counter
@@ -227,7 +226,7 @@ subroutine handle_lost_particles(iunit,t_confined, x, n, local_counter, boole_pa
     !write another if clause (if hole size = minimal .and. particle lost inside .and. boole_cut_out_hole = .true. 
     !(use extra variable m in orbit routine (0 normally, 1 when lost outside, -1 when lost inside))),
     !if m = 1 do as now, if m = -1 select arbitrary newp position and update x, vpar and vperp)
-    write(iunit,*) t_confined, x, n
+    write(iunits%et,*) t_confined, x, n
     !$omp critical
     local_counter%lost_particles = 1
     boole_particle_lost = .true.
@@ -235,15 +234,15 @@ subroutine handle_lost_particles(iunit,t_confined, x, n, local_counter, boole_pa
 
 end subroutine handle_lost_particles
 
-subroutine initialise_loop_variables(l, n, v0, local_counter,boole_particle_lost,t_step,t_confined, &
-    local_tetr_moments,x,v,vpar,vperp)
+subroutine initialise_loop_variables(l, n, v0, local_counter,boole_particle_lost,t,local_tetr_moments,x,v,vpar,vperp)
 
-use boltzmann_types_mod, only: b, counter_t, start
+use boltzmann_types_mod, only: b, counter_t, start, time_t
 use constants, only: ev2erg
 use tetra_physics_mod, only: particle_mass
 
 integer, intent(in) :: l, n
 type(counter_t) :: local_counter
+type(time_t) :: t
 logical :: boole_particle_lost
 real(dp) :: t_step, t_confined, pitchpar, v, vpar, vperp, v0
 real(dp), dimension(3) :: x
@@ -252,8 +251,8 @@ complex(dp), dimension(:,:) :: local_tetr_moments
 
 call set_local_counter_zero(local_counter)
 boole_particle_lost = .false.
-t_step = b%time_step
-t_confined = 0
+t%step = b%time_step
+t%confined = 0
 if (l.eq.1) local_tetr_moments = 0
 pitchpar = start%pitch(n)
 x = start%x(:,n)
@@ -736,11 +735,9 @@ module boltzmann_writing_data_mod
 
 contains
 
-subroutine write_data_to_files(filenames)
+subroutine write_data_to_files
 
-    use boltzmann_types_mod, only: filenames_t, boole_writing_data, output, moment_specs
-
-    type(filenames_t), intent(in) :: filenames
+    use boltzmann_types_mod, only: filenames, boole_writing_data, output, moment_specs
 
     if (boole_writing_data%vertex_indices) &
         call write_vertex_indices(filenames%vertex_indices)
@@ -945,11 +942,9 @@ subroutine write_fourier_moments(filename_fourier_moments,moments_in_frequency_s
 
 end subroutine write_fourier_moments
 
-subroutine name_files(filenames)
+subroutine name_files
 
-    use boltzmann_types_mod, only: filenames_t
-
-    type(filenames_t), intent(out) :: filenames
+    use boltzmann_types_mod, only: filenames
 
     filenames%exit_times = 'exit_times.dat'
     filenames%remaining_particles = 'remaining_particles.dat'
@@ -968,11 +963,9 @@ subroutine name_files(filenames)
 
 end subroutine name_files
 
-subroutine unlink_files(filenames)
+subroutine unlink_files
 
-    use boltzmann_types_mod, only: filenames_t
-
-    type(filenames_t) :: filenames
+    use boltzmann_types_mod, only: filenames
 
     call unlink(filenames%exit_times)
     call unlink(filenames%remaining_particles)
@@ -991,11 +984,9 @@ subroutine unlink_files(filenames)
 
 end subroutine unlink_files
 
-subroutine open_files_before_main_loop(iunits)
+subroutine open_files_before_main_loop
 
-    use boltzmann_types_mod, only: iunits_t
-    
-    type(iunits_t) :: iunits
+    use boltzmann_types_mod, only: iunits
     
     open(newunit = iunits%et, file = 'exit_times.dat')
     open(newunit = iunits%rp, file = 'remaining_particles.dat')
@@ -1004,11 +995,9 @@ subroutine open_files_before_main_loop(iunits)
     
 end subroutine open_files_before_main_loop
 
-subroutine close_files(iunits)
+subroutine close_files
 
-    use boltzmann_types_mod, only: iunits_t
-    
-    type(iunits_t) :: iunits
+    use boltzmann_types_mod, only: iunits
     
     close(iunits%et)
     close(iunits%rp)

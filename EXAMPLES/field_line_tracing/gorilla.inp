@@ -7,7 +7,7 @@
  !Electrostatic potential within the plasma volume in Gaussian units:
  !The potential is realised in GORILLA as a rescaling of the toroidal flux by eps_Phi.
  !This results in surfaces of equal potential coinciding with the flux surfaces and an electric field perpendicular to them
- eps_Phi =  0.0d0 , !1.d-6,
+ eps_Phi =  0.0d0 , !0.3d-7 ,
 !
  !Coordinate system
  !1 ... (R,phi,Z) cylindrical coordinate system
@@ -75,7 +75,7 @@
  ! 1 ... Time tracing in 0th order approximation: dt / dtau = const. in each tetrahedral cell
  ! 2 ... (Correct) Hamiltonian time tracing in adequate polynomial order
  !       Dependencies:  ipusher must be 2 (Polynomial pusher)
- i_time_tracing_option = 2 ,
+ i_time_tracing_option = 1 ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
@@ -127,10 +127,10 @@
 !------------------------------------------------------------------------------------------------------------!
 !
  !Switches to calculate optional quantities
- boole_time_hamiltonian = .true. ,
- boole_gyrophase = .true. ,
- boole_vpar_int = .true. ,
- boole_vpar2_int = .true. ,
+ boole_time_hamiltonian = .false. ,
+ boole_gyrophase = .false. ,
+ boole_vpar_int = .false. ,
+ boole_vpar2_int = .false. ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
@@ -153,7 +153,7 @@
 !------------------------------------------------------------------------------------------------------------!
 !
   !boolean for precalculation of rectangular grid to improve find_tetra (sensible for n_particles >> 1)
-  boole_grid_for_find_tetra = .true. ,
+  boole_grid_for_find_tetra = .false. ,
   a_factor = 2 ,
   b_factor = 0 ,!if either b_factor or c_factor are set to zero, they are calculated automatically such as to make delta_b and delta_c to be about in the range of delta_a (see module find tetra)
   c_factor = 0 ,

@@ -126,12 +126,16 @@ module boltzmann_types_mod
     character(len=100) :: tetr_moments
     end type filenames_t
 
+    type(filenames_t) :: filenames
+
     type iunits_t
     integer :: et
     integer :: rp
     integer :: pm
     integer :: di
     end type iunits_t
+
+    type(iunits_t) :: iunits
 
     type time_t
     real(dp) :: step
