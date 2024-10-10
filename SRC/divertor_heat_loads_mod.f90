@@ -1,12 +1,19 @@
-module boltzmann_mod
+module divertor_heat_loads_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
     implicit none
+
+    type iunits_t
+    integer :: pm
+    integer :: di
+    end type iunits_t
+
+    type(iunits_t) :: iunits
    
 contains
 
-subroutine read_boltzmann_inp_into_type
+subroutine read_divertor_heat_loads_inp_into_type
 
     use boltzmann_types_mod, only: u
 
@@ -15,21 +22,23 @@ subroutine read_boltzmann_inp_into_type
                boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
-               boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data
-    integer :: i_integrator_type, seed_option
+               boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
+               boole_divertor_intersections, boole_poincare_mappings
+    integer :: i_integrator_type, seed_option, num_poincare_mappings
 
-    integer :: b_inp_unit
-
-    !Namelist for boltzmann input
-    NAMELIST /boltzmann_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions, &
-    & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
-    & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
+    integer :: dhl_inp_unit
+    
+    !Namelist for divertor_heat_loads input
+    NAMELIST /divertor_heat_loads_nml/ time_step,energy_eV,n_particles,boole_divertor_intersections, boole_poincare_mappings, &
+    & num_poincare_mappings,boole_squared_moments,boole_point_source,boole_collisions, boole_precalc_collisions,&
+    & density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
+    & boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data
 
-    open(newunit = b_inp_unit, file='boltzmann.inp', status='unknown')
-    read(b_inp_unit,nml=boltzmann_nml)
-    close(b_inp_unit)
+    open(newunit = dhl_inp_unit, file='divertor_heat_loads.inp', status='unknown')
+    read(dhl_inp_unit,nml=divertor_heat_loads_nml)
+    close(dhl_inp_unit)
 
     u%time_step = time_step
     u%energy_eV = energy_eV
@@ -56,12 +65,15 @@ subroutine read_boltzmann_inp_into_type
     u%boole_write_moments = boole_write_moments
     u%boole_write_fourier_moments = boole_write_fourier_moments
     u%boole_write_exit_data = boole_write_exit_data
+    u%boole_divertor_intersections = boole_divertor_intersections
+    u%boole_poincare_mappings = boole_poincare_mappings
+    u%num_poincare_mappings = num_poincare_mappings
 
     print *,'GORILLA: Loaded input data from boltzmann.inp'
 
-end subroutine read_boltzmann_inp_into_type
+end subroutine read_divertor_heat_loads_inp_into_type
 
-subroutine calc_boltzmann
+subroutine calc_divertor_heat_loads
 
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
     use constants, only: ev2erg,pi,echarge,ame,amp,clight
@@ -93,7 +105,7 @@ subroutine calc_boltzmann
     type(counter_t) :: local_counter
     type(time_t) :: t
 
-    call read_boltzmann_inp_into_type
+    call read_divertor_heat_loads_inp_into_type
     call get_ipert()
     call initialize_gorilla(i_option,ipert)
 
@@ -118,6 +130,7 @@ subroutine calc_boltzmann
     call calc_collision_coefficients_for_all_tetrahedra(v0)
     call name_files
     call unlink_files
+    call open_files
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
     if (u%i_integrator_type.eq.2) print*, 'Error: i_integratpr_type set to 2, this module only works with &
@@ -153,7 +166,7 @@ subroutine calc_boltzmann
                     t%step = t%step/v0 !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 
-                call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t%step,boole_initialized,ind_tetr,iface,n,&
+                call orbit_timestep_dhl(x,vpar,vperp,t%step,boole_initialized,ind_tetr,iface,n,&
                             & local_tetr_moments, local_counter,t%remain)
 
                 t%confined = t%confined + t%step - t%remain
@@ -182,6 +195,7 @@ subroutine calc_boltzmann
 
     call normalise_prism_moments_and_prism_moments_squared
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
+    call close_files
     call write_data_to_files
 
     if (u%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
@@ -200,9 +214,9 @@ subroutine calc_boltzmann
          print*, 'number of particles left through the inside = ', counter%lost_inside
     endif
 
-end subroutine calc_boltzmann
+end subroutine calc_divertor_heat_loads
 
-subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,local_tetr_moments, &
+subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,local_tetr_moments, &
                                             local_counter, t_remain_out)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
@@ -216,7 +230,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     use boltzmann_types_mod, only: moment_specs, counter_t, pflux, start
     use tetra_grid_settings_mod, only: grid_kind
     use orbit_timestep_gorilla_supporting_functions_mod, only: categorize_lost_particles, update_local_tetr_moments, &
-                                                                initialize_constants_of_motion, calc_particle_weights_and_jperp
+    initialize_constants_of_motion, calc_particle_weights_and_jperp
 
     type(counter_t), intent(inout)               :: local_counter
     real(dp), dimension(3), intent(inout)        :: x
@@ -274,6 +288,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 
         t_remain = t_remain - t_pass
 
+        call calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,boole_t_finished)
         call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities)
         if(boole_t_finished) then !Orbit stops within cell, because "flight"-time t_step has finished
             if( present(t_remain_out)) t_remain_out = t_remain
@@ -284,6 +299,73 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
 
     vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
 
-end subroutine orbit_timestep_gorilla_boltzmann
+end subroutine orbit_timestep_dhl
 
-end module boltzmann_mod
+subroutine calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,boole_t_finished)
+
+    use boltzmann_types_mod, only: counter_t
+
+    real(dp), dimension(3), intent(in)  :: x, x_save
+    integer, intent(in)                 :: n, iper_phi
+    type(counter_t), intent(inout)      :: local_counter
+    logical, intent(out)                :: boole_t_finished
+    real(dp), dimension(3)              :: x_intersection
+
+    if (iper_phi.ne.0) then
+        local_counter%phi_0_mappings = local_counter%phi_0_mappings + 1!iper_phi
+        if ((local_counter%phi_0_mappings.gt.10) &
+            .and.(local_counter%phi_0_mappings.le.3000)) then
+            !$omp critical
+                write(iunits%pm,*) x
+            !$omp end critical
+        endif
+    endif
+
+    if (x(3).lt.-105d0) then
+        boole_t_finished = .true.
+       if (local_counter%phi_0_mappings.gt.10) then
+        x_intersection = x
+        call calc_plane_intersection(x_save,x_intersection,-105d0)
+        !$omp critical
+            write(iunits%di,*) x, n
+        !$omp end critical
+       endif
+    endif
+end subroutine calc_and_write_poincare_mappings_and_divertor_intersections
+
+subroutine calc_plane_intersection(x_save,x,z_plane)
+
+    use constants, only : pi
+    
+    real(dp), dimension(3), intent(in) :: x_save
+    real(dp), dimension(3), intent(inout) :: x
+    real(dp), intent(in) :: z_plane
+    real(dp) :: rel_dist_z
+    
+    rel_dist_z = (z_plane-x_save(3))/(x(3)-x_save(3))
+    x(1) = x_save(1) + rel_dist_z*(x(1)-x_save(1))
+    if (abs(x(2)-x_save(2)).gt.pi) then
+    x(2) = modulo(x_save(2) + 2*pi-abs(x(2)-x_save(2)),2*pi)
+    else
+    x(2) = x_save(2) + rel_dist_z*(x(2)-x_save(2))
+    endif
+    x(3) = z_plane
+    
+end subroutine calc_plane_intersection
+
+
+subroutine open_files
+    
+    open(newunit = iunits%pm, file = 'poincare_maps.dat')
+    open(newunit = iunits%di, file = 'divertor_intersections.dat')
+    
+end subroutine open_files
+
+subroutine close_files
+    
+    close(iunits%pm)
+    close(iunits%di)
+    
+end subroutine close_files
+
+end module divertor_heat_loads_mod

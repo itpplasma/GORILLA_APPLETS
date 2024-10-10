@@ -17,6 +17,7 @@
  !9 ... Computation of particle dwell times in tetrahedron cells
  !10 .. Perform a bolzmann test
  !11 .. Do field line tracing
+ !12 .. Compute divertor heat loads
  i_option = 11 ,
 !
 !------------------------------------------------------------------------------------------------------------!

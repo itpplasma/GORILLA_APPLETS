@@ -1,6 +1,6 @@
 ! INPUT FILE FOR BOLTZMANN
 !
-&boltzmann_nml
+&divertor_heat_loads_nml
 !
   !time for tracing particles
   time_step = 1.0d-3 ,
@@ -10,6 +10,15 @@
 !
   !Number of particles to be traced
   n_particles = 1.0d2 ,
+!
+  !Compute divertor intersections
+  boole_divertor_intersections = .true.,
+!
+  !Compute poincare mappings
+  boole_poincare_mappings = .true.,
+!
+  !Number of Poincare mappings per particle
+  num_poincare_mappings = 3000 ,
 !
   !Compute squares of moments 
   boole_squared_moments = .true.,
@@ -61,6 +70,6 @@
   boole_write_boltzmann_density = .false. ,
   boole_write_electric_potential = .false. ,
   boole_write_moments = .false. ,
-  boole_write_fourier_moments = .true. ,
-  boole_write_exit_data = .true.
+  boole_write_fourier_moments = .false. ,
+  boole_write_exit_data = .false.
 /

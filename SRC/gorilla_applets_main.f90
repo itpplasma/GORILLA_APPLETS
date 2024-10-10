@@ -15,6 +15,7 @@
   use total_dwell_times_mod, only: calc_total_dwell_times
   use boltzmann_mod, only: calc_boltzmann
   use field_line_tracing_mod, only: calc_field_lines
+  use divertor_heat_loads_mod, only: calc_divertor_heat_loads
 !
   implicit none
 !
@@ -129,6 +130,12 @@
         case(11) !Do field line tracing
 !
             call calc_field_lines
+!
+!-------------------------------------------------------------------------------------------!
+!
+        case(12) !Do field line tracing
+!
+            call calc_divertor_heat_loads
 !
 !-------------------------------------------------------------------------------------------!
 !

@@ -74,7 +74,7 @@ module boltzmann_types_mod
 
     type(collisions_t) :: c
 
-    type boltzmann_input_t
+    type input_t
     real(dp) :: time_step
     real(dp) :: energy_eV
     real(dp) :: n_particles
@@ -100,9 +100,12 @@ module boltzmann_types_mod
     logical  :: boole_write_moments
     logical  :: boole_write_fourier_moments
     logical  :: boole_write_exit_data
-    end type boltzmann_input_t
+    logical  :: boole_divertor_intersections !Used in divertor_heat_loads
+    logical  :: boole_poincare_mappings !Used in divertor_heat_loads
+    integer  :: num_poincare_mappings !Used in divertor_heat_loads
+    end type input_t
 
-    type(boltzmann_input_t) :: b
+    type(input_t) :: u
 
     type filenames_t
     character(len=100) :: exit_times
@@ -122,13 +125,6 @@ module boltzmann_types_mod
     end type filenames_t
 
     type(filenames_t) :: filenames
-
-    type iunits_t
-    integer :: pm
-    integer :: di
-    end type iunits_t
-
-    type(iunits_t) :: iunits
 
     type exit_data_t
     integer, dimension(:), allocatable :: lost
