@@ -37,20 +37,6 @@ module boltzmann_types_mod
 
     type(start_t) :: start
 
-
-    type boole_writing_data_t
-    logical :: vertex_indices = .false.
-    logical :: vertex_coordinates = .false.
-    logical :: prism_volumes = .false.
-    logical :: refined_prism_volumes = .true.
-    logical :: boltzmann_density = .true.
-    logical :: electric_potential = .false.
-    logical :: moments = .false.
-    logical :: fourier_moments = .true.
-    end type boole_writing_data_t
-
-    type(boole_writing_data_t) :: boole_writing_data
-
     type counter_t
     integer :: lost_particles = 0
     integer :: lost_inside = 0
@@ -105,13 +91,21 @@ module boltzmann_types_mod
     integer  :: i_integrator_type
     integer  :: seed_option
     integer  :: num_particles
+    logical  :: boole_write_vertex_indices
+    logical  :: boole_write_vertex_coordinates
+    logical  :: boole_write_prism_volumes
+    logical  :: boole_write_refined_prism_volumes
+    logical  :: boole_write_boltzmann_density
+    logical  :: boole_write_electric_potential
+    logical  :: boole_write_moments
+    logical  :: boole_write_fourier_moments
+    logical  :: boole_write_exit_data
     end type boltzmann_input_t
 
     type(boltzmann_input_t) :: b
 
     type filenames_t
     character(len=100) :: exit_times
-    character(len=100) :: remaining_particles
     character(len=100) :: poincare_maps
     character(len=100) :: prism_moments
     character(len=100) :: prism_moments_summed_squares
@@ -124,18 +118,29 @@ module boltzmann_types_mod
     character(len=100) :: boltzmann_density
     character(len=100) :: divertor_intersections
     character(len=100) :: tetr_moments
+    character(len=100) :: exit_data
     end type filenames_t
 
     type(filenames_t) :: filenames
 
     type iunits_t
-    integer :: et
-    integer :: rp
     integer :: pm
     integer :: di
     end type iunits_t
 
     type(iunits_t) :: iunits
+
+    type exit_data_t
+    integer, dimension(:), allocatable :: lost
+    real(dp), dimension(:), allocatable :: t_confined
+    real(dp), dimension(:,:), allocatable :: x
+    real(dp), dimension(:), allocatable :: v
+    real(dp), dimension(:), allocatable :: vpar
+    real(dp), dimension(:), allocatable :: vperp
+    integer, dimension(:), allocatable :: integration_step
+    end type exit_data_t
+
+    type(exit_data_t) :: exit_data
 
     type time_t
     real(dp) :: step

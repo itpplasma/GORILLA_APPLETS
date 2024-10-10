@@ -52,4 +52,15 @@
   ! 1 ... compute seed with a random number
   ! 2 ... load seed from file 'seed.inp'
   seed_option = 2
+
+  !write data to files
+  boole_write_vertex_indices = .false. ,
+  boole_write_vertex_coordinates = .false. ,
+  boole_write_prism_volumes = .false. ,
+  boole_write_refined_prism_volumes = .false. ,
+  boole_write_boltzmann_density = .false. ,
+  boole_write_electric_potential = .false. ,
+  boole_write_moments = .false. ,
+  boole_write_fourier_moments = .true. ,
+  boole_write_exit_data = .true.
 /

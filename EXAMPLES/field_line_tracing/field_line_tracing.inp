@@ -12,7 +12,7 @@
   n_particles = 5.0d3,
 !
   !Calculate intersections of field lines with phi = const. plane
-  boole_poincare_plot = .false.,
+  boole_poincare_plot = .true.,
 !
   !Number of poincare mappings until tracing is terminated (even if time_step is not yet finished)
   n_poincare_mappings = 3000,

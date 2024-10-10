@@ -213,20 +213,17 @@ subroutine print_progress(num_particles,kpart,n)
 
 end subroutine print_progress
 
-subroutine handle_lost_particles(t_confined, x, n, local_counter, boole_particle_lost)
+subroutine handle_lost_particles(local_counter, boole_particle_lost)
 
     use boltzmann_types_mod, only: counter_t, iunits
 
-    integer, intent(in) :: n
-    real(dp), intent(in) :: t_confined
-    real(dp), dimension(3), intent(in) :: x
     type(counter_t) :: local_counter
     logical :: boole_particle_lost
 
     !write another if clause (if hole size = minimal .and. particle lost inside .and. boole_cut_out_hole = .true. 
     !(use extra variable m in orbit routine (0 normally, 1 when lost outside, -1 when lost inside))),
     !if m = 1 do as now, if m = -1 select arbitrary newp position and update x, vpar and vperp)
-    write(iunits%et,*) t_confined, x, n
+
     !$omp critical
     local_counter%lost_particles = 1
     boole_particle_lost = .true.
@@ -480,7 +477,7 @@ subroutine calc_starting_conditions(v0, verts)
     use find_tetra_mod, only: find_tetra
     use tetra_grid_settings_mod, only: grid_kind
     use tetra_physics_mod, only: coord_system
-    use boltzmann_types_mod, only: b, start
+    use boltzmann_types_mod, only: b, start, exit_data
     
     real(dp), intent(in)                                   :: v0
     real(dp), dimension(:,:), allocatable, intent(out)     :: verts
@@ -721,6 +718,49 @@ subroutine carry_out_collisions(i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
     
 end subroutine carry_out_collisions
 
+subroutine initialize_exit_data
+
+    use boltzmann_types_mod, only: b, exit_data
+
+    allocate(exit_data%lost(b%num_particles))
+    allocate(exit_data%t_confined(b%num_particles))
+    allocate(exit_data%x(3,b%num_particles))
+    allocate(exit_data%v(b%num_particles))
+    allocate(exit_data%vpar(b%num_particles))
+    allocate(exit_data%vperp(b%num_particles))
+    allocate(exit_data%integration_step(b%num_particles))
+
+    exit_data%lost = 0
+    exit_data%t_confined = 0.0d0
+    exit_data%x = 0.0d0 
+    exit_data%v = 0.0d0 
+    exit_data%vpar = 0.0d0 
+    exit_data%vperp = 0.0d0 
+    exit_data%integration_step = 0
+
+
+end subroutine initialize_exit_data
+
+subroutine update_exit_data(boole_particle_lost,t_confined,x,v,vpar,vperp,i,n)
+
+    use boltzmann_types_mod, only: exit_data, b
+
+    integer, intent(in)    :: i, n
+    real(dp), dimension(3) :: x
+    real(dp)               :: t_confined, v, vpar, vperp
+    logical                :: boole_particle_lost
+
+    if (boole_particle_lost.eqv..true.) exit_data%lost(n) = 1
+    if (boole_particle_lost.eqv..false.) exit_data%lost(n) = 0
+    exit_data%t_confined(n) = t_confined
+    exit_data%x(:,n) = x 
+    exit_data%v(n) = v 
+    exit_data%vpar(n) = vpar
+    exit_data%vperp(n) = vperp 
+    exit_data%integration_step(n) = i
+
+end subroutine update_exit_data
+
 end module main_routine_supporting_functions_mod
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -737,39 +777,32 @@ contains
 
 subroutine write_data_to_files
 
-    use boltzmann_types_mod, only: filenames, boole_writing_data, output, moment_specs
+    use boltzmann_types_mod, only: filenames, b, output, moment_specs
 
-    if (boole_writing_data%vertex_indices) &
-        call write_vertex_indices(filenames%vertex_indices)
+    if (b%boole_write_vertex_indices) call write_vertex_indices
 
-    if (boole_writing_data%vertex_coordinates) &
-        call write_vertex_coordinates(filenames%vertex_coordinates)
+    if (b%boole_write_vertex_coordinates) call write_vertex_coordinates
 
-    if (boole_writing_data%prism_volumes) &
-        call write_prism_volumes(filenames%prism_volumes,output%prism_volumes)
+    if (b%boole_write_prism_volumes) call write_prism_volumes
 
-    if (boole_writing_data%refined_prism_volumes) &
-        call write_refined_prism_volumes(filenames%refined_prism_volumes,output%refined_prism_volumes)
+    if (b%boole_write_refined_prism_volumes) call write_refined_prism_volumes
 
-    if (boole_writing_data%boltzmann_density) &
-        call write_boltzmann_densities(filenames%boltzmann_density,output%boltzmann_density)
+    if (b%boole_write_boltzmann_density) call write_boltzmann_densities
 
-    if (boole_writing_data%electric_potential) &
-        call write_electric_potential(filenames%electric_potential,output%electric_potential)
+    if (b%boole_write_electric_potential) call write_electric_potential
 
-    if (boole_writing_data%moments) then
+    if (b%boole_write_moments) then
         if (moment_specs%n_moments.gt.0) then
-            call write_moments(filenames%prism_moments,filenames%prism_moments_summed_squares,filenames%tetr_moments, &
-                               output%prism_moments,output%prism_moments_squared,output%tetr_moments)
+            call write_moments
         else
             print*, "Error: moments are not written to file because no moment was computed. Turn computation of moments on in &
                      gorilla.inp."
         endif
     endif
 
-    if (boole_writing_data%fourier_moments) then
+    if (b%boole_write_fourier_moments) then
         if (moment_specs%n_moments.gt.0) then
-            call write_fourier_moments(filenames%fourier_moments, output%moments_in_frequency_space)
+            call write_fourier_moments
         else
             print*, "Error: Fourier moments are not written to file because no moment was computed (and thus also no fourier &
                      moment). Turn computation of moments on in gorilla.inp."
@@ -777,17 +810,19 @@ subroutine write_data_to_files
 
     endif
 
+    if (b%boole_write_exit_data) call write_exit_data
+
 end subroutine write_data_to_files
 
-subroutine write_vertex_indices(filename_vertex_indices)
+subroutine write_vertex_indices
 
     use tetra_grid_mod, only: ntetr, tetra_grid
+    use boltzmann_types_mod, only: filenames
 
-    character(len=100) :: filename_vertex_indices
     integer :: vi_unit
     integer :: i
 
-    open(newunit = vi_unit, file = filename_vertex_indices)
+    open(newunit = vi_unit, file = filenames%vertex_indices)
     do i=1, ntetr
         write(vi_unit, *) tetra_grid(i)%ind_knot([1, 2, 3, 4])
     end do
@@ -795,16 +830,16 @@ subroutine write_vertex_indices(filename_vertex_indices)
 
 end subroutine write_vertex_indices
 
-subroutine write_vertex_coordinates(filename_vertex_coordinates)
+subroutine write_vertex_coordinates
 
     use tetra_physics_mod, only: coord_system
     use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
+    use boltzmann_types_mod, only: filenames
 
-    character(len=100) :: filename_vertex_coordinates
     integer :: vc_unit
     integer :: i
 
-    open(newunit = vc_unit, file = filename_vertex_coordinates)
+    open(newunit = vc_unit, file = filenames%vertex_coordinates)
     101 format(1000(e21.14,x))
     if (coord_system.eq.1) then
         ![R,phi,Z]: Write vertex coordinates to file
@@ -821,96 +856,93 @@ subroutine write_vertex_coordinates(filename_vertex_coordinates)
 
 end subroutine write_vertex_coordinates
 
-subroutine write_prism_volumes(filename_prism_volumes,prism_volumes)
+subroutine write_prism_volumes
 
-    real(dp),dimension(:), intent(in) :: prism_volumes
-    character(len=100) :: filename_prism_volumes
+    use boltzmann_types_mod, only: filenames, output
+
     integer :: pv_unit
 
-    open(newunit = pv_unit, file = filename_prism_volumes)
-    write(pv_unit,'(ES20.10E4)') prism_volumes
+    open(newunit = pv_unit, file = filenames%prism_volumes)
+    write(pv_unit,'(ES20.10E4)') output%prism_volumes
     close(pv_unit)
 
 end subroutine write_prism_volumes
 
-subroutine write_refined_prism_volumes(filename_refined_prism_volumes,refined_prism_volumes)
+subroutine write_refined_prism_volumes
 
-    real(dp),dimension(:), intent(in) :: refined_prism_volumes
-    character(len=100) :: filename_refined_prism_volumes
+    use boltzmann_types_mod, only: filenames, output
+
     integer :: rpv_unit
 
-    open(newunit = rpv_unit, file = filename_refined_prism_volumes)
-    write(rpv_unit,'(ES20.10E4)') refined_prism_volumes
+    open(newunit = rpv_unit, file = filenames%refined_prism_volumes)
+    write(rpv_unit,'(ES20.10E4)') output%refined_prism_volumes
     close(rpv_unit)
 
 end subroutine write_refined_prism_volumes
 
-subroutine write_boltzmann_densities(filename_boltzmann_density,boltzmann_density)
+subroutine write_boltzmann_densities
 
-    real(dp),dimension(:), intent(in) :: boltzmann_density
-    character(len=100) :: filename_boltzmann_density
+    use boltzmann_types_mod, only: filenames, output
+
     integer :: bd_unit
 
-    open(newunit = bd_unit, file = filename_boltzmann_density)
-    write(bd_unit,'(ES20.10E4)') boltzmann_density
+    open(newunit = bd_unit, file = filenames%boltzmann_density)
+    write(bd_unit,'(ES20.10E4)') output%boltzmann_density
     close(bd_unit)
 
 end subroutine write_boltzmann_densities
 
-subroutine write_electric_potential(filename_electric_potential,electric_potential)
+subroutine write_electric_potential
 
-    real(dp),dimension(:), intent(in) :: electric_potential
-    character(len=100) :: filename_electric_potential
+    use boltzmann_types_mod, only: filenames, output
+
     integer :: epv_unit
 
-    open(newunit = epv_unit, file = filename_electric_potential)
-    write(epv_unit,'(ES20.10E4)') electric_potential
+    open(newunit = epv_unit, file = filenames%electric_potential)
+    write(epv_unit,'(ES20.10E4)') output%electric_potential
     close(epv_unit)
 
 end subroutine write_electric_potential
 
-subroutine write_moments(filename_prism_moments, filename_prism_moments_summed_squares, filename_tetr_moments, &
-                         prism_moments, prism_moments_squared, tetr_moments)
+subroutine write_moments
 
     use tetra_grid_mod, only: ntetr
-    use boltzmann_types_mod, only: moment_specs
+    use boltzmann_types_mod, only: moment_specs, filenames, output
 
-    complex(dp), dimension(:,:), intent(in) :: tetr_moments, prism_moments, prism_moments_squared
-    character(len=100) :: filename_prism_moments, filename_prism_moments_summed_squares, filename_tetr_moments
     integer :: p_moments_unit, pmss_unit, t_moments_unit
     integer :: l, i
     integer :: n_prisms
 
-    open(newunit = p_moments_unit, file = filename_prism_moments)
-    open(newunit = pmss_unit, file = filename_prism_moments_summed_squares)
-    open(newunit = t_moments_unit, file = filename_tetr_moments)
+    open(newunit = p_moments_unit, file = filenames%prism_moments)
+    open(newunit = pmss_unit, file = filenames%prism_moments_summed_squares)
+    open(newunit = t_moments_unit, file = filenames%tetr_moments)
 
     n_prisms = ntetr/3
 
     if (moment_specs%n_moments.gt.0) then
         do l = 1,n_prisms
             do i = 1,moment_specs%n_moments - 1
-                write(p_moments_unit,'(2ES20.10E4)',advance="no") real(prism_moments(i,l)), aimag(prism_moments(i,l))
+                write(p_moments_unit,'(2ES20.10E4)',advance="no") real(output%prism_moments(i,l)), aimag(output%prism_moments(i,l))
             enddo
-                write(p_moments_unit,'(2ES20.10E4)') real(prism_moments(moment_specs%n_moments,l)), &
-                                                     aimag(prism_moments(moment_specs%n_moments,l))
+                write(p_moments_unit,'(2ES20.10E4)') real(output%prism_moments(moment_specs%n_moments,l)), &
+                                                     aimag(output%prism_moments(moment_specs%n_moments,l))
         enddo
         if (moment_specs%boole_squared_moments) then
             do l = 1,n_prisms
                 do i = 1,moment_specs%n_moments - 1
-                    write(pmss_unit,'(2ES20.10E4)',advance="no") real(prism_moments_squared(i,l)), &
-                                                                    & aimag(prism_moments_squared(i,l))
+                    write(pmss_unit,'(2ES20.10E4)',advance="no") real(output%prism_moments_squared(i,l)), &
+                                                                    & aimag(output%prism_moments_squared(i,l))
                 enddo
-                    write(pmss_unit,'(2ES20.10E4)') real(prism_moments_squared(moment_specs%n_moments,l)), &
-                                                    aimag(prism_moments_squared(moment_specs%n_moments,l))
+                    write(pmss_unit,'(2ES20.10E4)') real(output%prism_moments_squared(moment_specs%n_moments,l)), &
+                                                    aimag(output%prism_moments_squared(moment_specs%n_moments,l))
             enddo
         endif
         do l = 1,ntetr
             do i = 1,moment_specs%n_moments - 1
-                write(t_moments_unit,'(2ES20.10E4)',advance="no") real(tetr_moments(i,l)), aimag(tetr_moments(i,l))
+                write(t_moments_unit,'(2ES20.10E4)',advance="no") real(output%tetr_moments(i,l)), aimag(output%tetr_moments(i,l))
             enddo
-                write(t_moments_unit,'(2ES20.10E4)') real(tetr_moments(moment_specs%n_moments,l)), &
-                                                     aimag(tetr_moments(moment_specs%n_moments,l))
+                write(t_moments_unit,'(2ES20.10E4)') real(output%tetr_moments(moment_specs%n_moments,l)), &
+                                                     aimag(output%tetr_moments(moment_specs%n_moments,l))
         enddo
     endif
 
@@ -920,34 +952,45 @@ subroutine write_moments(filename_prism_moments, filename_prism_moments_summed_s
 
 end subroutine write_moments
 
-subroutine write_fourier_moments(filename_fourier_moments,moments_in_frequency_space)
+subroutine write_fourier_moments
 
     use tetra_grid_settings_mod, only: grid_size
-    use boltzmann_types_mod, only: moment_specs
+    use boltzmann_types_mod, only: moment_specs, output, filenames
 
-    complex(dp), dimension(:,:,:), intent(in) :: moments_in_frequency_space
-    character(len=100) :: filename_fourier_moments
     integer :: fm_unit, l, i
 
-    open(newunit = fm_unit, file = filename_fourier_moments)
+    open(newunit = fm_unit, file = filenames%fourier_moments)
     do l = 1,moment_specs%n_triangles
         do i = 1,moment_specs%n_fourier_modes-1
-            write(fm_unit,'(2ES20.10E4)',advance="no") real(moments_in_frequency_space(1,l,i)), &
-                                                       aimag(moments_in_frequency_space(1,l,i))
+            write(fm_unit,'(2ES20.10E4)',advance="no") real(output%moments_in_frequency_space(1,l,i)), &
+                                                       aimag(output%moments_in_frequency_space(1,l,i))
         enddo
-            write(fm_unit,'(2ES20.10E4)') real(moments_in_frequency_space(1,l,moment_specs%n_fourier_modes)), &
-                                          aimag(moments_in_frequency_space(1,l,moment_specs%n_fourier_modes))
+            write(fm_unit,'(2ES20.10E4)') real(output%moments_in_frequency_space(1,l,moment_specs%n_fourier_modes)), &
+                                          aimag(output%moments_in_frequency_space(1,l,moment_specs%n_fourier_modes))
     enddo
     close(fm_unit)
 
 end subroutine write_fourier_moments
 
+subroutine write_exit_data
+
+    use boltzmann_types_mod, only: exit_data, filenames, b
+
+    integer :: ed_unit, i
+
+    open(newunit = ed_unit, file = filenames%exit_data)
+    do i = 1,b%num_particles
+        write(ed_unit,*) i, exit_data%lost(i), exit_data%t_confined(i), exit_data%x(:,i), exit_data%v(i), exit_data%vpar(i), &
+                        exit_data%vperp(i), exit_data%integration_step(i)
+    enddo
+    close (ed_unit)
+
+end subroutine write_exit_data
+
 subroutine name_files
 
     use boltzmann_types_mod, only: filenames
 
-    filenames%exit_times = 'exit_times.dat'
-    filenames%remaining_particles = 'remaining_particles.dat'
     filenames%poincare_maps = 'poincare_maps.dat'
     filenames%prism_moments = 'prism_moments.dat'
     filenames%prism_moments_summed_squares = 'prism_moments_summed_squares.dat'
@@ -960,6 +1003,7 @@ subroutine name_files
     filenames%boltzmann_density = 'boltzmann_density.dat'
     filenames%divertor_intersections = 'divertor_intersections.dat'
     filenames%tetr_moments = 'tetr_moments.dat'
+    filenames%exit_data = 'exit_data.dat'
 
 end subroutine name_files
 
@@ -967,8 +1011,6 @@ subroutine unlink_files
 
     use boltzmann_types_mod, only: filenames
 
-    call unlink(filenames%exit_times)
-    call unlink(filenames%remaining_particles)
     call unlink(filenames%poincare_maps)
     call unlink(filenames%prism_moments)
     call unlink(filenames%prism_moments_summed_squares)
@@ -981,6 +1023,7 @@ subroutine unlink_files
     call unlink(filenames%boltzmann_density)
     call unlink(filenames%divertor_intersections)
     call unlink(filenames%tetr_moments)
+    call unlink(filenames%exit_data)
 
 end subroutine unlink_files
 
@@ -988,8 +1031,6 @@ subroutine open_files_before_main_loop
 
     use boltzmann_types_mod, only: iunits
     
-    open(newunit = iunits%et, file = 'exit_times.dat')
-    open(newunit = iunits%rp, file = 'remaining_particles.dat')
     open(newunit = iunits%pm, file = 'poincare_maps.dat')
     open(newunit = iunits%di, file = 'divertor_intersections.dat')
     
@@ -999,8 +1040,6 @@ subroutine close_files
 
     use boltzmann_types_mod, only: iunits
     
-    close(iunits%et)
-    close(iunits%rp)
     close(iunits%pm)
     close(iunits%di)
     

@@ -13,7 +13,9 @@ subroutine read_boltzmann_inp_into_type
     real(dp) :: time_step,energy_eV,n_particles, density
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
                boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
-               boole_linear_temperature_simulation
+               boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
+               boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
+               boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data
     integer :: i_integrator_type, seed_option
 
     integer :: b_inp_unit
@@ -21,7 +23,9 @@ subroutine read_boltzmann_inp_into_type
     !Namelist for boltzmann input
     NAMELIST /boltzmann_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions, &
     & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
-    & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option
+    & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
+    & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
+    & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data
 
     open(newunit = b_inp_unit, file='boltzmann.inp', status='unknown')
     read(b_inp_unit,nml=boltzmann_nml)
@@ -43,6 +47,15 @@ subroutine read_boltzmann_inp_into_type
     b%i_integrator_type = i_integrator_type
     b%seed_option = seed_option
     b%num_particles = int(n_particles)
+    b%boole_write_vertex_indices = boole_write_vertex_indices
+    b%boole_write_vertex_coordinates = boole_write_vertex_coordinates
+    b%boole_write_prism_volumes = boole_write_prism_volumes
+    b%boole_write_refined_prism_volumes = boole_write_refined_prism_volumes
+    b%boole_write_boltzmann_density = boole_write_boltzmann_density
+    b%boole_write_electric_potential = boole_write_electric_potential
+    b%boole_write_moments = boole_write_moments
+    b%boole_write_fourier_moments = boole_write_fourier_moments
+    b%boole_write_exit_data = boole_write_exit_data
 
     print *,'GORILLA: Loaded input data from boltzmann.inp'
 
@@ -63,13 +76,13 @@ subroutine calc_boltzmann
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
     use boltzmann_types_mod, only: filenames, output, moment_specs, counter_t, counter, pflux, c, &
-                                   b, iunits, time_t, start
+                                   b, time_t, start
     use boltzmann_writing_data_mod, only: write_data_to_files, name_files, unlink_files, open_files_before_main_loop, close_files
     use main_routine_supporting_functions_mod, only: print_progress, handle_lost_particles, initialise_loop_variables, &
     add_local_tetr_moments_to_output, normalise_prism_moments_and_prism_moments_squared, set_moment_specifications, &
     initialise_output, fourier_transform_moments, add_local_counter_to_counter, &
     get_ipert, calc_poloidal_flux, calc_starting_conditions, calc_collision_coefficients_for_all_tetrahedra, &
-    carry_out_collisions
+    carry_out_collisions, initialize_exit_data, update_exit_data
 
     integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,iantithetic, i_part, n_prisms
     real(dp) :: v0,vpar,vperp, v
@@ -100,6 +113,7 @@ subroutine calc_boltzmann
     call calc_square_root_g
     call calc_volume_integrals(b%boole_boltzmann_energies,b%boole_refined_sqrt_g, b%density, b%energy_eV)
     call calc_starting_conditions(v0,verts)
+    call initialize_exit_data
     call calc_poloidal_flux(verts)
     call calc_collision_coefficients_for_all_tetrahedra(v0)
     call name_files
@@ -111,7 +125,7 @@ subroutine calc_boltzmann
                                     & i_integrator_type set to 1'
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart,v0, iunits, b, c, iantithetic) &
+    !$OMP& SHARED(counter, kpart,v0, b, c, iantithetic) &
     !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,v,t,ind_tetr,iface,local_tetr_moments,local_counter,boole_particle_lost,boole_initialized)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO
@@ -146,7 +160,7 @@ subroutine calc_boltzmann
                 t%confined = t%confined + t%step - t%remain
 
                 if (ind_tetr.eq.-1) then
-                    call handle_lost_particles(t%confined, x, n, local_counter, boole_particle_lost)
+                    call handle_lost_particles(local_counter, boole_particle_lost)
                     exit
                 endif
 
@@ -158,11 +172,8 @@ subroutine calc_boltzmann
             c%maxcol = max(dble(i)/dble(c%randcoli),c%maxcol)
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
-            if (t%confined.eq.b%time_step) then
-                write(iunits%rp,*) x, v, vpar, vperp, i, n
-            endif
+            call update_exit_data(boole_particle_lost,t%confined,x,v,vpar,vperp,i,n)
         enddo
-
         !$omp critical
         call add_local_tetr_moments_to_output(local_tetr_moments)
         !$omp end critical

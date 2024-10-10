@@ -445,7 +445,7 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
         local_counter%tetr_pushings = local_counter%tetr_pushings + 1
         !Domain Boundary
         if(ind_tetr.eq.-1) then
-            print *, 'WARNING: Particle lost.'
+            !print *, 'WARNING: Particle lost.'
             if( present(t_remain_out)) then
                 t_remain_out = t_remain
             endif
