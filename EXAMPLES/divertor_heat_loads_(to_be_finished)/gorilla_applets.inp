@@ -14,11 +14,10 @@
  !6 ... Demonstrate direct VMEC integrator
  !7 ... Computation of first Poincare invariance
  !8 ... Perform a reversibility test (demonstrate negative time)
- !9 ... Computation of particle dwell times in tetrahedron cells
- !10 .. Perform a bolzmann test
- !11 .. Do field line tracing
- !12 .. Compute divertor heat loads
- i_option = 12 ,
+ !9 ... Perform a bolzmann test
+ !10 .. Do field line tracing
+ !11 .. Compute divertor heat loads
+ i_option = 11 ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !

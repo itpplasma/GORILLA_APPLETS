@@ -92,9 +92,9 @@ subroutine calc_divertor_heat_loads
     use boltzmann_writing_data_mod, only: write_data_to_files, name_files, unlink_files
     use main_routine_supporting_functions_mod, only: print_progress, handle_lost_particles, initialise_loop_variables, &
     add_local_tetr_moments_to_output, normalise_prism_moments_and_prism_moments_squared, set_moment_specifications, &
-    initialise_output, fourier_transform_moments, add_local_counter_to_counter, &
-    get_ipert, calc_poloidal_flux, calc_starting_conditions, calc_collision_coefficients_for_all_tetrahedra, &
-    carry_out_collisions, initialize_exit_data, update_exit_data
+    initialise_output, fourier_transform_moments, add_local_counter_to_counter, get_ipert, calc_poloidal_flux, &
+    calc_collision_coefficients_for_all_tetrahedra, carry_out_collisions, initialize_exit_data, update_exit_data, &
+    set_seed_for_random_numbers
 
     integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,iantithetic, i_part, n_prisms
     real(dp) :: v0,vpar,vperp, v
@@ -105,6 +105,7 @@ subroutine calc_divertor_heat_loads
     type(counter_t) :: local_counter
     type(time_t) :: t
 
+    call set_seed_for_random_numbers
     call read_divertor_heat_loads_inp_into_type
     call get_ipert()
     call initialize_gorilla(i_option,ipert)
@@ -124,7 +125,7 @@ subroutine calc_divertor_heat_loads
     call initialise_output
     call calc_square_root_g
     call calc_volume_integrals(u%boole_boltzmann_energies,u%boole_refined_sqrt_g, u%density, u%energy_eV)
-    call calc_starting_conditions(v0,verts)
+    call calc_starting_conditions(verts)
     call initialize_exit_data
     call calc_poloidal_flux(verts)
     call calc_collision_coefficients_for_all_tetrahedra(v0)
@@ -367,5 +368,99 @@ subroutine close_files
     close(iunits%di)
     
 end subroutine close_files
+
+subroutine calc_starting_conditions(verts)
+
+    use boltzmann_types_mod, only: u
+    
+    real(dp), dimension(:,:), allocatable, intent(out)     :: verts
+    real(dp), dimension(:,:), allocatable                  :: rand_matrix
+
+    call set_verts_and_coordinate_limits(verts)
+    allocate(rand_matrix(5,u%num_particles))
+    call RANDOM_NUMBER(rand_matrix)
+    call allocate_start_type
+    call set_starting_positions(rand_matrix)
+    call set_rest_of_start_type(rand_matrix)
+
+end subroutine calc_starting_conditions
+
+subroutine set_starting_positions(rand_matrix)
+
+    use boltzmann_types_mod, only: u, start, g
+    use tetra_physics_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
+    use constants, only: pi
+
+    real(dp), dimension(:,:), intent(in) :: rand_matrix
+    integer :: i
+
+    start%x(1,:) = (/(214 + i*(216-214)/u%num_particles, i=1,u%num_particles)/)!r
+    start%x(2,:) = 0.0d0  !phi
+    start%x(3,:) = 12d0 !z
+
+end subroutine set_starting_positions
+
+subroutine set_rest_of_start_type(rand_matrix)
+
+    use boltzmann_types_mod, only: u, start, g
+    use constants, only: pi, ev2erg
+
+    real(dp), dimension(:,:), intent(in) :: rand_matrix
+    real(dp) :: constant_part_of_weight
+
+    start%pitch(:) = 2*rand_matrix(4,:)-1 !pitch parameter
+    constant_part_of_weight = u%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+    if (u%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+        start%energy = 5*u%energy_eV*rand_matrix(5,:) !boltzmann energy distribution
+        start%weight =  constant_part_of_weight*10/sqrt(pi)*u%energy_eV*ev2erg
+    endif
+    
+    if (u%boole_antithetic_variate) then
+        start%x(:,1:u%num_particles:2) = start%x(:,2:u%num_particles:2)
+        start%pitch(1:u%num_particles:2) = -start%pitch(2:u%num_particles:2)
+        start%energy(1:u%num_particles:2) = start%energy(2:u%num_particles:2)
+    endif
+
+end subroutine set_rest_of_start_type
+
+subroutine set_verts_and_coordinate_limits(verts)
+
+    use tetra_physics_mod, only: coord_system
+    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
+    use boltzmann_types_mod, only: g
+
+    real(dp), dimension(:,:), allocatable, intent(out)     :: verts
+
+    g%ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
+    g%ind_b = 2 !(phi in cylindrical and flux coordinates)
+    g%ind_c = 3 !(z in cylindrical coordinates, theta in flux coordinates)
+    if (coord_system.eq.2) then
+        g%ind_b = 3
+        g%ind_c = 2
+    endif
+    
+    allocate(verts(3,nvert))
+    if (coord_system.eq.1) verts = verts_rphiz
+    if (coord_system.eq.2) verts = verts_sthetaphi
+    
+    g%amin = minval(verts(g%ind_a,:))
+    g%amax = maxval(verts(g%ind_a,:))
+    g%cmin = minval(verts(g%ind_c,:))
+    g%cmax = maxval(verts(g%ind_c,:))
+
+end subroutine set_verts_and_coordinate_limits
+
+subroutine allocate_start_type
+
+    use boltzmann_types_mod, only: start, u
+
+    allocate(start%x(3,u%num_particles))
+    allocate(start%pitch(u%num_particles))
+    allocate(start%energy(u%num_particles))
+    allocate(start%weight(u%num_particles))
+    allocate(start%jperp(u%num_particles))
+
+end subroutine allocate_start_type
 
 end module divertor_heat_loads_mod

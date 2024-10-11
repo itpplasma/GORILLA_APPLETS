@@ -115,30 +115,25 @@
 !
 !-------------------------------------------------------------------------------------------!
 !
-        case(9) !Compute total dwell times
-!
-            call calc_total_dwell_times
-!
-!-------------------------------------------------------------------------------------------!
-!
-        case(10) !Do the boltzmanntest
+        case(9) !Do the boltzmanntest
 !
             call calc_boltzmann
 !
 !-------------------------------------------------------------------------------------------!
 !
-        case(11) !Do field line tracing
+        case(10) !Do field line tracing
 !
             call calc_field_lines
 !
 !-------------------------------------------------------------------------------------------!
 !
-        case(12) !Do field line tracing
+        case(11) !Calculate divertor heat loads
 !
             call calc_divertor_heat_loads
 !
 !-------------------------------------------------------------------------------------------!
 !
+            
     end select
 !
   end program gorilla_applets_main

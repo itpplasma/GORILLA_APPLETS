@@ -418,35 +418,119 @@ subroutine calc_poloidal_flux(verts)
     
 end subroutine calc_poloidal_flux
 
-subroutine calc_starting_conditions(v0, verts)
+subroutine calc_starting_conditions(verts)
 
-    use constants, only: pi, ev2erg
-    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, ntetr
-    use find_tetra_mod, only: find_tetra
-    use tetra_grid_settings_mod, only: grid_kind
-    use tetra_physics_mod, only: coord_system
-    use boltzmann_types_mod, only: u, start, exit_data
+    use boltzmann_types_mod, only: u
     
-    real(dp), intent(in)                                   :: v0
     real(dp), dimension(:,:), allocatable, intent(out)     :: verts
-    real(dp)                                               :: constant_part_of_weight
-    real(dp)                                               :: rand_scalar, vpar, vperp
-    real(dp)                                               :: amin, cmin, cmax !amax is set globally
-    real(dp), dimension(:), allocatable                    :: rand_vector
-    real(dp), dimension(:,:), allocatable                  :: rand_matrix1, rand_matrix2
-    integer                                                :: i
-    real(dp), dimension(3)                                 :: x
-    integer                                                :: ind_tetr_out,iface,seed_inp_unit
-    real(dp)                                               :: amax
-    integer                                                :: ind_a, ind_b, ind_c
+    real(dp), dimension(:,:), allocatable                  :: rand_matrix
+
+    call set_verts_and_coordinate_limits(verts)
+    allocate(rand_matrix(5,u%num_particles))
+    call RANDOM_NUMBER(rand_matrix)
+    call allocate_start_type
+    call set_starting_positions(rand_matrix)
+    call set_rest_of_start_type(rand_matrix)
+
+end subroutine calc_starting_conditions
+
+subroutine set_starting_positions(rand_matrix)
+
+    use boltzmann_types_mod, only: u, start, g
+    use tetra_physics_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
+    use constants, only: pi
+
+    real(dp), dimension(:,:), intent(in) :: rand_matrix
+
+    !compute starting conditions
+    if (u%boole_point_source) then
+        if (grid_kind.eq.2) then
+            start%x(1,:) = 160
+            start%x(2,:) = 0
+            start%x(3,:) = 70
+        elseif (grid_kind.eq.4) then
+            start%x(1,:) = 205
+            start%x(2,:) = 0
+            start%x(3,:) = 0
+        endif
+        if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
+    else
+        start%x(g%ind_a,:) = g%amin + (g%amax - g%amin)*rand_matrix(g%ind_a,:) !r in cylindrical, s in flux coordinates
+        start%x(g%ind_b,:) = 2*pi*rand_matrix(g%ind_b,:) !phi in cylindrical and flux coordinates
+        start%x(g%ind_c,:) = g%cmin + (g%cmax - g%cmin)*rand_matrix(g%ind_c,:) !z in cylindrical, theta in flux coordinates
+    endif
+
+end subroutine set_starting_positions
+
+subroutine set_rest_of_start_type(rand_matrix)
+
+    use boltzmann_types_mod, only: u, start, g
+    use constants, only: pi, ev2erg
+
+    real(dp), dimension(:,:), intent(in) :: rand_matrix
+    real(dp) :: constant_part_of_weight
+
+    start%pitch(:) = 2*rand_matrix(4,:)-1 !pitch parameter
+    constant_part_of_weight = u%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+    if (u%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+        start%energy = 5*u%energy_eV*rand_matrix(5,:) !boltzmann energy distribution
+        start%weight =  constant_part_of_weight*10/sqrt(pi)*u%energy_eV*ev2erg
+    endif
     
+    if (u%boole_antithetic_variate) then
+        start%x(:,1:u%num_particles:2) = start%x(:,2:u%num_particles:2)
+        start%pitch(1:u%num_particles:2) = -start%pitch(2:u%num_particles:2)
+        start%energy(1:u%num_particles:2) = start%energy(2:u%num_particles:2)
+    endif
+
+end subroutine set_rest_of_start_type
+
+subroutine set_verts_and_coordinate_limits(verts)
+
+    use tetra_physics_mod, only: coord_system
+    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
+    use boltzmann_types_mod, only: g
+
+    real(dp), dimension(:,:), allocatable, intent(out)     :: verts
+
+    g%ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
+    g%ind_b = 2 !(phi in cylindrical and flux coordinates)
+    g%ind_c = 3 !(z in cylindrical coordinates, theta in flux coordinates)
+    if (coord_system.eq.2) then
+        g%ind_b = 3
+        g%ind_c = 2
+    endif
     
-    !!!!comment out the following section to make starting conditions really random!!!
+    allocate(verts(3,nvert))
+    if (coord_system.eq.1) verts = verts_rphiz
+    if (coord_system.eq.2) verts = verts_sthetaphi
     
-    integer,dimension(:), allocatable                              :: seed
-    integer                                                        :: n
+    g%amin = minval(verts(g%ind_a,:))
+    g%amax = maxval(verts(g%ind_a,:))
+    g%cmin = minval(verts(g%ind_c,:))
+    g%cmax = maxval(verts(g%ind_c,:))
+
+end subroutine set_verts_and_coordinate_limits
+
+subroutine allocate_start_type
+
+    use boltzmann_types_mod, only: start, u
+
+    allocate(start%x(3,u%num_particles))
+    allocate(start%pitch(u%num_particles))
+    allocate(start%energy(u%num_particles))
+    allocate(start%weight(u%num_particles))
+    allocate(start%jperp(u%num_particles))
+
+end subroutine allocate_start_type
+
+subroutine set_seed_for_random_numbers
+
+    integer,dimension(:), allocatable   :: seed
+    integer                             :: seed_inp_unit
+    integer                             :: n
     
-    print*, 'calc_starting_conditions started'
     open(newunit = seed_inp_unit, file='seed.inp', status='old',action = 'read')
     read(seed_inp_unit,*) n
     allocate(seed(n))
@@ -454,80 +538,8 @@ subroutine calc_starting_conditions(v0, verts)
     close(seed_inp_unit)
     CALL RANDOM_SEED (PUT=seed)
     deallocate(seed)
-    
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    
-    allocate(rand_vector(u%num_particles))
-    allocate(rand_matrix1(3,u%num_particles))
-    allocate(rand_matrix2(2,u%num_particles))
-    
-    allocate(start%x(3,u%num_particles))
-    allocate(start%pitch(u%num_particles))
-    allocate(start%energy(u%num_particles))
-    allocate(start%weight(u%num_particles))
-    allocate(start%jperp(u%num_particles))
-    
-    ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
-    ind_b = 2 !(phi in cylindrical and flux coordinates)
-    ind_c = 3 !(z in cylindrical coordinates, theta in flux coordinates)
-    
-    if (coord_system.eq.2) then
-    ind_b = 3
-    ind_c = 2
-    endif
-    
-    if (coord_system.eq.1) allocate(verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:))))
-    if (coord_system.eq.2) allocate(verts(size(verts_sthetaphi(:,1)),size(verts_sthetaphi(1,:))))
-    if (coord_system.eq.1) verts = verts_rphiz
-    if (coord_system.eq.2) verts = verts_sthetaphi
-    
-    amin = minval(verts(ind_a,:))
-    amax = maxval(verts(ind_a,:))
-    cmin = minval(verts(ind_c,:))
-    cmax = maxval(verts(ind_c,:))
-    
-    constant_part_of_weight = u%density*(amax-amin)*(cmax-cmin)*2*pi
-    
-    !compute starting conditions
-    if (u%boole_point_source) then
-    if (grid_kind.eq.2) then
-    start%x(1,:) = 160
-    start%x(2,:) = 0
-    start%x(3,:) = 70
-    elseif (grid_kind.eq.4) then
-    start%x(1,:) = 205
-    start%x(2,:) = 0
-    start%x(3,:) = 0
-    endif
-    if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
-    else
-    call RANDOM_NUMBER(rand_matrix1)
-    start%x(ind_a,:) = amin + (amax - amin)*rand_matrix1(ind_a,:) !r in cylindrical, s in flux coordinates
-    start%x(ind_b,:) = 2*pi*rand_matrix1(ind_b,:) !phi in cylindrical and flux coordinates
-    start%x(ind_c,:) = cmin + (cmax - cmin)*rand_matrix1(ind_c,:) !z in cylindrical, theta in flux coordinates
-    ! start%x(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,u%num_particles)/)!r
-    ! start%x(ind_b,:) = 0.0d0  !1d-1 !phi in cylindrical and flux coordinates
-    ! start%x(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
-    endif
-    
-    call RANDOM_NUMBER(rand_matrix2)
-    start%pitch(:) = 2*rand_matrix2(1,:)-1 !pitch parameter
-    !start%pitch = 0.7d0 !pitch parameter
-    
-    if (u%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-    start%energy = 5*u%energy_eV*rand_matrix2(2,:) !boltzmann energy distribution
-    start%weight =  constant_part_of_weight*10/sqrt(pi)*u%energy_eV*ev2erg
-    endif
-    
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! start antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    if (u%boole_antithetic_variate) then
-    start%x(:,1:u%num_particles:2) = start%x(:,2:u%num_particles:2)
-    start%pitch(1:u%num_particles:2) = -start%pitch(2:u%num_particles:2)
-    start%energy(1:u%num_particles:2) = start%energy(2:u%num_particles:2)
-    endif
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! end antithetic variate !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    print*, 'calc_starting_conditions finished'
-end subroutine calc_starting_conditions
+
+end subroutine set_seed_for_random_numbers
 
 subroutine calc_collision_coefficients_for_all_tetrahedra(v0)
 

@@ -82,7 +82,7 @@ subroutine calc_boltzmann
     add_local_tetr_moments_to_output, normalise_prism_moments_and_prism_moments_squared, set_moment_specifications, &
     initialise_output, fourier_transform_moments, add_local_counter_to_counter, &
     get_ipert, calc_poloidal_flux, calc_starting_conditions, calc_collision_coefficients_for_all_tetrahedra, &
-    carry_out_collisions, initialize_exit_data, update_exit_data
+    carry_out_collisions, initialize_exit_data, update_exit_data, set_seed_for_random_numbers
 
     integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,iantithetic, i_part, n_prisms
     real(dp) :: v0,vpar,vperp, v
@@ -93,6 +93,7 @@ subroutine calc_boltzmann
     type(counter_t) :: local_counter
     type(time_t) :: t
 
+    call set_seed_for_random_numbers
     call read_boltzmann_inp_into_type
     call get_ipert()
     call initialize_gorilla(i_option,ipert)
@@ -112,7 +113,7 @@ subroutine calc_boltzmann
     call initialise_output
     call calc_square_root_g
     call calc_volume_integrals(u%boole_boltzmann_energies,u%boole_refined_sqrt_g, u%density, u%energy_eV)
-    call calc_starting_conditions(v0,verts)
+    call calc_starting_conditions(verts)
     call initialize_exit_data
     call calc_poloidal_flux(verts)
     call calc_collision_coefficients_for_all_tetrahedra(v0)

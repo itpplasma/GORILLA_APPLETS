@@ -92,7 +92,6 @@ SOURCES = SetWorkingPrecision.f90\
 	pusher_tetra_field_lines_mod.f90 \
 	field_line_tracing_mod.f90 \
 	divertor_heat_loads_mod.f90 \
-	total_dwell_times_mod.f90 \
 	gorilla_applets_main.f90
 
 OBJS = $(patsubst %.f90,OBJS/%.o,$(SOURCES))

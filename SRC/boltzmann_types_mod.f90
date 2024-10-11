@@ -138,6 +138,18 @@ module boltzmann_types_mod
 
     type(exit_data_t) :: exit_data
 
+    type grid_t
+    real(dp) :: amin
+    real(dp) :: amax
+    real(dp) :: cmin
+    real(dp) :: cmax
+    integer  :: ind_a
+    integer  :: ind_b
+    integer  :: ind_c
+    end type grid_t
+
+    type(grid_t) :: g
+
     type time_t
     real(dp) :: step
     real(dp) :: remain
