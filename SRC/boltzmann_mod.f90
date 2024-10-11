@@ -64,19 +64,16 @@ end subroutine read_boltzmann_inp_into_type
 subroutine calc_boltzmann
 
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
-    use constants, only: ev2erg,pi,echarge,ame,amp,clight
-    use tetra_physics_mod, only: particle_mass,particle_charge,cm_over_e, coord_system, tetra_physics
-    use omp_lib, only: omp_get_thread_num, omp_get_num_threads, omp_set_num_threads
-    use tetra_grid_settings_mod, only: n_field_periods, grid_size, grid_kind
-    use tetra_grid_mod, only: ntetr, nvert, verts_rphiz, tetra_grid
+    use constants, only: ev2erg,pi,echarge
+    use tetra_physics_mod, only: particle_mass,particle_charge
+    use omp_lib, only: omp_get_num_threads
+    use tetra_grid_settings_mod, only: grid_kind
+    use tetra_grid_mod, only: ntetr
     use gorilla_settings_mod, only: ispecies
-    use collis_ions, only: stost
-    use find_tetra_mod, only: find_tetra
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use boltzmann_types_mod, only: filenames, output, moment_specs, counter_t, counter, pflux, c, &
-                                   u, time_t, start
+    use boltzmann_types_mod, only: moment_specs, counter_t, counter, c, u, time_t
     use boltzmann_writing_data_mod, only: write_data_to_files, name_files, unlink_files
     use main_routine_supporting_functions_mod, only: print_progress, handle_lost_particles, initialise_loop_variables, &
     add_local_tetr_moments_to_output, normalise_prism_moments_and_prism_moments_squared, set_moment_specifications, &
@@ -84,7 +81,7 @@ subroutine calc_boltzmann
     get_ipert, calc_poloidal_flux, calc_starting_conditions, calc_collision_coefficients_for_all_tetrahedra, &
     carry_out_collisions, initialize_exit_data, update_exit_data, set_seed_for_random_numbers
 
-    integer :: kpart,i,j,n,l,m,k,p,ind_tetr,iface,iantithetic, i_part, n_prisms
+    integer :: kpart,i,n,l,p,ind_tetr,iface,iantithetic
     real(dp) :: v0,vpar,vperp, v
     real(dp), dimension(3) :: x
     real(dp), dimension(:,:), allocatable :: verts
@@ -104,7 +101,6 @@ subroutine calc_boltzmann
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     v0=sqrt(2.d0*u%energy_eV*ev2erg/particle_mass)
-    n_prisms = ntetr/3
     kpart = 0
     iantithetic = 1
     if (u%boole_antithetic_variate) iantithetic = 2
@@ -209,12 +205,11 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly
     use tetra_physics_mod, only: tetra_physics
-    use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type, boole_array_optional_quantities
+    use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use tetra_grid_mod, only: tetra_grid, ntetr
-    use boltzmann_types_mod, only: moment_specs, counter_t, pflux, start
+    use boltzmann_types_mod, only: counter_t
     use tetra_grid_settings_mod, only: grid_kind
     use orbit_timestep_gorilla_supporting_functions_mod, only: categorize_lost_particles, update_local_tetr_moments, &
                                                                 initialize_constants_of_motion, calc_particle_weights_and_jperp
@@ -228,7 +223,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     integer, intent(inout)                       :: ind_tetr,iface
     real(dp), intent(out), optional              :: t_remain_out
     real(dp), dimension(3)                       :: z_save, x_save
-    real(dp)                                     :: t_remain,t_pass,perpinv, aphi
+    real(dp)                                     :: t_remain,t_pass,perpinv
     logical                                      :: boole_t_finished
     integer                                      :: ind_tetr_save,iper_phi,n
     type(optional_quantities_type)               :: optional_quantities
