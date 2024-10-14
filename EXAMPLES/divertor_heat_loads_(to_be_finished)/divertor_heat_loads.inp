@@ -3,7 +3,7 @@
 &divertor_heat_loads_nml
 !
   !time for tracing particles
-  time_step = 1.0d-3 ,
+  time_step = 1.0d1 ,
 !
   !Kinetic energy of particles
   energy_eV = 3.5d3 ,
@@ -71,5 +71,5 @@
   boole_write_electric_potential = .false. ,
   boole_write_moments = .false. ,
   boole_write_fourier_moments = .false. ,
-  boole_write_exit_data = .false.
+  boole_write_exit_data = .true.
 /

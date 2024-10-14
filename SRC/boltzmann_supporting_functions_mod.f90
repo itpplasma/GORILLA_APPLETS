@@ -179,14 +179,15 @@ subroutine handle_lost_particles(local_counter, boole_particle_lost)
 
 end subroutine handle_lost_particles
 
-subroutine initialise_loop_variables(l, n, v0, local_counter,boole_particle_lost,t,local_tetr_moments,x,v,vpar,vperp)
+subroutine initialise_loop_variables(l, n, v0, local_counter,boole,t,local_tetr_moments,x,vpar,vperp)
 
-use boltzmann_types_mod, only: u, counter_t, start, time_t
+use boltzmann_types_mod, only: u, counter_t, start, time_t, boole_t
 use constants, only: ev2erg
 use tetra_physics_mod, only: particle_mass
 
 integer, intent(in) :: l, n
 type(counter_t) :: local_counter
+type(boole_t) :: boole
 type(time_t) :: t
 logical :: boole_particle_lost
 real(dp) :: t_step, t_confined, pitchpar, v, vpar, vperp, v0
@@ -195,7 +196,9 @@ complex(dp), dimension(:,:) :: local_tetr_moments
 
 
 call set_local_counter_zero(local_counter)
-boole_particle_lost = .false.
+boole%lost = .false.
+boole%initialized = .false.
+boole%exit = .false.
 t%step = u%time_step
 t%confined = 0
 if (l.eq.1) local_tetr_moments = 0
@@ -469,13 +472,13 @@ subroutine set_rest_of_start_type(rand_matrix)
     use constants, only: pi, ev2erg
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
-    real(dp) :: constant_part_of_weight
 
     start%pitch(:) = 2*rand_matrix(4,:)-1 !pitch parameter
-    constant_part_of_weight = u%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+    start%energy = u%energy_eV
+    start%weight = u%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
     if (u%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
         start%energy = 5*u%energy_eV*rand_matrix(5,:) !boltzmann energy distribution
-        start%weight =  constant_part_of_weight*10/sqrt(pi)*u%energy_eV*ev2erg
+        start%weight =  start%weight*10/sqrt(pi)*u%energy_eV*ev2erg
     endif
     
     if (u%boole_antithetic_variate) then
@@ -685,39 +688,40 @@ subroutine initialize_exit_data
     allocate(exit_data%lost(u%num_particles))
     allocate(exit_data%t_confined(u%num_particles))
     allocate(exit_data%x(3,u%num_particles))
-    allocate(exit_data%v(u%num_particles))
     allocate(exit_data%vpar(u%num_particles))
     allocate(exit_data%vperp(u%num_particles))
+    allocate(exit_data%phi_0_mappings(u%num_particles))
     allocate(exit_data%integration_step(u%num_particles))
 
     exit_data%lost = 0
     exit_data%t_confined = 0.0d0
-    exit_data%x = 0.0d0 
-    exit_data%v = 0.0d0 
+    exit_data%x = 0.0d0
     exit_data%vpar = 0.0d0 
     exit_data%vperp = 0.0d0 
     exit_data%integration_step = 0
+    exit_data%phi_0_mappings = 0
 
 
 end subroutine initialize_exit_data
 
-subroutine update_exit_data(boole_particle_lost,t_confined,x,v,vpar,vperp,i,n)
+subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_0_mappings)
 
     use boltzmann_types_mod, only: exit_data, u
 
     integer, intent(in)    :: i, n
+    integer, optional      :: phi_0_mappings
     real(dp), dimension(3) :: x
-    real(dp)               :: t_confined, v, vpar, vperp
+    real(dp)               :: t_confined, vpar, vperp
     logical                :: boole_particle_lost
 
     if (boole_particle_lost.eqv..true.) exit_data%lost(n) = 1
     if (boole_particle_lost.eqv..false.) exit_data%lost(n) = 0
     exit_data%t_confined(n) = t_confined
-    exit_data%x(:,n) = x 
-    exit_data%v(n) = v 
+    exit_data%x(:,n) = x
     exit_data%vpar(n) = vpar
     exit_data%vperp(n) = vperp 
     exit_data%integration_step(n) = i
+    if(present(phi_0_mappings)) exit_data%phi_0_mappings(n) = phi_0_mappings
 
 end subroutine update_exit_data
 
@@ -940,8 +944,8 @@ subroutine write_exit_data
 
     open(newunit = ed_unit, file = filenames%exit_data)
     do i = 1,u%num_particles
-        write(ed_unit,*) i, exit_data%lost(i), exit_data%t_confined(i), exit_data%x(:,i), exit_data%v(i), exit_data%vpar(i), &
-                        exit_data%vperp(i), exit_data%integration_step(i)
+        write(ed_unit,*) i, exit_data%lost(i), exit_data%t_confined(i), exit_data%x(:,i), exit_data%vpar(i), &
+                        exit_data%vperp(i), exit_data%integration_step(i), exit_data%phi_0_mappings(i)
     enddo
     close (ed_unit)
 

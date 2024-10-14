@@ -130,10 +130,10 @@ module boltzmann_types_mod
     integer, dimension(:), allocatable :: lost
     real(dp), dimension(:), allocatable :: t_confined
     real(dp), dimension(:,:), allocatable :: x
-    real(dp), dimension(:), allocatable :: v
     real(dp), dimension(:), allocatable :: vpar
     real(dp), dimension(:), allocatable :: vperp
     integer, dimension(:), allocatable :: integration_step
+    integer, dimension(:), allocatable :: phi_0_mappings
     end type exit_data_t
 
     type(exit_data_t) :: exit_data
@@ -149,6 +149,12 @@ module boltzmann_types_mod
     end type grid_t
 
     type(grid_t) :: g
+
+    type boole_t
+    logical :: initialized
+    logical :: lost
+    logical :: exit !used in divertor heat loads mod
+    end type boole_t
 
     type time_t
     real(dp) :: step

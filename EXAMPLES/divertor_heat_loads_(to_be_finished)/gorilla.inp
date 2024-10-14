@@ -127,10 +127,10 @@
 !------------------------------------------------------------------------------------------------------------!
 !
  !Switches to calculate optional quantities
- boole_time_hamiltonian = .true. ,
- boole_gyrophase = .true. ,
- boole_vpar_int = .true. ,
- boole_vpar2_int = .true. ,
+ boole_time_hamiltonian = .false. ,
+ boole_gyrophase = .false. ,
+ boole_vpar_int = .false. ,
+ boole_vpar2_int = .false. ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
@@ -153,7 +153,7 @@
 !------------------------------------------------------------------------------------------------------------!
 !
   !boolean for precalculation of rectangular grid to improve find_tetra (sensible for n_particles >> 1)
-  boole_grid_for_find_tetra = .true. ,
+  boole_grid_for_find_tetra = .false. ,
   a_factor = 2 ,
   b_factor = 0 ,!if either b_factor or c_factor are set to zero, they are calculated automatically such as to make delta_b and delta_c to be about in the range of delta_a (see module find tetra)
   c_factor = 0 ,

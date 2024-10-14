@@ -73,7 +73,7 @@ subroutine calc_boltzmann
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use boltzmann_types_mod, only: moment_specs, counter_t, counter, c, u, time_t
+    use boltzmann_types_mod, only: moment_specs, counter_t, counter, c, u, time_t, boole_t
     use boltzmann_writing_data_mod, only: write_data_to_files, name_files, unlink_files
     use main_routine_supporting_functions_mod, only: print_progress, handle_lost_particles, initialise_loop_variables, &
     add_local_tetr_moments_to_output, normalise_prism_moments_and_prism_moments_squared, set_moment_specifications, &
@@ -82,13 +82,13 @@ subroutine calc_boltzmann
     carry_out_collisions, initialize_exit_data, update_exit_data, set_seed_for_random_numbers
 
     integer :: kpart,i,n,l,p,ind_tetr,iface,iantithetic
-    real(dp) :: v0,vpar,vperp, v
+    real(dp) :: v0,vpar,vperp
     real(dp), dimension(3) :: x
     real(dp), dimension(:,:), allocatable :: verts
     complex(dp), dimension(:,:), allocatable :: local_tetr_moments
-    logical :: boole_initialized,boole_particle_lost
     type(counter_t) :: local_counter
     type(time_t) :: t
+    type(boole_t) :: boole
 
     call set_seed_for_random_numbers
     call read_boltzmann_inp_into_type
@@ -112,7 +112,7 @@ subroutine calc_boltzmann
     call calc_starting_conditions(verts)
     call initialize_exit_data
     call calc_poloidal_flux(verts)
-    call calc_collision_coefficients_for_all_tetrahedra(v0)
+    if (u%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(v0)
     call name_files
     call unlink_files
 
@@ -122,7 +122,7 @@ subroutine calc_boltzmann
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart,v0, u, c, iantithetic) &
-    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,v,t,ind_tetr,iface,local_tetr_moments,local_counter,boole_particle_lost,boole_initialized)
+    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,boole)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO
 
@@ -136,31 +136,26 @@ subroutine calc_boltzmann
             call print_progress(u%num_particles,kpart,n)
             !$omp end critical
 
-            call initialise_loop_variables(l, n, v0, local_counter,boole_particle_lost,t,local_tetr_moments,x,v,vpar,vperp)
+            call initialise_loop_variables(l, n, v0, local_counter,boole,t,local_tetr_moments,x,vpar,vperp)
 
             i = 0
             do while (t%confined.lt.u%time_step)
                 i = i+1
-                if (i.eq.1) then
-                    boole_initialized = .false.
-                endif
 
                 if (u%boole_collisions) then
                     call carry_out_collisions(i, n, v0, t, x, vpar,vperp,ind_tetr, iface)
                     t%step = t%step/v0 !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 
-                call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t%step,boole_initialized,ind_tetr,iface,n,&
+                call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t%step,boole,ind_tetr,iface,n,&
                             & local_tetr_moments, local_counter,t%remain)
 
                 t%confined = t%confined + t%step - t%remain
 
                 if (ind_tetr.eq.-1) then
-                    call handle_lost_particles(local_counter, boole_particle_lost)
+                    call handle_lost_particles(local_counter, boole%lost)
                     exit
                 endif
-
-                v = sqrt(vpar**2+vperp**2)
             enddo
 
             !$omp critical
@@ -168,7 +163,7 @@ subroutine calc_boltzmann
             c%maxcol = max(dble(i)/dble(c%randcoli),c%maxcol)
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
-            call update_exit_data(boole_particle_lost,t%confined,x,v,vpar,vperp,i,n)
+            call update_exit_data(boole%lost,t%confined,x,vpar,vperp,i,n)
         enddo
         !$omp critical
         call add_local_tetr_moments_to_output(local_tetr_moments)
@@ -199,7 +194,7 @@ subroutine calc_boltzmann
 
 end subroutine calc_boltzmann
 
-subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,local_tetr_moments, &
+subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole,ind_tetr,iface, n,local_tetr_moments, &
                                             local_counter, t_remain_out)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
@@ -209,17 +204,17 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use boltzmann_types_mod, only: counter_t
+    use boltzmann_types_mod, only: counter_t, boole_t
     use tetra_grid_settings_mod, only: grid_kind
     use orbit_timestep_gorilla_supporting_functions_mod, only: categorize_lost_particles, update_local_tetr_moments, &
                                                                 initialize_constants_of_motion, calc_particle_weights_and_jperp
 
     type(counter_t), intent(inout)               :: local_counter
+    type(boole_t), intent(inout)                 :: boole
     real(dp), dimension(3), intent(inout)        :: x
     complex(dp), dimension(:,:), intent (inout)  :: local_tetr_moments
     real(dp), intent(inout)                      :: vpar,vperp
     real(dp), intent(in)                         :: t_step
-    logical, intent(inout)                       :: boole_initialized
     integer, intent(inout)                       :: ind_tetr,iface
     real(dp), intent(out), optional              :: t_remain_out
     real(dp), dimension(3)                       :: z_save, x_save
@@ -228,7 +223,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
     integer                                      :: ind_tetr_save,iper_phi,n
     type(optional_quantities_type)               :: optional_quantities
     
-    if(.not.boole_initialized) then !If orbit_timestep is called for the first time without grid position
+    if(.not.boole%initialized) then !If orbit_timestep is called for the first time without grid position
         call check_coordinate_domain(x) !Check coordinate domain (optionally perform modulo operation)
         call find_tetra(x,vpar,vperp,ind_tetr,iface) !Find tetrahedron index and face index for position x
         if(ind_tetr.eq.-1) then !If particle doesn't lie inside any tetrahedron
@@ -237,11 +232,11 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,boole_initialize
         endif
         z_save = x-tetra_physics(ind_tetr)%x1
         call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
-        boole_initialized = .true.
+        boole%initialized = .true.
     endif
           
     if(t_step.eq.0.d0) return !Exit the subroutine after initialization, if time step equals zero
-    if(boole_initialized) z_save = x-tetra_physics(ind_tetr)%x1
+    if(boole%initialized) z_save = x-tetra_physics(ind_tetr)%x1
     call initialize_constants_of_motion(vperp,z_save,ind_tetr,perpinv)
     t_remain = t_step
     boole_t_finished = .false.

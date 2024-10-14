@@ -85,7 +85,7 @@ subroutine calc_divertor_heat_loads
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use boltzmann_types_mod, only: moment_specs, counter_t, counter, c, u, time_t
+    use boltzmann_types_mod, only: moment_specs, counter_t, counter, c, u, time_t, boole_t
     use boltzmann_writing_data_mod, only: write_data_to_files, name_files, unlink_files
     use main_routine_supporting_functions_mod, only: print_progress, handle_lost_particles, initialise_loop_variables, &
     add_local_tetr_moments_to_output, normalise_prism_moments_and_prism_moments_squared, set_moment_specifications, &
@@ -94,13 +94,12 @@ subroutine calc_divertor_heat_loads
     set_seed_for_random_numbers
 
     integer :: kpart,i,n,l,p,ind_tetr,iface,iantithetic
-    real(dp) :: v0,vpar,vperp, v
+    real(dp) :: v0,vpar,vperp
     real(dp), dimension(3) :: x
-    real(dp), dimension(:,:), allocatable :: verts
     complex(dp), dimension(:,:), allocatable :: local_tetr_moments
-    logical :: boole_initialized,boole_particle_lost
     type(counter_t) :: local_counter
     type(time_t) :: t
+    type(boole_t) :: boole
 
     call set_seed_for_random_numbers
     call read_divertor_heat_loads_inp_into_type
@@ -121,10 +120,10 @@ subroutine calc_divertor_heat_loads
     call initialise_output
     call calc_square_root_g
     call calc_volume_integrals(u%boole_boltzmann_energies,u%boole_refined_sqrt_g, u%density, u%energy_eV)
-    call calc_starting_conditions(verts)
+    call calc_starting_conditions
     call initialize_exit_data
     call calc_poloidal_flux(verts_rphiz)
-    call calc_collision_coefficients_for_all_tetrahedra(v0)
+    if (u%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(v0)
     call name_files
     call unlink_files
     call open_files
@@ -135,7 +134,7 @@ subroutine calc_divertor_heat_loads
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart,v0, u, c, iantithetic) &
-    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,v,t,ind_tetr,iface,local_tetr_moments,local_counter,boole_particle_lost,boole_initialized)
+    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,boole)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO
 
@@ -149,31 +148,30 @@ subroutine calc_divertor_heat_loads
             call print_progress(u%num_particles,kpart,n)
             !$omp end critical
 
-            call initialise_loop_variables(l, n, v0, local_counter,boole_particle_lost,t,local_tetr_moments,x,v,vpar,vperp)
+            call initialise_loop_variables(l, n, v0, local_counter,boole,t,local_tetr_moments,x,vpar,vperp)
 
             i = 0
             do while (t%confined.lt.u%time_step)
                 i = i+1
-                if (i.eq.1) then
-                    boole_initialized = .false.
-                endif
+                ! if (i.eq.1) then
+                !     boole%initialized = .false.
+                ! endif
 
                 if (u%boole_collisions) then
                     call carry_out_collisions(i, n, v0, t, x, vpar,vperp,ind_tetr, iface)
                     t%step = t%step/v0 !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 
-                call orbit_timestep_dhl(x,vpar,vperp,t%step,boole_initialized,ind_tetr,iface,n,&
+                call orbit_timestep_dhl(x,vpar,vperp,t%step,boole,ind_tetr,iface,n,&
                             & local_tetr_moments, local_counter,t%remain)
 
                 t%confined = t%confined + t%step - t%remain
 
                 if (ind_tetr.eq.-1) then
-                    call handle_lost_particles(local_counter, boole_particle_lost)
+                    call handle_lost_particles(local_counter, boole%lost)
                     exit
                 endif
-
-                v = sqrt(vpar**2+vperp**2)
+                if (boole%exit) exit
             enddo
 
             !$omp critical
@@ -181,7 +179,7 @@ subroutine calc_divertor_heat_loads
             c%maxcol = max(dble(i)/dble(c%randcoli),c%maxcol)
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
-            call update_exit_data(boole_particle_lost,t%confined,x,v,vpar,vperp,i,n)
+            call update_exit_data(boole%lost,t%confined,x,vpar,vperp,i,n,local_counter%phi_0_mappings)
         enddo
         !$omp critical
         call add_local_tetr_moments_to_output(local_tetr_moments)
@@ -213,7 +211,7 @@ subroutine calc_divertor_heat_loads
 
 end subroutine calc_divertor_heat_loads
 
-subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,local_tetr_moments, &
+subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole,ind_tetr,iface, n,local_tetr_moments, &
                                             local_counter, t_remain_out)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
@@ -223,17 +221,17 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole_initialized,ind_tetr,ifa
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use boltzmann_types_mod, only: counter_t
+    use boltzmann_types_mod, only: counter_t, boole_t
     use tetra_grid_settings_mod, only: grid_kind
     use orbit_timestep_gorilla_supporting_functions_mod, only: categorize_lost_particles, update_local_tetr_moments, &
                                                                 initialize_constants_of_motion, calc_particle_weights_and_jperp
 
     type(counter_t), intent(inout)               :: local_counter
+    type(boole_t), intent(inout)                 :: boole
     real(dp), dimension(3), intent(inout)        :: x
     complex(dp), dimension(:,:), intent (inout)  :: local_tetr_moments
     real(dp), intent(inout)                      :: vpar,vperp
     real(dp), intent(in)                         :: t_step
-    logical, intent(inout)                       :: boole_initialized
     integer, intent(inout)                       :: ind_tetr,iface
     real(dp), intent(out), optional              :: t_remain_out
     real(dp), dimension(3)                       :: z_save, x_save
@@ -242,7 +240,7 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole_initialized,ind_tetr,ifa
     integer                                      :: ind_tetr_save,iper_phi,n
     type(optional_quantities_type)               :: optional_quantities
     
-    if(.not.boole_initialized) then !If orbit_timestep is called for the first time without grid position
+    if(.not.boole%initialized) then !If orbit_timestep is called for the first time without grid position
         call check_coordinate_domain(x) !Check coordinate domain (optionally perform modulo operation)
         call find_tetra(x,vpar,vperp,ind_tetr,iface) !Find tetrahedron index and face index for position x
         if(ind_tetr.eq.-1) then !If particle doesn't lie inside any tetrahedron
@@ -251,11 +249,11 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole_initialized,ind_tetr,ifa
         endif
         z_save = x-tetra_physics(ind_tetr)%x1
         call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
-        boole_initialized = .true.
+        boole%initialized = .true.
     endif
           
     if(t_step.eq.0.d0) return !Exit the subroutine after initialization, if time step equals zero
-    if(boole_initialized) z_save = x-tetra_physics(ind_tetr)%x1
+    if(boole%initialized) z_save = x-tetra_physics(ind_tetr)%x1
     call initialize_constants_of_motion(vperp,z_save,ind_tetr,perpinv)
     t_remain = t_step
     boole_t_finished = .false.
@@ -284,9 +282,9 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole_initialized,ind_tetr,ifa
 
         t_remain = t_remain - t_pass
 
-        call calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,boole_t_finished)
+        call calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,boole)
         call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities)
-        if(boole_t_finished) then !Orbit stops within cell, because "flight"-time t_step has finished
+        if(boole%exit.or.boole_t_finished) then
             if( present(t_remain_out)) t_remain_out = t_remain
             exit
         endif
@@ -297,34 +295,37 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole_initialized,ind_tetr,ifa
 
 end subroutine orbit_timestep_dhl
 
-subroutine calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,boole_t_finished)
+subroutine calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,boole)
 
-    use boltzmann_types_mod, only: counter_t
+    use boltzmann_types_mod, only: counter_t, boole_t, u
 
-    real(dp), dimension(3), intent(in)  :: x, x_save
-    integer, intent(in)                 :: n, iper_phi
-    type(counter_t), intent(inout)      :: local_counter
-    logical, intent(out)                :: boole_t_finished
-    real(dp), dimension(3)              :: x_intersection
+    real(dp), dimension(3), intent(in)     :: x_save
+    real(dp), dimension(3), intent(inout)  :: x
+    integer, intent(in)                    :: n, iper_phi
+    type(counter_t), intent(inout)         :: local_counter
+    type(boole_t), intent(inout)           :: boole
+    real(dp), dimension(3)                 :: x_intersection
 
     if (iper_phi.ne.0) then
         local_counter%phi_0_mappings = local_counter%phi_0_mappings + 1!iper_phi
         if ((local_counter%phi_0_mappings.gt.10) &
-            .and.(local_counter%phi_0_mappings.le.3000)) then
+            .and.(local_counter%phi_0_mappings.le.u%num_poincare_mappings)) then
             !$omp critical
                 write(iunits%pm,*) x
             !$omp end critical
         endif
+        if (local_counter%phi_0_mappings.ge.u%num_poincare_mappings) boole%exit = .true.
     endif
 
     if (x(3).lt.-105d0) then
-        boole_t_finished = .true.
+        boole%exit = .true.
        if (local_counter%phi_0_mappings.gt.10) then
-        x_intersection = x
-        call calc_plane_intersection(x_save,x_intersection,-105d0)
-        !$omp critical
-            write(iunits%di,*) x, n
-        !$omp end critical
+            x_intersection = x
+            call calc_plane_intersection(x_save,x_intersection,-105d0)
+            x = x_intersection
+            !$omp critical
+                write(iunits%di,*) x, n
+            !$omp end critical
        endif
     endif
 end subroutine calc_and_write_poincare_mappings_and_divertor_intersections
@@ -364,48 +365,40 @@ subroutine close_files
     
 end subroutine close_files
 
-subroutine calc_starting_conditions(verts)
+subroutine calc_starting_conditions
 
     use boltzmann_types_mod, only: u
     
-    real(dp), dimension(:,:), allocatable, intent(out)     :: verts
-    real(dp), dimension(:,:), allocatable                  :: rand_matrix
+    real(dp), dimension(:,:), allocatable  :: rand_matrix
 
-    call set_verts_and_coordinate_limits(verts)
+    call set_coordinate_limits
+
     allocate(rand_matrix(5,u%num_particles))
     call RANDOM_NUMBER(rand_matrix)
+
     call allocate_start_type
-    call set_starting_positions(rand_matrix)
-    call set_rest_of_start_type(rand_matrix)
+    call set_start_type(rand_matrix)
 
 end subroutine calc_starting_conditions
 
-subroutine set_starting_positions(rand_matrix)
-
-    use boltzmann_types_mod, only: u, start
-
-    real(dp), dimension(:,:), intent(in) :: rand_matrix
-    integer :: i
-
-    start%x(1,:) = (/(214 + i*(216-214)/u%num_particles, i=1,u%num_particles)/)!r
-    start%x(2,:) = 0.0d0  !phi
-    start%x(3,:) = 12d0 !z
-
-end subroutine set_starting_positions
-
-subroutine set_rest_of_start_type(rand_matrix)
+subroutine set_start_type(rand_matrix)
 
     use boltzmann_types_mod, only: u, start, g
     use constants, only: pi, ev2erg
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
-    real(dp) :: constant_part_of_weight
+    integer                              :: i
 
-    start%pitch(:) = 2*rand_matrix(4,:)-1 !pitch parameter
-    constant_part_of_weight = u%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+    start%x(1,:) = (/(214 + i*(216-214)/u%num_particles, i=1,u%num_particles)/)!r
+    start%x(2,:) = 0.0d0  !phi
+    start%x(3,:) = 12d0 !z
+    start%pitch(:) = 2*rand_matrix(4,:)-1
+    start%weight = u%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+    start%energy = u%energy_eV
+
     if (u%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        start%energy = 5*u%energy_eV*rand_matrix(5,:) !boltzmann energy distribution
-        start%weight =  constant_part_of_weight*10/sqrt(pi)*u%energy_eV*ev2erg
+        start%weight =  start%weight*10/sqrt(pi)*u%energy_eV*ev2erg
+        start%energy = 5*u%energy_eV*rand_matrix(5,:)
     endif
     
     if (u%boole_antithetic_variate) then
@@ -414,34 +407,19 @@ subroutine set_rest_of_start_type(rand_matrix)
         start%energy(1:u%num_particles:2) = start%energy(2:u%num_particles:2)
     endif
 
-end subroutine set_rest_of_start_type
+end subroutine set_start_type
 
-subroutine set_verts_and_coordinate_limits(verts)
+subroutine set_coordinate_limits
 
-    use tetra_physics_mod, only: coord_system
-    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
+    use tetra_grid_mod, only: verts_rphiz
     use boltzmann_types_mod, only: g
 
-    real(dp), dimension(:,:), allocatable, intent(out)     :: verts
+    g%amin = minval(verts_rphiz(1,:)) !r coordinate
+    g%amax = maxval(verts_rphiz(1,:))
+    g%cmin = minval(verts_rphiz(3,:)) !z coordinate
+    g%cmax = maxval(verts_rphiz(3,:))
 
-    g%ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
-    g%ind_b = 2 !(phi in cylindrical and flux coordinates)
-    g%ind_c = 3 !(z in cylindrical coordinates, theta in flux coordinates)
-    if (coord_system.eq.2) then
-        g%ind_b = 3
-        g%ind_c = 2
-    endif
-    
-    allocate(verts(3,nvert))
-    if (coord_system.eq.1) verts = verts_rphiz
-    if (coord_system.eq.2) verts = verts_sthetaphi
-    
-    g%amin = minval(verts(g%ind_a,:))
-    g%amax = maxval(verts(g%ind_a,:))
-    g%cmin = minval(verts(g%ind_c,:))
-    g%cmax = maxval(verts(g%ind_c,:))
-
-end subroutine set_verts_and_coordinate_limits
+end subroutine set_coordinate_limits
 
 subroutine allocate_start_type
 
