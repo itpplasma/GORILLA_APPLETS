@@ -151,13 +151,15 @@ subroutine print_progress(num_particles,kpart,n)
 
     integer :: num_particles, kpart, n
 
-    if (num_particles.gt.10) then
-        if (modulo(kpart,int(num_particles/10)).eq.0) then
-            print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
-        endif
-    else 
-        print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
-    endif
+    ! if (num_particles.gt.10) then
+    !     if (modulo(kpart,int(num_particles/10)).eq.0) then
+    !         print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
+    !     endif
+    ! else 
+    !     print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
+    ! endif
+
+    print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
 
 end subroutine print_progress
 

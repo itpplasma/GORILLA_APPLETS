@@ -11,14 +11,20 @@
   !Number of particles to be traced
   n_particles = 1.0d2 ,
 !
+  !pitch angle (initial pitch angle must be consistent for perpendicular invariant to be the same for all particles)
+  lambda = 0.7d0 ,
+!
   !Compute divertor intersections
-  boole_divertor_intersections = .true.,
+  boole_divertor_intersection  = .true.,
 !
   !Compute poincare mappings
-  boole_poincare_mappings = .true.,
+  boole_poincare_plot = .true.,
 !
   !Number of Poincare mappings per particle
-  num_poincare_mappings = 3000 ,
+  n_poincare_mappings = 3000 ,
+!
+  !Number of poincare mappings which are ignored at the beginning of the run
+  n_mappings_ignored = 10,
 !
   !Compute squares of moments 
   boole_squared_moments = .false.,
@@ -62,7 +68,7 @@
   ! 2 ... load seed from file 'seed.inp'
   seed_option = 2
 
-  !write data to files
+  !write additional data to files
   boole_write_vertex_indices = .false. ,
   boole_write_vertex_coordinates = .false. ,
   boole_write_prism_volumes = .false. ,

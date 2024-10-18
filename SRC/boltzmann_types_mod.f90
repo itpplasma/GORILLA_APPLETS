@@ -100,9 +100,11 @@ module boltzmann_types_mod
     logical  :: boole_write_moments
     logical  :: boole_write_fourier_moments
     logical  :: boole_write_exit_data
-    logical  :: boole_divertor_intersections !Used in divertor_heat_loads
-    logical  :: boole_poincare_mappings !Used in divertor_heat_loads
-    integer  :: num_poincare_mappings !Used in divertor_heat_loads
+    logical  :: boole_divertor_intersection !Used in divertor_heat_loads
+    logical  :: boole_poincare_plot !Used in divertor_heat_loads
+    integer  :: n_poincare_mappings !Used in divertor_heat_loads
+    integer  :: n_mappings_ignored !Used in divertor_heat_loads
+    real(dp) :: lambda !Used in divertor_heat_loads
     end type input_t
 
     type(input_t) :: u

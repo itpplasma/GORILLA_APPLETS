@@ -17,20 +17,20 @@ subroutine read_divertor_heat_loads_inp_into_type
 
     use boltzmann_types_mod, only: u
 
-    real(dp) :: time_step,energy_eV,n_particles, density
+    real(dp) :: time_step,energy_eV,n_particles, density, lambda
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
                boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-               boole_divertor_intersections, boole_poincare_mappings
-    integer :: i_integrator_type, seed_option, num_poincare_mappings
+               boole_divertor_intersection, boole_poincare_plot
+    integer :: i_integrator_type, seed_option, n_poincare_mappings, n_mappings_ignored
 
     integer :: dhl_inp_unit
     
     !Namelist for divertor_heat_loads input
-    NAMELIST /divertor_heat_loads_nml/ time_step,energy_eV,n_particles,boole_divertor_intersections, boole_poincare_mappings, &
-    & num_poincare_mappings,boole_squared_moments,boole_point_source,boole_collisions, boole_precalc_collisions,&
+    NAMELIST /divertor_heat_loads_nml/ time_step,energy_eV,n_particles, lambda, boole_divertor_intersection, boole_poincare_plot, &
+    & n_poincare_mappings,n_mappings_ignored,boole_squared_moments,boole_point_source,boole_collisions, boole_precalc_collisions,&
     & density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
     & boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
@@ -65,9 +65,11 @@ subroutine read_divertor_heat_loads_inp_into_type
     u%boole_write_moments = boole_write_moments
     u%boole_write_fourier_moments = boole_write_fourier_moments
     u%boole_write_exit_data = boole_write_exit_data
-    u%boole_divertor_intersections = boole_divertor_intersections
-    u%boole_poincare_mappings = boole_poincare_mappings
-    u%num_poincare_mappings = num_poincare_mappings
+    u% boole_divertor_intersection =  boole_divertor_intersection
+    u%boole_poincare_plot = boole_poincare_plot
+    u%n_poincare_mappings = n_poincare_mappings
+    u%n_mappings_ignored = n_mappings_ignored
+    u%lambda = lambda
 
     print *,'GORILLA: Loaded input data from boltzmann.inp'
 
@@ -162,8 +164,7 @@ subroutine calc_divertor_heat_loads
                     t%step = t%step/v0 !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 
-                call orbit_timestep_dhl(x,vpar,vperp,t%step,boole,ind_tetr,iface,n,&
-                            & local_tetr_moments, local_counter,t%remain)
+                call orbit_timestep_dhl(x,vpar,vperp,t%step,boole,ind_tetr,iface,n,local_tetr_moments, local_counter,t%remain)
 
                 t%confined = t%confined + t%step - t%remain
 
@@ -211,8 +212,7 @@ subroutine calc_divertor_heat_loads
 
 end subroutine calc_divertor_heat_loads
 
-subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole,ind_tetr,iface, n,local_tetr_moments, &
-                                            local_counter, t_remain_out)
+subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole,ind_tetr,iface, n,local_tetr_moments, local_counter, t_remain_out)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly
@@ -221,7 +221,7 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole,ind_tetr,iface, n,local_
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use boltzmann_types_mod, only: counter_t, boole_t
+    use boltzmann_types_mod, only: counter_t, boole_t, u
     use tetra_grid_settings_mod, only: grid_kind
     use orbit_timestep_gorilla_supporting_functions_mod, only: categorize_lost_particles, update_local_tetr_moments, &
                                                                 initialize_constants_of_motion, calc_particle_weights_and_jperp
@@ -282,7 +282,9 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole,ind_tetr,iface, n,local_
 
         t_remain = t_remain - t_pass
 
-        call calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,boole)
+        !call calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,boole)
+        if(u%boole_poincare_plot)          call calc_and_write_poincare_mappings(x,iper_phi,local_counter,boole)
+        if(u%boole_divertor_intersection) call calc_and_write_divertor_intersections(x_save,x,n,local_counter,boole)
         call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities)
         if(boole%exit.or.boole_t_finished) then
             if( present(t_remain_out)) t_remain_out = t_remain
@@ -295,27 +297,38 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole,ind_tetr,iface, n,local_
 
 end subroutine orbit_timestep_dhl
 
-subroutine calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,boole)
+subroutine calc_and_write_poincare_mappings(x,iper_phi,local_counter,boole)
+
+    use boltzmann_types_mod, only: counter_t, boole_t, u
+
+    real(dp), dimension(3), intent(inout)  :: x
+    integer, intent(in)                    :: iper_phi
+    type(counter_t), intent(inout)         :: local_counter
+    type(boole_t), intent(inout)           :: boole
+
+    if (iper_phi.ne.0) then
+        local_counter%phi_0_mappings = local_counter%phi_0_mappings + 1!iper_phi
+        if ((local_counter%phi_0_mappings.gt.u%n_mappings_ignored) &
+            .and.(local_counter%phi_0_mappings.le.u%n_poincare_mappings)) then
+            !$omp critical
+                write(iunits%pm,*) x
+            !$omp end critical
+        endif
+        if (local_counter%phi_0_mappings.ge.u%n_poincare_mappings) boole%exit = .true.
+    endif
+
+end subroutine calc_and_write_poincare_mappings
+
+subroutine calc_and_write_divertor_intersections(x_save,x,n,local_counter,boole)
 
     use boltzmann_types_mod, only: counter_t, boole_t, u
 
     real(dp), dimension(3), intent(in)     :: x_save
     real(dp), dimension(3), intent(inout)  :: x
-    integer, intent(in)                    :: n, iper_phi
+    integer, intent(in)                    :: n
     type(counter_t), intent(inout)         :: local_counter
     type(boole_t), intent(inout)           :: boole
     real(dp), dimension(3)                 :: x_intersection
-
-    if (iper_phi.ne.0) then
-        local_counter%phi_0_mappings = local_counter%phi_0_mappings + 1!iper_phi
-        if ((local_counter%phi_0_mappings.gt.10) &
-            .and.(local_counter%phi_0_mappings.le.u%num_poincare_mappings)) then
-            !$omp critical
-                write(iunits%pm,*) x
-            !$omp end critical
-        endif
-        if (local_counter%phi_0_mappings.ge.u%num_poincare_mappings) boole%exit = .true.
-    endif
 
     if (x(3).lt.-105d0) then
         boole%exit = .true.
@@ -328,7 +341,8 @@ subroutine calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,
             !$omp end critical
        endif
     endif
-end subroutine calc_and_write_poincare_mappings_and_divertor_intersections
+
+end subroutine calc_and_write_divertor_intersections
 
 subroutine calc_plane_intersection(x_save,x,z_plane)
 
@@ -388,11 +402,18 @@ subroutine set_start_type(rand_matrix)
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
     integer                              :: i
+    real(dp)                             :: constant
 
-    start%x(1,:) = (/(214 + i*(216-214)/u%num_particles, i=1,u%num_particles)/)!r
+    start%x(1,:) = (/(214 + i*(216-214)/u%n_particles, i=1,u%num_particles)/)!r
     start%x(2,:) = 0.0d0  !phi
     start%x(3,:) = 12d0 !z
-    start%pitch(:) = 2*rand_matrix(4,:)-1
+    !start%pitch(:) = 2*rand_matrix(4,:)-1
+
+    constant = (1-u%lambda**2)*start%x(1,1)
+    do i = 1,u%num_particles
+        start%pitch(i) = sqrt(1-constant/start%x(1,i))
+    enddo
+
     start%weight = u%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
     start%energy = u%energy_eV
 
