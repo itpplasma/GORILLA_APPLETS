@@ -113,7 +113,7 @@ subroutine calc_divertor_heat_loads
     print*, 'particle charge number = ', particle_charge/echarge
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    v0=sqrt(2.d0*u%energy_eV*ev2erg/particle_mass)
+    v0=sqrt(2.0_dp*u%energy_eV*ev2erg/particle_mass)
     kpart = 0
     iantithetic = 1
     if (u%boole_antithetic_variate) iantithetic = 2
@@ -193,6 +193,7 @@ subroutine calc_divertor_heat_loads
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
     call close_files
     call write_data_to_files
+    call create_magnetic_field_file
 
     if (u%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
     print*, 'Number of lost particles',counter%lost_particles
@@ -252,7 +253,7 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole,ind_tetr,iface, n,local_
         boole%initialized = .true.
     endif
           
-    if(t_step.eq.0.d0) return !Exit the subroutine after initialization, if time step equals zero
+    if(t_step.eq.0.0_dp) return !Exit the subroutine after initialization, if time step equals zero
     if(boole%initialized) z_save = x-tetra_physics(ind_tetr)%x1
     call initialize_constants_of_motion(vperp,z_save,ind_tetr,perpinv)
     t_remain = t_step
@@ -330,11 +331,11 @@ subroutine calc_and_write_divertor_intersections(x_save,x,n,local_counter,boole)
     type(boole_t), intent(inout)           :: boole
     real(dp), dimension(3)                 :: x_intersection
 
-    if (x(3).lt.-105d0) then
+    if (x(3).lt.-105.0_dp) then
         boole%exit = .true.
        if (local_counter%phi_0_mappings.gt.10) then
             x_intersection = x
-            call calc_plane_intersection(x_save,x_intersection,-105d0)
+            call calc_plane_intersection(x_save,x_intersection,-105.0_dp)
             x = x_intersection
             !$omp critical
                 write(iunits%di,*) x, n
@@ -405,8 +406,8 @@ subroutine set_start_type(rand_matrix)
     real(dp)                             :: constant
 
     start%x(1,:) = (/(214 + i*(216-214)/u%n_particles, i=1,u%num_particles)/)!r
-    start%x(2,:) = 0.0d0  !phi
-    start%x(3,:) = 12d0 !z
+    start%x(2,:) = 0.0_dp  !phi
+    start%x(3,:) = 12.0_dp !z
     !start%pitch(:) = 2*rand_matrix(4,:)-1
 
     constant = (1-u%lambda**2)*start%x(1,1)
@@ -453,5 +454,65 @@ subroutine allocate_start_type
     allocate(start%jperp(u%num_particles))
 
 end subroutine allocate_start_type
+
+subroutine create_magnetic_field_file
+    use tetra_grid_settings_mod, only: n1,n2,n3
+    use boltzmann_types_mod, only: g
+    use constants, only: pi
+    use tetra_physics_mod, only: vector_potential_rphiz
+    use field_mod, only: ipert
+
+    character(len=100) :: filename
+    real(dp) :: A(3), B(3), bmod
+    real(dp), dimension(3,2) :: limits !min/max for the three coordinates
+    integer, dimension(3) :: n_points !number of vetices per direction
+    logical :: is_periodic(3) !describes periodicity in three dimensions
+    integer :: unit, i, j, k, n
+    real(dp), dimension(:), allocatable :: R, phi, Z
+
+    filename = "field_from_gorilla"
+
+    limits(1,:) = (/g%amin,g%amax/) !R
+    limits(2,:) = (/0.0_dp,2*pi/) !phi
+    limits(3,:) = (/g%cmin,g%amax/) !Z
+    n_points = (/n1, n2, n3/)
+    is_periodic = (/.false.,.true.,.false./)
+
+    allocate(R(n1), phi(n2), Z(n3))
+    R = linspace(limits(1,1), limits(1,2), n1)
+    phi = linspace(limits(2,1), limits(2,2), n2)
+    Z = linspace(limits(3,1), limits(3,2), n3)
+
+    open(newunit = unit, file = filename)
+    write(unit,*) n_points
+    write(unit,*) limits
+    write(unit,*) is_periodic
+
+    do i = 1, n1
+        do j = 1, n2
+            do k = 1, n3
+                call vector_potential_rphiz(R(i), phi(j), Z(k),ipert,1.0_dp,A(1),A(2),A(3),B(1),B(2),B(3),bmod)
+                write(unit,*) A, B
+            end do
+        end do
+    end do
+
+    close(unit)
+
+end subroutine create_magnetic_field_file
+
+function linspace(start, stop, n) result(x)
+    real(dp), intent(in) :: start, stop
+    integer, intent(in) :: n
+    real(dp) :: x(n)
+    real(dp) :: dx
+    integer :: i
+
+    dx = (stop - start) / (n - 1)
+    x(1) = start
+    do i = 2, n
+        x(i) = x(i-1) + dx
+    end do
+end function linspace
 
 end module divertor_heat_loads_mod

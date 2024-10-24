@@ -9,7 +9,7 @@
   energy_eV = 3.5d3 ,
 !
   !Number of particles to be traced
-  n_particles = 1.0d2 ,
+  n_particles = 1.0d1, !1.0d5 ,
 !
   !pitch angle (initial pitch angle must be consistent for perpendicular invariant to be the same for all particles)
   lambda = 0.7d0 ,
@@ -18,7 +18,7 @@
   boole_divertor_intersection  = .true.,
 !
   !Compute poincare mappings
-  boole_poincare_plot = .true.,
+  boole_poincare_plot = .false.,
 !
   !Number of Poincare mappings per particle
   n_poincare_mappings = 3000 ,
