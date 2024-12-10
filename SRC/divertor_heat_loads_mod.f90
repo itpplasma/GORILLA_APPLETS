@@ -193,7 +193,7 @@ subroutine calc_divertor_heat_loads
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
     call close_files
     call write_data_to_files
-    call create_magnetic_field_file
+    !call create_magnetic_field_file
 
     if (u%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
     print*, 'Number of lost particles',counter%lost_particles
@@ -220,7 +220,7 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole,ind_tetr,iface, n,local_
     use tetra_physics_mod, only: tetra_physics
     use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
-    use supporting_functions_mod, only: vperp_func
+    use supporting_functions_mod, only: vperp_func, bmod_func
     use find_tetra_mod, only: find_tetra
     use boltzmann_types_mod, only: counter_t, boole_t, u
     use tetra_grid_settings_mod, only: grid_kind
@@ -259,7 +259,10 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,boole,ind_tetr,iface, n,local_
     t_remain = t_step
     boole_t_finished = .false.
     local_counter%tetr_pushings = local_counter%tetr_pushings -1 !set tetr_pushings to -1 because when entering the loop it will go back to one without pushing
-
+    ! if (n.eq.1) then
+    !     print*, bmod_func(z_save,ind_tetr)
+    !     stop
+    ! endif
     do !Loop for tetrahedron pushings until t_step is reached
         local_counter%tetr_pushings = local_counter%tetr_pushings +1
 
@@ -405,7 +408,8 @@ subroutine set_start_type(rand_matrix)
     integer                              :: i
     real(dp)                             :: constant
 
-    start%x(1,:) = (/(214 + i*(216-214)/u%n_particles, i=1,u%num_particles)/)!r
+    if (u%num_particles.gt.1) start%x(1,:) = (/(214 + (i-1)*(216-214)/(u%n_particles-1), i=1,u%num_particles)/)!r
+    if (u%num_particles.eq.1) start%x(1,:) = 214
     start%x(2,:) = 0.0_dp  !phi
     start%x(3,:) = 12.0_dp !z
     !start%pitch(:) = 2*rand_matrix(4,:)-1
