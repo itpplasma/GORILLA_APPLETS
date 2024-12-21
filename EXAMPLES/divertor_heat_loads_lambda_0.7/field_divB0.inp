@@ -1,7 +1,7 @@
-1                                 ipert        ! 0=eq only, 1=vac, 2,3=vac+plas
+0                                 ipert        ! 0=eq only, 1=vac, 2,3=vac+plas
 1                                 iequil       ! 0=pert. alone, 1=with equil.
-0.25                              ampl         ! amplitude of perturbation, a.u.
-4 72                                ntor         ! number of toroidal harmonics
+1.00                              ampl         ! amplitude of perturbation, a.u.
+72                                ntor         ! number of toroidal harmonics
 0.99                              cutoff       ! inner cutoff in psi/psi_a units
 4                                 icftype      ! type of coil file
 'see_tetra_grid_inp'              gfile        ! equilibrium file

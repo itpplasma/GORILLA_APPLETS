@@ -107,7 +107,7 @@ module boltzmann_types_mod
     real(dp) :: lambda !Used in divertor_heat_loads
     end type input_t
 
-    type(input_t) :: u
+    type(input_t) :: in
 
     type filenames_t
     character(len=100) :: exit_times
@@ -152,11 +152,11 @@ module boltzmann_types_mod
 
     type(grid_t) :: g
 
-    type boole_t
+    type particle_status_t
     logical :: initialized
     logical :: lost
     logical :: exit !used in divertor heat loads mod
-    end type boole_t
+    end type particle_status_t
 
     type time_t
     real(dp) :: step

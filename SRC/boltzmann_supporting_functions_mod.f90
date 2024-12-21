@@ -87,7 +87,7 @@ end subroutine initialize_constants_of_motion
 
 subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
 
-    use boltzmann_types_mod, only: u, pflux, start
+    use boltzmann_types_mod, only: in, pflux, start
     use tetra_physics_mod, only: tetra_physics,particle_mass,particle_charge,cm_over_e
     use constants, only: ev2erg
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
@@ -103,29 +103,29 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
     phi = z_save(2)
     z = z_save(3)
 
-    if (.not.u%boole_refined_sqrt_g) start%weight = start%weight*r
-    if (u%boole_refined_sqrt_g) then
+    if (.not.in%boole_refined_sqrt_g) start%weight = start%weight*r
+    if (in%boole_refined_sqrt_g) then
         start%weight(n) = start%weight(n)* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
                                         &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))               
     endif
 
-    if (u%boole_linear_density_simulation.or.u%boole_linear_temperature_simulation) then
+    if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then
         local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save) + &
                                         & cm_over_e*vpar*&
                                         & (tetra_physics(ind_tetr)%h2_1+sum(tetra_physics(ind_tetr)%gh2*z_save))
     endif
-    if (u%boole_linear_density_simulation) then
+    if (in%boole_linear_density_simulation) then
         start%weight(n) = start%weight(n)*(pflux%max*1.1-local_poloidal_flux)/(pflux%max*1.1)
     endif
 
-    if (u%boole_boltzmann_energies) then
+    if (in%boole_boltzmann_energies) then
         !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
         phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
-        if (.not. u%boole_linear_temperature_simulation) then
-            start%weight(n) =start%weight(n)*sqrt(start%energy(n)*ev2erg)/(u%energy_eV*ev2erg)**1.5* &
-                        & exp(-(start%energy(n)*ev2erg+particle_charge*phi_elec_func)/(u%energy_eV*ev2erg))
+        if (.not. in%boole_linear_temperature_simulation) then
+            start%weight(n) =start%weight(n)*sqrt(start%energy(n)*ev2erg)/(in%energy_eV*ev2erg)**1.5* &
+                        & exp(-(start%energy(n)*ev2erg+particle_charge*phi_elec_func)/(in%energy_eV*ev2erg))
         else
-            temperature = u%energy_eV*ev2erg*(pflux%max*1.1-local_poloidal_flux)/(pflux%max*1.1)
+            temperature = in%energy_eV*ev2erg*(pflux%max*1.1-local_poloidal_flux)/(pflux%max*1.1)
             start%weight(n) = start%weight(n)*sqrt(start%energy(n)*ev2erg)/temperature**1.5* &
             & exp(-(start%energy(n)*ev2erg+particle_charge*phi_elec_func)/temperature)
         endif
@@ -139,7 +139,7 @@ end module orbit_timestep_gorilla_supporting_functions_mod
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-module main_routine_supporting_functions_mod
+module calc_boltzmann_supporting_functions_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
@@ -150,16 +150,15 @@ contains
 subroutine print_progress(num_particles,kpart,n)
 
     integer :: num_particles, kpart, n
+    logical :: print_progress_for_very_particle = .true.
 
-    ! if (num_particles.gt.10) then
-    !     if (modulo(kpart,int(num_particles/10)).eq.0) then
-    !         print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
-    !     endif
-    ! else 
-    !     print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
-    ! endif
-
-    print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
+    if (print_progress_for_very_particle) then
+        print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
+    else
+        if (modulo(kpart,int(num_particles/10)).eq.0) then
+            print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
+        endif
+    endif    
 
 end subroutine print_progress
 
@@ -181,15 +180,15 @@ subroutine handle_lost_particles(local_counter, boole_particle_lost)
 
 end subroutine handle_lost_particles
 
-subroutine initialise_loop_variables(l, n, v0, local_counter,boole,t,local_tetr_moments,x,vpar,vperp)
+subroutine initialise_loop_variables(l, n, v0, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
 
-use boltzmann_types_mod, only: u, counter_t, start, time_t, boole_t
+use boltzmann_types_mod, only: in, counter_t, start, time_t, particle_status_t
 use constants, only: ev2erg
 use tetra_physics_mod, only: particle_mass
 
 integer, intent(in) :: l, n
 type(counter_t) :: local_counter
-type(boole_t) :: boole
+type(particle_status_t) :: particle_status
 type(time_t) :: t
 logical :: boole_particle_lost
 real(dp) :: t_step, t_confined, pitchpar, v, vpar, vperp, v0
@@ -198,17 +197,17 @@ complex(dp), dimension(:,:) :: local_tetr_moments
 
 
 call set_local_counter_zero(local_counter)
-boole%lost = .false.
-boole%initialized = .false.
-boole%exit = .false.
-t%step = u%time_step
+particle_status%lost = .false.
+particle_status%initialized = .false.
+particle_status%exit = .false.
+t%step = in%time_step
 t%confined = 0
 if (l.eq.1) local_tetr_moments = 0
 pitchpar = start%pitch(n)
 x = start%x(:,n)
 vpar = pitchpar * v0
 vperp = sqrt(v0**2-vpar**2)
-if (u%boole_boltzmann_energies) then
+if (in%boole_boltzmann_energies) then
 v = sqrt(start%energy(n)*ev2erg*2/particle_mass)
 vpar = pitchpar * v
 vperp = sqrt(v**2-vpar**2)
@@ -242,18 +241,18 @@ end subroutine add_local_tetr_moments_to_output
 
 subroutine normalise_prism_moments_and_prism_moments_squared
 
-    use boltzmann_types_mod, only: moment_specs, output, u
+    use boltzmann_types_mod, only: moment_specs, output, in
     
     integer :: n
     
     
     do n = 1,moment_specs%n_moments
-    output%prism_moments(n,:) = output%prism_moments(n,:)/(output%prism_volumes*u%time_step*u%n_particles)
+    output%prism_moments(n,:) = output%prism_moments(n,:)/(output%prism_volumes*in%time_step*in%n_particles)
     if (moment_specs%boole_squared_moments) then
     output%prism_moments_squared(n,:) = output%prism_moments_squared(n,:)/ &
-                   (output%prism_volumes**2*u%time_step**2*u%n_particles)
+                   (output%prism_volumes**2*in%time_step**2*in%n_particles)
     endif
-    if (u%boole_refined_sqrt_g) then
+    if (in%boole_refined_sqrt_g) then
     output%prism_moments(n,:) = output%prism_moments(n,:)*output%prism_volumes/output%refined_prism_volumes
     if (moment_specs%boole_squared_moments) then
     output%prism_moments_squared(n,:) = output%prism_moments_squared(n,:)* &
@@ -269,13 +268,13 @@ subroutine set_moment_specifications
     use gorilla_settings_mod, only: boole_array_optional_quantities
     use tetra_grid_settings_mod, only: grid_size
     use tetra_grid_mod, only: ntetr
-    use boltzmann_types_mod, only: moment_specs, u
+    use boltzmann_types_mod, only: moment_specs, in
     
     integer :: i, n_prisms
     
     n_prisms = ntetr/3
     
-    moment_specs%boole_squared_moments = u%boole_squared_moments
+    moment_specs%boole_squared_moments = in%boole_squared_moments
     moment_specs%n_triangles = n_prisms/grid_size(2)
     moment_specs%n_fourier_modes = 5
     moment_specs%n_moments = 0
@@ -425,13 +424,13 @@ end subroutine calc_poloidal_flux
 
 subroutine calc_starting_conditions(verts)
 
-    use boltzmann_types_mod, only: u
+    use boltzmann_types_mod, only: in
     
     real(dp), dimension(:,:), allocatable, intent(out)     :: verts
     real(dp), dimension(:,:), allocatable                  :: rand_matrix
 
     call set_verts_and_coordinate_limits(verts)
-    allocate(rand_matrix(5,u%num_particles))
+    allocate(rand_matrix(5,in%num_particles))
     call RANDOM_NUMBER(rand_matrix)
     call allocate_start_type
     call set_starting_positions(rand_matrix)
@@ -441,7 +440,7 @@ end subroutine calc_starting_conditions
 
 subroutine set_starting_positions(rand_matrix)
 
-    use boltzmann_types_mod, only: u, start, g
+    use boltzmann_types_mod, only: in, start, g
     use tetra_physics_mod, only: coord_system
     use tetra_grid_settings_mod, only: grid_kind
     use constants, only: pi
@@ -449,7 +448,7 @@ subroutine set_starting_positions(rand_matrix)
     real(dp), dimension(:,:), intent(in) :: rand_matrix
 
     !compute starting conditions
-    if (u%boole_point_source) then
+    if (in%boole_point_source) then
         if (grid_kind.eq.2) then
             start%x(1,:) = 160
             start%x(2,:) = 0
@@ -470,23 +469,23 @@ end subroutine set_starting_positions
 
 subroutine set_rest_of_start_type(rand_matrix)
 
-    use boltzmann_types_mod, only: u, start, g
+    use boltzmann_types_mod, only: in, start, g
     use constants, only: pi, ev2erg
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
 
     start%pitch(:) = 2*rand_matrix(4,:)-1 !pitch parameter
-    start%energy = u%energy_eV
-    start%weight = u%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
-    if (u%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        start%energy = 5*u%energy_eV*rand_matrix(5,:) !boltzmann energy distribution
-        start%weight =  start%weight*10/sqrt(pi)*u%energy_eV*ev2erg
+    start%energy = in%energy_eV
+    start%weight = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+    if (in%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+        start%energy = 5*in%energy_eV*rand_matrix(5,:) !boltzmann energy distribution
+        start%weight =  start%weight*10/sqrt(pi)*in%energy_eV*ev2erg
     endif
     
-    if (u%boole_antithetic_variate) then
-        start%x(:,1:u%num_particles:2) = start%x(:,2:u%num_particles:2)
-        start%pitch(1:u%num_particles:2) = -start%pitch(2:u%num_particles:2)
-        start%energy(1:u%num_particles:2) = start%energy(2:u%num_particles:2)
+    if (in%boole_antithetic_variate) then
+        start%x(:,1:in%num_particles:2) = start%x(:,2:in%num_particles:2)
+        start%pitch(1:in%num_particles:2) = -start%pitch(2:in%num_particles:2)
+        start%energy(1:in%num_particles:2) = start%energy(2:in%num_particles:2)
     endif
 
 end subroutine set_rest_of_start_type
@@ -520,13 +519,13 @@ end subroutine set_verts_and_coordinate_limits
 
 subroutine allocate_start_type
 
-    use boltzmann_types_mod, only: start, u
+    use boltzmann_types_mod, only: start, in
 
-    allocate(start%x(3,u%num_particles))
-    allocate(start%pitch(u%num_particles))
-    allocate(start%energy(u%num_particles))
-    allocate(start%weight(u%num_particles))
-    allocate(start%jperp(u%num_particles))
+    allocate(start%x(3,in%num_particles))
+    allocate(start%pitch(in%num_particles))
+    allocate(start%energy(in%num_particles))
+    allocate(start%weight(in%num_particles))
+    allocate(start%jperp(in%num_particles))
 
 end subroutine allocate_start_type
 
@@ -548,7 +547,7 @@ end subroutine set_seed_for_random_numbers
 
 subroutine calc_collision_coefficients_for_all_tetrahedra(v0)
 
-    use boltzmann_types_mod, only: u, c
+    use boltzmann_types_mod, only: in, c
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge
     use constants, only: echarge,amp
@@ -612,14 +611,14 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(v0)
     if (j.lt.c%n) c%dens(j) = c%dens_mat(j,i)
     c%temp(j) = c%temp_mat(j,i)
     enddo
-    call collis_init(m0,z0,c%mass_num,c%charge_num,c%dens,c%temp,u%energy_eV,v0,efcolf,velrat,enrat)
+    call collis_init(m0,z0,c%mass_num,c%charge_num,c%dens,c%temp,in%energy_eV,v0,efcolf,velrat,enrat)
     c%efcolf_mat(:,i) = efcolf
     c%velrat_mat(:,i) = velrat
     c%enrat_mat(:,i) = enrat
     enddo
     
-    if (u%boole_precalc_collisions) then
-    allocate(c%randcol(u%num_particles,c%randcoli,3))
+    if (in%boole_precalc_collisions) then
+    allocate(c%randcol(in%num_particles,c%randcoli,3))
     call RANDOM_NUMBER(c%randcol)
     !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
     c%randcol(:,:,1:2:3) =  3.464102*(c%randcol(:,:,1:2:3)-.5)
@@ -628,7 +627,7 @@ end subroutine calc_collision_coefficients_for_all_tetrahedra
 
 subroutine carry_out_collisions(i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
 
-    use boltzmann_types_mod, only: u, c, time_t
+    use boltzmann_types_mod, only: in, c, time_t
     use collis_ions, only: stost
     use find_tetra_mod, only: find_tetra
     
@@ -665,11 +664,11 @@ subroutine carry_out_collisions(i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
     zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module 
     zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
     
-    if (u%boole_precalc_collisions) then
+    if (in%boole_precalc_collisions) then
     randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:) 
-    call stost(efcolf,velrat,enrat,zet,t%step,1,err,(u%time_step-t%confined)*v0,randnum)
+    call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*v0,randnum)
     else
-    call stost(efcolf,velrat,enrat,zet,t%step,1,err,(u%time_step-t%confined)*v0)
+    call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*v0)
     endif
     
     vpar = zet(5)*zet(4)*v0+vpar_background(1)
@@ -685,15 +684,15 @@ end subroutine carry_out_collisions
 
 subroutine initialize_exit_data
 
-    use boltzmann_types_mod, only: u, exit_data
+    use boltzmann_types_mod, only: in, exit_data
 
-    allocate(exit_data%lost(u%num_particles))
-    allocate(exit_data%t_confined(u%num_particles))
-    allocate(exit_data%x(3,u%num_particles))
-    allocate(exit_data%vpar(u%num_particles))
-    allocate(exit_data%vperp(u%num_particles))
-    allocate(exit_data%phi_0_mappings(u%num_particles))
-    allocate(exit_data%integration_step(u%num_particles))
+    allocate(exit_data%lost(in%num_particles))
+    allocate(exit_data%t_confined(in%num_particles))
+    allocate(exit_data%x(3,in%num_particles))
+    allocate(exit_data%vpar(in%num_particles))
+    allocate(exit_data%vperp(in%num_particles))
+    allocate(exit_data%phi_0_mappings(in%num_particles))
+    allocate(exit_data%integration_step(in%num_particles))
 
     exit_data%lost = 0
     exit_data%t_confined = 0.0d0
@@ -708,7 +707,7 @@ end subroutine initialize_exit_data
 
 subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_0_mappings)
 
-    use boltzmann_types_mod, only: exit_data, u
+    use boltzmann_types_mod, only: exit_data, in
 
     integer, intent(in)    :: i, n
     integer, optional      :: phi_0_mappings
@@ -727,37 +726,37 @@ subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_
 
 end subroutine update_exit_data
 
-end module main_routine_supporting_functions_mod
+end module calc_boltzmann_supporting_functions_mod
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-module boltzmann_writing_data_mod
+module write_data_to_files_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
     implicit none
 
-    public :: write_data_to_files, name_files, unlink_files
+    public :: write_data_to_files, give_file_names, unlink_files
 
 contains
 
 subroutine write_data_to_files
 
-    use boltzmann_types_mod, only: filenames, u, output, moment_specs
+    use boltzmann_types_mod, only: filenames, in, output, moment_specs
 
-    if (u%boole_write_vertex_indices) call write_vertex_indices
+    if (in%boole_write_vertex_indices) call write_vertex_indices
 
-    if (u%boole_write_vertex_coordinates) call write_vertex_coordinates
+    if (in%boole_write_vertex_coordinates) call write_vertex_coordinates
 
-    if (u%boole_write_prism_volumes) call write_prism_volumes
+    if (in%boole_write_prism_volumes) call write_prism_volumes
 
-    if (u%boole_write_refined_prism_volumes) call write_refined_prism_volumes
+    if (in%boole_write_refined_prism_volumes) call write_refined_prism_volumes
 
-    if (u%boole_write_boltzmann_density) call write_boltzmann_densities
+    if (in%boole_write_boltzmann_density) call write_boltzmann_densities
 
-    if (u%boole_write_electric_potential) call write_electric_potential
+    if (in%boole_write_electric_potential) call write_electric_potential
 
-    if (u%boole_write_moments) then
+    if (in%boole_write_moments) then
         if (moment_specs%n_moments.gt.0) then
             call write_moments
         else
@@ -766,7 +765,7 @@ subroutine write_data_to_files
         endif
     endif
 
-    if (u%boole_write_fourier_moments) then
+    if (in%boole_write_fourier_moments) then
         if (moment_specs%n_moments.gt.0) then
             call write_fourier_moments
         else
@@ -776,7 +775,7 @@ subroutine write_data_to_files
 
     endif
 
-    if (u%boole_write_exit_data) call write_exit_data
+    if (in%boole_write_exit_data) call write_exit_data
 
 end subroutine write_data_to_files
 
@@ -940,12 +939,12 @@ end subroutine write_fourier_moments
 
 subroutine write_exit_data
 
-    use boltzmann_types_mod, only: exit_data, filenames, u
+    use boltzmann_types_mod, only: exit_data, filenames, in
 
     integer :: ed_unit, i
 
     open(newunit = ed_unit, file = filenames%exit_data)
-    do i = 1,u%num_particles
+    do i = 1,in%num_particles
         write(ed_unit,*) i, exit_data%lost(i), exit_data%t_confined(i), exit_data%x(:,i), exit_data%vpar(i), &
                         exit_data%vperp(i), exit_data%integration_step(i), exit_data%phi_0_mappings(i)
     enddo
@@ -953,7 +952,7 @@ subroutine write_exit_data
 
 end subroutine write_exit_data
 
-subroutine name_files
+subroutine give_file_names
 
     use boltzmann_types_mod, only: filenames
 
@@ -971,7 +970,7 @@ subroutine name_files
     filenames%tetr_moments = 'tetr_moments.dat'
     filenames%exit_data = 'exit_data.dat'
 
-end subroutine name_files
+end subroutine give_file_names
 
 subroutine unlink_files
 
@@ -993,4 +992,4 @@ subroutine unlink_files
 
 end subroutine unlink_files
 
-end module boltzmann_writing_data_mod
+end module write_data_to_files_mod
