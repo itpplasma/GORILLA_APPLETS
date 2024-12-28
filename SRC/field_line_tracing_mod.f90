@@ -1,15 +1,17 @@
 module field_line_tracing_mod
+
+    use volume_integrals_and_sqrt_g_mod, only: sqrt_g
+
     implicit none
-!
+
     private
-!
+
     double precision :: time_step,energy_eV, min_poloidal_flux, max_poloidal_flux
     double precision, dimension(:,:), allocatable :: verts
     integer :: seed_option, num_particles,&
                & ind_a, ind_b, ind_c
     double precision :: n_particles, density, constant_part_of_weights, z_div_plate
     double complex, dimension(:,:), allocatable :: weights
-    double precision, dimension(:,:), allocatable :: sqrt_g
     double precision, dimension(:), allocatable :: J_perp, poloidal_flux, temperature_vector
     logical :: boole_linear_density_simulation, boole_linear_temperature_simulation, &
              & boole_poincare_plot, boole_divertor_intersection, boole_collisions, boole_point_source, boole_precalc_collisions, &
@@ -17,7 +19,7 @@ module field_line_tracing_mod
     double precision, dimension(:,:,:), allocatable :: randcol
     integer :: randcoli = int(1.0d5)
     integer :: n_poincare_mappings, n_mappings_ignored
-    integer :: pm_unit, di_unit, check_unit !file units
+    integer :: pm_unit, di_unit !file units
     type counter_t
         integer :: lost_particles = 0
         integer :: tetr_pushings = 0
@@ -27,134 +29,19 @@ module field_line_tracing_mod
         integer :: ignored_particles = 0
         integer :: integration_steps = 0
     end type counter_t
-!
+
     !Namelist for field_line_tracing input
     NAMELIST /field_line_tracing_nml/ time_step,energy_eV,n_particles,boole_poincare_plot,n_poincare_mappings,n_mappings_ignored, &
     & boole_divertor_intersection, z_div_plate,boole_point_source,boole_collisions, &
     & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
     & boole_linear_temperature_simulation,seed_option
-!
-    public :: calc_field_lines
-!
-contains
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
-subroutine read_field_line_tracing_inp()
-!
-    integer :: flt_inp_unit
 
-    open(newunit = flt_inp_unit, file='field_line_tracing.inp', status='unknown')
-    read(flt_inp_unit,nml=field_line_tracing_nml)
-    close(flt_inp_unit)
-!
-    print *,'GORILLA: Loaded input data from field_line_tracing.inp'
-end subroutine read_field_line_tracing_inp
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
-subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
-!
-    use constants, only: pi, ev2erg
-    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, ntetr
-    use find_tetra_mod, only: find_tetra
-    use tetra_grid_settings_mod, only: grid_kind
-    use tetra_physics_mod, only: coord_system
-    use collis_ions, only: collis_init, stost
-!
-    double precision, intent(in)                                   :: v0
-    double precision, dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
-    double precision                                               :: rand_scalar, vpar, vperp
-    double precision                                               :: amin, cmin, cmax, amax !is set globally
-    double precision, dimension(:), allocatable                    :: rand_vector
-    double precision, dimension(:), allocatable                    :: rand_matrix2
-    integer                                                        :: i
-    double precision, dimension(3)                                 :: x
-    integer                                                        :: ind_tetr_out,iface, seed_inp_unit
-!
-!!!!comment out the following section to make starting conditions really random!!!
-!
-    integer,dimension(:), allocatable                              :: seed
-    integer                                                        :: n
-!
-    open(newunit = seed_inp_unit, file='seed.inp', status='old',action = 'read')
-    read(seed_inp_unit,*) n
-    allocate(seed(n))
-    read(seed_inp_unit,*) seed
-    close(seed_inp_unit)
-    CALL RANDOM_SEED (PUT=seed)
-    deallocate(seed)
-!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!
-    allocate(start_pos_pitch_mat(5,num_particles))
-    allocate(rand_vector(num_particles))
-    allocate(rand_matrix2(num_particles))
-!
-    start_pos_pitch_mat = 0
-!
-    ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
-    ind_b = 2 !(phi in cylindrical and flux coordinates)
-    ind_c = 3 !(z in cylindrical coordinates, theta in flux coordinates)
-!
-    if (coord_system.eq.2) then
-        ind_b = 3
-        ind_c = 2
-    endif
-!
-    if (coord_system.eq.1) allocate(verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:))))
-    if (coord_system.eq.2) allocate(verts(size(verts_sthetaphi(:,1)),size(verts_sthetaphi(1,:))))
-    if (coord_system.eq.1) verts = verts_rphiz
-    if (coord_system.eq.2) verts = verts_sthetaphi
-!
-    amin = minval(verts(ind_a,:))
-    amax = maxval(verts(ind_a,:))
-    cmin = minval(verts(ind_c,:))
-    cmax = maxval(verts(ind_c,:))
-!
-    constant_part_of_weights = density*(amax-amin)*(cmax-cmin)*2*pi
-!
-    !compute starting conditions
-    if (boole_point_source) then
-        if (grid_kind.eq.2) then
-            start_pos_pitch_mat(1,:) = 160
-            start_pos_pitch_mat(2,:) = 0
-            start_pos_pitch_mat(3,:) = 70
-        elseif (grid_kind.eq.4) then
-            start_pos_pitch_mat(1,:) = 205
-            start_pos_pitch_mat(2,:) = 0
-            start_pos_pitch_mat(3,:) = 0
-        endif
-        if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
-    else
-        start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r
-        start_pos_pitch_mat(ind_b,:) = 0.0d0  !1d-1 !phi in cylindrical and flux coordinates
-        start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
-    endif
-!
-    start_pos_pitch_mat(4,:) = 1 !delete this once i have a proper subroutine for field line tracing
-!
-    call RANDOM_NUMBER(rand_matrix2)
-    if (boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        start_pos_pitch_mat(5,:) = 5*energy_eV*rand_matrix2(:) !boltzmann energy distribution
-        constant_part_of_weights = constant_part_of_weights*10/sqrt(pi)*energy_eV*ev2erg
-    endif
-!
-    weights(:,1) = constant_part_of_weights
-    if (boole_refined_sqrt_g.eqv..false.) weights(:,1) = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
-!
-    if (boole_precalc_collisions) then
-        allocate(randcol(num_particles,randcoli,3))
-        call RANDOM_NUMBER(randcol)
-        !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
-        randcol(:,:,1:2:3) =  3.464102*(randcol(:,:,1:2:3)-.5)
-    endif
-end subroutine calc_starting_conditions
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+    public :: calc_field_lines
+
+contains
+
 subroutine calc_field_lines
-!
+
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
     use constants, only: ev2erg,pi,echarge,ame,amp,clight
     use tetra_physics_mod, only: particle_mass,particle_charge,cm_over_e,mag_axis_R0, coord_system, tetra_physics
@@ -169,9 +56,8 @@ subroutine calc_field_lines
     use find_tetra_mod, only: find_tetra
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
-!
+    use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g
 
-!
     double precision, dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
                                                      velrat_mat, enrat_mat, dens_mat_tetr, temp_mat_tetr
     double precision :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v, maxcol
@@ -183,16 +69,16 @@ subroutine calc_field_lines
     double precision, dimension(5) :: z, zet
     double precision :: m0,z0
     double precision, dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
-    type(counter_t) counter, local_counter
+    type(counter_t) :: counter, local_counter
     integer :: ipert_unit, Te_unit, Ti_unit, ne_unit
-!
+
     !Load input for boltzmann computation
     call read_field_line_tracing_inp()
-!
+
     num_particles = int(n_particles)
     n_start = 1
     n_end = num_particles
-!
+
 
     open(newunit = ipert_unit, file='field_divB0.inp')
     read(ipert_unit,*) ipert        ! 0=eq only, 1=vac, 2=vac+plas no derivatives,
@@ -201,29 +87,29 @@ subroutine calc_field_lines
     !Initialize GORILLA
     call initialize_gorilla(i_option,ipert)
 
-!
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! delete this again afterwards !!!!!!!!!!!!!!!!!!!!!!!
     if (ispecies.eq.4) particle_charge = 15*echarge
     print*, 'particle charge number = ', particle_charge/echarge
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!
+
     allocate(weights(num_particles,1))
     allocate(J_perp(num_particles))
     allocate(poloidal_flux(num_particles))
     allocate(temperature_vector(num_particles))
-!
+
     poloidal_flux = 0
     temperature_vector = 0
-!
+
     call calc_square_root_g
-!
+
     !Compute velocity module from kinetic energy dependent on particle species
     v0=sqrt(2.d0*energy_eV*ev2erg/particle_mass)
-!
+
 print*, 'calc_starting_conditions started'
     call calc_starting_conditions(v0,start_pos_pitch_mat)
 print*, 'calc_starting_conditions finished'
-!
+
     max_poloidal_flux = 0
     min_poloidal_flux = tetra_physics(1)%Aphi1
     do i = 1, ntetr
@@ -231,7 +117,7 @@ print*, 'calc_starting_conditions finished'
                             & (verts([1,2,3],tetra_grid(i)%ind_knot(4))-verts([1,2,3],tetra_grid(i)%ind_knot(1)))))
         min_poloidal_flux = min(min_poloidal_flux,tetra_physics(i)%Aphi1)
     enddo
-!
+
     !write subroutine collis_precomp
     if (boole_collisions) then
         num_background_species = 2
@@ -260,24 +146,24 @@ print*, 'calc_starting_conditions finished'
         m0 = particle_mass/amp
         z0 = particle_charge/echarge
         print*, 'm0 = ', m0, 'z0 = ', z0
-!
+
 !!!!!!!!!!!!!!!!!!!! Alternative route is taken because data is not available per vertex but per tetrahedron !!!!!!!!!!!!!!!!!!!!!!!
-!
+
         allocate(dens_mat_tetr(num_background_species-1,ntetr))
         allocate(temp_mat_tetr(num_background_species,ntetr))
-!
+
         open(newunit = Te_unit, file = 'background/Te_d.dat')
         read(Te_unit,'(e16.9)') (temp_mat_tetr(2,i),i=1,ntetr/grid_size(2),3)
         close(Te_unit)
-!
+
         open(newunit = Ti_unit, file = 'background/Ti_d.dat')
         read(Ti_unit,'(e16.9)') (temp_mat_tetr(1,i),i=1,ntetr/grid_size(2),3)
         close(Ti_unit)
-!
+
         open(newunit = ne_unit, file = 'background/ne_d.dat')
         read(ne_unit,'(e16.9)') (dens_mat_tetr(1,i),i=1,ntetr/grid_size(2),3)
         close(ne_unit)
-!
+
         do i = 1,grid_size(2)-1
             temp_mat_tetr(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = temp_mat_tetr(:,1:ntetr/grid_size(2):3)
             dens_mat_tetr(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = dens_mat_tetr(:,1:ntetr/grid_size(2):3)
@@ -286,9 +172,7 @@ print*, 'calc_starting_conditions finished'
             temp_mat_tetr(:,1+i:ntetr:3) = temp_mat_tetr(:,1:ntetr:3)
             dens_mat_tetr(:,1+i:ntetr:3) = dens_mat_tetr(:,1:ntetr:3)
         enddo
-!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!
+
         do i = 1, ntetr
             do j = 1,num_background_species
                 !following if statement because electron density will be calculated in collis init
@@ -301,15 +185,15 @@ print*, 'calc_starting_conditions finished'
             enrat_mat(:,i) = enrat
         enddo
     endif
-!
+
         kpart = 0
         maxcol = 0
-!
+
         call unlink_files
         call open_files
-!
+
         if (boole_collisions) deallocate(efcolf,velrat,enrat)
-!
+
         !$OMP PARALLEL DEFAULT(NONE) &
         !$OMP& SHARED(num_particles,kpart,v0,time_step,boole_collisions, &
         !$OMP& dtau,dtaumin,n_start,n_end, &
@@ -320,11 +204,11 @@ print*, 'calc_starting_conditions finished'
         !$OMP& PRIVATE(n,boole_particle_lost,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized,t_step,err,zet, &
         !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr,v, &
         !$OMP& i,efcolf,velrat,enrat,vpar_background,randnum,j,local_counter)
-!
+
         print*, 'get number of threads', omp_get_num_threads()
         if (boole_collisions) allocate(efcolf(num_background_species),velrat(num_background_species),enrat(num_background_species))
         !$OMP DO
-!
+
         !Loop over particles
         do n = n_start,n_end !1,num_particles
             !if (.not.any(n.eq.(/31997,8046,16148,35518,12921,16318,3807,652,15296,19990,16976,6843,2603/))) cycle
@@ -346,11 +230,11 @@ endif
 
             t_step = time_step
             t_confined = 0
-!
+
             !You need x_rand_beg(1,3), pitchpar(1) (between -1 and 1), energy is already given
             x_rand_beg = start_pos_pitch_mat(1:3,n)
             pitchpar = start_pos_pitch_mat(4,n)
-!
+
             x = x_rand_beg
             vpar = pitchpar * v0
             vperp = sqrt(v0**2-vpar**2)
@@ -359,7 +243,7 @@ endif
                 vpar = pitchpar * v
                 vperp = sqrt(v**2-vpar**2)
             endif
-!
+
             i = 0
             do while (t_confined.lt.time_step)
                 i = i+1
@@ -367,7 +251,7 @@ endif
                 if (i.eq.1) then
                     boole_initialized = .false.
                 endif
-!
+
                 if (boole_collisions) then
                     if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
                     if (.not.(ind_tetr.eq.-1)) then
@@ -401,10 +285,10 @@ endif
                         !cm_over_e = clight*particle_mass/particle_charge
                     endif
                 endif
-!
+
                 call orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, &
                                 & n,v,start_pos_pitch_mat,local_counter,t_remain)
-!
+
                 t_confined = t_confined + t_step - t_remain
                 !Lost particle handling
                 if(ind_tetr.eq.-1) then
@@ -417,7 +301,7 @@ endif
                         boole_particle_lost = .true.
                     exit
                 endif
-!
+
                 v = sqrt(vpar**2+vperp**2)
             enddo
             !$omp critical
@@ -428,9 +312,9 @@ endif
         enddo !n
         !$OMP END DO
         !$OMP END PARALLEL
-!
+
         call close_files
-!
+
 if (boole_precalc_collisions) print*, "maxcol = ", maxcol
 print*, 'average number of pushings = ', counter%tetr_pushings/n_particles
 print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/n_particles
@@ -442,16 +326,14 @@ endif
 print*, 'tracing time in seconds = ', time_step
 print*, 'Number of lost particles',counter%lost_particles
 print*, 'number of particles still in orbit after tracing time has passed = ', counter%survived_particles
-!
+
 deallocate(start_pos_pitch_mat)
-!
+
 end subroutine calc_field_lines
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
 subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initialized,ind_tetr,iface, n,v,start_pos_pitch_mat, &
                                           & local_counter,t_remain_out)
-!
+
     use pusher_tetra_rk_mod, only: pusher_tetra_rk,initialize_const_motion_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly,initialize_const_motion_poly
     use pusher_tetra_field_lines_mod, only: pusher_tetra_field_lines
@@ -464,9 +346,7 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
     use find_tetra_mod, only: find_tetra
     use constants, only: pi, ev2erg
     use tetra_grid_mod, only: tetra_grid, ntetr
-!
 
-!
     double precision, dimension(3), intent(inout)   :: x
     double precision, intent(inout)                 :: vpar,vperp
     double precision, intent(in)                    :: t_step
@@ -480,34 +360,34 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
     double precision                                :: perpinv,speed, r, z, phi, B, phi_elec_func, wlin
     double precision, dimension(:,:)                :: start_pos_pitch_mat
     double precision, dimension(3)                  :: xyz, xyz_save
-    type(counter_t), intent(inout)              :: local_counter
+    type(counter_t), intent(inout)                  :: local_counter
 
-!
+
     !If orbit_timestep is called for the first time without grid position
     if(.not.boole_initialized) then
-!
+
         !Check coordinate domain (optionally perform modulo operation)
         call check_coordinate_domain(x)
-!
+
         !Find tetrahedron index and face index for position x
         call find_tetra(x,vpar,vperp,ind_tetr,iface)
-!
+
         !If particle doesn't lie inside any tetrahedron
         if(ind_tetr.eq.-1) then
             t_remain_out = t_step
             return
         endif
-!
+
         r = x(1) - verts(1, tetra_grid(ind_tetr)%ind_knot(1))
         z = x(3) - verts(3,tetra_grid(ind_tetr)%ind_knot(1))
         phi = x(2) - verts(2,tetra_grid(ind_tetr)%ind_knot(1))
-!
+
         if (boole_refined_sqrt_g) then
             weights(n,1) = weights(n,1)* &
                                     &  (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
                                     &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
         endif
-!
+
         if (boole_linear_density_simulation.or.boole_linear_temperature_simulation) then
             poloidal_flux(n) = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*(/r,phi,z/)) + &
                                              & cm_over_e*vpar*&
@@ -516,7 +396,7 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
         if (boole_linear_density_simulation) then
             weights(n,1) = weights(n,1)*(max_poloidal_flux*1.1-poloidal_flux(n))/(max_poloidal_flux*1.1)
         endif
-!
+
         if (boole_boltzmann_energies) then
             !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
             phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*(/r,phi,z/))
@@ -529,53 +409,53 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
                 & exp(-(start_pos_pitch_mat(5,n)*ev2erg+particle_charge*phi_elec_func)/temperature_vector(n))
             endif
         endif
-!
+
         !compute J_perp for perpendicular pressure
         B = tetra_physics(ind_tetr)%bmod1+sum(tetra_physics(ind_tetr)%gb*(/r,phi,z/))
         J_perp(n) = particle_mass*v**2*(1-start_pos_pitch_mat(4,n)**2)*cm_over_e/(2*B)*(-1)
         !-1 because of negative gyrophase
-!
+
         boole_initialized = .true.
     endif
-!
+
     !Exit the subroutine after initialization, if time step equals zero
     if(t_step.eq.0.d0) return
-!
+
     !Squared perpendicular velocity
     vperp2 = vperp**2
-!
+
     !Compute relative particle position
     z_save = x-tetra_physics(ind_tetr)%x1
-!
+
     !Compute perpendicular invariant of particle
     perpinv=-0.5d0*vperp2/bmod_func(z_save,ind_tetr)
-!
+
     !Integrate particle orbit for given time step
     t_remain = t_step
-!
+
     !Logical for handling time integration
     boole_t_finished = .false.
-!
+
     local_counter%tetr_pushings = local_counter%tetr_pushings - 1 !set tetr_pushings to -1 because when entering the loop
     !it wil go back to one without pushing
 
     !Loop for tetrahedron pushings until t_step is reached
     do
-!
+
         local_counter%tetr_pushings = local_counter%tetr_pushings + 1
         !Domain Boundary
         if(ind_tetr.eq.-1) then
-            print *, 'WARNING: Particle lost.'
+            !print *, 'WARNING: Particle lost.'
             if( present(t_remain_out)) then
                 t_remain_out = t_remain
             endif
             exit
         endif
-!
+
         ind_tetr_save = ind_tetr
         vpar_save = vpar
         x_save = x
-!
+
         !Calculate trajectory
         call pusher_tetra_field_lines(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper_phi)
 
@@ -609,7 +489,7 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
             local_counter%ignored_particles  = 1
            endif
         endif
-!
+
         !Orbit stops within cell, because "flight"-time t_step has finished
         if(boole_t_finished) then
             if(present(t_remain_out)) then
@@ -618,25 +498,23 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
             !if (x(3).gt.z_div_plate) print*, n, x, ind_tetr
             exit
         endif
-!
+
     enddo !Loop for tetrahedron pushings
-!
+
     !Compute vperp from position
     vperp = vperp_func(z_save,perpinv,ind_tetr_save)
-!
+
 end subroutine orbit_timestep_gorilla_field_lines
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
 subroutine calc_plane_intersection(x_save,x,z_plane)
-!
+
     use constants, only : pi
-!
+
     double precision, dimension(3), intent(in) :: x_save
     double precision, dimension(3), intent(inout) :: x
     double precision, intent(in) :: z_plane
     double precision :: rel_dist_z
-!
+
     rel_dist_z = (z_plane-x_save(3))/(x(3)-x_save(3))
     x(1) = x_save(1) + rel_dist_z*(x(1)-x_save(1))
     if (abs(x(2)-x_save(2)).gt.pi) then
@@ -645,37 +523,32 @@ subroutine calc_plane_intersection(x_save,x,z_plane)
         x(2) = x_save(2) + rel_dist_z*(x(2)-x_save(2))
     endif
     x(3) = z_plane
-!
+
 end subroutine calc_plane_intersection
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
 subroutine cyl_to_cart(xcyl,xcart)
-!
+
     double precision, dimension(3), intent(in) :: xcyl
     double precision, dimension(3), intent(out) :: xcart
-!
+
     xcart(1) = xcyl(1)*cos(xcyl(2))
     xcart(2) = xcyl(1)*sin(xcyl(2))
     xcart(3) = xcyl(3)
-!
+
 end subroutine cyl_to_cart
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
 subroutine cart_to_cyl(xcart,xcyl)
-!
+
     double precision, dimension(3), intent(in) :: xcart
     double precision, dimension(3), intent(out) :: xcyl
-!
+
     xcyl(1) = hypot(xcart(1),xcart(2))
     xcyl(2) = atan2(xcart(2),xcart(1))
     xcyl(3) = xcart(3)
 end subroutine cart_to_cyl
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
 subroutine set_counters_zero(local_counter)
-!
+
     type(counter_t), intent(inout) :: local_counter
 
     local_counter%lost_particles = 0
@@ -686,85 +559,148 @@ subroutine set_counters_zero(local_counter)
     local_counter%ignored_particles = 0
 
 end subroutine set_counters_zero
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
 subroutine add_local_counter_to_counter(local_counter,counter)
-!
+
         type(counter_t), intent(in) :: local_counter
         type(counter_t), intent(inout) :: counter
-!
+
         counter%lost_particles = counter%lost_particles + local_counter%lost_particles
         counter%tetr_pushings = counter%tetr_pushings + local_counter%tetr_pushings
         counter%phi_0_mappings = counter%phi_0_mappings + local_counter%phi_0_mappings
         counter%divertor_intersections = counter%divertor_intersections + local_counter%divertor_intersections
         counter%survived_particles = counter%survived_particles + local_counter%survived_particles
         counter%ignored_particles = counter%ignored_particles + local_counter%ignored_particles
-!
+
 end subroutine add_local_counter_to_counter
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
-subroutine calc_square_root_g
-!
-    use tetra_physics_mod, only: tetra_physics, hamiltonian_time
-    use tetra_grid_mod, only: ntetr, tetra_grid, verts_rphiz
-!
-    integer            :: ind_tetr
-!
-    allocate(sqrt_g(ntetr,7))
-    !compare first 6 entries with chapter 4.5 of master thesis from Jonatan Schatzlmayr, entry 7 is the radius (old metric determinant)
-!
-    do ind_tetr = 1, ntetr
-        sqrt_g(ind_tetr,1) = hamiltonian_time(ind_tetr)%h1_in_curlA
-!
-        sqrt_g(ind_tetr,2) = tetra_physics(ind_tetr)%gh1(1)*tetra_physics(ind_tetr)%curlA(1) + &
-                            & tetra_physics(ind_tetr)%gh2(1)*tetra_physics(ind_tetr)%curlA(2) + &
-                            & tetra_physics(ind_tetr)%gh3(1)*tetra_physics(ind_tetr)%curlA(3)
-!
-        sqrt_g(ind_tetr,3) = tetra_physics(ind_tetr)%gh1(3)*tetra_physics(ind_tetr)%curlA(1) + &
-                            & tetra_physics(ind_tetr)%gh2(3)*tetra_physics(ind_tetr)%curlA(2) + &
-                            & tetra_physics(ind_tetr)%gh3(3)*tetra_physics(ind_tetr)%curlA(3)
-!
-        sqrt_g(ind_tetr,4) = tetra_physics(ind_tetr)%bmod1
-!
-        sqrt_g(ind_tetr,5) = tetra_physics(ind_tetr)%gB(1)
-!
-        sqrt_g(ind_tetr,6) = tetra_physics(ind_tetr)%gB(3)
-!
-        sqrt_g(ind_tetr,7) = verts_rphiz(1,tetra_grid(ind_tetr)%ind_knot(1))
-    enddo
-!
-end subroutine calc_square_root_g
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
 subroutine unlink_files
-!
+
     call unlink('poincare_maps.dat')
     call unlink('divertor_intersections.dat')
     call unlink('check.dat')
-!
+
 end subroutine unlink_files
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
 subroutine open_files
-!
+
     open(newunit = pm_unit, file = 'poincare_maps.dat')
     open(newunit = di_unit, file = 'divertor_intersections.dat')
-    open(newunit = check_unit, file = 'check.dat')
-!
+
 end subroutine open_files
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
 subroutine close_files
-!
+
     close(pm_unit)
     close(di_unit)
-    close(check_unit)
-!
+
 end subroutine close_files
-!
+
+subroutine read_field_line_tracing_inp()
+
+    integer :: flt_inp_unit
+
+    open(newunit = flt_inp_unit, file='field_line_tracing.inp', status='unknown')
+    read(flt_inp_unit,nml=field_line_tracing_nml)
+    close(flt_inp_unit)
+
+    print *,'GORILLA: Loaded input data from field_line_tracing.inp'
+end subroutine read_field_line_tracing_inp
+
+subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
+
+    use constants, only: pi, ev2erg
+    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, ntetr
+    use find_tetra_mod, only: find_tetra
+    use tetra_grid_settings_mod, only: grid_kind
+    use tetra_physics_mod, only: coord_system
+    use collis_ions, only: collis_init, stost
+
+    double precision, intent(in)                                   :: v0
+    double precision, dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
+    double precision                                               :: rand_scalar, vpar, vperp
+    double precision                                               :: amin, cmin, cmax, amax !is set globally
+    double precision, dimension(:), allocatable                    :: rand_vector
+    double precision, dimension(:), allocatable                    :: rand_matrix2
+    integer                                                        :: i
+    double precision, dimension(3)                                 :: x
+    integer                                                        :: ind_tetr_out,iface, seed_inp_unit
+
+!!!!comment out the following section to make starting conditions really random!!!
+
+    integer,dimension(:), allocatable                              :: seed
+    integer                                                        :: n
+
+    open(newunit = seed_inp_unit, file='seed.inp', status='old',action = 'read')
+    read(seed_inp_unit,*) n
+    allocate(seed(n))
+    read(seed_inp_unit,*) seed
+    close(seed_inp_unit)
+    CALL RANDOM_SEED (PUT=seed)
+    deallocate(seed)
+
+    allocate(start_pos_pitch_mat(5,num_particles))
+    allocate(rand_vector(num_particles))
+    allocate(rand_matrix2(num_particles))
+
+    start_pos_pitch_mat = 0
+
+    ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
+    ind_b = 2 !(phi in cylindrical and flux coordinates)
+    ind_c = 3 !(z in cylindrical coordinates, theta in flux coordinates)
+
+    if (coord_system.eq.2) then
+        ind_b = 3
+        ind_c = 2
+    endif
+
+    if (coord_system.eq.1) allocate(verts(size(verts_rphiz(:,1)),size(verts_rphiz(1,:))))
+    if (coord_system.eq.2) allocate(verts(size(verts_sthetaphi(:,1)),size(verts_sthetaphi(1,:))))
+    if (coord_system.eq.1) verts = verts_rphiz
+    if (coord_system.eq.2) verts = verts_sthetaphi
+
+    amin = minval(verts(ind_a,:))
+    amax = maxval(verts(ind_a,:))
+    cmin = minval(verts(ind_c,:))
+    cmax = maxval(verts(ind_c,:))
+
+    constant_part_of_weights = density*(amax-amin)*(cmax-cmin)*2*pi
+
+    !compute starting conditions
+    if (boole_point_source) then
+        if (grid_kind.eq.2) then
+            start_pos_pitch_mat(1,:) = 160
+            start_pos_pitch_mat(2,:) = 0
+            start_pos_pitch_mat(3,:) = 70
+        elseif (grid_kind.eq.4) then
+            start_pos_pitch_mat(1,:) = 205
+            start_pos_pitch_mat(2,:) = 0
+            start_pos_pitch_mat(3,:) = 0
+        endif
+        if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
+    else
+        start_pos_pitch_mat(ind_a,:) = (/(214 + i*(216-214)/n_particles, i=1,num_particles)/)!r
+        start_pos_pitch_mat(ind_b,:) = 0.0d0  !1d-1 !phi in cylindrical and flux coordinates
+        start_pos_pitch_mat(ind_c,:) = 12d0 !z in cylindrical, theta in flux coordinates
+    endif
+
+    start_pos_pitch_mat(4,:) = 1 !delete this once i have a proper subroutine for field line tracing
+
+    call RANDOM_NUMBER(rand_matrix2)
+    if (boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+        start_pos_pitch_mat(5,:) = 5*energy_eV*rand_matrix2(:) !boltzmann energy distribution
+        constant_part_of_weights = constant_part_of_weights*10/sqrt(pi)*energy_eV*ev2erg
+    endif
+
+    weights(:,1) = constant_part_of_weights
+    if (boole_refined_sqrt_g.eqv..false.) weights(:,1) = constant_part_of_weights*start_pos_pitch_mat(ind_a,:)
+
+    if (boole_precalc_collisions) then
+        allocate(randcol(num_particles,randcoli,3))
+        call RANDOM_NUMBER(randcol)
+        !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
+        randcol(:,:,1:2:3) =  3.464102*(randcol(:,:,1:2:3)-.5)
+    endif
+end subroutine calc_starting_conditions
+
 end module field_line_tracing_mod

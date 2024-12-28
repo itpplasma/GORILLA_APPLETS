@@ -7,7 +7,7 @@
  !Electrostatic potential within the plasma volume in Gaussian units:
  !The potential is realised in GORILLA as a rescaling of the toroidal flux by eps_Phi.
  !This results in surfaces of equal potential coinciding with the flux surfaces and an electric field perpendicular to them
- eps_Phi =  1.d-6 , !1.d-6
+ eps_Phi =  0.0d0 , !1.d-6,
 !
  !Coordinate system
  !1 ... (R,phi,Z) cylindrical coordinate system
@@ -17,8 +17,8 @@
 !------------------------------------------------------------------------------------------------------------!
 !
  !particle species
- !1 ... electron, 2 ... deuterium ion, 3 ... alpha particle
- ispecies = 1 ,
+ !1 ... electron, 2 ... deuterium ion, 3 ... alpha particle, 4 ... ionised tungsten
+ ispecies = 3 ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
@@ -40,7 +40,7 @@
  boole_pusher_ode45 = .false. ,
 ! 
  !ODE45 relative accuracy (pusher_orbit)
- rel_err_ode45 = 1.E-8 ,
+ rel_err_ode45 = 1.E-10 ,
 !
  !Physical time - orbit parameter relation
  !false ... dt_dtau is a linear function of position in each tetrahedron
@@ -127,10 +127,10 @@
 !------------------------------------------------------------------------------------------------------------!
 !
  !Switches to calculate optional quantities
- boole_time_hamiltonian = .true. ,
- boole_gyrophase = .true. ,
- boole_vpar_int = .true. ,
- boole_vpar2_int = .true. ,
+ boole_time_hamiltonian = .false. ,
+ boole_gyrophase = .false. ,
+ boole_vpar_int = .false. ,
+ boole_vpar2_int = .false. ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
@@ -153,14 +153,14 @@
 !------------------------------------------------------------------------------------------------------------!
 !
   !boolean for precalculation of rectangular grid to improve find_tetra (sensible for n_particles >> 1)
-  boole_grid_for_find_tetra = .true. ,
+  boole_grid_for_find_tetra = .false. ,
   a_factor = 2 ,
   b_factor = 0 ,!if either b_factor or c_factor are set to zero, they are calculated automatically such as to make delta_b and delta_c to be about in the range of delta_a (see module find tetra)
   c_factor = 0 ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
-!In the guiding center theory of the default implementation the electric field is assumed to be weak 
+ !In the guiding center theory of the default implementation the electric field is assumed to be weak 
  !compared to the magnetic field. In case of the investigation of impurities in WEST geometry
  !(Soledge3X-EIRENE, cylindrical coordinates only) additional terms have to be included in the dynamics
 !
@@ -174,7 +174,7 @@
 
  !Filenames for storing electric field and drift velocity
  filename_electric_field = 'electric_field.dat',
- filename_electric_drift = 'electric_drift.dat'
+ filename_electric_drift = 'electric_drift.dat',
 !
 !------------------------------------------------------------------------------------------------------------!
 !

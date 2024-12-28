@@ -12,9 +12,9 @@
   use direct_vmec_integrator_mod, only: direct_vmec_integrator
   use poincare_invariances_mod, only: compute_first_poincare_invariance
   use reversibility_test_mod, only: make_reversibility_test
-  use total_dwell_times_mod, only: calc_total_dwell_times
   use boltzmann_mod, only: calc_boltzmann
   use field_line_tracing_mod, only: calc_field_lines
+  use divertor_heat_loads_mod, only: calc_divertor_heat_loads
 !
   implicit none
 !
@@ -114,24 +114,25 @@
 !
 !-------------------------------------------------------------------------------------------!
 !
-        case(9) !Compute total dwell times
-!
-            call calc_total_dwell_times
-!
-!-------------------------------------------------------------------------------------------!
-!
-        case(10) !Do the boltzmanntest
+        case(9) !Do the boltzmanntest
 !
             call calc_boltzmann
 !
 !-------------------------------------------------------------------------------------------!
 !
-        case(11) !Do field line tracing
+        case(10) !Do field line tracing
 !
             call calc_field_lines
 !
 !-------------------------------------------------------------------------------------------!
 !
+        case(11) !Calculate divertor heat loads
+!
+            call calc_divertor_heat_loads
+!
+!-------------------------------------------------------------------------------------------!
+!
+            
     end select
 !
   end program gorilla_applets_main

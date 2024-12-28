@@ -5,11 +5,18 @@
 !
 !------------------------------------------------------------------------------------------------------------!
 !
- !Fluxtube volume OR mono-energetic radial transport coefficient OR numerical diffusion coefficient
+ !Choice of application
  !1 ... Pre-computation of fluxtube volume for GORILLA
  !2 ... Computation of mono-energetic transport coefficient for given collisionality and Mach number
  !3 ... Scan over collisionality: Computation of mono-energetic transport coefficent for constant Mach number
  !4 ... Computation of numerical diffusion coefficient (No collisions)
+ !5 ... Computation of alpha particle lifetime
+ !6 ... Demonstrate direct VMEC integrator
+ !7 ... Computation of first Poincare invariance
+ !8 ... Perform a reversibility test (demonstrate negative time)
+ !9 ... Perform a bolzmann test
+ !10 .. Do field line tracing
+ !11 .. Compute divertor heat loads
  i_option = 10 ,
 !
 !------------------------------------------------------------------------------------------------------------!
