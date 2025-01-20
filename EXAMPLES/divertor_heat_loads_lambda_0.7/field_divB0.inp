@@ -1,7 +1,7 @@
-0                                 ipert        ! 0=eq only, 1=vac, 2,3=vac+plas
+1                                 ipert        ! 0=eq only, 1=vac, 2,3=vac+plas
 1                                 iequil       ! 0=pert. alone, 1=with equil.
-1.00                              ampl         ! amplitude of perturbation, a.u.
-72                                ntor         ! number of toroidal harmonics
+0.25                              ampl         ! amplitude of perturbation, a.u.
+4 72                                ntor         ! number of toroidal harmonics
 0.99                              cutoff       ! inner cutoff in psi/psi_a units
 4                                 icftype      ! type of coil file
 'see_tetra_grid_inp'              gfile        ! equilibrium file
@@ -10,7 +10,7 @@
 'DATA/ASDEX/FLUXDATA'                  fluxdatapath ! directory with data in flux coord.
 0                                 window size for filtering of psi array over R
 0                                 window size for filtering of psi array over Z
-0                                 iaxieq      ! format of axisymmetric equilibrium file, 0 for EFIT, 1 for WEST. If this line is absent, default is iaxieq=0
+1                                 iaxieq      ! format of axisymmetric equilibrium file, 0 for EFIT, 1 for WEST. If this line is absent, default is iaxieq=0
 
 
 
