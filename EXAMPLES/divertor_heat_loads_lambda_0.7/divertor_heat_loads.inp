@@ -3,17 +3,17 @@
 &divertor_heat_loads_nml
 !
   !time for tracing particles
-  time_step = 1.0d-3 ,
+  time_step = 1.0d1 ,
 !
   !Kinetic energy of particles
   energy_eV = 3.5d3 ,
 !
   !Number of particles to be traced
-  n_particles = 1.0d2 ,
+  n_particles = 1.0d3 ,
 !
   !pitch angle (only strictly valid for first particle. Other particles will have slightly differing values such that 
   !perpendicular invariant remains constant)
-  lambda = 0.7d0 ,
+  lambda = 0.8d0 ,
 !
   !Compute divertor intersections
   boole_divertor_intersection  = .true.,
@@ -25,7 +25,7 @@
   n_poincare_mappings = 3000 ,
 !
   !Number of poincare mappings which are ignored at the beginning of the run
-  n_mappings_ignored = 0,
+  n_mappings_ignored = 10,
 !
   !Compute squares of moments 
   boole_squared_moments = .false.,

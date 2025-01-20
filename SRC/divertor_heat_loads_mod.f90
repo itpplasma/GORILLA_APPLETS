@@ -261,7 +261,7 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,particle_status,ind_tetr,iface
     boole_t_finished = .false.
     local_counter%tetr_pushings = local_counter%tetr_pushings -1 !set tetr_pushings to -1 because when entering the loop it will go back to one without pushing
     ! if (n.eq.1) then
-    !     print*, bmod_func(z_save,ind_tetr)
+    !     print*, 'hello', x, bmod_func(z_save,ind_tetr)
     !     stop
     ! endif
     !open(581,file = 'banana_orbit.dat')
@@ -342,7 +342,7 @@ subroutine calc_and_write_divertor_intersections(x_save,x,n,local_counter,partic
 
     if (x(3).lt.z_divertor_plate) then
         particle_status%exit = .true.
-       if (local_counter%phi_0_mappings.gt.10) then
+       if (local_counter%phi_0_mappings.gt.in%n_mappings_ignored) then
             x_intersection = x
             call calc_plane_intersection(x_save,x_intersection,z_divertor_plate)
             x = x_intersection

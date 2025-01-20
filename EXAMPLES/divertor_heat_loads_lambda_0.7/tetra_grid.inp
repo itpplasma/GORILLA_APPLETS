@@ -5,22 +5,24 @@
 !    
  !Grid Size
  !Rectangular: nR, Field-aligned: ns
- n1 = 30 ,
+ n1 = 200 ,
  !Rectangular: nphi, Field-aligned: nphi                  			
  n2 = 30, 
  !Rectangular: nZ, Field-aligned: ntheta                          		
- n3 = 30 ,
+ n3 = 200 ,
 !
  !Grid kind
  !1 ... rectangular grid for axisymmetric EFIT data (g-file)
  !2 ... field-aligned grid for axisymmetric EFIT data (g-file) (z.b. ASDEX)
  !3 ... field-aligned grid for non-axisymmetric VMEC (netcdf)
  !4 ... SOLEDGE3X_EIRENE grid (WEST)
- grid_kind = 2 ,
+ grid_kind = 1 ,
 !
  !MHD equilibrium filename
- g_file_filename = 'MHD_EQUILIBRIA/g_file_for_test' ,
- convex_wall_filename = 'MHD_EQUILIBRIA/convex_wall_for_test.dat' ,
+ !g_file_filename = 'MHD_EQUILIBRIA/g_file_for_test' ,
+ g_file_filename = 'DATA/ASDEX/g26884.4300' ,
+ !convex_wall_filename = 'MHD_EQUILIBRIA/convex_wall_for_test.dat' ,
+ convex_wall_filename = 'DATA/ASDEX/convexwall.dat' ,
  netcdf_filename = 'MHD_EQUILIBRIA/netcdf_file_for_test.nc' ,
 !
  !MESH_SOLEDGE3X_EIRENE filename
@@ -36,7 +38,7 @@
  n_field_periods_manual =  1 ,
 !
  !Symmetry Flux Coordinates Annulus (Minimal value for flux coordinates s)
- sfc_s_min = 1.d-1 ,
+ sfc_s_min = 1.d-8 ,
 !
  !Option for $\theta$-variable being used in grid
  ! 1 ... theta scaling in symmetry flux coordinates
@@ -62,5 +64,3 @@
 !------------------------------------------------------------------------------------------------------------!
 !    
 /
-
-
