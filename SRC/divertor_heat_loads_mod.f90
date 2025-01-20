@@ -290,8 +290,11 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,particle_status,ind_tetr,iface
 
         t_remain = t_remain - t_pass
 
-        !call calc_and_write_poincare_mappings_and_divertor_intersections(x_save,x,n,iper_phi,local_counter,particle_status)
-        if(in%boole_poincare_plot)          call calc_and_write_poincare_mappings(x,iper_phi,local_counter,particle_status)
+        if(iper_phi.ne.0) then
+            local_counter%phi_0_mappings = local_counter%phi_0_mappings + 1
+            if(in%boole_poincare_plot) call calc_and_write_poincare_mappings(x,iper_phi,local_counter,particle_status)
+        endif
+        
         if(in%boole_divertor_intersection)  call calc_and_write_divertor_intersections(x_save,x,n,local_counter,particle_status)
         call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities)
         if(particle_status%exit.or.boole_t_finished) then
@@ -315,16 +318,15 @@ subroutine calc_and_write_poincare_mappings(x,iper_phi,local_counter,particle_st
     type(counter_t), intent(inout)         :: local_counter
     type(particle_status_t), intent(inout) :: particle_status
 
-    if (iper_phi.ne.0) then
-        local_counter%phi_0_mappings = local_counter%phi_0_mappings + 1!iper_phi
-        if ((local_counter%phi_0_mappings.ge.in%n_mappings_ignored) &
-            .and.(local_counter%phi_0_mappings.le.in%n_poincare_mappings)) then
-            !$omp critical
-                write(iunits%pm,*) x
-            !$omp end critical
-        endif
-        if (local_counter%phi_0_mappings.ge.in%n_poincare_mappings) particle_status%exit = .true.
+    if ((local_counter%phi_0_mappings.ge.in%n_mappings_ignored) &
+        .and.(local_counter%phi_0_mappings.le.in%n_poincare_mappings)) then
+        !$omp critical
+            write(iunits%pm,*) x
+        !$omp end critical
     endif
+
+    if ((local_counter%phi_0_mappings.ge.in%n_poincare_mappings).and. &
+                                (in%boole_divertor_intersection.eqv..false.)) particle_status%exit = .true.
 
 end subroutine calc_and_write_poincare_mappings
 
