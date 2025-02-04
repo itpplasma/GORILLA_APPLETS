@@ -62,5 +62,6 @@
   boole_write_electric_potential = .false. ,
   boole_write_moments = .false. ,
   boole_write_fourier_moments = .true. ,
-  boole_write_exit_data = .true.
+  boole_write_exit_data = .true. ,
+  boole_write_grid_data = .true.
 /

@@ -207,10 +207,6 @@ subroutine calc_divertor_heat_loads
     PRINT*, 'temperature = ', ev2erg*in%energy_eV
     print*, 'energy in eV = ', in%energy_eV
     print*, 'tracing time in seconds = ', in%time_step
-    if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-         print*, 'number of particles left through the outside = ', counter%lost_outside
-         print*, 'number of particles left through the inside = ', counter%lost_inside
-    endif
 
 end subroutine calc_divertor_heat_loads
 
@@ -260,19 +256,11 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,particle_status,ind_tetr,iface
     t_remain = t_step
     boole_t_finished = .false.
     local_counter%tetr_pushings = local_counter%tetr_pushings -1 !set tetr_pushings to -1 because when entering the loop it will go back to one without pushing
-    ! if (n.eq.1) then
-    !     print*, 'hello', x, bmod_func(z_save,ind_tetr)
-    !     stop
-    ! endif
-    !open(581,file = 'banana_orbit.dat')
 
     do !Loop for tetrahedron pushings until t_step is reached
         local_counter%tetr_pushings = local_counter%tetr_pushings +1
 
         if(ind_tetr.eq.-1) then
-            if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-                call categorize_lost_particles(ind_tetr_save,z_save,local_counter,t_remain,t_remain_out)
-            endif
             exit
         endif
 
@@ -368,7 +356,7 @@ subroutine calc_plane_intersection(x_save,x,z_plane)
     rel_dist_z = (z_plane-x_save(3))/(x(3)-x_save(3))
     x(1) = x_save(1) + rel_dist_z*(x(1)-x_save(1))
     if (abs(x(2)-x_save(2)).gt.pi) then
-    x(2) = modulo(x_save(2) + 2*pi-abs(x(2)-x_save(2)),2*pi)
+    x(2) = modulo(x_save(2) + 2.0_dp*pi-abs(x(2)-x_save(2)),2*pi)
     else
     x(2) = x_save(2) + rel_dist_z*(x(2)-x_save(2))
     endif
@@ -482,10 +470,13 @@ subroutine create_magnetic_field_file
     integer :: unit, i, j, k, n
     real(dp), dimension(:), allocatable :: R, phi, Z
 
+    print*, 'ATTENTION: the subroutine create_magnetic_field_file prints magnetic field and vector potential at points evenly &
+             spaced in r, phi and z direction even if in GORILLA they are spaced differently (e.g. close to the magnetic axis, &
+             near resonant surfaces or when not working with cylindrical coordinates and grid_kind = 1)'
     filename = "field_from_gorilla"
 
     limits(1,:) = (/g%amin,g%amax/) !R
-    limits(2,:) = (/0.0_dp,2*pi/) !phi
+    limits(2,:) = (/0.0_dp,2.0_dp*pi/) !phi
     limits(3,:) = (/g%cmin,g%amax/) !Z
     n_points = (/n1, n2, n3/)
     is_periodic = (/.false.,.true.,.false./)

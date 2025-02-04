@@ -15,7 +15,8 @@ subroutine read_boltzmann_inp_into_type
                boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
-               boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data
+               boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
+               boole_write_grid_data
     integer :: i_integrator_type, seed_option
 
     integer :: b_inp_unit
@@ -25,7 +26,7 @@ subroutine read_boltzmann_inp_into_type
     & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
     & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
-    & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data
+    & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, boole_write_grid_data
 
     open(newunit = b_inp_unit, file='boltzmann.inp', status='unknown')
     read(b_inp_unit,nml=boltzmann_nml)
@@ -56,6 +57,7 @@ subroutine read_boltzmann_inp_into_type
     in%boole_write_moments = boole_write_moments
     in%boole_write_fourier_moments = boole_write_fourier_moments
     in%boole_write_exit_data = boole_write_exit_data
+    in%boole_write_grid_data = boole_write_grid_data
 
     print *,'GORILLA: Loaded input data from boltzmann.inp'
 
@@ -100,7 +102,7 @@ subroutine calc_boltzmann
     print*, 'particle charge number = ', particle_charge/echarge
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    v0=sqrt(2.d0*in%energy_eV*ev2erg/particle_mass)
+    v0=sqrt(2.0_dp*in%energy_eV*ev2erg/particle_mass)
     kpart = 0
     iantithetic = 1
     if (in%boole_antithetic_variate) iantithetic = 2
@@ -188,8 +190,7 @@ subroutine calc_boltzmann
     print*, 'energy in eV = ', in%energy_eV
     print*, 'tracing time in seconds = ', in%time_step
     if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-         print*, 'number of particles left through the outside = ', counter%lost_outside
-         print*, 'number of particles left through the inside = ', counter%lost_inside
+         print*, 'number of times particles were pushed across the inside hole = ', counter%lost_inside
     endif
 
 end subroutine calc_boltzmann
@@ -204,9 +205,9 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use boltzmann_types_mod, only: counter_t, particle_status_t
+    use boltzmann_types_mod, only: counter_t, particle_status_t, g
     use tetra_grid_settings_mod, only: grid_kind
-    use orbit_timestep_gorilla_supporting_functions_mod, only: categorize_lost_particles, update_local_tetr_moments, &
+    use orbit_timestep_gorilla_supporting_functions_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
                                                                 initialize_constants_of_motion, calc_particle_weights_and_jperp
 
     type(counter_t), intent(inout)               :: local_counter
@@ -219,9 +220,10 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
     real(dp), intent(out), optional              :: t_remain_out
     real(dp), dimension(3)                       :: z_save, x_save
     real(dp)                                     :: t_remain,t_pass,perpinv
-    logical                                      :: boole_t_finished
+    logical                                      :: boole_t_finished, boole_lost_inside
     integer                                      :: ind_tetr_save,iper_phi,n
     type(optional_quantities_type)               :: optional_quantities
+    real(dp), dimension(3)                       :: x_new
     
     if(.not.particle_status%initialized) then !If orbit_timestep is called for the first time without grid position
         call check_coordinate_domain(x) !Check coordinate domain (optionally perform modulo operation)
@@ -235,7 +237,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
         particle_status%initialized = .true.
     endif
           
-    if(t_step.eq.0.d0) return !Exit the subroutine after initialization, if time step equals zero
+    if(t_step.eq.0.0_dp) return !Exit the subroutine after initialization, if time step equals zero
     if(particle_status%initialized) z_save = x-tetra_physics(ind_tetr)%x1
     call initialize_constants_of_motion(vperp,z_save,ind_tetr,perpinv)
     t_remain = t_step
@@ -246,10 +248,24 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
         local_counter%tetr_pushings = local_counter%tetr_pushings +1
 
         if(ind_tetr.eq.-1) then
+            if(present(t_remain_out)) t_remain_out = t_remain
             if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-                call categorize_lost_particles(ind_tetr_save,z_save,local_counter,t_remain,t_remain_out)
+                call identify_particles_entering_annulus(x,local_counter,boole_lost_inside)
+                if (boole_lost_inside) then
+                    x_new = 3*(/g%raxis,x(2),g%zaxis/) - 2*x
+                    call find_tetra(x_new,vpar,vperp,ind_tetr,iface)
+                    x = x_new
+                    print*, "particle pushing across the hole surrounding the magnetic axis was successful"
+                    if (ind_tetr.eq.-1) then
+                        print*, "ATTENTION: particle pushing across the hole surrounding the magnetic axis was unsuccessful"
+                        exit
+                    endif
+                else
+                    exit
+                endif
+            else
+                exit
             endif
-            exit
         endif
 
         ind_tetr_save = ind_tetr

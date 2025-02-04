@@ -9,7 +9,7 @@
   energy_eV = 3.5d3 ,
 !
   !Number of particles to be traced
-  n_particles = 1.0d3 ,
+  n_particles = 1.0d1 ,
 !
   !pitch angle (only strictly valid for first particle. Other particles will have slightly differing values such that 
   !perpendicular invariant remains constant)
@@ -19,7 +19,7 @@
   boole_divertor_intersection  = .true.,
 !
   !Compute poincare mappings
-  boole_poincare_plot = .false.,
+  boole_poincare_plot = .true.,
 !
   !Number of Poincare mappings per particle
   n_poincare_mappings = 3000 ,

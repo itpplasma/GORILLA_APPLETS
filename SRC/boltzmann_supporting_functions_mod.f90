@@ -6,31 +6,24 @@ module orbit_timestep_gorilla_supporting_functions_mod
    
 contains
 
-subroutine categorize_lost_particles(ind_tetr,x,local_counter,t_remain,t_remain_out)
+subroutine identify_particles_entering_annulus(x,local_counter,boole_lost_inside)
 
     use tetra_physics_mod, only: tetra_physics
-    use boltzmann_types_mod, only: counter_t, pflux
+    use boltzmann_types_mod, only: counter_t, pflux, g
 
-    integer, intent(in) :: ind_tetr
     real(dp), dimension(3), intent(in) :: x
-    real(dp), intent(in) :: t_remain
     type(counter_t), intent(inout) :: local_counter
-    real(dp), intent(out), optional              :: t_remain_out
-    real(dp) :: aphi
+    logical, intent(out)   :: boole_lost_inside
+    real(dp) :: distance_from_magnetic_axis
 
-    !print *, 'WARNING: Particle lost.'
-    aphi = tetra_physics(ind_tetr)%Aphi1+sum(tetra_physics(ind_tetr)%gAphi*x)
-    if (abs(aphi-pflux%max).lt.abs(aphi-pflux%min)) then
-        local_counter%lost_outside = local_counter%lost_outside + 1
-    endif
-    if (abs(aphi-pflux%max).gt.abs(aphi-pflux%min)) then
+    boole_lost_inside = .false.
+    distance_from_magnetic_axis = sqrt((x(1)-g%raxis)**2 + (x(3)-g%zaxis)**2)
+    if (distance_from_magnetic_axis.lt.g%dist_from_o_point_within_grid) then
         local_counter%lost_inside = local_counter%lost_inside + 1
-    endif
-    if( present(t_remain_out)) then
-        t_remain_out = t_remain
+        boole_lost_inside = .true.
     endif
 
-end subroutine categorize_lost_particles
+end subroutine identify_particles_entering_annulus
 
 subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quantities)
 
@@ -73,7 +66,7 @@ subroutine initialize_constants_of_motion(vperp,z_save,ind_tetr,perpinv)
     integer, intent(in)                :: ind_tetr
     real(dp), intent(out)              :: perpinv
 
-    perpinv=-0.5d0*vperp**2/bmod_func(z_save,ind_tetr)
+    perpinv=-0.5_dp*vperp**2/bmod_func(z_save,ind_tetr)
              
     !Initialize constants of motion in particle-private module
     select case(ipusher)
@@ -115,18 +108,18 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
                                         & (tetra_physics(ind_tetr)%h2_1+sum(tetra_physics(ind_tetr)%gh2*z_save))
     endif
     if (in%boole_linear_density_simulation) then
-        start%weight(n) = start%weight(n)*(pflux%max*1.1-local_poloidal_flux)/(pflux%max*1.1)
+        start%weight(n) = start%weight(n)*(pflux%max*1.1_dp-local_poloidal_flux)/(pflux%max*1.1_dp)
     endif
 
     if (in%boole_boltzmann_energies) then
         !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
         phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
         if (.not. in%boole_linear_temperature_simulation) then
-            start%weight(n) =start%weight(n)*sqrt(start%energy(n)*ev2erg)/(in%energy_eV*ev2erg)**1.5* &
+            start%weight(n) =start%weight(n)*sqrt(start%energy(n)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
                         & exp(-(start%energy(n)*ev2erg+particle_charge*phi_elec_func)/(in%energy_eV*ev2erg))
         else
-            temperature = in%energy_eV*ev2erg*(pflux%max*1.1-local_poloidal_flux)/(pflux%max*1.1)
-            start%weight(n) = start%weight(n)*sqrt(start%energy(n)*ev2erg)/temperature**1.5* &
+            temperature = in%energy_eV*ev2erg*(pflux%max*1.1_dp-local_poloidal_flux)/(pflux%max*1.1_dp)
+            start%weight(n) = start%weight(n)*sqrt(start%energy(n)*ev2erg)/temperature**1.5_dp* &
             & exp(-(start%energy(n)*ev2erg+particle_charge*phi_elec_func)/temperature)
         endif
     endif
@@ -150,7 +143,7 @@ contains
 subroutine print_progress(num_particles,kpart,n)
 
     integer :: num_particles, kpart, n
-    logical :: print_progress_for_very_particle = .true.
+    logical :: print_progress_for_very_particle = .false.
 
     if (print_progress_for_very_particle) then
         print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
@@ -296,7 +289,6 @@ subroutine set_local_counter_zero(counter)
     
     counter%lost_particles = 0
     counter%lost_inside = 0
-    counter%lost_outside = 0
     counter%tetr_pushings = 0
     counter%phi_0_mappings = 0
     
@@ -385,7 +377,6 @@ subroutine add_local_counter_to_counter(local_counter)
     
     counter%lost_particles = counter%lost_particles + local_counter%lost_particles
     counter%lost_inside = counter%lost_inside + local_counter%lost_inside
-    counter%lost_outside = counter%lost_outside + local_counter%lost_outside
     counter%tetr_pushings = counter%tetr_pushings + local_counter%tetr_pushings
     counter%phi_0_mappings = counter%phi_0_mappings + local_counter%phi_0_mappings
     
@@ -450,13 +441,13 @@ subroutine set_starting_positions(rand_matrix)
     !compute starting conditions
     if (in%boole_point_source) then
         if (grid_kind.eq.2) then
-            start%x(1,:) = 160
-            start%x(2,:) = 0
-            start%x(3,:) = 70
+            start%x(1,:) = 160 !170.8509699_dp
+            start%x(2,:) = 0.0_dp
+            start%x(3,:) = 70 !8.922304_dp
         elseif (grid_kind.eq.4) then
-            start%x(1,:) = 205
-            start%x(2,:) = 0
-            start%x(3,:) = 0
+            start%x(1,:) = 205_dp
+            start%x(2,:) = 0.0_dp
+            start%x(3,:) = 0.0_dp
         endif
         if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
     else
@@ -492,11 +483,14 @@ end subroutine set_rest_of_start_type
 
 subroutine set_verts_and_coordinate_limits(verts)
 
-    use tetra_physics_mod, only: coord_system
+    use tetra_physics_mod, only: coord_system, tetra_physics
     use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
+    use tetra_grid_settings_mod, only: grid_size
+    use magdata_in_symfluxcoor_mod, only : raxis,zaxis
     use boltzmann_types_mod, only: g
 
     real(dp), dimension(:,:), allocatable, intent(out)     :: verts
+    integer :: i
 
     g%ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
     g%ind_b = 2 !(phi in cylindrical and flux coordinates)
@@ -514,6 +508,15 @@ subroutine set_verts_and_coordinate_limits(verts)
     g%amax = maxval(verts(g%ind_a,:))
     g%cmin = minval(verts(g%ind_c,:))
     g%cmax = maxval(verts(g%ind_c,:))
+
+    g%raxis = raxis
+    g%zaxis = zaxis
+
+    g%dist_from_o_point_within_grid = 0.0_dp
+    do i = 1,3*grid_size(3)
+        g%dist_from_o_point_within_grid = max(g%dist_from_o_point_within_grid, &
+                                              1.1_dp*sqrt((tetra_physics(i)%x1(1)-raxis)**2 + (tetra_physics(i)%x1(3)-zaxis)**2))
+    enddo
 
 end subroutine set_verts_and_coordinate_limits
 
@@ -620,8 +623,8 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(v0)
     if (in%boole_precalc_collisions) then
     allocate(c%randcol(in%num_particles,c%randcoli,3))
     call RANDOM_NUMBER(c%randcol)
-    !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
-    c%randcol(:,:,1:2:3) =  3.464102*(c%randcol(:,:,1:2:3)-.5)
+    !3.464102_dp = sqrt(12), this creates a random number with zero average and unit variance
+    c%randcol(:,:,1:2:3) =  3.464102_dp*(c%randcol(:,:,1:2:3)-0.5_dp)
     endif
 end subroutine calc_collision_coefficients_for_all_tetrahedra
 
@@ -695,10 +698,10 @@ subroutine initialize_exit_data
     allocate(exit_data%integration_step(in%num_particles))
 
     exit_data%lost = 0
-    exit_data%t_confined = 0.0d0
-    exit_data%x = 0.0d0
-    exit_data%vpar = 0.0d0 
-    exit_data%vperp = 0.0d0 
+    exit_data%t_confined = 0.0_dp
+    exit_data%x = 0.0_dp
+    exit_data%vpar = 0.0_dp 
+    exit_data%vperp = 0.0_dp 
     exit_data%integration_step = 0
     exit_data%phi_0_mappings = 0
 
@@ -776,6 +779,8 @@ subroutine write_data_to_files
     endif
 
     if (in%boole_write_exit_data) call write_exit_data
+
+    if (in%boole_write_grid_data) call write_grid_data
 
 end subroutine write_data_to_files
 
@@ -952,6 +957,24 @@ subroutine write_exit_data
 
 end subroutine write_exit_data
 
+subroutine write_grid_data
+
+    use tetra_grid_settings_mod, only: grid_size
+    use boltzmann_types_mod, only: filenames, g
+
+    integer :: gd_unit
+
+    open(newunit = gd_unit, file = filenames%grid_data)
+    write(gd_unit,*) grid_size
+    write(gd_unit,*) g%raxis, g%zaxis
+    write(gd_unit,*) g%dist_from_o_point_within_grid
+    write(gd_unit,*) g%amin, g%amax
+    write(gd_unit,*) g%cmin, g%cmax
+    write(gd_unit,*) g%ind_a, g%ind_b, g%ind_c
+    close(gd_unit)
+
+end subroutine write_grid_data
+
 subroutine give_file_names
 
     use boltzmann_types_mod, only: filenames
@@ -969,6 +992,7 @@ subroutine give_file_names
     filenames%divertor_intersections = 'divertor_intersections.dat'
     filenames%tetr_moments = 'tetr_moments.dat'
     filenames%exit_data = 'exit_data.dat'
+    filenames%grid_data = 'grid_data.dat'
 
 end subroutine give_file_names
 

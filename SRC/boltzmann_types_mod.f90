@@ -40,7 +40,6 @@ module boltzmann_types_mod
     type counter_t
     integer :: lost_particles = 0
     integer :: lost_inside = 0
-    integer :: lost_outside = 0
     integer :: tetr_pushings = 0
     integer :: phi_0_mappings = 0
     integer :: integration_steps = 0
@@ -100,6 +99,7 @@ module boltzmann_types_mod
     logical  :: boole_write_moments
     logical  :: boole_write_fourier_moments
     logical  :: boole_write_exit_data
+    logical  :: boole_write_grid_data
     logical  :: boole_divertor_intersection !Used in divertor_heat_loads
     logical  :: boole_poincare_plot !Used in divertor_heat_loads
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
@@ -124,6 +124,7 @@ module boltzmann_types_mod
     character(len=100) :: divertor_intersections
     character(len=100) :: tetr_moments
     character(len=100) :: exit_data
+    character(len=100) :: grid_data
     end type filenames_t
 
     type(filenames_t) :: filenames
@@ -145,6 +146,9 @@ module boltzmann_types_mod
     real(dp) :: amax
     real(dp) :: cmin
     real(dp) :: cmax
+    real(dp) :: raxis
+    real(dp) :: zaxis
+    real(dp) :: dist_from_o_point_within_grid !minimum radius of circle centered at magnetic axis completely contained in the grid
     integer  :: ind_a
     integer  :: ind_b
     integer  :: ind_c
