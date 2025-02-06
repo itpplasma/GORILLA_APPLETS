@@ -76,12 +76,12 @@ subroutine calc_boltzmann
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
     use boltzmann_types_mod, only: moment_specs, counter_t, counter, c, in, time_t, particle_status_t
-    use write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
-    use calc_boltzmann_supporting_functions_mod, only: print_progress, handle_lost_particles, &
-    add_local_tetr_moments_to_output, normalise_prism_moments_and_prism_moments_squared, set_moment_specifications, &
-    initialise_output, fourier_transform_moments, add_local_counter_to_counter, initialise_loop_variables, &
-    get_ipert, calc_poloidal_flux, calc_starting_conditions, calc_collision_coefficients_for_all_tetrahedra, &
-    carry_out_collisions, initialize_exit_data, update_exit_data, set_seed_for_random_numbers
+    use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
+    use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
+    get_ipert, set_moment_specifications, initialise_output, calc_starting_conditions, initialize_exit_data, calc_poloidal_flux, &
+    calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments
+    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
+    add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data
 
     integer :: kpart,i,n,l,p,ind_tetr,iface,iantithetic
     real(dp) :: v0,vpar,vperp
@@ -207,8 +207,8 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
     use find_tetra_mod, only: find_tetra
     use boltzmann_types_mod, only: counter_t, particle_status_t, g
     use tetra_grid_settings_mod, only: grid_kind
-    use orbit_timestep_gorilla_supporting_functions_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
-                                                                initialize_constants_of_motion, calc_particle_weights_and_jperp
+    use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
+                                                       initialize_constants_of_motion, calc_particle_weights_and_jperp
 
     type(counter_t), intent(inout)               :: local_counter
     type(particle_status_t), intent(inout)       :: particle_status

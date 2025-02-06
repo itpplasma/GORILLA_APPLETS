@@ -87,7 +87,10 @@ SOURCES = SetWorkingPrecision.f90\
 	collis_ions_mod.f90 \
 	boltzmann_types_mod.f90 \
 	volume_integrals_and_sqrt_g_mod.f90 \
-	boltzmann_supporting_functions_mod.f90 \
+	utils_parallelised_particle_pushing_mod.f90 \
+	utils_data_pre_and_post_processing_mod.f90 \
+	utils_orbit_timestep_mod.f90 \
+	utils_write_data_to_files_mod.f90 \
 	boltzmann_mod.f90 \
 	pusher_tetra_field_lines_mod.f90 \
 	field_line_tracing_mod.f90 \
