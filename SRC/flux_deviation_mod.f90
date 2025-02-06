@@ -100,6 +100,7 @@
             use mono_energetic_transp_coef_settings_mod, only: lambda_start,boole_psi_mat
             use gorilla_settings_mod, only: boole_helical_pert, helical_pert_eps_Aphi, helical_pert_m_fourier, &
                                           & helical_pert_n_fourier
+            use binsrc_mod, only: binsrc
 !
             implicit none
 !
@@ -288,7 +289,8 @@
                 end select
 !
                 !Find random start indices that are distributed proportionally to the flux tube volume
-                call binsrc(pos_fluxtv_mat(:,4),1,shape(pos_fluxtv_mat(:,4)),xi(n),i)
+                
+                call binsrc(pos_fluxtv_mat(:,4),1,size(pos_fluxtv_mat(:,4)),xi(n),i)
 !
                 select case(i_integrator_type)
                     case(1,0)
