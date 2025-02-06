@@ -196,6 +196,7 @@
       use odeint_mod, only: odeint_allroutines
       use runge_kutta_mod, only: runge_kutta_allroutines
       use gorilla_settings_mod, only: rel_err_ode45
+      use chamb_can_mod, only: chamb_can
 !
       implicit none
 !
@@ -332,6 +333,7 @@
 !
       use velo_mod,   only : isw_field_type
       use odeint_mod, only: odeint_allroutines
+      use chamb_can_mod, only: chamb_can
 !
       implicit none
 !
