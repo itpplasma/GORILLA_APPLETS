@@ -22,6 +22,7 @@
             use vector_potentail_mod, only: torflux
             use mono_energetic_transp_coef_settings_mod, only: energy_eV,v_E
             use fluxtv_mod, only: pos_fluxtv_mat,load_flux_tube_volume
+            use spline_vmec_data_mod, only: splint_vmec_data
 !
             implicit none
 !
