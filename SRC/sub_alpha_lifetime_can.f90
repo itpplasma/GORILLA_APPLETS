@@ -81,6 +81,7 @@
 !
       use parmot_mod, only : rmu,ro0
       use velo_mod,   only : isw_field_type
+      use magfie_mod, only: magfie_vmec, magfie_can
 !
       implicit none
 !
@@ -297,6 +298,7 @@
 !  Called routines:  magfie_vmec, magfie_can
 !
       use velo_mod,   only : isw_field_type
+      use magfie_mod, only: magfie_vmec, magfie_can
 !
       double precision :: phi
       double precision, dimension(5) :: y,dery
@@ -335,6 +337,7 @@
       use velo_mod,   only : isw_field_type
       use odeint_mod, only: odeint_allroutines
       use chamb_can_mod, only: chamb_can
+      use magfie_mod, only: magfie_vmec, magfie_can
 !
       implicit none
 !

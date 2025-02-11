@@ -921,6 +921,7 @@ E_ePhi = particle_charge * phi_elec_func_new(x,ind_tetr)/ev2erg
         use tetra_grid_settings_mod, only: grid_kind
         use supporting_functions_mod, only: theta_sym_flux2theta_vmec
         use spline_vmec_data_mod, only: splint_vmec_data
+        use magdata_in_symfluxcoordinates_mod, only: magdata_in_symfluxcoord_ext
 !
         implicit none
 !
