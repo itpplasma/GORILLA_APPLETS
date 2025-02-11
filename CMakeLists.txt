@@ -33,7 +33,5 @@ add_executable(gorilla_applets_main.x
 
 target_link_libraries(gorilla_applets_main.x
   GORILLA_APPLETS
-  netcdff
-  netcdf
-  lapack)
+  )
 target_include_directories(gorilla_applets_main.x PUBLIC ${CMAKE_BINARY_DIR}/SRC_CORE)

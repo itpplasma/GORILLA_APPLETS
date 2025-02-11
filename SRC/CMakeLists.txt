@@ -24,7 +24,13 @@ add_library(GORILLA_APPLETS STATIC
   volume_integrals_and_sqrt_g_mod.f90
   zzg.f90
   )
-target_link_libraries(GORILLA_APPLETS GORILLA)
+target_link_libraries(GORILLA_APPLETS 
+  GORILLA
+  blas
+  lapack
+  netcdf
+  netcdff
+)
 target_include_directories(GORILLA_APPLETS PUBLIC ${CMAKE_BINARY_DIR}/SRC_CORE)
 
 set_target_properties (GORILLA_APPLETS PROPERTIES
