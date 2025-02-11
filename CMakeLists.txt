@@ -25,3 +25,15 @@ if(APPLE)
 endif()
 
 add_subdirectory(SRC)
+add_subdirectory(SRC_CORE)
+
+add_executable(gorilla_applets_main.x
+  SRC/gorilla_applets_main.f90
+)
+
+target_link_libraries(gorilla_applets_main.x
+  GORILLA_APPLETS
+  netcdff
+  netcdf
+  lapack)
+target_include_directories(gorilla_applets_main.x PUBLIC ${CMAKE_BINARY_DIR}/SRC_CORE)
