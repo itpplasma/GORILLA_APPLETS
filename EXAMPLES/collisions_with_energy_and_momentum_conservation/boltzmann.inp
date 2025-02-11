@@ -1,34 +1,18 @@
 ! INPUT FILE FOR BOLTZMANN
 !
-&divertor_heat_loads_nml
+&boltzmann_nml
 !
   !time for tracing particles
-  time_step = 1.0d0 ,
+  time_step = 1.0d-3 ,
 !
   !Kinetic energy of particles
   energy_eV = 3.5d3 ,
 !
   !Number of particles to be traced
-  n_particles = 1.0d1 ,
-!
-  !pitch angle (only strictly valid for first particle. Other particles will have slightly differing values such that 
-  !perpendicular invariant remains constant)
-  lambda = 0.8d0 ,
-!
-  !Compute divertor intersections
-  boole_divertor_intersection  = .true.,
-!
-  !Compute poincare mappings
-  boole_poincare_plot = .true.,
-!
-  !Number of Poincare mappings per particle
-  n_poincare_mappings = 3000 ,
-!
-  !Number of poincare mappings which are ignored at the beginning of the run
-  n_mappings_ignored = 10,
+  n_particles = 1.0d2 ,
 !
   !Compute squares of moments 
-  boole_squared_moments = .false.,
+  boole_squared_moments = .true.,
 !
   !Start all particles from the same physical position
   boole_point_source = .false.,
@@ -37,7 +21,7 @@
   boole_collisions = .false.,
 !
   !precalcualte random numbers for collisions
-  boole_precalc_collisions = .false.,
+  boole_precalc_collisions = .true.,
 !
   !Simulated density of particles
   density = 1,
@@ -46,17 +30,17 @@
   boole_refined_sqrt_g = .true.,
 !
   !work with boltzmann energies instead of with monoenergetic articles
-  boole_boltzmann_energies = .false.,
+  boole_boltzmann_energies = .true.,
 !
   !make density a linear function of poloidal flux
-  boole_linear_density_simulation = .false.,
+  boole_linear_density_simulation = .true.,
 !
   !always initiate pairs of particles where both particles start at the same position but move
   !in opposite direction, this helps to reduce statistical noise
-  boole_antithetic_variate = .false.,
+  boole_antithetic_variate = .true.,
 !
   !make temperature a linear function of poloidal flux
-  boole_linear_temperature_simulation = .false.,
+  boole_linear_temperature_simulation = .true.,
 !
   !Set integrator type
   !(must be 1, otherwise it currently does not work)
@@ -68,15 +52,16 @@
   ! 1 ... compute seed with a random number
   ! 2 ... load seed from file 'seed.inp'
   seed_option = 2
-!
-  !write additional data to files
-  boole_write_vertex_indices = .false. ,
-  boole_write_vertex_coordinates = .false. ,
+
+  !write data to files
+  boole_write_vertex_indices = .true. ,
+  boole_write_vertex_coordinates = .true. ,
   boole_write_prism_volumes = .false. ,
-  boole_write_refined_prism_volumes = .false. ,
+  boole_write_refined_prism_volumes = .true. ,
   boole_write_boltzmann_density = .false. ,
   boole_write_electric_potential = .false. ,
-  boole_write_moments = .false. ,
-  boole_write_fourier_moments = .false. ,
+  boole_write_moments = .true. ,
+  boole_write_fourier_moments = .true. ,
   boole_write_exit_data = .true.
+  boole_write_grid_data = .true.
 /
