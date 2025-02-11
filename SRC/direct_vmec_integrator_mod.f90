@@ -13,6 +13,7 @@ module direct_vmec_integrator_mod
         use supporting_functions_mod, only: theta_sym_flux2theta_vmec,theta_vmec2theta_sym_flux
         use tetra_grid_settings_mod, only: n_field_periods
         use plag_coeff_mod, only: plag_coeff
+        use sub_alpha_lifetime_can_mod, only: orbit_timestep_can
 !
         implicit none
 !

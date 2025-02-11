@@ -101,6 +101,8 @@
             use gorilla_settings_mod, only: boole_helical_pert, helical_pert_eps_Aphi, helical_pert_m_fourier, &
                                           & helical_pert_n_fourier
             use binsrc_mod, only: binsrc
+            use llsq_mod, only: llsq
+            use sub_alpha_lifetime_can_mod, only: orbit_timestep_can
 !
             implicit none
 !

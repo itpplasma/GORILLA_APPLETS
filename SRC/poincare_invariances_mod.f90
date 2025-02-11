@@ -426,6 +426,7 @@ print *, ''
         use supporting_functions_mod, only: theta_sym_flux2theta_vmec,theta_vmec2theta_sym_flux
         use tetra_grid_settings_mod, only: n_field_periods
         !use spline_vmec_data_mod, only: vmec_field
+        use sub_alpha_lifetime_can_mod, only: orbit_timestep_can
 !
         implicit none
 !

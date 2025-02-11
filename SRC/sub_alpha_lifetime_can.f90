@@ -1,3 +1,9 @@
+module sub_alpha_lifetime_can_mod
+
+      implicit none
+
+      contains 
+!
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
       subroutine elefie_can(x,derphi)
@@ -211,8 +217,6 @@
       double precision, dimension(2)    :: y
       double precision, dimension(ndim) :: z
 !
-      external velo_can
-!
       !Use relative error definition from input file
       relerr = rel_err_ode45
 !
@@ -352,8 +356,6 @@
       double precision x,bmod,sqrtg,bder,hcovar,hctrvr,hcurl
       dimension x(3),bder(3),hcovar(3),hctrvr(3),hcurl(3)
 !
-      external :: rhs_mflint_can
-!
       ierr=0
 !
       phi=phibeg
@@ -420,6 +422,5 @@
       bmod00=y(5)/y(4)
 !
       end subroutine integrate_mfl_can
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
+end module sub_alpha_lifetime_can_mod

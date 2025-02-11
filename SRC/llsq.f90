@@ -1,3 +1,9 @@
+module llsq_mod
+
+  implicit none
+
+  contains
+
 subroutine llsq0 ( n, x, y, a )
 
 !*****************************************************************************80
@@ -30,7 +36,6 @@ subroutine llsq0 ( n, x, y, a )
 !    Output, real ( kind = 8 ) A the slope of the 
 !    least-squares approximant to the data.
 !
-  implicit none
 
   integer ( kind = 4 ) n
 
@@ -57,7 +62,8 @@ subroutine llsq0 ( n, x, y, a )
   a = top / bot
 
   return
-end
+end subroutine llsq0
+
 subroutine llsq ( n, x, y, a, b )
 
 !*****************************************************************************80
@@ -90,9 +96,8 @@ subroutine llsq ( n, x, y, a, b )
 !    Output, real ( kind = 8 ) A, B, the slope and Y-intercept of the 
 !    least-squares approximant to the data.
 !
-  implicit none
 
-  integer ( kind = 4 ) n
+  integer ( kind = 8 ) n
 
   real ( kind = 8 ) a
   real ( kind = 8 ) b
@@ -126,4 +131,6 @@ subroutine llsq ( n, x, y, a, b )
   b = ybar - a * xbar
 
   return
-end
+end subroutine llsq
+
+end module llsq_mod

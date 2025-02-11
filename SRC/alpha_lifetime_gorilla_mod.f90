@@ -105,6 +105,7 @@
             use supporting_functions_mod, only: theta_sym_flux2theta_vmec,theta_vmec2theta_sym_flux
             use tetra_grid_settings_mod, only: n_field_periods
             use binsrc_mod, only: binsrc
+            use sub_alpha_lifetime_can_mod, only: orbit_timestep_can
 !
             implicit none
 !
