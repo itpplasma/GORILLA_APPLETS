@@ -21,7 +21,7 @@ module sub_alpha_lifetime_can_mod
     use gorilla_settings_mod, only: eps_Phi
     use tetra_physics_mod, only: particle_charge,cm_over_e,particle_mass
     use parmot_mod, only: ro0
-    !use spline_vmec_data_mod, only: vmec_field
+    use splint_vmec_data_mod, only: vmec_field
 !
     implicit none
 !
