@@ -34,7 +34,6 @@
 
 # Data files
 *.dat
-*.txt
 *.mat
 *.fig
 fort.*

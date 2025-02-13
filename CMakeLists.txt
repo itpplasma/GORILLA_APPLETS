@@ -4,7 +4,7 @@ set(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
 
 project (GORILLA_APPLETS
   VERSION 1.0.0)
-  
+
 enable_language(Fortran)
 
 if(UNIX AND NOT APPLE)
