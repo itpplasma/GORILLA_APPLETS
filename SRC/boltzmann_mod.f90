@@ -79,7 +79,8 @@ subroutine calc_boltzmann
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
     get_ipert, set_moment_specifications, initialise_output, calc_starting_conditions, initialize_exit_data, calc_poloidal_flux, &
-    calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments
+    calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
+    find_minimal_angle_between_curlA_and_tetrahedron_faces
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
     add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data
 
@@ -117,6 +118,8 @@ subroutine calc_boltzmann
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(v0)
     call give_file_names
     call unlink_files
+
+    !call find_minimal_angle_between_curlA_and_tetrahedron_faces
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
     if (in%i_integrator_type.eq.2) print*, 'Error: i_integratpr_type set to 2, this module only works with &

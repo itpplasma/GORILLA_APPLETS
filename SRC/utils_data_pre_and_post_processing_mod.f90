@@ -325,7 +325,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(v0)
     allocate(c%randcol(in%num_particles,c%randcoli,3))
     call RANDOM_NUMBER(c%randcol)
     !3.464102_dp = sqrt(12), this creates a random number with zero average and unit variance
-    c%randcol(:,:,1:2:3) =  3.464102_dp*(c%randcol(:,:,1:2:3)-0.5_dp)
+    c%randcol(:,:,1:3:2) =  3.464102_dp*(c%randcol(:,:,1:3:2)-0.5_dp)
     endif
 end subroutine calc_collision_coefficients_for_all_tetrahedra
 
@@ -397,5 +397,53 @@ subroutine fourier_transform_moments
     print*, 'fourier transform finished'
     
 end subroutine fourier_transform_moments
+
+subroutine find_minimal_angle_between_curlA_and_tetrahedron_faces
+    !tetra_physics(i)%curlA contains contravariant components of the curl of A, so to make them physical components 
+    !one has to multiply the second component by R and leave the rest as it is
+    !anorm vectors result from the cross product of the vectors in cylindrical coordinates connecting tetrahedron vertices
+    !Thus, the second component is physical (containing only r and z components) whereas the first and the third component have to
+    !be multiplied by R to make them physical
+
+    use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
+    use tetra_physics_mod, only: tetra_physics
+    use tetra_grid_settings_mod, only: sfc_s_min
+
+    real(dp)                                     :: temp, temp1, R, curlA_norm, normalisation
+    real(dp), dimension(3,4)                     :: anorm !normal vectors to tetrahedron faces in physical units
+    real(dp), dimension(4)                       :: anormnorm !magnitude of normal vectors
+    real(dp), dimension(3)                       :: curlA !physical components of vector potential
+    integer                                      :: i, j
+
+    temp = 1.0_dp
+    do i = 1,ntetr
+        temp1 = 1.0_dp
+        anorm = tetra_physics(i)%anorm
+        curlA = tetra_physics(i)%curlA !This expression does not contain the metric determinant, but the latter only scales the
+        !vector linearly and we are only interested in the normalised vector anyways
+        curlA(2) = curlA(2)*verts_rphiz(1,tetra_grid(i)%ind_knot(1))
+        curlA_norm = sqrt(curlA(1)**2 + curlA(2)**2 + curlA(3)**2)
+        do j = 1,4
+            R = verts_rphiz(1,tetra_grid(i)%ind_knot(j))
+            anorm(1:3:2,j) = anorm(1:3:2,j)*R
+            anormnorm(j) = sqrt(anorm(1,j)**2 + anorm(2,j)**2 + anorm(3,j)**2)
+            normalisation = 1/(curlA_norm*anormnorm(j))
+            temp1 = min(temp1, abs((anorm(1,j)*curlA(1) + anorm(2,j)*curlA(2) + anorm(3,j)*curlA(3))*normalisation))
+        enddo
+        ! if (temp1.lt.0.1_dp) then
+        !      print*, i, temp1
+        !      print*, anormnorm
+        !      print*, 'anorm1 = ', anorm(:,1)/anormnorm(1)
+        !      print*, 'anorm2 = ', anorm(:,2)/anormnorm(2)
+        !      print*, 'anorm3 = ', anorm(:,3)/anormnorm(3)
+        !      print*, 'anorm4 = ', anorm(:,4)/anormnorm(4)
+        !      print*, 'h = ', tetra_physics(i)%h1_1, tetra_physics(i)%h2_1/tetra_physics(i)%x1(1), tetra_physics(i)%h3_1
+        ! endif
+        temp = min(temp,temp1)
+    enddo
+    temp = asin(temp)
+    print*, "The minimal angle between the curl of the vector potential and any adjacent tetrahedron face is ", &
+            temp, " radiants. sfc_s_min = ", sfc_s_min
+end subroutine find_minimal_angle_between_curlA_and_tetrahedron_faces
 
 end module utils_data_pre_and_post_processing_mod

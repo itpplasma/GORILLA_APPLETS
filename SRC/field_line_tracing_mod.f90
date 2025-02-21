@@ -699,7 +699,7 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
         allocate(randcol(num_particles,randcoli,3))
         call RANDOM_NUMBER(randcol)
         !3.464102 = sqrt(12), this creates a random number with zero average and unit variance
-        randcol(:,:,1:2:3) =  3.464102*(randcol(:,:,1:2:3)-.5)
+        randcol(:,:,1:3:2) =  3.464102*(randcol(:,:,1:3:2)-.5)
     endif
 end subroutine calc_starting_conditions
 
