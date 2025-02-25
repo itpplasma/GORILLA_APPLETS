@@ -228,133 +228,61 @@ subroutine write_grid_data
     use boltzmann_types_mod, only: filenames, g
     use netcdf
 
-    integer :: gd_unit
+    integer :: status, ncid
+    integer :: dimid_2, dimid_3, varid
+    
+    status = nf90_create(filenames%grid_data, NF90_NETCDF4, ncid)
+    call nc_check(status, 'open')
 
-    open(newunit = gd_unit, file = filenames%grid_data)
-    write(gd_unit,*) grid_size
-    write(gd_unit,*) g%raxis, g%zaxis, 0
-    write(gd_unit,*) g%dist_from_o_point_within_grid, 0, 0
-    write(gd_unit,*) n_extra_rings, 0, 0
-    write(gd_unit,*) g%amin, g%amax, 0
-    write(gd_unit,*) g%cmin, g%cmax, 0
-    write(gd_unit,*) g%ind_a, g%ind_b, g%ind_c
-    close(gd_unit)
+    ! define dimensions
+    status = nf90_def_dim(ncid, '2', 2, dimid_2)
+    status = nf90_def_dim(ncid, '3', 3, dimid_3)
 
-        ! Rmin, Rmax, Zmin, Zmax, nR, nphi, nZ, AnR, Anphi, AnZ, dAnphi_dR, dAnphi_dZ)
-        ! use netcdf
-        ! character(len = *), intent(in) :: filename
-        ! integer, intent(in) :: ncoil, nmax
-        ! real(dp), intent(in) :: Rmin, Rmax, Zmin, Zmax
-        ! integer, intent(in) :: nR, nphi, nZ
-        ! complex(dp), intent(in), dimension(:, :, :, :) :: AnR, Anphi, AnZ, dAnphi_dR, dAnphi_dZ
-        ! real(dp), dimension(:), allocatable :: R, Z, coil_number, ntor
-        ! integer :: status, ncid
-        ! integer :: dimid_R, dimid_Z, dimid_tor, dimid_coil
-        ! integer :: varid_R, varid_Z, varid_ntor, varid_coils, varid_nR, varid_nphi, varid_nZ
-        ! integer :: varid_actual_data
-        ! integer :: k
-    
-        ! allocate(R(nR), Z(nZ), coil_number(ncoil), ntor(nmax))
-    
-        ! R = linspace(Rmin, Rmax, nR, 0, 0)
-        ! Z = linspace(Zmin, Zmax, nZ, 0, 0)
-        ! coil_number = [(k, k = 1, ncoil)]
-        ! ntor = [(k, k = 0, nmax)]
-    
-        ! status = nf90_create(filename, NF90_NETCDF4, ncid)
-        ! call nc_check(status, 'open')
-    
-        ! ! define dimensions metadata
-        ! status = nf90_def_dim(ncid, 'R', nR, dimid_R)
-        ! status = nf90_def_dim(ncid, 'Z', nZ, dimid_Z)
-        ! status = nf90_def_dim(ncid, 'ntor', nmax+1, dimid_tor)
-        ! status = nf90_def_dim(ncid, 'coil_number', ncoil, dimid_coil)
-    
-        ! ! define variables metadata
-        ! status = nf90_def_var(ncid, 'R', NF90_DOUBLE, [dimid_R], varid_R)
-        ! status = nf90_def_var(ncid, 'Z', NF90_DOUBLE, [dimid_Z], varid_Z)
-        ! status = nf90_def_var(ncid, 'ntor', NF90_DOUBLE, [dimid_tor], varid_ntor)
-        ! status = nf90_def_var(ncid, 'coil_number', NF90_DOUBLE, [dimid_coil], varid_coils)
-        ! status = nf90_def_var(ncid, 'nR', NF90_DOUBLE, varid_nR)
-        ! status = nf90_def_var(ncid, 'nphi', NF90_DOUBLE, varid_nphi)
-        ! status = nf90_def_var(ncid, 'nZ', NF90_DOUBLE, varid_nZ)
-    
-        ! ! write variables and comments metadata
-        ! status = nf90_put_var(ncid, varid_R, R)
-        ! status = nf90_put_att(ncid, varid_R, 'comment', 'R components of grid in cm')
-        ! status = nf90_put_var(ncid, varid_Z, Z)
-        ! status = nf90_put_att(ncid, varid_Z, 'comment', 'Z components of grid in cm')
-        ! status = nf90_put_var(ncid, varid_ntor, ntor)
-        ! status = nf90_put_att(ncid, varid_ntor, 'comment', 'toroidal mode numbers')
-        ! status = nf90_put_var(ncid, varid_coils, coil_number)
-        ! status = nf90_put_att(ncid, varid_coils, 'comment', 'coil numbers')
-        ! status = nf90_put_var(ncid, varid_nR, nR)
-        ! status = nf90_put_att(ncid, varid_nR, 'comment', 'number of grid points in R direction')
-        ! status = nf90_put_var(ncid, varid_nphi, nphi)
-        ! status = nf90_put_att(ncid, varid_nphi, 'comment', 'number of grid points in phi direction')
-        ! status = nf90_put_var(ncid, varid_nZ, nZ)
-        ! status = nf90_put_att(ncid, varid_nZ, 'comment', 'number of grid points in Z direction')
-    
-        ! ! process actual data
-        ! status = nf90_def_var(ncid, 'AnR_real', NF90_DOUBLE, &
-        !   [dimid_tor, dimid_R, dimid_Z, dimid_coil], varid_actual_data)
-        ! status = nf90_put_var(ncid, varid_actual_data, real(AnR))
-        ! status = nf90_put_att(ncid, varid_actual_data, 'comment', &
-        !   'real part of toroidal Fourier mode of R component of vector potential')
-        ! status = nf90_def_var(ncid, 'AnR_imag', NF90_DOUBLE, &
-        !   [dimid_tor, dimid_R, dimid_Z, dimid_coil], varid_actual_data)
-        ! status = nf90_put_var(ncid, varid_actual_data, aimag(AnR))
-        ! status = nf90_put_att(ncid, varid_actual_data, 'comment', &
-        !   'imaginary part of toroidal Fourier mode of R component of vector potential')
-    
-        ! status = nf90_def_var(ncid, 'Anphi_real', NF90_DOUBLE, &
-        !   [dimid_tor, dimid_R, dimid_Z, dimid_coil], varid_actual_data)
-        ! status = nf90_put_var(ncid, varid_actual_data, real(Anphi))
-        ! status = nf90_put_att(ncid, varid_actual_data, 'comment', &
-        !   'real part of toroidal Fourier mode of phi component of vector potential')
-        ! status = nf90_def_var(ncid, 'Anphi_imag', NF90_DOUBLE, &
-        !   [dimid_tor, dimid_R, dimid_Z, dimid_coil], varid_actual_data)
-        ! status = nf90_put_var(ncid, varid_actual_data, aimag(Anphi))
-        ! status = nf90_put_att(ncid, varid_actual_data, 'comment', &
-        !   'imaginary part of toroidal Fourier mode of phi component of vector potential')
-    
-        ! status = nf90_def_var(ncid, 'AnZ_real', NF90_DOUBLE, &
-        !   [dimid_tor, dimid_R, dimid_Z, dimid_coil], varid_actual_data)
-        ! status = nf90_put_var(ncid, varid_actual_data, real(AnZ))
-        ! status = nf90_put_att(ncid, varid_actual_data, 'comment', &
-        !   'real part of toroidal Fourier mode of Z component of vector potential')
-        ! status = nf90_def_var(ncid, 'AnZ_imag', NF90_DOUBLE, &
-        !   [dimid_tor, dimid_R, dimid_Z, dimid_coil], varid_actual_data)
-        ! status = nf90_put_var(ncid, varid_actual_data, aimag(AnZ))
-        ! status = nf90_put_att(ncid, varid_actual_data, 'comment', &
-        !   'imaginary part of toroidal Fourier mode of Z component of vector potential')
-    
-        ! status = nf90_def_var(ncid, 'dAnphi_dR_real', NF90_DOUBLE, &
-        !   [dimid_tor, dimid_R, dimid_Z, dimid_coil], varid_actual_data)
-        ! status = nf90_put_var(ncid, varid_actual_data, real(dAnphi_dR))
-        ! status = nf90_put_att(ncid, varid_actual_data, 'comment', &
-        !   'real part of toroidal Fourier mode of derivative w.r.t. R of phi component of vector potential')
-        ! status = nf90_def_var(ncid, 'dAnphi_dR_imag', NF90_DOUBLE, &
-        !   [dimid_tor, dimid_R, dimid_Z, dimid_coil], varid_actual_data)
-        ! status = nf90_put_var(ncid, varid_actual_data, aimag(dAnphi_dR))
-        ! status = nf90_put_att(ncid, varid_actual_data, 'comment', &
-        !   'imaginary part of toroidal Fourier mode of derivative w.r.t. R of phi component of vector potential')
-    
-        ! status = nf90_def_var(ncid, 'dAnphi_dZ_real', NF90_DOUBLE, &
-        !   [dimid_tor, dimid_R, dimid_Z, dimid_coil], varid_actual_data)
-        ! status = nf90_put_var(ncid, varid_actual_data, real(dAnphi_dZ))
-        ! status = nf90_put_att(ncid, varid_actual_data, 'comment', &
-        !   'real part of toroidal Fourier mode of derivative w.r.t. Z of phi component of vector potential')
-        ! status = nf90_def_var(ncid, 'dAnphi_dZ_imag', NF90_DOUBLE, &
-        !   [dimid_tor, dimid_R, dimid_Z, dimid_coil], varid_actual_data)
-        ! status = nf90_put_var(ncid, varid_actual_data, aimag(dAnphi_dZ))
-        ! status = nf90_put_att(ncid, varid_actual_data, 'comment', &
-        !   'imaginary part of toroidal Fourier mode of derivative w.r.t. Z of phi component of vector potential')
-    
-        ! status = nf90_close(ncid)
-        ! call nc_check(status, 'close')
+    !write grid_size
+    status = nf90_def_var(ncid, 'grid_size', NF90_DOUBLE, [dimid_3], varid)
+    status = nf90_put_var(ncid, varid, grid_size)
+    status = nf90_put_att(ncid, varid, 'comment', 'number of tetrahedra in r-, phi- and z-direction')
+
+    !write o-point
+    status = nf90_def_var(ncid, 'opoint', NF90_DOUBLE, [dimid_2], varid)
+    status = nf90_put_var(ncid, varid, (/g%raxis, g%zaxis/))
+    status = nf90_put_att(ncid, varid, 'comment', 'r- and z-value of o-point')
+
+    !write minimum radius of circle centered at magnetic axis completely contained in the grid
+    status = nf90_def_var(ncid, 'distance from opoint', NF90_DOUBLE, varid)
+    status = nf90_put_var(ncid, varid, g%dist_from_o_point_within_grid)
+    status = nf90_put_att(ncid, varid, 'comment', 'minimum radius of circle centered at &
+    magnetic axis completely contained in the grid') 
+
+    !write number of extra rings
+    status = nf90_def_var(ncid, 'number of extra rings', NF90_DOUBLE, varid)
+    status = nf90_put_var(ncid, varid, n_extra_rings)
+    status = nf90_put_att(ncid, varid, 'comment', 'number of extra rings added close to the o-point') 
+
+    !write range in r-direction
+    status = nf90_def_var(ncid, 'r range', NF90_DOUBLE, [dimid_2], varid)
+    status = nf90_put_var(ncid, varid, (/g%amin, g%amax/))
+    status = nf90_put_att(ncid, varid, 'comment', 'minimum and maximum r-values') 
+
+    !write range in z-direction
+    status = nf90_def_var(ncid, 'z range', NF90_DOUBLE, [dimid_2], varid)
+    status = nf90_put_var(ncid, varid, (/g%cmin, g%cmax/))
+    status = nf90_put_att(ncid, varid, 'comment', 'minimum and maximum z-values') 
+
+    status = nf90_close(ncid)
+    call nc_check(status, 'close')
 
 end subroutine write_grid_data
+
+subroutine nc_check(status, operation)
+    use netcdf, only: NF90_NOERR, nf90_strerror
+    integer, intent(in) :: status
+    character(len=*), intent(in) :: operation
+
+    if (status == NF90_NOERR) return
+    write (*, '("Error encountered during ", a, ": ", a)') operation, nf90_strerror(status)
+    error stop
+end subroutine nc_check
 
 subroutine give_file_names
 
@@ -373,7 +301,7 @@ subroutine give_file_names
     filenames%divertor_intersections = 'divertor_intersections.dat'
     filenames%tetr_moments = 'tetr_moments.dat'
     filenames%exit_data = 'exit_data.dat'
-    filenames%grid_data = 'grid_data.dat'
+    filenames%grid_data = 'grid_data.nc'
 
 end subroutine give_file_names
 
