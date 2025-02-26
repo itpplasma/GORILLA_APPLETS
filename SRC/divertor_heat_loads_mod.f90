@@ -94,7 +94,8 @@ subroutine calc_divertor_heat_loads
     calc_poloidal_flux, calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
     fourier_transform_moments
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, initialise_loop_variables, &
-    add_local_tetr_moments_to_output, add_local_counter_to_counter, carry_out_collisions, update_exit_data
+    add_local_tetr_moments_to_output, add_local_counter_to_counter, carry_out_collisions, update_exit_data, &
+    initialise_seed_for_random_numbers_for_each_thread
 
     integer :: kpart,i,n,l,p,ind_tetr,iface,iantithetic
     real(dp) :: v0,vpar,vperp
@@ -139,7 +140,7 @@ subroutine calc_divertor_heat_loads
     !$OMP& SHARED(counter, kpart,v0, in, c, iantithetic) &
     !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status)
     print*, 'get number of threads', omp_get_num_threads()
-    !$OMP DO
+    !$OMP DO SCHEDULE(static)
 
     !Loop over particles
     do p = 1,in%num_particles/iantithetic
@@ -150,6 +151,10 @@ subroutine calc_divertor_heat_loads
             kpart = kpart+1 !in general not equal to n becuase of parallelisation
             call print_progress(in%num_particles,kpart,n)
             !$omp end critical
+
+            if (.not.in%boole_precalc_collisions) then
+                call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num())
+            endif
 
             call initialise_loop_variables(l, n, v0, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
 

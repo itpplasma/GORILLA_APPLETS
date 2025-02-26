@@ -9,7 +9,7 @@
   energy_eV = 3.5d3 ,
 !
   !Number of particles to be traced
-  n_particles = 1.0d2 ,
+  n_particles = 1.0d3 ,
 !
   !Compute squares of moments 
   boole_squared_moments = .true.,
@@ -18,10 +18,10 @@
   boole_point_source = .false.,
 !
   !include a collision operator
-  boole_collisions = .false.,
+  boole_collisions = .true.,
 !
   !precalcualte random numbers for collisions
-  boole_precalc_collisions = .true.,
+  boole_precalc_collisions = .false.,
 !
   !Simulated density of particles
   density = 1,
@@ -33,7 +33,7 @@
   boole_boltzmann_energies = .true.,
 !
   !make density a linear function of poloidal flux
-  boole_linear_density_simulation = .true.,
+  boole_linear_density_simulation = .false.,
 !
   !always initiate pairs of particles where both particles start at the same position but move
   !in opposite direction, this helps to reduce statistical noise

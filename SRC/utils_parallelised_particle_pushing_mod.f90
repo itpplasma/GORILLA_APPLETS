@@ -9,7 +9,7 @@ contains
 subroutine print_progress(num_particles,kpart,n)
 
     integer :: num_particles, kpart, n
-    logical :: print_progress_for_very_particle = .true.
+    logical :: print_progress_for_very_particle = .false.
 
     if (print_progress_for_very_particle) then
         print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
@@ -215,5 +215,27 @@ function linspace(start, stop, n) result(x)
         x(i) = x(i-1) + dx
     end do
 end function linspace
+
+subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num)
+    !This routine sets an individual seed for random number generation in each thread. It does so by adding the thread number
+    !to a given array of integers and using the sum as a put argument of random_seed. Since the seed has very low entropy (every
+    !value of the array is identical), the first random numbers produced are likely to be very non-random. Thus, n random
+    !numbers are generated to get rid of these potentially corrupted numnbers (compare with 
+    !https://stackoverflow.com/questions/51893720/correctly-setting-random-seeds-for-repeatability)
+
+    integer, intent(in) :: thread_num
+    real(dp) :: randnum
+    integer :: i,n, state(33)
+
+    n = 1000
+    state = 20180815
+
+    call random_seed(put=state+thread_num)
+
+    do i = 1,n
+        call random_number(randnum)
+    enddo
+    
+end subroutine initialise_seed_for_random_numbers_for_each_thread
 
 end module utils_parallelised_particle_pushing_mod
