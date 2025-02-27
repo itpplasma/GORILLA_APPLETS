@@ -92,14 +92,20 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
     real(dp) :: local_poloidal_flux, phi_elec_func, temperature
     real(dp) :: r, phi, z
 
+    !This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by 
+    !only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine 
+    !(this is necessary for the energy and momentum conserving collision operator)
+    start%weight(n) =  start%weight(n)*in%energy_eV*ev2erg 
+
     r = z_save(1)
     phi = z_save(2)
     z = z_save(3)
 
-    if (.not.in%boole_refined_sqrt_g) start%weight = start%weight*(r + tetra_physics(ind_tetr)%x1(1))
     if (in%boole_refined_sqrt_g) then
         start%weight(n) = start%weight(n)* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
-                                        &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))               
+                                        &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
+    else
+        start%weight = start%weight*(r + tetra_physics(ind_tetr)%x1(1))
     endif
 
     if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then
@@ -123,22 +129,6 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
     endif
 
     start%jperp(n) = particle_mass*vperp**2*cm_over_e/(2*bmod_func(z_save,ind_tetr))*(-1) !-1 because of negative gyrophase
-
-    ! print*, "r sqrt(g) = ", r + tetra_physics(ind_tetr)%x1(1), (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
-    ! &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))  
-    ! if (in%boole_linear_density_simulation) then
-    !     print*, "linear density factor = ", (pflux%max*1.1_dp-local_poloidal_flux)/(pflux%max*1.1_dp)
-    ! endif
-    ! if (in%boole_boltzmann_energies) then
-    !     if (.not. in%boole_linear_temperature_simulation) then
-    !         print*, "boltzmann energy factor without temperature gradient = ", &
-    !         & sqrt(start%energy(n)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
-    !         & exp(-(start%energy(n)*ev2erg+particle_charge*phi_elec_func)/(in%energy_eV*ev2erg))
-    !     else
-    !         print*, "boltzmann energy factor with temperature gradient = ",sqrt(start%energy(n)*ev2erg)/temperature**1.5_dp* &
-    !         & exp(-(start%energy(n)*ev2erg+particle_charge*phi_elec_func)/temperature)
-    !     endif
-    ! endif
 
 end subroutine calc_particle_weights_and_jperp
 

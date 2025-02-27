@@ -69,6 +69,7 @@ module boltzmann_types_mod
     integer :: randcoli = int(1.0d5)
     integer :: n !number of background species
     real(dp) :: maxcol = 0
+    real(dp) :: weight_factor
     end type collisions_t
 
     type(collisions_t) :: c

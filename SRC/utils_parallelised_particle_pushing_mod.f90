@@ -145,6 +145,7 @@ subroutine carry_out_collisions(i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar, vpar_mat_save, vpar_mat
     integer :: err, j
+    real(dp) :: particle_to_background_coupling_strength = 1.0_dp
     
     allocate(efcolf(c%n))
     allocate(velrat(c%n))
@@ -198,14 +199,16 @@ subroutine carry_out_collisions(i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
 
         if (in%boole_preserve_energy_and_momentum_during_collisions) then
             delta_vpar = vpar - vpar_save
-            delta_epsilon = m0/2*(vpar**2 + vperp**2 - vpar_save**2 - vperp_save**2)
+            delta_epsilon = particle_mass/2*(vpar**2 + vperp**2 - vpar_save**2 - vperp_save**2)
 
             vpar_mat_save = c%vpar_mat(1,ind_tetr)
             
             !$omp critical
-            !c%vpar_mat(1,ind_tetr) = vpar_mat_save - start%weight(n)*delta_vpar
-            !vpar_mat = c%vpar_mat(1,ind_tetr)
-            ! c%temp_mat(1,ind_tetr) = c%temp_mat(1,ind_tetr) + m0/3*(vpar_mat_save**2 - vpar_mat**2) - start%weight(n)*delta_epsilon
+            c%vpar_mat(1,ind_tetr) = vpar_mat_save - &
+                                    0.01_dp*c%weight_factor*start%weight(n)*delta_vpar*particle_to_background_coupling_strength
+            vpar_mat = c%vpar_mat(1,ind_tetr)
+            c%temp_mat(1,ind_tetr) = c%temp_mat(1,ind_tetr) + particle_mass/3*(vpar_mat_save**2 - vpar_mat**2) - &
+                                     0.01_dp*c%weight_factor*start%weight(n)*delta_epsilon*particle_to_background_coupling_strength
             !$omp end critical
         endif
 

@@ -122,8 +122,7 @@ subroutine calc_boltzmann
     call give_file_names
     call unlink_files
 
-    !all analyse_particle_weight_distribution
-
+    !call analyse_particle_weight_distribution
     !call find_minimal_angle_between_curlA_and_tetrahedron_faces
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
@@ -204,8 +203,6 @@ subroutine calc_boltzmann
     if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
          print*, 'number of times particles were pushed across the inside hole = ', counter%lost_inside
     endif
-
-    !call analyse_particle_weight_distribution
 
 end subroutine calc_boltzmann
 

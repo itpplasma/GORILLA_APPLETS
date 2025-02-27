@@ -186,7 +186,7 @@ end subroutine set_starting_positions
 
 subroutine set_rest_of_start_type(rand_matrix)
 
-    use boltzmann_types_mod, only: in, start, g
+    use boltzmann_types_mod, only: in, start, g, c
     use constants, only: pi, ev2erg
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
@@ -196,7 +196,7 @@ subroutine set_rest_of_start_type(rand_matrix)
     start%weight = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
     if (in%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
         start%energy = 5*in%energy_eV*rand_matrix(5,:) !boltzmann energy distribution
-        start%weight =  start%weight*10/sqrt(pi)*in%energy_eV*ev2erg
+        start%weight =  start%weight*10/sqrt(pi)
     endif
     
     if (in%boole_antithetic_variate) then
@@ -204,6 +204,8 @@ subroutine set_rest_of_start_type(rand_matrix)
         start%pitch(1:in%num_particles:2) = -start%pitch(2:in%num_particles:2)
         start%energy(1:in%num_particles:2) = start%energy(2:in%num_particles:2)
     endif
+
+    c%weight_factor = 1/(start%weight(1)*g%amax)
 
 end subroutine set_rest_of_start_type
 

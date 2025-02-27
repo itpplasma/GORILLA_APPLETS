@@ -425,7 +425,7 @@ subroutine set_start_type(rand_matrix)
     start%energy = in%energy_eV
 
     if (in%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        start%weight =  start%weight*10/sqrt(pi)*in%energy_eV*ev2erg
+        start%weight =  start%weight*10/sqrt(pi)
         start%energy = 5*in%energy_eV*rand_matrix(5,:)
     endif
     
