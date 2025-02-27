@@ -23,6 +23,9 @@
   !precalcualte random numbers for collisions
   boole_precalc_collisions = .false.,
 !
+  !make collisions energy and momentum conserving
+  boole_preserve_energy_and_momentum_during_collisions = .true.,
+!
   !Simulated density of particles
   density = 1,
 !

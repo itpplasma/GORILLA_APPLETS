@@ -301,31 +301,40 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(v0)
     close(ne_unit)
     
     do i = 1,grid_size(2)-1 !copy data from first phi slice to all other phi slices
-    c%temp_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%temp_mat(:,1:ntetr/grid_size(2):3)
-    c%dens_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%dens_mat(:,1:ntetr/grid_size(2):3)
+        c%temp_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%temp_mat(:,1:ntetr/grid_size(2):3)
+        c%dens_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%dens_mat(:,1:ntetr/grid_size(2):3)
     enddo
     do i = 1,2 !copy data from first tetrahedron of each triangular prism to the two other ones
-    c%temp_mat(:,1+i:ntetr:3) = c%temp_mat(:,1:ntetr:3)
-    c%dens_mat(:,1+i:ntetr:3) = c%dens_mat(:,1:ntetr:3)
+        c%temp_mat(:,1+i:ntetr:3) = c%temp_mat(:,1:ntetr:3)
+        c%dens_mat(:,1+i:ntetr:3) = c%dens_mat(:,1:ntetr:3)
     enddo
-    
-    do i = 1, ntetr
-    do j = 1,c%n
-    !> if statement because electron density will be calculated in collis init
-    if (j.lt.c%n) c%dens(j) = c%dens_mat(j,i)
-    c%temp(j) = c%temp_mat(j,i)
+
+    !for now, use constant background profiles
+    do i = 1, c%n-1
+        c%dens_mat(i,:) = sum(c%dens_mat(i,:))/ntetr
+        c%temp_mat(i,:) = sum(c%temp_mat(i,:))/ntetr
     enddo
-    call collis_init(m0,z0,c%mass_num,c%charge_num,c%dens,c%temp,in%energy_eV,v0,efcolf,velrat,enrat)
-    c%efcolf_mat(:,i) = efcolf
-    c%velrat_mat(:,i) = velrat
-    c%enrat_mat(:,i) = enrat
-    enddo
+    c%temp_mat(c%n,:) = sum(c%temp_mat(c%n,:))/ntetr
+
+    if (.not.in%boole_preserve_energy_and_momentum_during_collisions) then
+        do i = 1, ntetr
+            do j = 1,c%n
+                !> if statement because electron density will be calculated in collis init
+                if (j.lt.c%n) c%dens(j) = c%dens_mat(j,i)
+                c%temp(j) = c%temp_mat(j,i)
+            enddo
+            call collis_init(m0,z0,c%mass_num,c%charge_num,c%dens,c%temp,in%energy_eV,v0,efcolf,velrat,enrat)
+            c%efcolf_mat(:,i) = efcolf
+            c%velrat_mat(:,i) = velrat
+            c%enrat_mat(:,i) = enrat
+        enddo
+    endif
     
     if (in%boole_precalc_collisions) then
-    allocate(c%randcol(in%num_particles,c%randcoli,3))
-    call RANDOM_NUMBER(c%randcol)
-    !3.464102_dp = sqrt(12), this creates a random number with zero average and unit variance
-    c%randcol(:,:,1:3:2) =  3.464102_dp*(c%randcol(:,:,1:3:2)-0.5_dp)
+        allocate(c%randcol(in%num_particles,c%randcoli,3))
+        call RANDOM_NUMBER(c%randcol)
+        !3.464102_dp = sqrt(12), this creates a random number with zero average and unit variance
+        c%randcol(:,:,1:3:2) =  3.464102_dp*(c%randcol(:,:,1:3:2)-0.5_dp)
     endif
 end subroutine calc_collision_coefficients_for_all_tetrahedra
 
@@ -445,5 +454,30 @@ subroutine find_minimal_angle_between_curlA_and_tetrahedron_faces
     print*, "The minimal angle between the curl of the vector potential and any adjacent tetrahedron face is ", &
             temp, " radiants. sfc_s_min = ", sfc_s_min
 end subroutine find_minimal_angle_between_curlA_and_tetrahedron_faces
+
+subroutine analyse_particle_weight_distribution
+
+    use boltzmann_types_mod, only: in, start
+
+    integer  :: i
+    real(dp) :: maximum_weight, minimum_weight, average_weight
+
+    maximum_weight = start%weight(1)
+    minimum_weight = start%weight(1)
+    average_weight = 0
+
+    do i = 1,int(in%n_particles)
+        average_weight = average_weight + start%weight(i)
+        maximum_weight = max(maximum_weight,start%weight(i))
+        minimum_weight = min(minimum_weight,start%weight(i))
+    enddo
+
+    average_weight = average_weight/in%n_particles
+
+    print*, "maximum particle weight = ", maximum_weight
+    print*, "minimum particle weight = ", minimum_weight
+    print*, "average particle weight = ", average_weight
+
+end subroutine analyse_particle_weight_distribution
 
 end module utils_data_pre_and_post_processing_mod

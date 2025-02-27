@@ -100,6 +100,7 @@ module boltzmann_types_mod
     logical  :: boole_write_fourier_moments
     logical  :: boole_write_exit_data
     logical  :: boole_write_grid_data
+    logical  :: boole_preserve_energy_and_momentum_during_collisions
     logical  :: boole_divertor_intersection !Used in divertor_heat_loads
     logical  :: boole_poincare_plot !Used in divertor_heat_loads
     integer  :: n_poincare_mappings !Used in divertor_heat_loads

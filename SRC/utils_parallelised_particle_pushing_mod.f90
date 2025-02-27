@@ -126,9 +126,12 @@ end subroutine add_local_counter_to_counter
 
 subroutine carry_out_collisions(i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
 
-    use boltzmann_types_mod, only: in, c, time_t
+    use boltzmann_types_mod, only: in, c, time_t, start
     use collis_ions, only: stost
     use find_tetra_mod, only: find_tetra
+    use collis_ions, only: collis_init
+    use tetra_physics_mod, only: particle_mass,particle_charge
+    use constants, only: echarge,amp
     
     integer, intent(in) :: i, n
     real(dp), intent(in) :: v0
@@ -140,7 +143,8 @@ subroutine carry_out_collisions(i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
     real(dp), dimension(5) :: zet
     real(dp), dimension(3) :: randnum
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
-    integer :: err
+    real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar, vpar_mat_save, vpar_mat
+    integer :: err, j
     
     allocate(efcolf(c%n))
     allocate(velrat(c%n))
@@ -149,36 +153,64 @@ subroutine carry_out_collisions(i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
     
     if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
     if (.not.(ind_tetr.eq.-1)) then
-    efcolf = c%efcolf_mat(:,ind_tetr)
-    velrat = c%velrat_mat(:,ind_tetr)
-    enrat = c%enrat_mat(:,ind_tetr)
-    vpar_background = c%vpar_mat(:,ind_tetr)
-    
-    vpar = vpar - vpar_background(1)
-    !since vpar_background actually has num_background_particles entries, consider giving it as an extra
-    !optional input variable to stost, before randnum (maybe also check if radnum could then be set by 
-    !randnum = variable eve if vpar_background is not set and other variables are not set by name indexing)
-    !since it came up when writing these lines: replace expressions like
-    zet(1:3) = x !spatial position
-    zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module 
-    zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
-    
-    if (in%boole_precalc_collisions) then
-        randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:) 
-        call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*v0,randnum)
-    else
-        call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*v0)
+        if (in%boole_preserve_energy_and_momentum_during_collisions) then
+            !use temp and dens to call collis_init to compute efcolf, velrat enrat and vpar_background
+            do j = 1,c%n
+                !> if statement because electron density will be calculated in collis init
+                if (j.lt.c%n) c%dens(j) = c%dens_mat(j,ind_tetr)
+                c%temp(j) = c%temp_mat(j,ind_tetr)
+            enddo
+            m0 = particle_mass/amp
+            z0 = particle_charge/echarge
+            call collis_init(m0,z0,c%mass_num,c%charge_num,c%dens,c%temp,in%energy_eV,v0,efcolf,velrat,enrat)
+            vpar_save = vpar
+            vperp_save = vperp
+        else
+            efcolf = c%efcolf_mat(:,ind_tetr)
+            velrat = c%velrat_mat(:,ind_tetr)
+            enrat = c%enrat_mat(:,ind_tetr)
+        endif
+        vpar_background = c%vpar_mat(:,ind_tetr)
+
+        vpar = vpar - vpar_background(1)
+        !since vpar_background actually has num_background_particles entries, consider giving it as an extra
+        !optional input variable to stost, before randnum (maybe also check if radnum could then be set by 
+        !randnum = variable even if vpar_background is not set and other variables are not set by name indexing)
+        !since it came up when writing these lines: replace expressions like
+        zet(1:3) = x !spatial position
+        zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module 
+        zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
+        
+        if (in%boole_precalc_collisions) then
+            randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:) 
+            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*v0,randnum)
+        else
+            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*v0)
+        endif
+        
+        vpar = zet(5)*zet(4)*v0+vpar_background(1)
+        vperp = sqrt(1-zet(5)**2)*zet(4)*v0
+        
+        !optionally still change particle_mass, particle_charge and cm_over_e, e.g.:
+        !particle_charge = particle_charge + echarge
+        !particle_mass = particle_mass + ame - amp
+        !cm_over_e = clight*particle_mass/particle_charge
+
+        if (in%boole_preserve_energy_and_momentum_during_collisions) then
+            delta_vpar = vpar - vpar_save
+            delta_epsilon = m0/2*(vpar**2 + vperp**2 - vpar_save**2 - vperp_save**2)
+
+            vpar_mat_save = c%vpar_mat(1,ind_tetr)
+            
+            !$omp critical
+            !c%vpar_mat(1,ind_tetr) = vpar_mat_save - start%weight(n)*delta_vpar
+            !vpar_mat = c%vpar_mat(1,ind_tetr)
+            ! c%temp_mat(1,ind_tetr) = c%temp_mat(1,ind_tetr) + m0/3*(vpar_mat_save**2 - vpar_mat**2) - start%weight(n)*delta_epsilon
+            !$omp end critical
+        endif
+
     endif
-    
-    vpar = zet(5)*zet(4)*v0+vpar_background(1)
-    vperp = sqrt(1-zet(5)**2)*zet(4)*v0
-    
-    !optionally still change particle_mass, particle_charge and cm_over_e, e.g.:
-    !particle_charge = particle_charge + echarge
-    !particle_mass = particle_mass + ame - amp 
-    !cm_over_e = clight*particle_mass/particle_charge
-    endif
-    
+
 end subroutine carry_out_collisions
 
 subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_0_mappings)
@@ -221,7 +253,8 @@ subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num)
     !to a given array of integers and using the sum as a put argument of random_seed. Since the seed has very low entropy (every
     !value of the array is identical), the first random numbers produced are likely to be very non-random. Thus, n random
     !numbers are generated to get rid of these potentially corrupted numnbers (compare with 
-    !https://stackoverflow.com/questions/51893720/correctly-setting-random-seeds-for-repeatability)
+    !https://stackoverflow.com/questions/51893720/correctly-setting-random-seeds-for-repeatability, also check
+    !https://stats.stackexchange.com/questions/354373/what-exactly-is-a-seed-in-a-random-number-generator)
 
     integer, intent(in) :: thread_num
     real(dp) :: randnum
@@ -235,7 +268,7 @@ subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num)
     do i = 1,n
         call random_number(randnum)
     enddo
-    
+
 end subroutine initialise_seed_for_random_numbers_for_each_thread
 
 end module utils_parallelised_particle_pushing_mod

@@ -16,7 +16,7 @@ subroutine read_boltzmann_inp_into_type
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-               boole_write_grid_data
+               boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
     integer :: i_integrator_type, seed_option
 
     integer :: b_inp_unit
@@ -26,7 +26,8 @@ subroutine read_boltzmann_inp_into_type
     & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
     & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
-    & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, boole_write_grid_data
+    & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
+    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
 
     open(newunit = b_inp_unit, file='boltzmann.inp', status='unknown')
     read(b_inp_unit,nml=boltzmann_nml)
@@ -58,6 +59,7 @@ subroutine read_boltzmann_inp_into_type
     in%boole_write_fourier_moments = boole_write_fourier_moments
     in%boole_write_exit_data = boole_write_exit_data
     in%boole_write_grid_data = boole_write_grid_data
+    in%boole_preserve_energy_and_momentum_during_collisions = boole_preserve_energy_and_momentum_during_collisions
 
     print *,'GORILLA: Loaded input data from boltzmann.inp'
 
@@ -80,7 +82,7 @@ subroutine calc_boltzmann
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
     get_ipert, set_moment_specifications, initialise_output, calc_starting_conditions, initialize_exit_data, calc_poloidal_flux, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
-    find_minimal_angle_between_curlA_and_tetrahedron_faces
+    find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
     add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, &
     initialise_seed_for_random_numbers_for_each_thread
@@ -119,6 +121,8 @@ subroutine calc_boltzmann
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(v0)
     call give_file_names
     call unlink_files
+
+    !all analyse_particle_weight_distribution
 
     !call find_minimal_angle_between_curlA_and_tetrahedron_faces
 
@@ -200,6 +204,8 @@ subroutine calc_boltzmann
     if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
          print*, 'number of times particles were pushed across the inside hole = ', counter%lost_inside
     endif
+
+    !call analyse_particle_weight_distribution
 
 end subroutine calc_boltzmann
 
