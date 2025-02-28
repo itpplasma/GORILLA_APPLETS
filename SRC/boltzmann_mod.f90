@@ -95,6 +95,7 @@ subroutine calc_boltzmann
     type(counter_t) :: local_counter
     type(time_t) :: t
     type(particle_status_t) :: particle_status
+    logical :: thread_flag = .true.
 
     call set_seed_for_random_numbers
     call read_boltzmann_inp_into_type
@@ -131,12 +132,19 @@ subroutine calc_boltzmann
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart,v0, in, c, iantithetic) &
-    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status)
+    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status) &
+    !$OMP& FIRSTPRIVATE(thread_flag)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO SCHEDULE(static)
 
     !Loop over particles
     do p = 1,in%num_particles/iantithetic
+
+        if ((.not.in%boole_precalc_collisions).and.thread_flag) then
+            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num())
+            thread_flag = .false.
+        endif
+
         do l = 1,iantithetic
 
             n = (p-1)*iantithetic+l
@@ -144,10 +152,6 @@ subroutine calc_boltzmann
             kpart = kpart+1 !in general not equal to n becuase of parallelisation
             call print_progress(in%num_particles,kpart,n)
             !$omp end critical
-
-            if (.not.in%boole_precalc_collisions) then
-                call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num())
-            endif
 
             call initialise_loop_variables(l, n, v0, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
 
