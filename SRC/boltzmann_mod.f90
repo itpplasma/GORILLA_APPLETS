@@ -17,7 +17,7 @@ subroutine read_boltzmann_inp_into_type
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
                boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
-    integer :: i_integrator_type, seed_option
+    integer :: i_integrator_type, seed_option, n_background_density_updates
 
     integer :: b_inp_unit
 
@@ -27,7 +27,7 @@ subroutine read_boltzmann_inp_into_type
     & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
+    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_background_density_updates
 
     open(newunit = b_inp_unit, file='boltzmann.inp', status='unknown')
     read(b_inp_unit,nml=boltzmann_nml)
@@ -60,6 +60,7 @@ subroutine read_boltzmann_inp_into_type
     in%boole_write_exit_data = boole_write_exit_data
     in%boole_write_grid_data = boole_write_grid_data
     in%boole_preserve_energy_and_momentum_during_collisions = boole_preserve_energy_and_momentum_during_collisions
+    in%n_background_density_updates = n_background_density_updates
 
     print *,'GORILLA: Loaded input data from boltzmann.inp'
 
@@ -127,8 +128,67 @@ subroutine calc_boltzmann
     !call find_minimal_angle_between_curlA_and_tetrahedron_faces
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
+
+    if (in%n_background_density_updates.gt.0) then
+        !set integration time to tau/nn_background_density_updates
+        !set local and global counters to zero
+    endif
+
     if (in%i_integrator_type.eq.2) print*, 'Error: i_integratpr_type set to 2, this module only works with &
                                     & i_integrator_type set to 1'
+
+    call parallelised_particle_pushing(v0)
+
+    if (in%n_background_density_updates.gt.0) then
+        !carry out background density updates
+    endif
+
+
+    call normalise_prism_moments_and_prism_moments_squared
+    if (moment_specs%n_moments.gt.0) call fourier_transform_moments
+    call write_data_to_files
+
+    if (in%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
+    print*, 'Number of lost particles',counter%lost_particles
+    print*, 'average number of pushings = ', counter%tetr_pushings/in%n_particles
+    print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/in%n_particles
+    print*, 'average number of integration steps = ', counter%integration_steps/in%n_particles
+    PRINT*, 'particle mass = ', particle_mass
+    PRINT*, 'absolute value of velocity = ', v0
+    PRINT*, 'particle charge = ', particle_charge
+    PRINT*, 'temperature = ', ev2erg*in%energy_eV
+    print*, 'energy in eV = ', in%energy_eV
+    print*, 'tracing time in seconds = ', in%time_step
+    if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
+         print*, 'number of times particles were pushed across the inside hole = ', counter%lost_inside
+    endif
+
+end subroutine calc_boltzmann
+
+subroutine parallelised_particle_pushing(v0)
+
+    use boltzmann_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t
+    use tetra_grid_mod, only: ntetr
+    use omp_lib, only: omp_get_num_threads, omp_get_thread_num
+    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
+    add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, &
+    initialise_seed_for_random_numbers_for_each_thread
+
+    real(dp), intent(in)                     :: v0
+    integer                                  :: kpart, iantithetic, ind_tetr, iface
+    integer                                  :: p, l, n, i
+    real(dp), dimension(3)                   :: x
+    real(dp)                                 :: vpar,vperp
+    type(time_t)                             :: t
+    type(counter_t)                          :: local_counter
+    type(particle_status_t)                  :: particle_status
+    complex(dp), dimension(:,:), allocatable :: local_tetr_moments
+    logical                                  :: thread_flag = .true.
+
+    allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
+    kpart = 0
+    iantithetic = 1
+    if (in%boole_antithetic_variate) iantithetic = 2
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart,v0, in, c, iantithetic) &
@@ -146,7 +206,6 @@ subroutine calc_boltzmann
         endif
 
         do l = 1,iantithetic
-
             n = (p-1)*iantithetic+l
             !$omp critical
             kpart = kpart+1 !in general not equal to n becuase of parallelisation
@@ -189,26 +248,7 @@ subroutine calc_boltzmann
     !$OMP END DO
     !$OMP END PARALLEL
 
-    call normalise_prism_moments_and_prism_moments_squared
-    if (moment_specs%n_moments.gt.0) call fourier_transform_moments
-    call write_data_to_files
-
-    if (in%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
-    print*, 'Number of lost particles',counter%lost_particles
-    print*, 'average number of pushings = ', counter%tetr_pushings/in%n_particles
-    print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/in%n_particles
-    print*, 'average number of integration steps = ', counter%integration_steps/in%n_particles
-    PRINT*, 'particle mass = ', particle_mass
-    PRINT*, 'absolute value of velocity = ', v0
-    PRINT*, 'particle charge = ', particle_charge
-    PRINT*, 'temperature = ', ev2erg*in%energy_eV
-    print*, 'energy in eV = ', in%energy_eV
-    print*, 'tracing time in seconds = ', in%time_step
-    if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-         print*, 'number of times particles were pushed across the inside hole = ', counter%lost_inside
-    endif
-
-end subroutine calc_boltzmann
+end subroutine
 
 subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,ind_tetr,iface, n,local_tetr_moments, &
                                             local_counter, t_remain_out)
