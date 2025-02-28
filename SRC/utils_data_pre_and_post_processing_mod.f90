@@ -100,6 +100,7 @@ subroutine calc_starting_conditions(verts)
     call RANDOM_NUMBER(rand_matrix)
     call allocate_start_type
     call set_starting_positions(rand_matrix)
+    call set_weights
     call set_rest_of_start_type(rand_matrix)
 
 end subroutine calc_starting_conditions
@@ -184,19 +185,31 @@ subroutine set_starting_positions(rand_matrix)
 
 end subroutine set_starting_positions
 
-subroutine set_rest_of_start_type(rand_matrix)
+subroutine set_weights
 
     use boltzmann_types_mod, only: in, start, g, c
-    use constants, only: pi, ev2erg
+    use constants, only: pi
+
+    start%weight = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+
+    if (in%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+        start%weight =  start%weight*10/sqrt(pi)
+    endif
+
+    c%weight_factor = 1/(start%weight(1)*g%amax)
+
+end subroutine set_weights
+
+subroutine set_rest_of_start_type(rand_matrix)
+
+    use boltzmann_types_mod, only: in, start
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
 
     start%pitch(:) = 2*rand_matrix(4,:)-1 !pitch parameter
     start%energy = in%energy_eV
-    start%weight = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
-    if (in%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+    if (in%boole_boltzmann_energies) then
         start%energy = 5*in%energy_eV*rand_matrix(5,:) !boltzmann energy distribution
-        start%weight =  start%weight*10/sqrt(pi)
     endif
     
     if (in%boole_antithetic_variate) then
@@ -204,8 +217,6 @@ subroutine set_rest_of_start_type(rand_matrix)
         start%pitch(1:in%num_particles:2) = -start%pitch(2:in%num_particles:2)
         start%energy(1:in%num_particles:2) = start%energy(2:in%num_particles:2)
     endif
-
-    c%weight_factor = 1/(start%weight(1)*g%amax)
 
 end subroutine set_rest_of_start_type
 
@@ -244,9 +255,9 @@ subroutine calc_poloidal_flux(verts)
     pflux%max = 0
     pflux%min = tetra_physics(1)%Aphi1
     do i = 1, ntetr
-    pflux%max = max(pflux%max,tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi* &
-    & (verts([1,2,3],tetra_grid(i)%ind_knot(4))-verts([1,2,3],tetra_grid(i)%ind_knot(1)))))
-    pflux%min = min(pflux%min,tetra_physics(i)%Aphi1)
+        !pflux%max = max(pflux%max,tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi* &
+        !& (verts([1,2,3],tetra_grid(i)%ind_knot(4))-verts([1,2,3],tetra_grid(i)%ind_knot(1)))))
+        pflux%min = min(pflux%min,tetra_physics(i)%Aphi1)
     enddo
     
 end subroutine calc_poloidal_flux
@@ -339,6 +350,25 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(v0)
         c%randcol(:,:,1:3:2) =  3.464102_dp*(c%randcol(:,:,1:3:2)-0.5_dp)
     endif
 end subroutine calc_collision_coefficients_for_all_tetrahedra
+
+subroutine perform_background_density_update(i)
+
+    use boltzmann_types_mod, only: c, output
+    use gorilla_settings_mod, only: boole_time_Hamiltonian
+
+    integer, intent(in) :: i
+    real(dp) :: r=0.99_dp
+
+    if (boole_time_Hamiltonian.eqv..false.) then
+        print*, "Error, variable 'boole_time_Hamiltonian' must be set to '.true.' for background density update to work"
+        stop
+    endif
+
+    c%dens_mat(1,:) = r*c%dens_mat(1,:) + (1-r)*output%tetr_moments(1,:)
+
+    print*, "background density update ", i, " complete"
+
+end subroutine perform_background_density_update
 
 subroutine normalise_prism_moments_and_prism_moments_squared
 

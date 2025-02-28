@@ -78,25 +78,18 @@ subroutine calc_boltzmann
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use boltzmann_types_mod, only: moment_specs, counter_t, counter, c, in, time_t, particle_status_t
+    use boltzmann_types_mod, only: moment_specs, counter, c, in
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
     get_ipert, set_moment_specifications, initialise_output, calc_starting_conditions, initialize_exit_data, calc_poloidal_flux, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
-    find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution
-    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
-    add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, &
-    initialise_seed_for_random_numbers_for_each_thread
+    find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution, &
+    perform_background_density_update, set_weights
+    use boltzmann_types_mod, only: output
 
-    integer :: kpart,i,n,l,p,ind_tetr,iface,iantithetic
-    real(dp) :: v0,vpar,vperp
-    real(dp), dimension(3) :: x
+    real(dp) :: v0
     real(dp), dimension(:,:), allocatable :: verts
-    complex(dp), dimension(:,:), allocatable :: local_tetr_moments
-    type(counter_t) :: local_counter
-    type(time_t) :: t
-    type(particle_status_t) :: particle_status
-    logical :: thread_flag = .true.
+    integer :: i
 
     call set_seed_for_random_numbers
     call read_boltzmann_inp_into_type
@@ -109,40 +102,36 @@ subroutine calc_boltzmann
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     v0=sqrt(2.0_dp*in%energy_eV*ev2erg/particle_mass)
-    kpart = 0
-    iantithetic = 1
-    if (in%boole_antithetic_variate) iantithetic = 2
 
     call set_moment_specifications
     call initialise_output
     call calc_square_root_g
     call calc_volume_integrals(in%boole_boltzmann_energies,in%boole_refined_sqrt_g, in%density, in%energy_eV)
-    call calc_starting_conditions(verts)
     call initialize_exit_data
+    call calc_starting_conditions(verts)
     call calc_poloidal_flux(verts)
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(v0)
     call give_file_names
     call unlink_files
 
-    !call analyse_particle_weight_distribution
-    !call find_minimal_angle_between_curlA_and_tetrahedron_faces
-
-    allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
-
-    if (in%n_background_density_updates.gt.0) then
-        !set integration time to tau/nn_background_density_updates
-        !set local and global counters to zero
-    endif
-
     if (in%i_integrator_type.eq.2) print*, 'Error: i_integratpr_type set to 2, this module only works with &
                                     & i_integrator_type set to 1'
 
-    call parallelised_particle_pushing(v0)
-
-    if (in%n_background_density_updates.gt.0) then
-        !carry out background density updates
+    if (in%n_background_density_updates.eq.0) then
+        call parallelised_particle_pushing(v0)
+    else
+        do i = 1, in%n_background_density_updates
+            !set everything 0, also counters, write subroutine for that
+            !potentially set weights to updated densities
+            call set_weights !weights need to be set again because in orbit_timestep_gorilla_boltzmannn they are multiplied with 
+            !some factor, so we need to get rid of it again
+            output%tetr_moments = 0.0_dp
+            output%prism_moments = 0.0_dp
+            output%prism_moments_squared = 0.0_dp
+            call parallelised_particle_pushing(v0)
+            call perform_background_density_update(i)
+        enddo
     endif
-
 
     call normalise_prism_moments_and_prism_moments_squared
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments

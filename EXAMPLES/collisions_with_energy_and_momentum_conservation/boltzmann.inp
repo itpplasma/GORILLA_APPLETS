@@ -26,6 +26,9 @@
   !make collisions energy and momentum conserving
   boole_preserve_energy_and_momentum_during_collisions = .true.,
 !
+  !decides how often background densities should be updated
+  n_background_density_updates = 2,
+!
   !Simulated density of particles
   density = 1,
 !

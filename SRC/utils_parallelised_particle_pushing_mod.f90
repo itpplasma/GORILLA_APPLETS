@@ -55,7 +55,7 @@ real(dp), dimension(3) :: x
 complex(dp), dimension(:,:) :: local_tetr_moments
 
 
-call set_local_counter_zero(local_counter)
+call set_counter_zero(local_counter)
 particle_status%lost = .false.
 particle_status%initialized = .false.
 particle_status%exit = .false.
@@ -98,7 +98,7 @@ subroutine add_local_tetr_moments_to_output(local_tetr_moments)
     
 end subroutine add_local_tetr_moments_to_output
 
-subroutine set_local_counter_zero(counter)
+subroutine set_counter_zero(counter)
 
     use boltzmann_types_mod, only: counter_t
     
@@ -109,7 +109,7 @@ subroutine set_local_counter_zero(counter)
     counter%tetr_pushings = 0
     counter%phi_0_mappings = 0
     
-end subroutine set_local_counter_zero
+end subroutine set_counter_zero
 
 subroutine add_local_counter_to_counter(local_counter)
 
