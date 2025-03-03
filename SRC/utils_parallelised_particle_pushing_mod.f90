@@ -49,7 +49,6 @@ integer, intent(in) :: l, n
 type(counter_t) :: local_counter
 type(particle_status_t) :: particle_status
 type(time_t) :: t
-logical :: boole_particle_lost
 real(dp) :: t_step, t_confined, pitchpar, v, vpar, vperp, v0
 real(dp), dimension(3) :: x
 complex(dp), dimension(:,:) :: local_tetr_moments
@@ -145,7 +144,7 @@ subroutine carry_out_collisions(i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar, vpar_mat_save, vpar_mat
     integer :: err, j
-    real(dp) :: particle_to_background_coupling_strength = 1.0_dp
+    real(dp) :: particle_to_background_coupling_strength = 1.0_dp, w_v = 1.0_dp, w_t = 1.0_dp
     
     allocate(efcolf(c%n))
     allocate(velrat(c%n))
@@ -205,10 +204,11 @@ subroutine carry_out_collisions(i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
             
             !$omp critical
             c%vpar_mat(1,ind_tetr) = vpar_mat_save - &
-                                    0.01_dp*c%weight_factor*start%weight(n)*delta_vpar*particle_to_background_coupling_strength
+                                     c%weight_factor*start%weight(n)*delta_vpar/w_v**particle_to_background_coupling_strength
             vpar_mat = c%vpar_mat(1,ind_tetr)
             c%temp_mat(1,ind_tetr) = c%temp_mat(1,ind_tetr) + particle_mass/3*(vpar_mat_save**2 - vpar_mat**2) - &
-                                     0.01_dp*c%weight_factor*start%weight(n)*delta_epsilon*particle_to_background_coupling_strength
+                                     2.0_dp/3.0_dp*c%weight_factor*start%weight(n)*delta_epsilon/w_t &
+                                     *particle_to_background_coupling_strength
             !$omp end critical
         endif
 

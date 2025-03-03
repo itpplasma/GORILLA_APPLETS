@@ -357,7 +357,7 @@ subroutine perform_background_density_update(i)
     use gorilla_settings_mod, only: boole_time_Hamiltonian
 
     integer, intent(in) :: i
-    real(dp) :: r=0.99_dp
+    real(dp) :: r=0.99_dp !under-relaxation factor
 
     if (boole_time_Hamiltonian.eqv..false.) then
         print*, "Error, variable 'boole_time_Hamiltonian' must be set to '.true.' for background density update to work"
@@ -369,6 +369,18 @@ subroutine perform_background_density_update(i)
     print*, "background density update ", i, " complete"
 
 end subroutine perform_background_density_update
+
+subroutine prepare_next_round_of_parallelised_particle_pushing
+
+    use boltzmann_types_mod, only: output
+
+    call set_weights !weights need to be set again because in orbit_timestep_gorilla_boltzmannn they are multiplied with 
+    !some factor, so we need to get rid of it again. Potentially set weights to updated densities
+    output%tetr_moments = 0.0_dp
+    output%prism_moments = 0.0_dp
+    output%prism_moments_squared = 0.0_dp
+
+end subroutine prepare_next_round_of_parallelised_particle_pushing
 
 subroutine normalise_prism_moments_and_prism_moments_squared
 

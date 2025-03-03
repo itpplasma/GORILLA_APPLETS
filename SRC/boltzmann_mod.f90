@@ -84,7 +84,7 @@ subroutine calc_boltzmann
     get_ipert, set_moment_specifications, initialise_output, calc_starting_conditions, initialize_exit_data, calc_poloidal_flux, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
     find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution, &
-    perform_background_density_update, set_weights
+    perform_background_density_update, set_weights, prepare_next_round_of_parallelised_particle_pushing
     use boltzmann_types_mod, only: output
 
     real(dp) :: v0
@@ -114,20 +114,14 @@ subroutine calc_boltzmann
     call give_file_names
     call unlink_files
 
-    if (in%i_integrator_type.eq.2) print*, 'Error: i_integratpr_type set to 2, this module only works with &
+    if (in%i_integrator_type.eq.2) print*, 'Error: i_integrator_type set to 2, this module only works with &
                                     & i_integrator_type set to 1'
 
     if (in%n_background_density_updates.eq.0) then
         call parallelised_particle_pushing(v0)
     else
         do i = 1, in%n_background_density_updates
-            !set everything 0, also counters, write subroutine for that
-            !potentially set weights to updated densities
-            call set_weights !weights need to be set again because in orbit_timestep_gorilla_boltzmannn they are multiplied with 
-            !some factor, so we need to get rid of it again
-            output%tetr_moments = 0.0_dp
-            output%prism_moments = 0.0_dp
-            output%prism_moments_squared = 0.0_dp
+            if (i.gt.1) call prepare_next_round_of_parallelised_particle_pushing
             call parallelised_particle_pushing(v0)
             call perform_background_density_update(i)
         enddo
