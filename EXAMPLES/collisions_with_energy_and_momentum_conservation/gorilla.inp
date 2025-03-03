@@ -18,7 +18,7 @@
 !
  !particle species
  !1 ... electron, 2 ... deuterium ion, 3 ... alpha particle, 4 ... ionised tungsten
- ispecies = 3 ,
+ ispecies = 2 ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
@@ -127,7 +127,7 @@
 !------------------------------------------------------------------------------------------------------------!
 !
  !Switches to calculate optional quantities
- boole_time_hamiltonian = .false. ,
+ boole_time_hamiltonian = .true. ,
  boole_gyrophase = .false. ,
  boole_vpar_int = .false. ,
  boole_vpar2_int = .false. ,

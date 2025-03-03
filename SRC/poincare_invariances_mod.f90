@@ -17,6 +17,7 @@ module poincare_invariances_mod
         use orbit_timestep_gorilla_mod, only: initialize_gorilla
         use tetra_grid_settings_mod, only: n_field_periods
         use gorilla_settings_mod, only: boole_time_Hamiltonian,boole_gyrophase
+        use splint_vmec_data_mod, only: vmec_field
 !
         implicit none
 !
@@ -424,6 +425,8 @@ print *, ''
         use velo_mod, only: isw_field_type
         use supporting_functions_mod, only: theta_sym_flux2theta_vmec,theta_vmec2theta_sym_flux
         use tetra_grid_settings_mod, only: n_field_periods
+        use splint_vmec_data_mod, only: vmec_field
+        use sub_alpha_lifetime_can_mod, only: orbit_timestep_can
 !
         implicit none
 !
@@ -918,6 +921,8 @@ E_ePhi = particle_charge * phi_elec_func_new(x,ind_tetr)/ev2erg
         use tetra_physics_mod, only: coord_system
         use tetra_grid_settings_mod, only: grid_kind
         use supporting_functions_mod, only: theta_sym_flux2theta_vmec
+        use splint_vmec_data_mod, only: splint_vmec_data
+        use magdata_in_symfluxcoordinates_mod, only: magdata_in_symfluxcoord_ext
 !
         implicit none
 !

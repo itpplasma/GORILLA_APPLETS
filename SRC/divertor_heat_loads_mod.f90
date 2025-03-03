@@ -88,12 +88,14 @@ subroutine calc_divertor_heat_loads
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
     use boltzmann_types_mod, only: moment_specs, counter_t, counter, c, in, time_t, particle_status_t
-    use write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
-    use calc_boltzmann_supporting_functions_mod, only: print_progress, handle_lost_particles, initialise_loop_variables, &
-    add_local_tetr_moments_to_output, normalise_prism_moments_and_prism_moments_squared, set_moment_specifications, &
-    initialise_output, fourier_transform_moments, add_local_counter_to_counter, get_ipert, calc_poloidal_flux, &
-    calc_collision_coefficients_for_all_tetrahedra, carry_out_collisions, initialize_exit_data, update_exit_data, &
-    set_seed_for_random_numbers
+    use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
+    use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, get_ipert, &
+    set_moment_specifications, initialise_output, initialize_exit_data, &
+    calc_poloidal_flux, calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
+    fourier_transform_moments
+    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, initialise_loop_variables, &
+    add_local_tetr_moments_to_output, add_local_counter_to_counter, carry_out_collisions, update_exit_data, &
+    initialise_seed_for_random_numbers_for_each_thread
 
     integer :: kpart,i,n,l,p,ind_tetr,iface,iantithetic
     real(dp) :: v0,vpar,vperp
@@ -138,7 +140,7 @@ subroutine calc_divertor_heat_loads
     !$OMP& SHARED(counter, kpart,v0, in, c, iantithetic) &
     !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status)
     print*, 'get number of threads', omp_get_num_threads()
-    !$OMP DO
+    !$OMP DO SCHEDULE(static)
 
     !Loop over particles
     do p = 1,in%num_particles/iantithetic
@@ -149,6 +151,10 @@ subroutine calc_divertor_heat_loads
             kpart = kpart+1 !in general not equal to n becuase of parallelisation
             call print_progress(in%num_particles,kpart,n)
             !$omp end critical
+
+            if (.not.in%boole_precalc_collisions) then
+                call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num())
+            endif
 
             call initialise_loop_variables(l, n, v0, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
 
@@ -207,10 +213,6 @@ subroutine calc_divertor_heat_loads
     PRINT*, 'temperature = ', ev2erg*in%energy_eV
     print*, 'energy in eV = ', in%energy_eV
     print*, 'tracing time in seconds = ', in%time_step
-    if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-         print*, 'number of particles left through the outside = ', counter%lost_outside
-         print*, 'number of particles left through the inside = ', counter%lost_inside
-    endif
 
 end subroutine calc_divertor_heat_loads
 
@@ -225,8 +227,8 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,particle_status,ind_tetr,iface
     use find_tetra_mod, only: find_tetra
     use boltzmann_types_mod, only: counter_t, particle_status_t, in
     use tetra_grid_settings_mod, only: grid_kind
-    use orbit_timestep_gorilla_supporting_functions_mod, only: categorize_lost_particles, update_local_tetr_moments, &
-                                                                initialize_constants_of_motion, calc_particle_weights_and_jperp
+    use utils_orbit_timestep_mod, only: update_local_tetr_moments, initialize_constants_of_motion, &
+                                                       calc_particle_weights_and_jperp
 
     type(counter_t), intent(inout)               :: local_counter
     type(particle_status_t), intent(inout)       :: particle_status
@@ -260,19 +262,11 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,particle_status,ind_tetr,iface
     t_remain = t_step
     boole_t_finished = .false.
     local_counter%tetr_pushings = local_counter%tetr_pushings -1 !set tetr_pushings to -1 because when entering the loop it will go back to one without pushing
-    ! if (n.eq.1) then
-    !     print*, 'hello', x, bmod_func(z_save,ind_tetr)
-    !     stop
-    ! endif
-    !open(581,file = 'banana_orbit.dat')
 
     do !Loop for tetrahedron pushings until t_step is reached
         local_counter%tetr_pushings = local_counter%tetr_pushings +1
 
         if(ind_tetr.eq.-1) then
-            if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-                call categorize_lost_particles(ind_tetr_save,z_save,local_counter,t_remain,t_remain_out)
-            endif
             exit
         endif
 
@@ -368,7 +362,7 @@ subroutine calc_plane_intersection(x_save,x,z_plane)
     rel_dist_z = (z_plane-x_save(3))/(x(3)-x_save(3))
     x(1) = x_save(1) + rel_dist_z*(x(1)-x_save(1))
     if (abs(x(2)-x_save(2)).gt.pi) then
-    x(2) = modulo(x_save(2) + 2*pi-abs(x(2)-x_save(2)),2*pi)
+    x(2) = modulo(x_save(2) + 2.0_dp*pi-abs(x(2)-x_save(2)),2*pi)
     else
     x(2) = x_save(2) + rel_dist_z*(x(2)-x_save(2))
     endif
@@ -431,7 +425,7 @@ subroutine set_start_type(rand_matrix)
     start%energy = in%energy_eV
 
     if (in%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        start%weight =  start%weight*10/sqrt(pi)*in%energy_eV*ev2erg
+        start%weight =  start%weight*10/sqrt(pi)
         start%energy = 5*in%energy_eV*rand_matrix(5,:)
     endif
     
@@ -473,6 +467,7 @@ subroutine create_magnetic_field_file
     use constants, only: pi
     use tetra_physics_mod, only: vector_potential_rphiz
     use field_mod, only: ipert
+    use utils_parallelised_particle_pushing_mod, only: linspace
 
     character(len=100) :: filename
     real(dp) :: A(3), B(3), bmod
@@ -482,10 +477,13 @@ subroutine create_magnetic_field_file
     integer :: unit, i, j, k, n
     real(dp), dimension(:), allocatable :: R, phi, Z
 
+    print*, 'ATTENTION: the subroutine create_magnetic_field_file prints magnetic field and vector potential at points evenly &
+             spaced in r, phi and z direction even if in GORILLA they are spaced differently (e.g. close to the magnetic axis, &
+             near resonant surfaces or when not working with cylindrical coordinates and grid_kind = 1)'
     filename = "field_from_gorilla"
 
     limits(1,:) = (/g%amin,g%amax/) !R
-    limits(2,:) = (/0.0_dp,2*pi/) !phi
+    limits(2,:) = (/0.0_dp,2.0_dp*pi/) !phi
     limits(3,:) = (/g%cmin,g%amax/) !Z
     n_points = (/n1, n2, n3/)
     is_periodic = (/.false.,.true.,.false./)
@@ -512,19 +510,5 @@ subroutine create_magnetic_field_file
     close(unit)
 
 end subroutine create_magnetic_field_file
-
-function linspace(start, stop, n) result(x)
-    real(dp), intent(in) :: start, stop
-    integer, intent(in) :: n
-    real(dp) :: x(n)
-    real(dp) :: dx
-    integer :: i
-
-    dx = (stop - start) / (n - 1)
-    x(1) = start
-    do i = 2, n
-        x(i) = x(i-1) + dx
-    end do
-end function linspace
 
 end module divertor_heat_loads_mod

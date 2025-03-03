@@ -4,7 +4,7 @@ set(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
 
 project (GORILLA_APPLETS
   VERSION 1.0.0)
-  
+
 enable_language(Fortran)
 
 if(UNIX AND NOT APPLE)
@@ -25,3 +25,13 @@ if(APPLE)
 endif()
 
 add_subdirectory(SRC)
+add_subdirectory(SRC_CORE)
+
+add_executable(gorilla_applets_main.x
+  SRC/gorilla_applets_main.f90
+)
+
+target_link_libraries(gorilla_applets_main.x
+  GORILLA_APPLETS
+  )
+target_include_directories(gorilla_applets_main.x PUBLIC ${CMAKE_BINARY_DIR}/SRC_CORE)

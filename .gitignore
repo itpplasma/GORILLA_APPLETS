@@ -34,13 +34,13 @@
 
 # Data files
 *.dat
-*.txt
 *.mat
 *.fig
 fort.*
 out.*
 *.png
 *out
+*.nc
 
 # macOS
 .DS*
@@ -90,3 +90,6 @@ EXAMPLES/PYTHON_RUN
 /REVERSIBILITY_TEST
 /test
 /test_collis
+
+EXAMPLES/collisions_with_energy_and_momentum_conservation/test.f90
+EXAMPLES/collisions_with_energy_and_momentum_conservation/test

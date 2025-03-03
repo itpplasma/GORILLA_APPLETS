@@ -23,6 +23,12 @@
   !precalcualte random numbers for collisions
   boole_precalc_collisions = .true.,
 !
+  !make collisions energy and momentum conserving
+  boole_preserve_energy_and_momentum_during_collisions = .false.,
+!
+  !decides how often background densities should be updated
+  n_background_density_updates = 0,
+!
   !Simulated density of particles
   density = 1,
 !
@@ -62,5 +68,6 @@
   boole_write_electric_potential = .false. ,
   boole_write_moments = .false. ,
   boole_write_fourier_moments = .true. ,
-  boole_write_exit_data = .true.
+  boole_write_exit_data = .true. ,
+  boole_write_grid_data = .true.
 /

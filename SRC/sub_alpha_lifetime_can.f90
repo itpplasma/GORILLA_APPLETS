@@ -1,3 +1,9 @@
+module sub_alpha_lifetime_can_mod
+
+      implicit none
+
+      contains 
+!
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
       subroutine elefie_can(x,derphi)
@@ -15,6 +21,7 @@
     use gorilla_settings_mod, only: eps_Phi
     use tetra_physics_mod, only: particle_charge,cm_over_e,particle_mass
     use parmot_mod, only: ro0
+    use splint_vmec_data_mod, only: vmec_field
 !
     implicit none
 !
@@ -80,6 +87,7 @@
 !
       use parmot_mod, only : rmu,ro0
       use velo_mod,   only : isw_field_type
+      use magfie_mod, only: magfie_vmec, magfie_can
 !
       implicit none
 !
@@ -196,6 +204,7 @@
       use odeint_mod, only: odeint_allroutines
       use runge_kutta_mod, only: runge_kutta_allroutines
       use gorilla_settings_mod, only: rel_err_ode45
+      use chamb_can_mod, only: chamb_can
 !
       implicit none
 !
@@ -207,8 +216,6 @@
 !
       double precision, dimension(2)    :: y
       double precision, dimension(ndim) :: z
-!
-      external velo_can
 !
       !Use relative error definition from input file
       relerr = rel_err_ode45
@@ -295,6 +302,7 @@
 !  Called routines:  magfie_vmec, magfie_can
 !
       use velo_mod,   only : isw_field_type
+      use magfie_mod, only: magfie_vmec, magfie_can
 !
       double precision :: phi
       double precision, dimension(5) :: y,dery
@@ -332,6 +340,8 @@
 !
       use velo_mod,   only : isw_field_type
       use odeint_mod, only: odeint_allroutines
+      use chamb_can_mod, only: chamb_can
+      use magfie_mod, only: magfie_vmec, magfie_can
 !
       implicit none
 !
@@ -345,8 +355,6 @@
 !
       double precision x,bmod,sqrtg,bder,hcovar,hctrvr,hcurl
       dimension x(3),bder(3),hcovar(3),hctrvr(3),hcurl(3)
-!
-      external :: rhs_mflint_can
 !
       ierr=0
 !
@@ -414,6 +422,5 @@
       bmod00=y(5)/y(4)
 !
       end subroutine integrate_mfl_can
-!
-!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!
+
+end module sub_alpha_lifetime_can_mod

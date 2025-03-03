@@ -104,6 +104,8 @@
             use velo_mod, only: isw_field_type
             use supporting_functions_mod, only: theta_sym_flux2theta_vmec,theta_vmec2theta_sym_flux
             use tetra_grid_settings_mod, only: n_field_periods
+            use binsrc_mod, only: binsrc
+            use sub_alpha_lifetime_can_mod, only: orbit_timestep_can
 !
             implicit none
 !
@@ -199,7 +201,7 @@ print *, kpart, ' / ', n_particles, 'particle: ', n, 'thread: ' !, omp_get_threa
                 !$omp end critical
 
                 !Find random start indices that are distributed proportionally to the flux tube volume
-                call binsrc(pos_fluxtv_mat(:,4),1,shape(pos_fluxtv_mat(:,4)),xi(n),i)
+                call binsrc(pos_fluxtv_mat(:,4),1,size(pos_fluxtv_mat(:,4)),xi(n),i)
 !
                 x_rand_beg = pos_fluxtv_mat(i,1:3)
 !

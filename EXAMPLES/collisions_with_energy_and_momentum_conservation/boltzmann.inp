@@ -9,7 +9,7 @@
   energy_eV = 3.5d3 ,
 !
   !Number of particles to be traced
-  n_particles = 1.0d2 ,
+  n_particles = 1.0d3 ,
 !
   !Compute squares of moments 
   boole_squared_moments = .true.,
@@ -21,13 +21,13 @@
   boole_collisions = .true.,
 !
   !precalcualte random numbers for collisions
-  boole_precalc_collisions = .true.,
+  boole_precalc_collisions = .false.,
 !
   !make collisions energy and momentum conserving
-  boole_preserve_energy_and_momentum_during_collisions = .false.,
+  boole_preserve_energy_and_momentum_during_collisions = .true.,
 !
   !decides how often background densities should be updated
-  n_background_density_updates = 0,
+  n_background_density_updates = 2,
 !
   !Simulated density of particles
   density = 1,
@@ -39,14 +39,14 @@
   boole_boltzmann_energies = .true.,
 !
   !make density a linear function of poloidal flux
-  boole_linear_density_simulation = .true.,
+  boole_linear_density_simulation = .false.,
 !
   !always initiate pairs of particles where both particles start at the same position but move
   !in opposite direction, this helps to reduce statistical noise
-  boole_antithetic_variate = .true.,
+  boole_antithetic_variate = .false.,
 !
   !make temperature a linear function of poloidal flux
-  boole_linear_temperature_simulation = .true.,
+  boole_linear_temperature_simulation = .false.,
 !
   !Set integrator type
   !(must be 1, otherwise it currently does not work)
@@ -60,14 +60,14 @@
   seed_option = 2
 
   !write data to files
-  boole_write_vertex_indices = .false. ,
-  boole_write_vertex_coordinates = .false. ,
+  boole_write_vertex_indices = .true. ,
+  boole_write_vertex_coordinates = .true. ,
   boole_write_prism_volumes = .false. ,
-  boole_write_refined_prism_volumes = .false. ,
+  boole_write_refined_prism_volumes = .true. ,
   boole_write_boltzmann_density = .false. ,
   boole_write_electric_potential = .false. ,
-  boole_write_moments = .false. ,
+  boole_write_moments = .true. ,
   boole_write_fourier_moments = .true. ,
-  boole_write_exit_data = .true. ,
+  boole_write_exit_data = .true.
   boole_write_grid_data = .true.
 /
