@@ -11,7 +11,7 @@
   !Number of particles to be traced
   n_particles = 1.0d3 ,
 !
-  !Compute squares of moments 
+  !Compute squares of moments
   boole_squared_moments = .true.,
 !
   !Start all particles from the same physical position
@@ -27,7 +27,7 @@
   boole_preserve_energy_and_momentum_during_collisions = .true.,
 !
   !decides how often background densities should be updated
-  n_background_density_updates = 2,
+  n_background_density_updates = 0,
 !
   !Simulated density of particles
   density = 1,
