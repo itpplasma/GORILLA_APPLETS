@@ -9,7 +9,7 @@ contains
 subroutine identify_particles_entering_annulus(x,local_counter,boole_lost_inside)
 
     use tetra_physics_mod, only: tetra_physics
-    use boltzmann_types_mod, only: counter_t, pflux, g
+    use boltzmann_types_mod, only: counter_t, g
 
     real(dp), dimension(3), intent(in) :: x
     type(counter_t), intent(inout) :: local_counter
@@ -80,7 +80,7 @@ end subroutine initialize_constants_of_motion
 
 subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
 
-    use boltzmann_types_mod, only: in, pflux, start
+    use boltzmann_types_mod, only: in, flux, start
     use tetra_physics_mod, only: tetra_physics,particle_mass,particle_charge,cm_over_e
     use constants, only: ev2erg
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
@@ -112,7 +112,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
         local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
     endif
     if (in%boole_linear_density_simulation) then
-        start%weight(n) = start%weight(n)*(pflux%max*1.1_dp-local_poloidal_flux)/(pflux%max*1.1_dp)
+        start%weight(n) = start%weight(n)*(flux%poloidal_max*1.1_dp-local_poloidal_flux)/(flux%poloidal_max*1.1_dp)
     endif
 
     if (in%boole_boltzmann_energies) then
@@ -122,7 +122,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
             start%weight(n) =start%weight(n)*sqrt(start%energy(n)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
                         & exp(-(start%energy(n)*ev2erg+particle_charge*phi_elec_func)/(in%energy_eV*ev2erg))
         else
-            temperature = in%energy_eV*ev2erg*(pflux%max*1.1_dp-local_poloidal_flux)/(pflux%max*1.1_dp)
+            temperature = in%energy_eV*ev2erg*(flux%poloidal_max*1.1_dp-local_poloidal_flux)/(flux%poloidal_max*1.1_dp)
             start%weight(n) = start%weight(n)*sqrt(start%energy(n)*ev2erg)/temperature**1.5_dp* &
             & exp(-(start%energy(n)*ev2erg+particle_charge*phi_elec_func)/temperature)
         endif
@@ -131,5 +131,38 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
     start%jperp(n) = particle_mass*vperp**2*cm_over_e/(2*bmod_func(z_save,ind_tetr))*(-1) !-1 because of negative gyrophase
 
 end subroutine calc_particle_weights_and_jperp
+
+subroutine compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
+
+    use boltzmann_types_mod, only: output
+    use tetra_grid_settings_mod, only: grid_size
+
+    integer, intent(in) :: ind_tetr_save,ind_tetr
+    integer, dimension(2) :: ind_r, ind_in_first_phi_slice
+    real(dp), dimension(3)        :: x
+    integer :: change, boundary_num
+
+    ind_in_first_phi_slice = mod((/ind_tetr_save,ind_tetr/) - 1,grid_size(1)*grid_size(3)*6) + 1
+    ind_r = int((ind_in_first_phi_slice - 1)/(grid_size(3)*6)) + 1
+    
+    if (.not.(ind_r(1).eq.ind_r(2))) then
+        if (.not.(ind_tetr.eq.-1)) then
+            change = ind_r(2) - ind_r(1)
+            boundary_num = max(ind_r(2), ind_r(1))
+            !$omp critical
+            output%radial_flux(boundary_num) = output%radial_flux(boundary_num) + change
+            !$omp end critical
+        else
+            !$omp critical
+            if (ind_r(1).eq.1) then
+                output%radial_flux(ind_r(1)) = output%radial_flux(ind_r(1)) - 1
+            else
+                output%radial_flux(ind_r(1)+1) = output%radial_flux(ind_r(1)+1) + 1
+            endif
+            !$omp end critical
+        endif
+    endif
+
+end subroutine compute_radial_fluxes
 
 end module utils_orbit_timestep_mod

@@ -143,8 +143,9 @@ subroutine calc_boltzmann
     print*, 'energy in eV = ', in%energy_eV
     print*, 'tracing time in seconds = ', in%time_step
     if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-         print*, 'number of times particles were pushed across the inside hole = ', counter%lost_inside
+         print*, 'number of times that particles were pushed across the inside hole = ', counter%lost_inside
     endif
+    !print*, output%radial_flux
 
 end subroutine calc_boltzmann
 
@@ -246,7 +247,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
     use boltzmann_types_mod, only: counter_t, particle_status_t, g
     use tetra_grid_settings_mod, only: grid_kind
     use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
-                                                       initialize_constants_of_motion, calc_particle_weights_and_jperp
+                                        initialize_constants_of_motion, calc_particle_weights_and_jperp, compute_radial_fluxes
 
     type(counter_t), intent(inout)               :: local_counter
     type(particle_status_t), intent(inout)       :: particle_status
@@ -320,6 +321,8 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
         t_remain = t_remain - t_pass
 
         call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities)
+        if((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
+
         if(boole_t_finished) then !Orbit stops within cell, because "flight"-time t_step has finished
             if( present(t_remain_out)) t_remain_out = t_remain
             exit
