@@ -63,6 +63,7 @@ subroutine initialise_output
 
     use tetra_grid_mod, only: ntetr
     use boltzmann_types_mod, only: moment_specs, output
+    use tetra_grid_settings_mod, only: grid_size
     
     integer :: n_prisms
     
@@ -72,6 +73,7 @@ subroutine initialise_output
     allocate(output%refined_prism_volumes(n_prisms))
     allocate(output%electric_potential(n_prisms))
     allocate(output%boltzmann_density(n_prisms))
+    allocate(output%radial_flux(grid_size(1)+1))
     allocate(output%tetr_moments(moment_specs%n_moments,ntetr))
     allocate(output%prism_moments(moment_specs%n_moments,n_prisms))
     if (moment_specs%boole_squared_moments) allocate(output%prism_moments_squared(moment_specs%n_moments,n_prisms))
@@ -81,6 +83,7 @@ subroutine initialise_output
     output%refined_prism_volumes = 0
     output%electric_potential = 0
     output%boltzmann_density = 0
+    output%radial_flux = 0
     output%tetr_moments = 0
     output%prism_moments = 0
     if (moment_specs%boole_squared_moments) output%prism_moments_squared = 0
@@ -245,19 +248,19 @@ end subroutine initialize_exit_data
 
 subroutine calc_poloidal_flux(verts)
 
-    use boltzmann_types_mod, only: pflux
+    use boltzmann_types_mod, only: flux
     use tetra_physics_mod, only: tetra_physics
     use tetra_grid_mod, only: ntetr, tetra_grid
     
     real(dp), dimension(:,:), intent(in) :: verts
     integer :: i
     
-    pflux%max = 0
-    pflux%min = tetra_physics(1)%Aphi1
+    flux%poloidal_max = 0
+    flux%poloidal_min = tetra_physics(1)%Aphi1
     do i = 1, ntetr
-        !pflux%max = max(pflux%max,tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi* &
-        !& (verts([1,2,3],tetra_grid(i)%ind_knot(4))-verts([1,2,3],tetra_grid(i)%ind_knot(1)))))
-        pflux%min = min(pflux%min,tetra_physics(i)%Aphi1)
+        flux%poloidal_max = max(flux%poloidal_max,tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi* &
+        & (verts([1,2,3],tetra_grid(i)%ind_knot(4))-verts([1,2,3],tetra_grid(i)%ind_knot(1)))))
+        flux%poloidal_min = min(flux%poloidal_min,tetra_physics(i)%Aphi1)
     enddo
     
 end subroutine calc_poloidal_flux

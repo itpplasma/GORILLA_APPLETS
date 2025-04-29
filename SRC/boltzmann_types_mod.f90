@@ -19,6 +19,7 @@ module boltzmann_types_mod
     real(dp), dimension(:), allocatable :: refined_prism_volumes
     real(dp), dimension(:), allocatable :: electric_potential
     real(dp), dimension(:), allocatable :: boltzmann_density
+    real(dp), dimension(:), allocatable :: radial_flux
     complex(dp), dimension(:,:), allocatable :: tetr_moments
     complex(dp), dimension(:,:), allocatable :: prism_moments
     complex(dp), dimension(:,:), allocatable :: prism_moments_squared
@@ -47,12 +48,12 @@ module boltzmann_types_mod
 
     type(counter_t) :: counter
 
-    type poloidal_flux_t
-    real(dp) :: min
-    real(dp) :: max
-    end type poloidal_flux_t
+    type flux_t
+    real(dp) :: poloidal_min
+    real(dp) :: poloidal_max
+    end type flux_t
 
-    type(poloidal_flux_t) :: pflux
+    type(flux_t) :: flux
 
     type collisions_t
     real(dp), dimension(:,:,:), allocatable :: randcol
