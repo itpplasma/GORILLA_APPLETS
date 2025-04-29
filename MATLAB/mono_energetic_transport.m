@@ -68,7 +68,7 @@ addpath(path_functions_GORILLA);
 % The created files during this run will be stored in an own folder. The code 
 % while create a new folder if the folder thus not exist.
 
-name_folder='data_plots/mono_energetic_transport_old_2';
+name_folder='data_plots/mono_energetic_transport';
 mkdir(path_script,name_folder);
 path_data_plots=[path_script,'/',name_folder];
 %% 
@@ -103,7 +103,7 @@ tetra_grid.read();
 % The code needs to be executed seperatly for diffrent normalized ExB-drifts 
 % (mach numbers).
 
-mach_number = [0,1*10^-2];
+mach_number = 0;%[0,1*10^-2];
 %mach_number = [0,10^-4,10^-2];
 %% 
 % 
@@ -207,7 +207,7 @@ gorilla.GORILLANML.boole_newton_precalc = false;
 % 
 % Polynomial order for orbit pusher
 
-gorilla.GORILLANML.poly_order = 4;
+gorilla.GORILLANML.poly_order = 3;
 %% 
 % 
 % 
@@ -329,8 +329,8 @@ gorilla.GORILLANML.helical_pert_n_fourier = 2;
 
 gorilla.GORILLANML.boole_time_Hamiltonian = false;
 gorilla.GORILLANML.boole_gyrophase = false;
-gorilla.GORILLANML.vpar_int = false;
-gorilla.GORILLANML.vpar2_int = false;
+gorilla.GORILLANML.boole_vpar_int = false;
+gorilla.GORILLANML.boole_vpar2_int = false;
 %%
 %
 %
@@ -367,11 +367,11 @@ tetra_grid.TETRA_GRID_NML.n1 = 100;
 %% 
 % Rectangular: nphi, Field-aligned: nphi
 
-tetra_grid.TETRA_GRID_NML.n2 = 30;
+tetra_grid.TETRA_GRID_NML.n2 = 60;
 %% 
 % Rectangular: nZ, Field-aligned: ntheta
 
-tetra_grid.TETRA_GRID_NML.n3 = 30;
+tetra_grid.TETRA_GRID_NML.n3 = 60;
 %% 
 % 
 % 
@@ -535,13 +535,13 @@ gorilla_applets.GORILLA_APPLETS_NML.start_pos_x3  = 0.00013;
 % 
 % Size of a single time step
 
-gorilla_applets.GORILLA_APPLETS_NML.t_step_fluxtv = 0.001;
+gorilla_applets.GORILLA_APPLETS_NML.t_step_fluxtv = -0.001;
 %% 
 % 
 % 
 % Number of time steps for fluxtube volume
 
-gorilla_applets.GORILLA_APPLETS_NML.nt_steps_fluxtv = 10000;
+gorilla_applets.GORILLA_APPLETS_NML.nt_steps_fluxtv = 100000;
 %% 
 % 
 % Inputfile mono_energetic_transp_coef
@@ -572,7 +572,7 @@ mono_energetic_transp_coef.TRANSPCOEFNML.n_particles = 200;
 % 
 % true ... with collisions (Lorentz collision operator)
 
-mono_energetic_transp_coef.TRANSPCOEFNML.boole_collisions = true;
+mono_energetic_transp_coef.TRANSPCOEFNML.boole_collisions = false;
 %% 
 % 
 % 
@@ -671,7 +671,7 @@ mono_energetic_transp_coef.TRANSPCOEFNML.filename_transp_diff_coef = ['nustar_di
 % Starting value for normalized collisionality $\nu^\ast$ (Highest value --> 
 % Scan is towards smaller collisionalities)
 
-mono_energetic_transp_coef.TRANSPCOEFNML.nu_star_start = 0.1;
+mono_energetic_transp_coef.TRANSPCOEFNML.nu_star_start = 8;
 %% 
 % 
 % 
@@ -683,7 +683,7 @@ mono_energetic_transp_coef.TRANSPCOEFNML.nu_exp_basis = 0.5;
 % 
 % Number of evaluations of nu_star for scan
 
-mono_energetic_transp_coef.TRANSPCOEFNML.n_nu_scans = 3;
+mono_energetic_transp_coef.TRANSPCOEFNML.n_nu_scans = 12;
 %% 
 % 
 % 
@@ -705,7 +705,7 @@ mono_energetic_transp_coef.TRANSPCOEFNML.lambda_start = 0.9;
 % 
 % Total Monte Carlo physical orbit flight time per particle
 
-mono_energetic_transp_coef.TRANSPCOEFNML.total_MC_time = 10;
+mono_energetic_transp_coef.TRANSPCOEFNML.total_MC_time = 0.5;
 %% 
 % 
 % 

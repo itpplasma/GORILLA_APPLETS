@@ -63,7 +63,7 @@
   boole_write_vertex_indices = .false. ,
   boole_write_vertex_coordinates = .false. ,
   boole_write_prism_volumes = .false. ,
-  boole_write_refined_prism_volumes = .false. ,
+  boole_write_refined_prism_volumes = .true. ,
   boole_write_boltzmann_density = .false. ,
   boole_write_electric_potential = .false. ,
   boole_write_moments = .false. ,

@@ -36,7 +36,7 @@
  n_field_periods_manual =  1 ,
 !
  !Symmetry Flux Coordinates Annulus (Minimal value for flux coordinates s)
- sfc_s_min = 1.d-1 ,
+ sfc_s_min = 1.d-5 ,
 !
  !Option for $\theta$-variable being used in grid
  ! 1 ... theta scaling in symmetry flux coordinates
