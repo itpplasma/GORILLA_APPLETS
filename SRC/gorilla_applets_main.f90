@@ -15,6 +15,7 @@
   use boltzmann_mod, only: calc_boltzmann
   use field_line_tracing_mod, only: calc_field_lines
   use divertor_heat_loads_mod, only: calc_divertor_heat_loads
+  use self_consistent_electric_field_mod, only: calc_self_consistent_electric_field
 !
   implicit none
 !
@@ -129,6 +130,12 @@
         case(11) !Calculate divertor heat loads
 !
             call calc_divertor_heat_loads
+!
+!-------------------------------------------------------------------------------------------!
+!
+        case(12) !Calculate self consistent electric field
+!
+            call calc_self_consistent_electric_field
 !
 !-------------------------------------------------------------------------------------------!
 !

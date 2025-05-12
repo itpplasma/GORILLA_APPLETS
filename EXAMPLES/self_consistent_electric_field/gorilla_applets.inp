@@ -18,7 +18,7 @@
  !10 .. Do field line tracing
  !11 .. Compute divertor heat loads
  !12 .. Compute self consistent eectric field
- i_option = 11 ,
+ i_option = 12 ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
