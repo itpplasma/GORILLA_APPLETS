@@ -6,7 +6,7 @@ module self_consistent_electric_field_mod
    
 contains
 
-subroutine read_boltzmann_inp_into_type
+subroutine read_self_consistent_electric_field_inp_into_type
 
     use boltzmann_types_mod, only: in
 
@@ -19,19 +19,19 @@ subroutine read_boltzmann_inp_into_type
                boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
     integer :: i_integrator_type, seed_option, n_background_density_updates
 
-    integer :: b_inp_unit
+    integer :: s_inp_unit
 
-    !Namelist for boltzmann input
-    NAMELIST /boltzmann_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions, &
+    !Namelist for self consistent electric field input
+    NAMELIST /self_consistent_ef_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions, &
     & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
     & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_background_density_updates
 
-    open(newunit = b_inp_unit, file='boltzmann.inp', status='unknown')
-    read(b_inp_unit,nml=boltzmann_nml)
-    close(b_inp_unit)
+    open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
+    read(s_inp_unit,nml=self_consistent_ef_nml)
+    close(s_inp_unit)
 
     in%time_step = time_step
     in%energy_eV = energy_eV
@@ -62,9 +62,9 @@ subroutine read_boltzmann_inp_into_type
     in%boole_preserve_energy_and_momentum_during_collisions = boole_preserve_energy_and_momentum_during_collisions
     in%n_background_density_updates = n_background_density_updates
 
-    print *,'GORILLA: Loaded input data from boltzmann.inp'
+    print *,'GORILLA: Loaded input data from self_consistent_ef.inp'
 
-end subroutine read_boltzmann_inp_into_type
+end subroutine read_self_consistent_electric_field_inp_into_type
 
 subroutine calc_self_consistent_electric_field
 
@@ -92,7 +92,7 @@ subroutine calc_self_consistent_electric_field
     integer :: i
 
     call set_seed_for_random_numbers
-    call read_boltzmann_inp_into_type
+    call read_self_consistent_electric_field_inp_into_type
     call get_ipert()
     call initialize_gorilla(i_option,ipert)
 
@@ -207,7 +207,7 @@ subroutine parallelised_particle_pushing(v0)
                     t%step = t%step/v0 !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 
-                call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t%step,particle_status,ind_tetr,iface,n,&
+                call orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t%step,particle_status,ind_tetr,iface,n,&
                             & local_tetr_moments, local_counter,t%remain)
 
                 t%confined = t%confined + t%step - t%remain
@@ -234,7 +234,7 @@ subroutine parallelised_particle_pushing(v0)
 
 end subroutine
 
-subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,ind_tetr,iface, n,local_tetr_moments, &
+subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particle_status,ind_tetr,iface, n,local_tetr_moments, &
                                             local_counter, t_remain_out)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
@@ -332,6 +332,6 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
 
     vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
 
-end subroutine orbit_timestep_gorilla_boltzmann
+end subroutine orbit_timestep_gorilla_self_consistent_ef
 
 end module self_consistent_electric_field_mod

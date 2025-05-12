@@ -1,6 +1,6 @@
-! INPUT FILE FOR BOLTZMANN
+! INPUT FILE FOR SELF CONSISTENT ELECTRIC FIELD
 !
-&boltzmann_nml
+&self_consistent_ef_nml
 !
   !time for tracing particles
   time_step = 1.0d-3 ,
