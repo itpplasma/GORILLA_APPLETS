@@ -373,6 +373,65 @@ subroutine perform_background_density_update(i)
 
 end subroutine perform_background_density_update
 
+subroutine perform_electric_potential_update(i, update_dimension, density)
+
+    use boltzmann_types_mod, only: c, output, grid_t, in
+    use gorilla_settings_mod, only: boole_time_Hamiltonian
+    use tetra_grid_mod, only: ntetr, nvert
+    !use tetra_physics_mod, only: phi_elec
+
+    integer, intent(in) :: i, update_dimension
+    real(dp), dimension(ntetr), intent(in) :: density
+    real(dp), dimension(ntetr) :: rho
+    real(dp), dimension(nvert) :: phi_elec_from_rho
+    real(dp) :: r=0.99_dp !under-relaxation factor
+
+    if (boole_time_Hamiltonian.eqv..false.) then
+        print*, "Error, variable 'boole_time_Hamiltonian' must be set to '.true.' for electric potential update to work"
+        stop
+    endif
+
+    !call routine that computes the electric potential arising from the electron and ion densities (i.e. phi_elec_from_rho, 
+    !compute it in 1D and 3D, first only in 1D)
+
+    !add phi_elec_from_rho to phi_elec from tetra_physics_mod, make it a module variable there
+
+
+    !call make_tetra_physics with i_option. Add this as an optional input argument to make_tetra_physics, 
+    !if it is 12, then phi_elec(iv) should not be overwritten with  = A_x2(iv)*eps_Phi as is done currently but left as it is
+
+    c%dens_mat(1,:) = r*c%dens_mat(1,:) + (1-r)*output%tetr_moments(1,:)
+
+    print*, "electric potential update ", i, " complete"
+
+end subroutine perform_electric_potential_update
+
+subroutine calc_phi_elec_from_rho(density, phi_elec_from_rho, update_dimension)
+
+    !use boltzmann_types_mod, only:  vertices_per_flux_surface, solid_angles_per_tetrazhedron_vertex
+    use tetra_grid_mod, only: ntetr, nvert
+    use tetra_grid_settings_mod, only: grid_size
+
+    real(dp), dimension(ntetr), intent(in) :: density
+    integer, intent(in) :: update_dimension
+    real(dp), dimension(nvert) :: rho
+    real(dp), dimension(nvert) :: phi_elec_from_rho
+    real(dp), dimension(grid_size(2)) :: average_density_per_flux_surface
+    integer :: i
+
+    if (update_dimension.eq.1) then
+        do i = 1,grid_size(2)
+            !average_density_per_flux_surface(i) = sum(density(tetrahedra_per_flux_surface(j)))/(grid_size(2)*grid_size(3))
+        enddo
+        !rho(vertices_per_flux_surface(1)) = average_density_per_flux_surface(1)
+        do i = 2,grid_size(2)
+            !rho(vertices_per_flux_surface(i)) = 0.5_dp0*(average_density_per_flux_surface(i-1)+average_density_per_flux_surface(i))
+        enddo
+        !rho(vertices_per_flux_surface(end)) = average_density_per_flux_surface(end)
+    endif
+
+end subroutine calc_phi_elec_from_rho
+
 subroutine prepare_next_round_of_parallelised_particle_pushing
 
     use boltzmann_types_mod, only: output
