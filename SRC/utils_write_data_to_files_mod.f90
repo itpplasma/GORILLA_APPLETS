@@ -10,7 +10,7 @@ contains
 
 subroutine write_data_to_files
 
-    use boltzmann_types_mod, only: filenames, in, output, moment_specs
+    use gorilla_applets_types_mod, only: filenames, in, output, moment_specs
 
     if (in%boole_write_vertex_indices) call write_vertex_indices
 
@@ -52,7 +52,7 @@ end subroutine write_data_to_files
 subroutine write_vertex_indices
 
     use tetra_grid_mod, only: ntetr, tetra_grid
-    use boltzmann_types_mod, only: filenames
+    use gorilla_applets_types_mod, only: filenames
 
     integer :: vi_unit
     integer :: i
@@ -69,7 +69,7 @@ subroutine write_vertex_coordinates
 
     use tetra_physics_mod, only: coord_system
     use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
-    use boltzmann_types_mod, only: filenames
+    use gorilla_applets_types_mod, only: filenames
 
     integer :: vc_unit
     integer :: i
@@ -93,7 +93,7 @@ end subroutine write_vertex_coordinates
 
 subroutine write_prism_volumes
 
-    use boltzmann_types_mod, only: filenames, output
+    use gorilla_applets_types_mod, only: filenames, output
 
     integer :: pv_unit
 
@@ -105,7 +105,7 @@ end subroutine write_prism_volumes
 
 subroutine write_refined_prism_volumes
 
-    use boltzmann_types_mod, only: filenames, output
+    use gorilla_applets_types_mod, only: filenames, output
 
     integer :: rpv_unit
 
@@ -117,7 +117,7 @@ end subroutine write_refined_prism_volumes
 
 subroutine write_boltzmann_densities
 
-    use boltzmann_types_mod, only: filenames, output
+    use gorilla_applets_types_mod, only: filenames, output
 
     integer :: bd_unit
 
@@ -129,7 +129,7 @@ end subroutine write_boltzmann_densities
 
 subroutine write_electric_potential
 
-    use boltzmann_types_mod, only: filenames, output
+    use gorilla_applets_types_mod, only: filenames, output
 
     integer :: epv_unit
 
@@ -142,7 +142,7 @@ end subroutine write_electric_potential
 subroutine write_moments
 
     use tetra_grid_mod, only: ntetr
-    use boltzmann_types_mod, only: moment_specs, filenames, output
+    use gorilla_applets_types_mod, only: moment_specs, filenames, output
 
     integer :: p_moments_unit, pmss_unit, t_moments_unit
     integer :: l, i
@@ -190,7 +190,7 @@ end subroutine write_moments
 subroutine write_fourier_moments
 
     use tetra_grid_settings_mod, only: grid_size
-    use boltzmann_types_mod, only: moment_specs, output, filenames
+    use gorilla_applets_types_mod, only: moment_specs, output, filenames
 
     integer :: fm_unit, l, i
 
@@ -209,7 +209,7 @@ end subroutine write_fourier_moments
 
 subroutine write_exit_data
 
-    use boltzmann_types_mod, only: exit_data, filenames, in
+    use gorilla_applets_types_mod, only: exit_data, filenames, in
 
     integer :: ed_unit, i
 
@@ -225,7 +225,7 @@ end subroutine write_exit_data
 subroutine write_grid_data
 
     use tetra_grid_settings_mod, only: grid_size, n_extra_rings
-    use boltzmann_types_mod, only: filenames, g
+    use gorilla_applets_types_mod, only: filenames, g
     use netcdf
 
     integer :: status, ncid
@@ -286,7 +286,7 @@ end subroutine nc_check
 
 subroutine give_file_names
 
-    use boltzmann_types_mod, only: filenames
+    use gorilla_applets_types_mod, only: filenames
 
     filenames%poincare_maps = 'poincare_maps.dat'
     filenames%prism_moments = 'prism_moments.dat'
@@ -307,7 +307,7 @@ end subroutine give_file_names
 
 subroutine unlink_files
 
-    use boltzmann_types_mod, only: filenames
+    use gorilla_applets_types_mod, only: filenames
 
     call unlink(filenames%poincare_maps)
     call unlink(filenames%prism_moments)

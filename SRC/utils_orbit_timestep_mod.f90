@@ -9,7 +9,7 @@ contains
 subroutine identify_particles_entering_annulus(x,local_counter,boole_lost_inside)
 
     use tetra_physics_mod, only: tetra_physics
-    use boltzmann_types_mod, only: counter_t, g
+    use gorilla_applets_types_mod, only: counter_t, g
 
     real(dp), dimension(3), intent(in) :: x
     type(counter_t), intent(inout) :: local_counter
@@ -27,7 +27,7 @@ end subroutine identify_particles_entering_annulus
 
 subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quantities)
 
-    use boltzmann_types_mod, only: moment_specs, start
+    use gorilla_applets_types_mod, only: moment_specs, start
     use gorilla_settings_mod, only: optional_quantities_type
 
     type(optional_quantities_type), intent(in)   :: optional_quantities
@@ -80,7 +80,7 @@ end subroutine initialize_constants_of_motion
 
 subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
 
-    use boltzmann_types_mod, only: in, flux, start
+    use gorilla_applets_types_mod, only: in, flux, start
     use tetra_physics_mod, only: tetra_physics,particle_mass,particle_charge,cm_over_e
     use constants, only: ev2erg
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
@@ -134,7 +134,7 @@ end subroutine calc_particle_weights_and_jperp
 
 subroutine compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
 
-    use boltzmann_types_mod, only: output
+    use gorilla_applets_types_mod, only: output
     use tetra_grid_settings_mod, only: grid_size
 
     integer, intent(in) :: ind_tetr_save,ind_tetr

@@ -46,7 +46,7 @@ subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, 
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_grid_settings_mod, only: grid_size, n_field_periods
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
-    use boltzmann_types_mod, only: output
+    use gorilla_applets_types_mod, only: output
     
     real(dp), dimension(:), allocatable              :: prism_volumes, refined_prism_volumes, elec_pot_vec, n_b
     logical, intent(in)                              :: boole_boltzmann_energies, boole_refined_sqrt_g

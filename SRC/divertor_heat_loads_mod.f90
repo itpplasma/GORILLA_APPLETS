@@ -15,7 +15,7 @@ contains
 
 subroutine read_divertor_heat_loads_inp_into_type
 
-    use boltzmann_types_mod, only: in
+    use gorilla_applets_types_mod, only: in
 
     real(dp) :: time_step,energy_eV,n_particles, density, lambda
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
@@ -87,7 +87,7 @@ subroutine calc_divertor_heat_loads
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use boltzmann_types_mod, only: moment_specs, counter_t, counter, c, in, time_t, particle_status_t
+    use gorilla_applets_types_mod, only: moment_specs, counter_t, counter, c, in, time_t, particle_status_t
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, get_ipert, &
     set_moment_specifications, initialise_output, initialize_exit_data, &
@@ -225,7 +225,7 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,particle_status,ind_tetr,iface
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func, bmod_func
     use find_tetra_mod, only: find_tetra
-    use boltzmann_types_mod, only: counter_t, particle_status_t, in
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, in
     use tetra_grid_settings_mod, only: grid_kind
     use utils_orbit_timestep_mod, only: update_local_tetr_moments, initialize_constants_of_motion, &
                                                        calc_particle_weights_and_jperp
@@ -305,7 +305,7 @@ end subroutine orbit_timestep_dhl
 
 subroutine calc_and_write_poincare_mappings(x,iper_phi,local_counter,particle_status)
 
-    use boltzmann_types_mod, only: counter_t, particle_status_t, in
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, in
 
     real(dp), dimension(3), intent(inout)  :: x
     integer, intent(in)                    :: iper_phi
@@ -326,7 +326,7 @@ end subroutine calc_and_write_poincare_mappings
 
 subroutine calc_and_write_divertor_intersections(x_save,x,n,local_counter,particle_status)
 
-    use boltzmann_types_mod, only: counter_t, particle_status_t, in
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, in
 
     real(dp), dimension(3), intent(in)     :: x_save
     real(dp), dimension(3), intent(inout)  :: x
@@ -387,7 +387,7 @@ end subroutine close_files
 
 subroutine calc_starting_conditions
 
-    use boltzmann_types_mod, only: in
+    use gorilla_applets_types_mod, only: in
     
     real(dp), dimension(:,:), allocatable  :: rand_matrix
 
@@ -403,7 +403,7 @@ end subroutine calc_starting_conditions
 
 subroutine set_start_type(rand_matrix)
 
-    use boltzmann_types_mod, only: in, start, g
+    use gorilla_applets_types_mod, only: in, start, g
     use constants, only: pi, ev2erg
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
@@ -440,7 +440,7 @@ end subroutine set_start_type
 subroutine set_coordinate_limits
 
     use tetra_grid_mod, only: verts_rphiz
-    use boltzmann_types_mod, only: g
+    use gorilla_applets_types_mod, only: g
 
     g%amin = minval(verts_rphiz(1,:)) !r coordinate
     g%amax = maxval(verts_rphiz(1,:))
@@ -451,7 +451,7 @@ end subroutine set_coordinate_limits
 
 subroutine allocate_start_type
 
-    use boltzmann_types_mod, only: start, in
+    use gorilla_applets_types_mod, only: start, in
 
     allocate(start%x(3,in%num_particles))
     allocate(start%pitch(in%num_particles))
@@ -463,7 +463,7 @@ end subroutine allocate_start_type
 
 subroutine create_magnetic_field_file
     use tetra_grid_settings_mod, only: n1,n2,n3
-    use boltzmann_types_mod, only: g
+    use gorilla_applets_types_mod, only: g
     use constants, only: pi
     use tetra_physics_mod, only: vector_potential_rphiz
     use field_mod, only: ipert

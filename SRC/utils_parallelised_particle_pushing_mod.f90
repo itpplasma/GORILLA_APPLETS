@@ -23,7 +23,7 @@ end subroutine print_progress
 
 subroutine handle_lost_particles(local_counter, boole_particle_lost)
 
-    use boltzmann_types_mod, only: counter_t
+    use gorilla_applets_types_mod, only: counter_t
 
     type(counter_t) :: local_counter
     logical :: boole_particle_lost
@@ -41,7 +41,7 @@ end subroutine handle_lost_particles
 
 subroutine initialise_loop_variables(l, n, v0, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
 
-use boltzmann_types_mod, only: in, counter_t, start, time_t, particle_status_t
+use gorilla_applets_types_mod, only: in, counter_t, start, time_t, particle_status_t
 use constants, only: ev2erg
 use tetra_physics_mod, only: particle_mass
 
@@ -75,7 +75,7 @@ end subroutine initialise_loop_variables
 
 subroutine add_local_tetr_moments_to_output(local_tetr_moments)
 
-    use boltzmann_types_mod, only: moment_specs, output
+    use gorilla_applets_types_mod, only: moment_specs, output
     use tetra_grid_mod, only: ntetr
     
     complex(dp), dimension(:,:), intent(in) :: local_tetr_moments
@@ -99,7 +99,7 @@ end subroutine add_local_tetr_moments_to_output
 
 subroutine set_counter_zero(counter)
 
-    use boltzmann_types_mod, only: counter_t
+    use gorilla_applets_types_mod, only: counter_t
     
     type(counter_t), intent(inout) :: counter
     
@@ -112,7 +112,7 @@ end subroutine set_counter_zero
 
 subroutine add_local_counter_to_counter(local_counter)
 
-    use boltzmann_types_mod, only: counter_t, counter
+    use gorilla_applets_types_mod, only: counter_t, counter
     
     type(counter_t), intent(in) :: local_counter
     
@@ -125,7 +125,7 @@ end subroutine add_local_counter_to_counter
 
 subroutine carry_out_collisions(i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
 
-    use boltzmann_types_mod, only: in, time_t
+    use gorilla_applets_types_mod, only: in, time_t
     use find_tetra_mod, only: find_tetra
     
     integer, intent(in) :: i, n
@@ -148,7 +148,7 @@ end subroutine carry_out_collisions
 
 subroutine collisions_with_background_updates(i, n, v0, t, x, vpar, vperp, ind_tetr)
 
-    use boltzmann_types_mod, only: in, c, time_t, start
+    use gorilla_applets_types_mod, only: in, c, time_t, start
     use collis_ions, only: stost
     use collis_ions, only: collis_init
     use tetra_physics_mod, only: particle_mass,particle_charge
@@ -222,7 +222,7 @@ end subroutine collisions_with_background_updates
 
 subroutine collisions_without_background_updates(i, n, v0, t, x, vpar, vperp, ind_tetr)
 
-    use boltzmann_types_mod, only: in, c, time_t
+    use gorilla_applets_types_mod, only: in, c, time_t
     use collis_ions, only: stost
     
     integer, intent(in) :: i, n
@@ -274,7 +274,7 @@ end subroutine collisions_without_background_updates
 
 subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_0_mappings)
 
-    use boltzmann_types_mod, only: exit_data, in
+    use gorilla_applets_types_mod, only: exit_data, in
 
     integer, intent(in)    :: i, n
     integer, optional      :: phi_0_mappings

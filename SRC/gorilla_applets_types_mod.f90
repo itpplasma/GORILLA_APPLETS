@@ -1,4 +1,4 @@
-module boltzmann_types_mod
+module gorilla_applets_types_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
@@ -156,6 +156,7 @@ module boltzmann_types_mod
     integer  :: ind_a
     integer  :: ind_b
     integer  :: ind_c
+    real(dp), dimension(:,:), allocatable :: vertices_per_flux_surface !used in self_consistent_electric_field_mod
     end type grid_t
 
     type(grid_t) :: g
@@ -172,4 +173,4 @@ module boltzmann_types_mod
     real(dp) :: confined
     end type time_t
 
-end module boltzmann_types_mod
+end module gorilla_applets_types_mod

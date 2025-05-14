@@ -39,7 +39,7 @@ subroutine set_moment_specifications
     use gorilla_settings_mod, only: boole_array_optional_quantities
     use tetra_grid_settings_mod, only: grid_size
     use tetra_grid_mod, only: ntetr
-    use boltzmann_types_mod, only: moment_specs, in
+    use gorilla_applets_types_mod, only: moment_specs, in
     
     integer :: i, n_prisms
     
@@ -62,7 +62,7 @@ end subroutine set_moment_specifications
 subroutine initialise_output
 
     use tetra_grid_mod, only: ntetr
-    use boltzmann_types_mod, only: moment_specs, output
+    use gorilla_applets_types_mod, only: moment_specs, output
     use tetra_grid_settings_mod, only: grid_size
     
     integer :: n_prisms
@@ -93,7 +93,7 @@ end subroutine initialise_output
 
 subroutine calc_starting_conditions(verts)
 
-    use boltzmann_types_mod, only: in
+    use gorilla_applets_types_mod, only: in
     
     real(dp), dimension(:,:), allocatable, intent(out)     :: verts
     real(dp), dimension(:,:), allocatable                  :: rand_matrix
@@ -114,7 +114,7 @@ subroutine set_verts_and_coordinate_limits(verts)
     use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
     use tetra_grid_settings_mod, only: grid_size
     use magdata_in_symfluxcoor_mod, only : raxis,zaxis
-    use boltzmann_types_mod, only: g
+    use gorilla_applets_types_mod, only: g
 
     real(dp), dimension(:,:), allocatable, intent(out)     :: verts
     integer :: i
@@ -149,7 +149,7 @@ end subroutine set_verts_and_coordinate_limits
 
 subroutine allocate_start_type
 
-    use boltzmann_types_mod, only: start, in
+    use gorilla_applets_types_mod, only: start, in
 
     allocate(start%x(3,in%num_particles))
     allocate(start%pitch(in%num_particles))
@@ -161,7 +161,7 @@ end subroutine allocate_start_type
 
 subroutine set_starting_positions(rand_matrix)
 
-    use boltzmann_types_mod, only: in, start, g
+    use gorilla_applets_types_mod, only: in, start, g
     use tetra_physics_mod, only: coord_system
     use tetra_grid_settings_mod, only: grid_kind
     use constants, only: pi
@@ -190,7 +190,7 @@ end subroutine set_starting_positions
 
 subroutine set_weights
 
-    use boltzmann_types_mod, only: in, start, g, c
+    use gorilla_applets_types_mod, only: in, start, g, c
     use constants, only: pi
 
     start%weight = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
@@ -205,7 +205,7 @@ end subroutine set_weights
 
 subroutine set_rest_of_start_type(rand_matrix)
 
-    use boltzmann_types_mod, only: in, start
+    use gorilla_applets_types_mod, only: in, start
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
 
@@ -225,7 +225,7 @@ end subroutine set_rest_of_start_type
 
 subroutine initialize_exit_data
 
-    use boltzmann_types_mod, only: in, exit_data
+    use gorilla_applets_types_mod, only: in, exit_data
 
     allocate(exit_data%lost(in%num_particles))
     allocate(exit_data%t_confined(in%num_particles))
@@ -248,7 +248,7 @@ end subroutine initialize_exit_data
 
 subroutine calc_poloidal_flux(verts)
 
-    use boltzmann_types_mod, only: flux
+    use gorilla_applets_types_mod, only: flux
     use tetra_physics_mod, only: tetra_physics
     use tetra_grid_mod, only: ntetr, tetra_grid
     
@@ -267,7 +267,7 @@ end subroutine calc_poloidal_flux
 
 subroutine calc_collision_coefficients_for_all_tetrahedra(v0)
 
-    use boltzmann_types_mod, only: in, c
+    use gorilla_applets_types_mod, only: in, c
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge
     use constants, only: echarge,amp
@@ -356,7 +356,7 @@ end subroutine calc_collision_coefficients_for_all_tetrahedra
 
 subroutine perform_background_density_update(i)
 
-    use boltzmann_types_mod, only: c, output
+    use gorilla_applets_types_mod, only: c, output
     use gorilla_settings_mod, only: boole_time_Hamiltonian
 
     integer, intent(in) :: i
@@ -375,7 +375,7 @@ end subroutine perform_background_density_update
 
 subroutine perform_electric_potential_update(i, update_dimension, density)
 
-    use boltzmann_types_mod, only: c, output, grid_t, in
+    use gorilla_applets_types_mod, only: c, output, grid_t, in
     use gorilla_settings_mod, only: boole_time_Hamiltonian
     use tetra_grid_mod, only: ntetr, nvert
     !use tetra_physics_mod, only: phi_elec
@@ -408,7 +408,7 @@ end subroutine perform_electric_potential_update
 
 subroutine calc_phi_elec_from_rho(density, phi_elec_from_rho, update_dimension)
 
-    !use boltzmann_types_mod, only:  vertices_per_flux_surface, solid_angles_per_tetrazhedron_vertex
+    !use gorilla_applets_types_mod, only:  vertices_per_flux_surface, solid_angles_per_tetrazhedron_vertex
     use tetra_grid_mod, only: ntetr, nvert
     use tetra_grid_settings_mod, only: grid_size
 
@@ -428,13 +428,14 @@ subroutine calc_phi_elec_from_rho(density, phi_elec_from_rho, update_dimension)
             !rho(vertices_per_flux_surface(i)) = 0.5_dp0*(average_density_per_flux_surface(i-1)+average_density_per_flux_surface(i))
         enddo
         !rho(vertices_per_flux_surface(end)) = average_density_per_flux_surface(end)
+        !phi_elec_from_rho = factor * rho
     endif
 
 end subroutine calc_phi_elec_from_rho
 
 subroutine prepare_next_round_of_parallelised_particle_pushing
 
-    use boltzmann_types_mod, only: output
+    use gorilla_applets_types_mod, only: output
 
     call set_weights !weights need to be set again because in orbit_timestep_gorilla_boltzmannn they are multiplied with 
     !some factor, so we need to get rid of it again. Potentially set weights to updated densities
@@ -446,7 +447,7 @@ end subroutine prepare_next_round_of_parallelised_particle_pushing
 
 subroutine normalise_prism_moments_and_prism_moments_squared
 
-    use boltzmann_types_mod, only: moment_specs, output, in
+    use gorilla_applets_types_mod, only: moment_specs, output, in
     
     integer :: n
     
@@ -471,7 +472,7 @@ subroutine fourier_transform_moments
 
     use constants, only: pi
     use tetra_grid_settings_mod, only: grid_size
-    use boltzmann_types_mod, only: moment_specs, output
+    use gorilla_applets_types_mod, only: moment_specs, output
     use tetra_grid_mod, only: ntetr
     
     integer                                     :: n,m,j,k,p,q,l
@@ -563,7 +564,7 @@ end subroutine find_minimal_angle_between_curlA_and_tetrahedron_faces
 
 subroutine analyse_particle_weight_distribution
 
-    use boltzmann_types_mod, only: in, start
+    use gorilla_applets_types_mod, only: in, start
 
     integer  :: i
     real(dp) :: maximum_weight, minimum_weight, average_weight
