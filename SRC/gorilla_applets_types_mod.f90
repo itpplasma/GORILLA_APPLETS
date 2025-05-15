@@ -34,6 +34,10 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: energy
     real(dp), dimension(:), allocatable :: weight
     real(dp), dimension(:), allocatable :: jperp
+    real(dp) ::  particle_charge
+    real(dp) :: particle_mass
+    real(dp) :: cm_over_e
+    !add v0 at some point
     end type start_t
 
     type(start_t) :: start
@@ -104,6 +108,7 @@ module gorilla_applets_types_mod
     logical  :: boole_write_grid_data
     logical  :: boole_preserve_energy_and_momentum_during_collisions = .false.
     integer  :: n_background_density_updates = 0
+    integer  :: n_electric_potential_updates !used in self consistent electric field computation
     logical  :: boole_divertor_intersection !Used in divertor_heat_loads
     logical  :: boole_poincare_plot !Used in divertor_heat_loads
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
@@ -156,7 +161,8 @@ module gorilla_applets_types_mod
     integer  :: ind_a
     integer  :: ind_b
     integer  :: ind_c
-    real(dp), dimension(:,:), allocatable :: vertices_per_flux_surface !used in self_consistent_electric_field_mod
+    integer, dimension(:,:), allocatable :: vertices_per_flux_surface !used in self_consistent_electric_field_mod
+    integer, dimension(:,:), allocatable :: prisms_per_flux_tube !used in self_consistent_electric_field_mod
     end type grid_t
 
     type(grid_t) :: g

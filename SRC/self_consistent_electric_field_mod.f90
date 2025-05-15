@@ -17,7 +17,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
                boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
-    integer :: i_integrator_type, seed_option, n_background_density_updates
+    integer :: i_integrator_type, seed_option, n_electric_potential_updates
 
     integer :: s_inp_unit
 
@@ -27,7 +27,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_background_density_updates
+    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_electric_potential_updates
 
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
     read(s_inp_unit,nml=self_consistent_ef_nml)
@@ -60,7 +60,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%boole_write_exit_data = boole_write_exit_data
     in%boole_write_grid_data = boole_write_grid_data
     in%boole_preserve_energy_and_momentum_during_collisions = boole_preserve_energy_and_momentum_during_collisions
-    in%n_background_density_updates = n_background_density_updates
+    in%n_electric_potential_updates = n_electric_potential_updates
 
     print *,'GORILLA: Loaded input data from self_consistent_ef.inp'
 
@@ -84,17 +84,19 @@ subroutine calc_self_consistent_electric_field
     get_ipert, set_moment_specifications, initialise_output, calc_starting_conditions, initialize_exit_data, calc_poloidal_flux, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
     find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution, &
-    perform_background_density_update, set_weights, prepare_next_round_of_parallelised_particle_pushing
+    perform_background_density_update, set_weights, prepare_next_round_of_parallelised_particle_pushing, &
+    associate_flux_labels_with_tetrahedra_and_vertices
     use gorilla_applets_types_mod, only: output
 
     real(dp) :: v0
     real(dp), dimension(:,:), allocatable :: verts
-    integer :: i
+    integer :: i, particle_species
 
     call set_seed_for_random_numbers
     call read_self_consistent_electric_field_inp_into_type
     call get_ipert()
     call initialize_gorilla(i_option,ipert)
+    call associate_flux_labels_with_tetrahedra_and_vertices
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! delete this again afterwards !!!!!!!!!!!!!!!!!!!!!!!
     if (ispecies.eq.4) particle_charge = 15*echarge
@@ -110,22 +112,21 @@ subroutine calc_self_consistent_electric_field
     call initialize_exit_data
     call calc_starting_conditions(verts)
     call calc_poloidal_flux(verts)
-    if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(v0)
     call give_file_names
     call unlink_files
 
     if (in%i_integrator_type.eq.2) print*, 'Error: i_integrator_type set to 2, this module only works with &
                                     & i_integrator_type set to 1'
 
-    if (in%n_background_density_updates.eq.0) then
-        call parallelised_particle_pushing(v0)
-    else
-        do i = 1, in%n_background_density_updates
-            if (i.gt.1) call prepare_next_round_of_parallelised_particle_pushing
+    do i = 1, max(in%n_electric_potential_updates,1)
+        do particle_species = 1,2 !trace electrons and ions
+            if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(v0)
             call parallelised_particle_pushing(v0)
-            call perform_background_density_update(i)
+            !call perform_background_density_update(i)
+            !call perform_electric_potential_update(i, update_dimension, rho)
+            call prepare_next_round_of_parallelised_particle_pushing(particle_species)
         enddo
-    endif
+    enddo
 
     call normalise_prism_moments_and_prism_moments_squared
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
@@ -145,7 +146,6 @@ subroutine calc_self_consistent_electric_field
     if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
          print*, 'number of times that particles were pushed across the inside hole = ', counter%lost_inside
     endif
-    !print*, output%radial_flux
 
 end subroutine calc_self_consistent_electric_field
 

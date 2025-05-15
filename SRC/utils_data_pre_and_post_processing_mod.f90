@@ -206,6 +206,7 @@ end subroutine set_weights
 subroutine set_rest_of_start_type(rand_matrix)
 
     use gorilla_applets_types_mod, only: in, start
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
 
@@ -220,6 +221,10 @@ subroutine set_rest_of_start_type(rand_matrix)
         start%pitch(1:in%num_particles:2) = -start%pitch(2:in%num_particles:2)
         start%energy(1:in%num_particles:2) = start%energy(2:in%num_particles:2)
     endif
+
+    start%particle_charge = particle_charge
+    start%particle_mass = particle_mass
+    start%cm_over_e = cm_over_e
 
 end subroutine set_rest_of_start_type
 
@@ -281,19 +286,19 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(v0)
     real(dp) :: m0, z0
     
     c%n = 2 !number of background species
-    allocate(c%dens_mat(c%n-1,ntetr))
-    allocate(c%temp_mat(c%n,ntetr))
-    allocate(c%vpar_mat(c%n,ntetr))
-    allocate(c%efcolf_mat(c%n,ntetr))
-    allocate(c%velrat_mat(c%n,ntetr))
-    allocate(c%enrat_mat(c%n,ntetr))
-    allocate(c%mass_num(c%n-1))
-    allocate(c%charge_num(c%n-1))
-    allocate(c%dens(c%n))
-    allocate(c%temp(c%n))
-    allocate(efcolf(c%n))
-    allocate(velrat(c%n))
-    allocate(enrat(c%n))
+    if (.not.allocated(c%dens_mat))   allocate(c%dens_mat(c%n-1,ntetr))
+    if (.not.allocated(c%temp_mat))   allocate(c%temp_mat(c%n,ntetr))
+    if (.not.allocated(c%vpar_mat))   allocate(c%vpar_mat(c%n,ntetr))
+    if (.not.allocated(c%efcolf_mat)) allocate(c%efcolf_mat(c%n,ntetr))
+    if (.not.allocated(c%velrat_mat)) allocate(c%velrat_mat(c%n,ntetr))
+    if (.not.allocated(c%enrat_mat))  allocate(c%enrat_mat(c%n,ntetr))
+    if (.not.allocated(c%mass_num))   allocate(c%mass_num(c%n-1))
+    if (.not.allocated(c%charge_num)) allocate(c%charge_num(c%n-1))
+    if (.not.allocated(c%dens))       allocate(c%dens(c%n))
+    if (.not.allocated(c%temp))       allocate(c%temp(c%n))
+    if (.not.allocated(efcolf))       allocate(efcolf(c%n))
+    if (.not.allocated(velrat))       allocate(velrat(c%n))
+    if (.not.allocated(enrat))        allocate(enrat(c%n))
     c%mass_num = 0
     c%charge_num = 0
     c%mass_num(1) = 2
@@ -347,7 +352,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(v0)
     endif
     
     if (in%boole_precalc_collisions) then
-        allocate(c%randcol(in%num_particles,c%randcoli,3))
+        if (.not.allocated(c%randcol)) allocate(c%randcol(in%num_particles,c%randcoli,3))
         call RANDOM_NUMBER(c%randcol)
         !3.464102_dp = sqrt(12), this creates a random number with zero average and unit variance
         c%randcol(:,:,1:3:2) =  3.464102_dp*(c%randcol(:,:,1:3:2)-0.5_dp)
@@ -358,32 +363,37 @@ subroutine perform_background_density_update(i)
 
     use gorilla_applets_types_mod, only: c, output
     use gorilla_settings_mod, only: boole_time_Hamiltonian
+    use tetra_grid_mod, only: ntetr
 
     integer, intent(in) :: i
     real(dp) :: r=0.99_dp !under-relaxation factor
+    real(dp), dimension(ntetr) :: density_from_particle_trajectories
 
     if (boole_time_Hamiltonian.eqv..false.) then
         print*, "Error, variable 'boole_time_Hamiltonian' must be set to '.true.' for background density update to work"
         stop
     endif
 
-    c%dens_mat(1,:) = r*c%dens_mat(1,:) + (1-r)*output%tetr_moments(1,:)
+    density_from_particle_trajectories(1:ntetr:3) = output%prism_moments(1,:)
+    density_from_particle_trajectories(2:ntetr:3) = output%prism_moments(1,:)
+    density_from_particle_trajectories(3:ntetr:3) = output%prism_moments(1,:)
+
+    c%dens_mat(1,:) = r*c%dens_mat(1,:) + (1-r)*density_from_particle_trajectories
 
     print*, "background density update ", i, " complete"
 
 end subroutine perform_background_density_update
 
-subroutine perform_electric_potential_update(i, update_dimension, density)
+subroutine perform_electric_potential_update(i, update_dimension)
 
     use gorilla_applets_types_mod, only: c, output, grid_t, in
-    use gorilla_settings_mod, only: boole_time_Hamiltonian
+    use gorilla_settings_mod, only: boole_time_Hamiltonian, coord_system
     use tetra_grid_mod, only: ntetr, nvert
-    !use tetra_physics_mod, only: phi_elec
+    use tetra_physics_mod, only: make_tetra_physics, phi_elec
+    use field_mod, only: ipert
 
     integer, intent(in) :: i, update_dimension
-    real(dp), dimension(ntetr), intent(in) :: density
-    real(dp), dimension(ntetr) :: rho
-    real(dp), dimension(nvert) :: phi_elec_from_rho
+    real(dp), dimension(:), allocatable :: phi_elec_from_rho
     real(dp) :: r=0.99_dp !under-relaxation factor
 
     if (boole_time_Hamiltonian.eqv..false.) then
@@ -391,51 +401,169 @@ subroutine perform_electric_potential_update(i, update_dimension, density)
         stop
     endif
 
-    !call routine that computes the electric potential arising from the electron and ion densities (i.e. phi_elec_from_rho, 
-    !compute it in 1D and 3D, first only in 1D)
+    call calc_phi_elec_from_rho(phi_elec_from_rho, update_dimension)
 
-    !add phi_elec_from_rho to phi_elec from tetra_physics_mod, make it a module variable there
+    phi_elec = r*phi_elec + (1-r)*phi_elec_from_rho !make it a module variable there
 
-
-    !call make_tetra_physics with i_option. Add this as an optional input argument to make_tetra_physics, 
-    !if it is 12, then phi_elec(iv) should not be overwritten with  = A_x2(iv)*eps_Phi as is done currently but left as it is
-
-    c%dens_mat(1,:) = r*c%dens_mat(1,:) + (1-r)*output%tetr_moments(1,:)
+    !giving i_option = 12 as input variable prevents make_tetra_physics from overwriting phi_elec
+    call make_tetra_physics(coord_system,ipert,i_option = 12) 
 
     print*, "electric potential update ", i, " complete"
 
 end subroutine perform_electric_potential_update
 
-subroutine calc_phi_elec_from_rho(density, phi_elec_from_rho, update_dimension)
+subroutine calc_phi_elec_from_rho(phi_elec_from_rho, update_dimension)
 
-    !use gorilla_applets_types_mod, only:  vertices_per_flux_surface, solid_angles_per_tetrazhedron_vertex
-    use tetra_grid_mod, only: ntetr, nvert
-    use tetra_grid_settings_mod, only: grid_size
-
-    real(dp), dimension(ntetr), intent(in) :: density
     integer, intent(in) :: update_dimension
-    real(dp), dimension(nvert) :: rho
-    real(dp), dimension(nvert) :: phi_elec_from_rho
-    real(dp), dimension(grid_size(2)) :: average_density_per_flux_surface
-    integer :: i
+    real(dp), dimension(:), allocatable :: phi_elec_from_rho, rho_vert, rho_flux_tube
+    real(dp) :: factor = 1
 
     if (update_dimension.eq.1) then
-        do i = 1,grid_size(2)
-            !average_density_per_flux_surface(i) = sum(density(tetrahedra_per_flux_surface(j)))/(grid_size(2)*grid_size(3))
-        enddo
-        !rho(vertices_per_flux_surface(1)) = average_density_per_flux_surface(1)
-        do i = 2,grid_size(2)
-            !rho(vertices_per_flux_surface(i)) = 0.5_dp0*(average_density_per_flux_surface(i-1)+average_density_per_flux_surface(i))
-        enddo
-        !rho(vertices_per_flux_surface(end)) = average_density_per_flux_surface(end)
-        !phi_elec_from_rho = factor * rho
+
+        call calc_average_density_per_flux_tube(rho_flux_tube)
+        call calc_rho_on_vertices(rho_flux_tube, rho_vert)
+        phi_elec_from_rho = factor * rho_vert
+        
     endif
 
 end subroutine calc_phi_elec_from_rho
 
-subroutine prepare_next_round_of_parallelised_particle_pushing
+subroutine calc_average_density_per_flux_tube(rho_flux_tube)
 
-    use gorilla_applets_types_mod, only: output
+    use gorilla_applets_types_mod, only:  g, output
+    use tetra_grid_mod, only: nvert
+    use tetra_grid_settings_mod, only: grid_size
+
+    real(dp), dimension(:), allocatable, intent(out) :: rho_flux_tube
+    integer :: ns, j, ind_prism
+    real(dp) :: prism_volumes
+
+    allocate(rho_flux_tube(grid_size(1)))
+
+    do ns = 1,grid_size(1)
+        prism_volumes = 0
+        do j = 1, grid_size(2)*grid_size(3)*2
+            ind_prism = g%prisms_per_flux_tube(ns,j)
+            rho_flux_tube(ns) = rho_flux_tube(ns) + output%prism_moments(1,ind_prism)*output%refined_prism_volumes(ind_prism)
+            prism_volumes = prism_volumes + output%refined_prism_volumes(ind_prism)
+        enddo
+        rho_flux_tube(ns) = rho_flux_tube(ns)/prism_volumes
+    enddo
+
+end subroutine calc_average_density_per_flux_tube
+
+subroutine calc_rho_on_vertices(rho_flux_tube, rho_vert)
+
+    use tetra_grid_mod, only: nvert
+    use tetra_grid_settings_mod, only: grid_size
+    use gorilla_applets_types_mod, only: g
+
+    real(dp), dimension(:), intent(in) :: rho_flux_tube
+    real(dp), dimension(:), allocatable, intent(out) :: rho_vert
+    integer :: ns
+    real(dp) :: value_to_be_set
+
+    allocate(rho_vert(nvert))
+
+    value_to_be_set = rho_flux_tube(1)
+    call fill_vector_parts_with_value(rho_vert, g%vertices_per_flux_surface(1,:), rho_flux_tube(1))
+
+    do ns = 2,grid_size(1)
+        value_to_be_set = 0.5_dp*(rho_flux_tube(ns-1)+rho_flux_tube(ns))
+        call fill_vector_parts_with_value(rho_vert, g%vertices_per_flux_surface(ns,:), value_to_be_set)
+    enddo
+
+    call fill_vector_parts_with_value(rho_vert, g%vertices_per_flux_surface(grid_size(1)+1,:), rho_flux_tube(grid_size(1)))
+
+    contains
+
+    subroutine fill_vector_parts_with_value(vector,indices,value_to_be_set)
+
+        real(dp), dimension(:), intent(inout) :: vector
+        integer, dimension(:), intent(in) :: indices
+        real(dp), intent(in) :: value_to_be_set
+        integer :: i, numel
+
+        numel = size(indices)
+
+        do i = 1,numel
+            vector(indices(i)) = value_to_be_set
+        enddo        
+
+    end subroutine fill_vector_parts_with_value
+
+end subroutine calc_rho_on_vertices
+
+subroutine associate_flux_labels_with_tetrahedra_and_vertices
+
+    use tetra_grid_settings_mod, only: grid_kind, grid_size
+    use gorilla_applets_types_mod, only: g
+
+    integer :: ns, ntheta, nphi, i, ind_prism, j, ind_vert
+
+    ! if ((.not.grid_kind.eq.3).and.(.not.grid_kind.eq.4))  then
+    !     print*, 'Error, flux labels can ony be associated with tetrahedra and vertices if grid_kind is either 3 or 4. &
+    !              Program is terminated.'
+    !     stop
+    ! endif
+
+    allocate(g%vertices_per_flux_surface(grid_size(1)+1,grid_size(2)*grid_size(3)))
+    allocate(g%prisms_per_flux_tube(grid_size(1),grid_size(2)*grid_size(3)*2))
+
+    !Fill vertices_per_flux_surface
+    do ns = 1,grid_size(1)+1
+        i = 1
+        do nphi = 1,grid_size(3)
+            do ntheta = 1,grid_size(2)
+                ind_vert = (nphi-1)*(grid_size(1)+1)*grid_size(3) + (ns-1)*grid_size(3) + ntheta
+                g%vertices_per_flux_surface(ns,i) = ind_vert
+                i = i + 1
+            enddo
+        enddo
+    enddo
+
+    !Fill prisms_per_flux_tube
+    do ns = 1,grid_size(1)
+        i = 1
+        do nphi = 1,grid_size(3)
+            do ntheta = 1,grid_size(2)
+                do j = 1,2 !count through prisms per hexahedron
+                    ind_prism = (nphi-1)*grid_size(1)*grid_size(3)*2 + (ns-1)*grid_size(3)*2 + (ntheta-1)*2 + j
+                    g%prisms_per_flux_tube(ns,i) = ind_prism
+                    i = i + 1
+                enddo
+            enddo
+        enddo
+    enddo
+
+end subroutine associate_flux_labels_with_tetrahedra_and_vertices
+
+subroutine prepare_next_round_of_parallelised_particle_pushing(particle_species)
+
+    use gorilla_applets_types_mod, only: start, output
+    use constants, only: echarge,ame,clight
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
+    use gorilla_applets_settings_mod, only: i_option
+
+    integer, intent(in), optional :: particle_species
+
+    if (i_option.eq.12) then
+        if (.not.present(particle_species)) then
+            print*, 'Error: particle_species must be present if i_option = 12. Program terminated.'
+            stop
+        elseif (particle_species.eq.1) then !prepare tracing of electrons
+            particle_charge = echarge
+            particle_mass = ame
+            cm_over_e = clight*ame/echarge
+        elseif (particle_species.eq.2) then !prepare tracing of ions as given in the start type
+            particle_charge = start%particle_charge
+            particle_mass = start%particle_mass
+            cm_over_e = start%cm_over_e
+        else
+            print*, 'Error: particle_species must be either 1 or 2. Program terminated.'
+            stop
+        endif
+    endif
 
     call set_weights !weights need to be set again because in orbit_timestep_gorilla_boltzmannn they are multiplied with 
     !some factor, so we need to get rid of it again. Potentially set weights to updated densities
@@ -487,25 +615,25 @@ subroutine fourier_transform_moments
     moment_specs%n_triangles = n_prisms/grid_size(2)
     allocate(prism_moments_ordered_for_ft(moment_specs%n_moments,moment_specs%n_triangles,grid_size(2)))
     do q = 1,grid_size(2)
-    prism_moments_ordered_for_ft(:,:,q) = output%prism_moments(:,moment_specs%n_triangles*(q-1)+1:moment_specs%n_triangles*q)
+        prism_moments_ordered_for_ft(:,:,q) = output%prism_moments(:,moment_specs%n_triangles*(q-1)+1:moment_specs%n_triangles*q)
     enddo
     
     if (moment_specs%n_fourier_modes.gt.grid_size(2)) then
-    print*, 'moment_specs%n_fourier_modes was chosen to be bigger than n_phi, it is therefore reduced to n_phi'
-    moment_specs%n_fourier_modes = grid_size(2)
+        print*, 'moment_specs%n_fourier_modes was chosen to be bigger than n_phi, it is therefore reduced to n_phi'
+        moment_specs%n_fourier_modes = grid_size(2)
     endif
     
     i = (0,1)
     
     do p = 1,moment_specs%n_triangles
-    do n = 1,moment_specs%n_moments
-    do k = 0,moment_specs%n_fourier_modes-1
-    do j = 0,grid_size(2)-1
-    output%moments_in_frequency_space(n,p,k+1) = output%moments_in_frequency_space(n,p,k+1) + &
-    1/dble(grid_size(2))*exp(-2*pi*i*j*k/grid_size(2))*prism_moments_ordered_for_ft(n,p,j+1)
-    enddo
-    enddo
-    enddo
+        do n = 1,moment_specs%n_moments
+            do k = 0,moment_specs%n_fourier_modes-1
+                do j = 0,grid_size(2)-1
+                    output%moments_in_frequency_space(n,p,k+1) = output%moments_in_frequency_space(n,p,k+1) + &
+                    1/dble(grid_size(2))*exp(-2*pi*i*j*k/grid_size(2))*prism_moments_ordered_for_ft(n,p,j+1)
+                enddo
+            enddo
+        enddo
     enddo
     
     deallocate(prism_moments_ordered_for_ft)
