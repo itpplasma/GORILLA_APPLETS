@@ -39,20 +39,23 @@ subroutine handle_lost_particles(local_counter, boole_particle_lost)
 
 end subroutine handle_lost_particles
 
-subroutine initialise_loop_variables(l, n, v0, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
+subroutine initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp,species_in)
 
 use gorilla_applets_types_mod, only: in, counter_t, start, time_t, particle_status_t
 use constants, only: ev2erg
 use tetra_physics_mod, only: particle_mass
 
 integer, intent(in) :: l, n
+integer, intent(in), optional :: species_in
 type(counter_t) :: local_counter
 type(particle_status_t) :: particle_status
 type(time_t) :: t
-real(dp) :: t_step, t_confined, pitchpar, v, vpar, vperp, v0
+real(dp) :: t_step, t_confined, pitchpar, v, vpar, vperp
 real(dp), dimension(3) :: x
 complex(dp), dimension(:,:) :: local_tetr_moments
+integer :: species = 1
 
+if (present(species_in)) species = species_in
 
 call set_counter_zero(local_counter)
 particle_status%lost = .false.
@@ -61,14 +64,14 @@ particle_status%exit = .false.
 t%step = in%time_step
 t%confined = 0.0_dp
 if (l.eq.1) local_tetr_moments = 0.0_dp
-pitchpar = start%pitch(n)
-x = start%x(:,n)
-vpar = pitchpar * v0
-vperp = sqrt(v0**2-vpar**2)
+pitchpar = start%pitch(n,species)
+x = start%x(:,n,species)
+vpar = pitchpar * start%v0(species)
+vperp = sqrt(start%v0(species)**2-vpar**2)
 if (in%boole_boltzmann_energies) then
-v = sqrt(start%energy(n)*ev2erg*2/particle_mass)
-vpar = pitchpar * v
-vperp = sqrt(v**2-vpar**2)
+    v = sqrt(start%energy(n,species)*ev2erg*2/particle_mass)
+    vpar = pitchpar * v
+    vperp = sqrt(v**2-vpar**2)
 endif
 
 end subroutine initialise_loop_variables
@@ -123,30 +126,33 @@ subroutine add_local_counter_to_counter(local_counter)
     
 end subroutine add_local_counter_to_counter
 
-subroutine carry_out_collisions(i, n, v0, t, x, vpar, vperp, ind_tetr, iface)
+subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species_in)
 
     use gorilla_applets_types_mod, only: in, time_t
     use find_tetra_mod, only: find_tetra
     
     integer, intent(in) :: i, n
-    real(dp), intent(in) :: v0
+    integer, intent(in), optional :: species_in
+    integer :: species = 1
     real(dp), dimension(3), intent(inout) :: x
     real(dp), intent(inout) :: vpar, vperp
     type(time_t) :: t
     integer :: ind_tetr, iface
+
+    if (present(species_in)) species = species_in
     
     if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
     if (.not.(ind_tetr.eq.-1)) then
         if (in%boole_preserve_energy_and_momentum_during_collisions) then
-            call collisions_with_background_updates(i, n, v0, t, x, vpar, vperp, ind_tetr)
+            call collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
         else
-            call collisions_without_background_updates(i, n, v0, t, x, vpar, vperp, ind_tetr)
+            call collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
         endif
     endif
 
 end subroutine carry_out_collisions
 
-subroutine collisions_with_background_updates(i, n, v0, t, x, vpar, vperp, ind_tetr)
+subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
 
     use gorilla_applets_types_mod, only: in, c, time_t, start
     use collis_ions, only: stost
@@ -154,8 +160,7 @@ subroutine collisions_with_background_updates(i, n, v0, t, x, vpar, vperp, ind_t
     use tetra_physics_mod, only: particle_mass,particle_charge
     use constants, only: echarge,amp
     
-    integer, intent(in) :: i, n
-    real(dp), intent(in) :: v0
+    integer, intent(in) :: i, n, species
     real(dp), dimension(3), intent(inout) :: x
     real(dp), intent(inout) :: vpar, vperp
     type(time_t) :: t
@@ -177,7 +182,7 @@ subroutine collisions_with_background_updates(i, n, v0, t, x, vpar, vperp, ind_t
         z = c%charge_num(j)
         dens = c%dens_mat(j,ind_tetr)
         temp = c%temp_mat(j,ind_tetr)
-        call collis_init(m0, z0, m, z, dens, temp, in%energy_eV, v0, efcolf, velrat, enrat, boole_no_electrons=.true.)
+        call collis_init(m0,z0, m,z, dens, temp, in%energy_eV, start%v0(species), efcolf, velrat, enrat, boole_no_electrons=.true.)
 
         vpar_save = vpar
         vperp_save = vperp
@@ -185,18 +190,18 @@ subroutine collisions_with_background_updates(i, n, v0, t, x, vpar, vperp, ind_t
         vpar = vpar - vpar_background
 
         zet(1:3) = x !spatial position
-        zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module 
+        zet(4) = sqrt(vpar**2+vperp**2)/start%v0(species) !normalized velocity module 
         zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
         
         if (in%boole_precalc_collisions) then
             randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:) 
-            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*v0,randnum)
+            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*start%v0(species),randnum)
         else
-            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*v0)
+            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*start%v0(species))
         endif
         
-        vpar = zet(5)*zet(4)*v0+vpar_background
-        vperp = sqrt(1-zet(5)**2)*zet(4)*v0
+        vpar = zet(5)*zet(4)*start%v0(species)+vpar_background
+        vperp = sqrt(1-zet(5)**2)*zet(4)*start%v0(species)
         
         !optionally still change particle_mass, particle_charge and cm_over_e, e.g.:
         !particle_charge = particle_charge + echarge
@@ -210,23 +215,22 @@ subroutine collisions_with_background_updates(i, n, v0, t, x, vpar, vperp, ind_t
         
         !$omp critical
         c%vpar_mat(j,ind_tetr) = vpar_mat_save - &
-                                    c%weight_factor*start%weight(n)*delta_vpar/w_v*particle_to_background_coupling_strength
+                            c%weight_factor*start%weight(n,species)*delta_vpar/w_v*particle_to_background_coupling_strength
         vpar_mat = c%vpar_mat(j,ind_tetr)
         c%temp_mat(j,ind_tetr) = c%temp_mat(j,ind_tetr) + particle_mass/3*(vpar_mat_save**2 - vpar_mat**2) - &
-                                    2.0_dp/3.0_dp*c%weight_factor*start%weight(n)*delta_epsilon/w_t &
-                                    *particle_to_background_coupling_strength
+                            2.0_dp/3.0_dp*c%weight_factor*start%weight(n,species)*delta_epsilon/w_t &
+                            *particle_to_background_coupling_strength
         !$omp end critical
     enddo
 
 end subroutine collisions_with_background_updates
 
-subroutine collisions_without_background_updates(i, n, v0, t, x, vpar, vperp, ind_tetr)
+subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
 
-    use gorilla_applets_types_mod, only: in, c, time_t
+    use gorilla_applets_types_mod, only: in, c, time_t, start
     use collis_ions, only: stost
     
-    integer, intent(in) :: i, n
-    real(dp), intent(in) :: v0
+    integer, intent(in) :: i, n, species
     real(dp), dimension(3), intent(inout) :: x
     real(dp), intent(inout) :: vpar, vperp
     type(time_t) :: t
@@ -252,18 +256,18 @@ subroutine collisions_without_background_updates(i, n, v0, t, x, vpar, vperp, in
     !since vpar_background actually has num_background_particles entries, consider giving it as an extra
     !optional input variable to stost, before randnum
     zet(1:3) = x !spatial position
-    zet(4) = sqrt(vpar**2+vperp**2)/v0 !normalized velocity module 
+    zet(4) = sqrt(vpar**2+vperp**2)/start%v0(species) !normalized velocity module 
     zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
 
     if (in%boole_precalc_collisions) then
         randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:) 
-        call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*v0,randnum)
+        call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*start%v0(species),randnum)
     else
-        call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*v0)
+        call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*start%v0(species))
     endif
 
-    vpar = zet(5)*zet(4)*v0+vpar_background(1)
-    vperp = sqrt(1-zet(5)**2)*zet(4)*v0
+    vpar = zet(5)*zet(4)*start%v0(species)+vpar_background(1)
+    vperp = sqrt(1-zet(5)**2)*zet(4)*start%v0(species)
 
     !optionally still change particle_mass, particle_charge and cm_over_e, e.g.:
     !particle_charge = particle_charge + echarge
@@ -292,6 +296,34 @@ subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_
     if(present(phi_0_mappings)) exit_data%phi_0_mappings(n) = phi_0_mappings
 
 end subroutine update_exit_data
+
+subroutine update_start_type(x,vpar,vperp,n,species,ind_tetr)
+
+    use gorilla_applets_types_mod, only: start, in
+    use supporting_functions_mod, only: bmod_func
+    use constants, only: ev2erg
+    use tetra_physics_mod, only: tetra_physics
+
+    real(dp), dimension(3), intent(in) :: x
+    real(dp), intent(in)               :: vpar, vperp
+    integer, intent(in)                :: n, species, ind_tetr
+    real(dp), dimension(3)             :: x_local
+
+    if (ind_tetr.eq.-1) then
+        start%lost(n,species) = .true.
+        return
+    endif
+
+    start%x(:,n,species) = x
+    start%v0(species) = sqrt(vpar**2+vperp**2)
+    start%pitch(n,species) = vpar/start%v0(species)
+    start%energy(n,species) = 0.5_dp*start%v0(species)**2*start%particle_mass(species)/ev2erg
+
+    x_local = x-tetra_physics(ind_tetr)%x1
+    start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(x_local,ind_tetr))*(-1)
+    !-1 because of negative gyrophase
+
+end subroutine update_start_type
 
 function linspace(start, stop, n) result(x)
     real(dp), intent(in) :: start, stop

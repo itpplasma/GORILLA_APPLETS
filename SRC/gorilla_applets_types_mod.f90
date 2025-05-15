@@ -29,15 +29,17 @@ module gorilla_applets_types_mod
     type(output_t) :: output
 
     type start_t
-    real(dp), dimension(:,:), allocatable :: x
-    real(dp), dimension(:), allocatable :: pitch
-    real(dp), dimension(:), allocatable :: energy
-    real(dp), dimension(:), allocatable :: weight
-    real(dp), dimension(:), allocatable :: jperp
-    real(dp) ::  particle_charge
-    real(dp) :: particle_mass
-    real(dp) :: cm_over_e
-    !add v0 at some point
+    real(dp), dimension(:,:,:), allocatable :: x
+    real(dp), dimension(:,:),   allocatable :: pitch
+    real(dp), dimension(:,:),   allocatable :: energy
+    real(dp), dimension(:,:),   allocatable :: weight
+    real(dp), dimension(:,:),   allocatable :: jperp
+    real(dp), dimension(:),     allocatable :: particle_charge !used in self consistent electric field computation 
+    real(dp), dimension(:),     allocatable :: particle_mass !used in self consistent electric field computation
+    real(dp), dimension(:),     allocatable :: cm_over_e !used in self consistent electric field computation
+    real(dp), dimension(:),     allocatable :: v0 !This is the thermal velocity, not the particle velocity; 
+                                                  !used in self consistent electric field computation
+    logical, dimension(:,:),    allocatable :: lost
     end type start_t
 
     type(start_t) :: start
@@ -108,6 +110,7 @@ module gorilla_applets_types_mod
     logical  :: boole_write_grid_data
     logical  :: boole_preserve_energy_and_momentum_during_collisions = .false.
     integer  :: n_background_density_updates = 0
+    integer  :: n_species = 1 !used in self consistent electric field computation
     integer  :: n_electric_potential_updates !used in self consistent electric field computation
     logical  :: boole_divertor_intersection !Used in divertor_heat_loads
     logical  :: boole_poincare_plot !Used in divertor_heat_loads

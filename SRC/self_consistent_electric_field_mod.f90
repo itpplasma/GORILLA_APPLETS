@@ -17,7 +17,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
                boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
-    integer :: i_integrator_type, seed_option, n_electric_potential_updates
+    integer :: i_integrator_type, seed_option, n_electric_potential_updates, n_species
 
     integer :: s_inp_unit
 
@@ -27,7 +27,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_electric_potential_updates
+    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_electric_potential_updates, n_species
 
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
     read(s_inp_unit,nml=self_consistent_ef_nml)
@@ -61,6 +61,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%boole_write_grid_data = boole_write_grid_data
     in%boole_preserve_energy_and_momentum_during_collisions = boole_preserve_energy_and_momentum_during_collisions
     in%n_electric_potential_updates = n_electric_potential_updates
+    in%n_species = n_species
 
     print *,'GORILLA: Loaded input data from self_consistent_ef.inp'
 
@@ -70,7 +71,6 @@ subroutine calc_self_consistent_electric_field
 
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
     use constants, only: ev2erg,pi,echarge
-    use tetra_physics_mod, only: particle_mass,particle_charge
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
     use tetra_grid_settings_mod, only: grid_kind
     use tetra_grid_mod, only: ntetr
@@ -78,7 +78,7 @@ subroutine calc_self_consistent_electric_field
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use gorilla_applets_types_mod, only: moment_specs, counter, c, in
+    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
     get_ipert, set_moment_specifications, initialise_output, calc_starting_conditions, initialize_exit_data, calc_poloidal_flux, &
@@ -88,23 +88,14 @@ subroutine calc_self_consistent_electric_field
     associate_flux_labels_with_tetrahedra_and_vertices
     use gorilla_applets_types_mod, only: output
 
-    real(dp) :: v0
     real(dp), dimension(:,:), allocatable :: verts
-    integer :: i, particle_species
+    integer :: i, species
 
     call set_seed_for_random_numbers
     call read_self_consistent_electric_field_inp_into_type
     call get_ipert()
     call initialize_gorilla(i_option,ipert)
     call associate_flux_labels_with_tetrahedra_and_vertices
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! delete this again afterwards !!!!!!!!!!!!!!!!!!!!!!!
-    if (ispecies.eq.4) particle_charge = 15*echarge
-    print*, 'particle charge number = ', particle_charge/echarge
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-    v0=sqrt(2.0_dp*in%energy_eV*ev2erg/particle_mass)
-
     call set_moment_specifications
     call initialise_output
     call calc_square_root_g
@@ -119,12 +110,11 @@ subroutine calc_self_consistent_electric_field
                                     & i_integrator_type set to 1'
 
     do i = 1, max(in%n_electric_potential_updates,1)
-        do particle_species = 1,2 !trace electrons and ions
-            if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(v0)
-            call parallelised_particle_pushing(v0)
-            !call perform_background_density_update(i)
+        do species = 1,2 !trace electrons and ions
+            call prepare_next_round_of_parallelised_particle_pushing(1)
+            if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
+            call parallelised_particle_pushing(species)
             !call perform_electric_potential_update(i, update_dimension, rho)
-            call prepare_next_round_of_parallelised_particle_pushing(particle_species)
         enddo
     enddo
 
@@ -133,13 +123,13 @@ subroutine calc_self_consistent_electric_field
     call write_data_to_files
 
     if (in%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
-    print*, 'Number of lost particles',counter%lost_particles
+    print*, 'Number of lost ions',counter%lost_particles
     print*, 'average number of pushings = ', counter%tetr_pushings/in%n_particles
     print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/in%n_particles
     print*, 'average number of integration steps = ', counter%integration_steps/in%n_particles
-    PRINT*, 'particle mass = ', particle_mass
-    PRINT*, 'absolute value of velocity = ', v0
-    PRINT*, 'particle charge = ', particle_charge
+    PRINT*, 'ion mass = ', start%particle_mass(1)
+    PRINT*, 'absolute value of ion velocity = ', start%v0(1)
+    PRINT*, 'ion charge = ', start%particle_charge(1)
     PRINT*, 'temperature = ', ev2erg*in%energy_eV
     print*, 'energy in eV = ', in%energy_eV
     print*, 'tracing time in seconds = ', in%time_step
@@ -149,16 +139,16 @@ subroutine calc_self_consistent_electric_field
 
 end subroutine calc_self_consistent_electric_field
 
-subroutine parallelised_particle_pushing(v0)
+subroutine parallelised_particle_pushing(species)
 
-    use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t
+    use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
-    add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, &
+    add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
     initialise_seed_for_random_numbers_for_each_thread
 
-    real(dp), intent(in)                     :: v0
+    integer, intent(in)                      :: species
     integer                                  :: kpart, iantithetic, ind_tetr, iface
     integer                                  :: p, l, n, i
     real(dp), dimension(3)                   :: x
@@ -175,7 +165,7 @@ subroutine parallelised_particle_pushing(v0)
     if (in%boole_antithetic_variate) iantithetic = 2
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart,v0, in, c, iantithetic) &
+    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start) &
     !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status) &
     !$OMP& FIRSTPRIVATE(thread_flag)
     print*, 'get number of threads', omp_get_num_threads()
@@ -196,15 +186,15 @@ subroutine parallelised_particle_pushing(v0)
             call print_progress(in%num_particles,kpart,n)
             !$omp end critical
 
-            call initialise_loop_variables(l, n, v0, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
+            call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp,species)
 
             i = 0
             do while (t%confined.lt.in%time_step)
                 i = i+1
 
                 if (in%boole_collisions) then
-                    call carry_out_collisions(i, n, v0, t, x, vpar,vperp,ind_tetr, iface)
-                    t%step = t%step/v0 !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
+                    call carry_out_collisions(i, n, t, x, vpar,vperp,ind_tetr, iface, species)
+                    t%step = t%step/start%v0(species) !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 
                 call orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t%step,particle_status,ind_tetr,iface,n,&
@@ -224,6 +214,7 @@ subroutine parallelised_particle_pushing(v0)
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
             call update_exit_data(particle_status%lost,t%confined,x,vpar,vperp,i,n)
+            call update_start_type(x,vpar,vperp,n,species,ind_tetr)
         enddo
         !$omp critical
         call add_local_tetr_moments_to_output(local_tetr_moments)
@@ -232,7 +223,7 @@ subroutine parallelised_particle_pushing(v0)
     !$OMP END DO
     !$OMP END PARALLEL
 
-end subroutine
+end subroutine parallelised_particle_pushing
 
 subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particle_status,ind_tetr,iface, n,local_tetr_moments, &
                                             local_counter, t_remain_out)

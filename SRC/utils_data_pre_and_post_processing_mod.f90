@@ -96,11 +96,13 @@ subroutine calc_starting_conditions(verts)
     use gorilla_applets_types_mod, only: in
     
     real(dp), dimension(:,:), allocatable, intent(out)     :: verts
-    real(dp), dimension(:,:), allocatable                  :: rand_matrix
+    real(dp), dimension(:,:,:), allocatable                :: rand_matrix
 
     call set_verts_and_coordinate_limits(verts)
-    allocate(rand_matrix(5,in%num_particles))
+
+    allocate(rand_matrix(5,in%num_particles,in%n_species))
     call RANDOM_NUMBER(rand_matrix)
+
     call allocate_start_type
     call set_starting_positions(rand_matrix)
     call set_weights
@@ -126,11 +128,11 @@ subroutine set_verts_and_coordinate_limits(verts)
         g%ind_b = 3
         g%ind_c = 2
     endif
-    
+
     allocate(verts(3,nvert))
     if (coord_system.eq.1) verts = verts_rphiz
     if (coord_system.eq.2) verts = verts_sthetaphi
-    
+
     g%amin = minval(verts(g%ind_a,:))
     g%amax = maxval(verts(g%ind_a,:))
     g%cmin = minval(verts(g%ind_c,:))
@@ -150,12 +152,17 @@ end subroutine set_verts_and_coordinate_limits
 subroutine allocate_start_type
 
     use gorilla_applets_types_mod, only: start, in
+    use gorilla_applets_settings_mod, only: i_option
 
-    allocate(start%x(3,in%num_particles))
-    allocate(start%pitch(in%num_particles))
-    allocate(start%energy(in%num_particles))
-    allocate(start%weight(in%num_particles))
-    allocate(start%jperp(in%num_particles))
+    allocate(start%x(3,in%num_particles,in%n_species))
+    allocate(start%pitch(in%num_particles,in%n_species))
+    allocate(start%energy(in%num_particles,in%n_species))
+    allocate(start%weight(in%num_particles,in%n_species))
+    allocate(start%jperp(in%num_particles,in%n_species))
+    allocate(start%lost(in%num_particles,in%n_species))
+    allocate(start%particle_charge(in%n_species))
+    allocate(start%particle_mass(in%n_species))
+    allocate(start%cm_over_e(in%n_species))
 
 end subroutine allocate_start_type
 
@@ -166,24 +173,24 @@ subroutine set_starting_positions(rand_matrix)
     use tetra_grid_settings_mod, only: grid_kind
     use constants, only: pi
 
-    real(dp), dimension(:,:), intent(in) :: rand_matrix
+    real(dp), dimension(:,:,:), intent(in) :: rand_matrix
 
     !compute starting conditions
     if (in%boole_point_source) then
         if (grid_kind.eq.2) then
-            start%x(1,:) = 160 !170.8509699_dp
-            start%x(2,:) = 0.0_dp
-            start%x(3,:) = 70 !8.922304_dp
+            start%x(1,:,:) = 160 !170.8509699_dp
+            start%x(2,:,:) = 0.0_dp
+            start%x(3,:,:) = 70 !8.922304_dp
         elseif (grid_kind.eq.4) then
-            start%x(1,:) = 205_dp
-            start%x(2,:) = 0.0_dp
-            start%x(3,:) = 0.0_dp
+            start%x(1,:,:) = 205_dp
+            start%x(2,:,:) = 0.0_dp
+            start%x(3,:,:) = 0.0_dp
         endif
         if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
     else
-        start%x(g%ind_a,:) = g%amin + (g%amax - g%amin)*rand_matrix(g%ind_a,:) !r in cylindrical, s in flux coordinates
-        start%x(g%ind_b,:) = 2*pi*rand_matrix(g%ind_b,:) !phi in cylindrical and flux coordinates
-        start%x(g%ind_c,:) = g%cmin + (g%cmax - g%cmin)*rand_matrix(g%ind_c,:) !z in cylindrical, theta in flux coordinates
+        start%x(g%ind_a,:,:) = g%amin + (g%amax - g%amin)*rand_matrix(g%ind_a,:,:) !r in cylindrical, s in flux coordinates
+        start%x(g%ind_b,:,:) = 2*pi*rand_matrix(g%ind_b,:,:) !phi in cylindrical and flux coordinates
+        start%x(g%ind_c,:,:) = g%cmin + (g%cmax - g%cmin)*rand_matrix(g%ind_c,:,:) !z in cylindrical, theta in flux coordinates
     endif
 
 end subroutine set_starting_positions
@@ -199,7 +206,7 @@ subroutine set_weights
         start%weight =  start%weight*10/sqrt(pi)
     endif
 
-    c%weight_factor = 1/(start%weight(1)*g%amax)
+    c%weight_factor = 1/(start%weight(1,1)*g%amax)
 
 end subroutine set_weights
 
@@ -207,24 +214,34 @@ subroutine set_rest_of_start_type(rand_matrix)
 
     use gorilla_applets_types_mod, only: in, start
     use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
+    use gorilla_applets_settings_mod, only: i_option
+    use constants, only: echarge,ame,clight
+    use constants, only: ev2erg
 
-    real(dp), dimension(:,:), intent(in) :: rand_matrix
+    real(dp), dimension(:,:,:), intent(in) :: rand_matrix
 
-    start%pitch(:) = 2*rand_matrix(4,:)-1 !pitch parameter
+    start%pitch(:,:) = 2*rand_matrix(4,:,:)-1 !pitch parameter
     start%energy = in%energy_eV
     if (in%boole_boltzmann_energies) then
-        start%energy = 5*in%energy_eV*rand_matrix(5,:) !boltzmann energy distribution
+        start%energy = 5*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
     endif
     
     if (in%boole_antithetic_variate) then
-        start%x(:,1:in%num_particles:2) = start%x(:,2:in%num_particles:2)
-        start%pitch(1:in%num_particles:2) = -start%pitch(2:in%num_particles:2)
-        start%energy(1:in%num_particles:2) = start%energy(2:in%num_particles:2)
+        start%x(:,1:in%num_particles:2,:) = start%x(:,2:in%num_particles:2,:)
+        start%pitch(1:in%num_particles:2,:) = -start%pitch(2:in%num_particles:2,:)
+        start%energy(1:in%num_particles:2,:) = start%energy(2:in%num_particles:2,:)
     endif
 
     start%particle_charge = particle_charge
     start%particle_mass = particle_mass
     start%cm_over_e = cm_over_e
+    if (i_option.eq.12) then
+        start%particle_charge(2) = echarge
+        start%particle_mass(2) = ame
+        start%cm_over_e(2) = clight*ame/echarge
+    endif
+
+    start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
 
 end subroutine set_rest_of_start_type
 
@@ -270,20 +287,23 @@ subroutine calc_poloidal_flux(verts)
     
 end subroutine calc_poloidal_flux
 
-subroutine calc_collision_coefficients_for_all_tetrahedra(v0)
+subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
-    use gorilla_applets_types_mod, only: in, c
+    use gorilla_applets_types_mod, only: in, c, start
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge
     use constants, only: echarge,amp
     use tetra_grid_settings_mod, only: grid_size
     use collis_ions, only: collis_init
     
-    real(dp), intent(in) :: v0
+    integer, intent(in), optional :: species_in
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
     integer :: Te_unit, Ti_unit, ne_unit
     integer :: i, j
+    integer :: species = 1
     real(dp) :: m0, z0
+
+    if (present(species_in)) species = species_in
     
     c%n = 2 !number of background species
     if (.not.allocated(c%dens_mat))   allocate(c%dens_mat(c%n-1,ntetr))
@@ -344,7 +364,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(v0)
                 if (j.lt.c%n) c%dens(j) = c%dens_mat(j,i)
                 c%temp(j) = c%temp_mat(j,i)
             enddo
-            call collis_init(m0,z0,c%mass_num,c%charge_num,c%dens,c%temp,in%energy_eV,v0,efcolf,velrat,enrat)
+            call collis_init(m0,z0,c%mass_num,c%charge_num,c%dens,c%temp,in%energy_eV,start%v0(species),efcolf,velrat,enrat)
             c%efcolf_mat(:,i) = efcolf
             c%velrat_mat(:,i) = velrat
             c%enrat_mat(:,i) = enrat
@@ -538,30 +558,23 @@ subroutine associate_flux_labels_with_tetrahedra_and_vertices
 
 end subroutine associate_flux_labels_with_tetrahedra_and_vertices
 
-subroutine prepare_next_round_of_parallelised_particle_pushing(particle_species)
+subroutine prepare_next_round_of_parallelised_particle_pushing(species)
 
     use gorilla_applets_types_mod, only: start, output
     use constants, only: echarge,ame,clight
     use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
     use gorilla_applets_settings_mod, only: i_option
 
-    integer, intent(in), optional :: particle_species
+    integer, intent(in), optional :: species
 
     if (i_option.eq.12) then
-        if (.not.present(particle_species)) then
-            print*, 'Error: particle_species must be present if i_option = 12. Program terminated.'
+        if (.not.present(species)) then
+            print*, 'Error: species must be present if i_option = 12. Program terminated.'
             stop
-        elseif (particle_species.eq.1) then !prepare tracing of electrons
-            particle_charge = echarge
-            particle_mass = ame
-            cm_over_e = clight*ame/echarge
-        elseif (particle_species.eq.2) then !prepare tracing of ions as given in the start type
-            particle_charge = start%particle_charge
-            particle_mass = start%particle_mass
-            cm_over_e = start%cm_over_e
         else
-            print*, 'Error: particle_species must be either 1 or 2. Program terminated.'
-            stop
+            particle_charge = start%particle_charge(species)
+            particle_mass = start%particle_mass(species)
+            cm_over_e = start%cm_over_e(species)
         endif
     endif
 
@@ -697,14 +710,14 @@ subroutine analyse_particle_weight_distribution
     integer  :: i
     real(dp) :: maximum_weight, minimum_weight, average_weight
 
-    maximum_weight = start%weight(1)
-    minimum_weight = start%weight(1)
+    maximum_weight = start%weight(1,1)
+    minimum_weight = start%weight(1,1)
     average_weight = 0
 
     do i = 1,int(in%n_particles)
-        average_weight = average_weight + start%weight(i)
-        maximum_weight = max(maximum_weight,start%weight(i))
-        minimum_weight = min(minimum_weight,start%weight(i))
+        average_weight = average_weight + start%weight(i,1)
+        maximum_weight = max(maximum_weight,start%weight(i,1))
+        minimum_weight = min(minimum_weight,start%weight(i,1))
     enddo
 
     average_weight = average_weight/in%n_particles

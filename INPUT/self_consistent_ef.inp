@@ -8,6 +8,9 @@
   !Kinetic energy of particles
   energy_eV = 3.5d3 ,
 !
+  !Number of species is usually 2, namely the ion species specified in gorilla.inp and electrons
+  n_species = 2
+!
   !Number of particles to be traced
   n_particles = 1.0d2 ,
 !

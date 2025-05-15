@@ -110,7 +110,7 @@ subroutine calc_boltzmann
     call initialize_exit_data
     call calc_starting_conditions(verts)
     call calc_poloidal_flux(verts)
-    if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(v0)
+    if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
     call give_file_names
     call unlink_files
 
@@ -196,14 +196,14 @@ subroutine parallelised_particle_pushing(v0)
             call print_progress(in%num_particles,kpart,n)
             !$omp end critical
 
-            call initialise_loop_variables(l, n, v0, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
+            call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
 
             i = 0
             do while (t%confined.lt.in%time_step)
                 i = i+1
 
                 if (in%boole_collisions) then
-                    call carry_out_collisions(i, n, v0, t, x, vpar,vperp,ind_tetr, iface)
+                    call carry_out_collisions(i, n, t, x, vpar,vperp,ind_tetr, iface)
                     t%step = t%step/v0 !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 
