@@ -29,8 +29,13 @@
   !make collisions energy and momentum conserving
   boole_preserve_energy_and_momentum_during_collisions = .false.,
 !
-  !decides how often electric potential should be updated
-  n_electric_potential_updates = 0,
+  !Number of electric potential updates
+  n_electric_potential_updates = 3,
+!
+  !type of electric potential update
+  !1 ... 1D 
+  !3 ... 3D 
+  update_dimension = 1
 !
   !Simulated density of particles
   density = 1,

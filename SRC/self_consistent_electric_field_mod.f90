@@ -17,7 +17,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
                boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
-    integer :: i_integrator_type, seed_option, n_electric_potential_updates, n_species
+    integer :: i_integrator_type, seed_option, n_electric_potential_updates, update_dimension, n_species
 
     integer :: s_inp_unit
 
@@ -27,7 +27,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_electric_potential_updates, n_species
+    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_electric_potential_updates, update_dimension, &
+    & n_species
 
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
     read(s_inp_unit,nml=self_consistent_ef_nml)
@@ -61,6 +62,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%boole_write_grid_data = boole_write_grid_data
     in%boole_preserve_energy_and_momentum_during_collisions = boole_preserve_energy_and_momentum_during_collisions
     in%n_electric_potential_updates = n_electric_potential_updates
+    in%update_dimension = update_dimension
     in%n_species = n_species
 
     print *,'GORILLA: Loaded input data from self_consistent_ef.inp'
@@ -84,9 +86,9 @@ subroutine calc_self_consistent_electric_field
     get_ipert, set_moment_specifications, initialise_output, calc_starting_conditions, initialize_exit_data, calc_poloidal_flux, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
     find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution, &
-    perform_background_density_update, set_weights, prepare_next_round_of_parallelised_particle_pushing, &
-    associate_flux_labels_with_tetrahedra_and_vertices
-    use gorilla_applets_types_mod, only: output
+    perform_electric_potential_update, set_weights, prepare_next_round_of_parallelised_particle_pushing, &
+    associate_flux_labels_with_tetrahedra_and_vertices, initialise_electric_potential_type
+    use gorilla_applets_types_mod, only: output, ep
 
     real(dp), dimension(:,:), allocatable :: verts
     integer :: i, species
@@ -103,6 +105,7 @@ subroutine calc_self_consistent_electric_field
     call initialize_exit_data
     call calc_starting_conditions(verts)
     call calc_poloidal_flux(verts)
+    call initialise_electric_potential_type
     call give_file_names
     call unlink_files
 
@@ -110,15 +113,17 @@ subroutine calc_self_consistent_electric_field
                                     & i_integrator_type set to 1'
 
     do i = 1, max(in%n_electric_potential_updates,1)
+        ep%rho_prism = 0
         do species = 1,2 !trace electrons and ions
             call prepare_next_round_of_parallelised_particle_pushing(1)
             if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
             call parallelised_particle_pushing(species)
-            !call perform_electric_potential_update(i, update_dimension, rho)
+            call normalise_prism_moments_and_prism_moments_squared
+            ep%rho_prism = ep%rho_prism + output%prism_moments(1,:)*start%particle_charge(species)
         enddo
+        call perform_electric_potential_update(i)
     enddo
 
-    call normalise_prism_moments_and_prism_moments_squared
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
     call write_data_to_files
 

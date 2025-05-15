@@ -404,15 +404,33 @@ subroutine perform_background_density_update(i)
 
 end subroutine perform_background_density_update
 
-subroutine perform_electric_potential_update(i, update_dimension)
+subroutine initialise_electric_potential_type
 
-    use gorilla_applets_types_mod, only: c, output, grid_t, in
+    use gorilla_applets_types_mod, only: ep
+    use tetra_grid_mod, only: ntetr, nvert
+    use tetra_grid_settings_mod, only: grid_size
+
+    allocate(ep%rho_prism(ntetr/3))
+    allocate(ep%rho_flux_tube(grid_size(1)))
+    allocate(ep%rho_vert(nvert))
+    allocate(ep%phi_elec_from_rho(nvert))
+
+    ep%rho_prism(ntetr/3) = 0
+    ep%rho_flux_tube(grid_size(1)) = 0
+    ep%rho_vert(nvert) = 0
+    ep%phi_elec_from_rho(nvert) = 0
+
+end subroutine initialise_electric_potential_type
+
+subroutine perform_electric_potential_update(i)
+
+    use gorilla_applets_types_mod, only: c, output, grid_t, in, ep
     use gorilla_settings_mod, only: boole_time_Hamiltonian, coord_system
     use tetra_grid_mod, only: ntetr, nvert
     use tetra_physics_mod, only: make_tetra_physics, phi_elec
     use field_mod, only: ipert
 
-    integer, intent(in) :: i, update_dimension
+    integer, intent(in) :: i
     real(dp), dimension(:), allocatable :: phi_elec_from_rho
     real(dp) :: r=0.99_dp !under-relaxation factor
 
@@ -421,9 +439,9 @@ subroutine perform_electric_potential_update(i, update_dimension)
         stop
     endif
 
-    call calc_phi_elec_from_rho(phi_elec_from_rho, update_dimension)
+    call calc_phi_elec_from_rho
 
-    phi_elec = r*phi_elec + (1-r)*phi_elec_from_rho !make it a module variable there
+    phi_elec = r*phi_elec + (1-r)*ep%phi_elec_from_rho !make it a module variable there
 
     !giving i_option = 12 as input variable prevents make_tetra_physics from overwriting phi_elec
     call make_tetra_physics(coord_system,ipert,i_option = 12) 
@@ -432,82 +450,74 @@ subroutine perform_electric_potential_update(i, update_dimension)
 
 end subroutine perform_electric_potential_update
 
-subroutine calc_phi_elec_from_rho(phi_elec_from_rho, update_dimension)
+subroutine calc_phi_elec_from_rho
 
-    integer, intent(in) :: update_dimension
-    real(dp), dimension(:), allocatable :: phi_elec_from_rho, rho_vert, rho_flux_tube
-    real(dp) :: factor = 1
+    use gorilla_applets_types_mod, only: in, ep
 
-    if (update_dimension.eq.1) then
+    real(dp) :: factor = 0.0_dp
 
-        call calc_average_density_per_flux_tube(rho_flux_tube)
-        call calc_rho_on_vertices(rho_flux_tube, rho_vert)
-        phi_elec_from_rho = factor * rho_vert
+    if (in%update_dimension.eq.1) then
+
+        call calc_average_density_per_flux_tube
+        call calc_rho_on_vertices
+        ep%phi_elec_from_rho = factor * ep%rho_vert
         
     endif
 
 end subroutine calc_phi_elec_from_rho
 
-subroutine calc_average_density_per_flux_tube(rho_flux_tube)
+subroutine calc_average_density_per_flux_tube
 
-    use gorilla_applets_types_mod, only:  g, output
+    use gorilla_applets_types_mod, only:  g, output, ep
     use tetra_grid_mod, only: nvert
     use tetra_grid_settings_mod, only: grid_size
 
-    real(dp), dimension(:), allocatable, intent(out) :: rho_flux_tube
     integer :: ns, j, ind_prism
     real(dp) :: prism_volumes
-
-    allocate(rho_flux_tube(grid_size(1)))
 
     do ns = 1,grid_size(1)
         prism_volumes = 0
         do j = 1, grid_size(2)*grid_size(3)*2
             ind_prism = g%prisms_per_flux_tube(ns,j)
-            rho_flux_tube(ns) = rho_flux_tube(ns) + output%prism_moments(1,ind_prism)*output%refined_prism_volumes(ind_prism)
+            ep%rho_flux_tube(ns) = ep%rho_flux_tube(ns) + output%prism_moments(1,ind_prism)*output%refined_prism_volumes(ind_prism)
             prism_volumes = prism_volumes + output%refined_prism_volumes(ind_prism)
         enddo
-        rho_flux_tube(ns) = rho_flux_tube(ns)/prism_volumes
+        ep%rho_flux_tube(ns) = ep%rho_flux_tube(ns)/prism_volumes
     enddo
 
 end subroutine calc_average_density_per_flux_tube
 
-subroutine calc_rho_on_vertices(rho_flux_tube, rho_vert)
+subroutine calc_rho_on_vertices
 
     use tetra_grid_mod, only: nvert
     use tetra_grid_settings_mod, only: grid_size
-    use gorilla_applets_types_mod, only: g
+    use gorilla_applets_types_mod, only: g, ep
 
-    real(dp), dimension(:), intent(in) :: rho_flux_tube
-    real(dp), dimension(:), allocatable, intent(out) :: rho_vert
     integer :: ns
     real(dp) :: value_to_be_set
 
-    allocate(rho_vert(nvert))
-
-    value_to_be_set = rho_flux_tube(1)
-    call fill_vector_parts_with_value(rho_vert, g%vertices_per_flux_surface(1,:), rho_flux_tube(1))
+    call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(1,:), ep%rho_flux_tube(1))
 
     do ns = 2,grid_size(1)
-        value_to_be_set = 0.5_dp*(rho_flux_tube(ns-1)+rho_flux_tube(ns))
-        call fill_vector_parts_with_value(rho_vert, g%vertices_per_flux_surface(ns,:), value_to_be_set)
+        value_to_be_set = 0.5_dp*(ep%rho_flux_tube(ns-1)+ep%rho_flux_tube(ns))
+        call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(ns,:), value_to_be_set)
     enddo
 
-    call fill_vector_parts_with_value(rho_vert, g%vertices_per_flux_surface(grid_size(1)+1,:), rho_flux_tube(grid_size(1)))
+    call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(grid_size(1)+1,:), ep%rho_flux_tube(grid_size(1)))
 
     contains
 
-    subroutine fill_vector_parts_with_value(vector,indices,value_to_be_set)
+    subroutine fill_vector_parts_with_value(vector,indices,set_value)
 
         real(dp), dimension(:), intent(inout) :: vector
         integer, dimension(:), intent(in) :: indices
-        real(dp), intent(in) :: value_to_be_set
+        real(dp), intent(in) :: set_value
         integer :: i, numel
 
         numel = size(indices)
 
         do i = 1,numel
-            vector(indices(i)) = value_to_be_set
+            vector(indices(i)) = set_value
         enddo        
 
     end subroutine fill_vector_parts_with_value

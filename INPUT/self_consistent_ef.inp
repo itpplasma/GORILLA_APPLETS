@@ -32,6 +32,11 @@
   !decides how often electric potential should be updated
   n_electric_potential_updates = 0,
 !
+  !type of electric potential update
+  !1 ... 1D 
+  !3 ... 3D 
+  update_dimension = 1
+!
   !Simulated density of particles
   density = 1,
 !

@@ -112,6 +112,7 @@ module gorilla_applets_types_mod
     integer  :: n_background_density_updates = 0
     integer  :: n_species = 1 !used in self consistent electric field computation
     integer  :: n_electric_potential_updates !used in self consistent electric field computation
+    integer  :: update_dimension = 1 !used in self consistent electric field computation
     logical  :: boole_divertor_intersection !Used in divertor_heat_loads
     logical  :: boole_poincare_plot !Used in divertor_heat_loads
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
@@ -169,6 +170,15 @@ module gorilla_applets_types_mod
     end type grid_t
 
     type(grid_t) :: g
+
+    type electric_potential_t
+    real(dp), dimension(:), allocatable :: rho_prism
+    real(dp), dimension(:), allocatable :: rho_flux_tube
+    real(dp), dimension(:), allocatable :: rho_vert
+    real(dp), dimension(:), allocatable :: phi_elec_from_rho
+    end type electric_potential_t
+
+    type(electric_potential_t) :: ep
 
     type particle_status_t
     logical :: initialized
