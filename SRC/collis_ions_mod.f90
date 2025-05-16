@@ -1,5 +1,7 @@
 module collis_ions
 
+      use, intrinsic :: iso_fortran_env, only: dp => real64
+
 implicit none
 !
 contains
@@ -82,7 +84,7 @@ subroutine onseff(v,dp,dh,dpd)
   return
 end subroutine onseff
 
-subroutine collis_init(am0,Z0,m,Z,dens,temp,eion,v0,efcolf,velrat,enrat,boole_no_electrons)
+subroutine collis_init(m0,Z0,m,Z,dens,temp,e0,v0,efcolf,velrat,enrat,species_in,boole_no_electrons)
 
 !   Performs precomputation of the constants for Coulomb collision
 !   operator for test particles colliding with n-1 sorts of ions and with electrons
@@ -93,27 +95,31 @@ subroutine collis_init(am0,Z0,m,Z,dens,temp,eion,v0,efcolf,velrat,enrat,boole_no
 !   mean free paths.
 !
 !   Input variables:
-!        formal: am0,Z0        - mass number and charge number of the colliding particle
+!        formal: m0,Z0         - mass number and charge number of the colliding particle
 !                m             - mass numbers of the ion species (n-1 entries) (where n is the number of particle species 
 !                                with which the test particle collides (n-1 ion species and electrons))
 !                Z             - charge numbers of these species (n-1 entries)
 !                dens          - densities of ion species and electrons (n entries), 1/cm**3
 !                temp          - temperatures of ion species and electrons (n entries), eV
-!                eion          - test particle energy used for normalisation, eV
+!                e0          - test particle energy used for normalisation, eV
 !   Output variables:
-!        formal: v0            - test particle velocity corresponding to eion, cm/s
+!        formal: v0            - test particle velocity corresponding to e0, cm/s
 !                efcolf        - normalized collision frequencies (n entries)
 !                velrat        - ratio of v0 to the background particle thermal velocity $v_{t}=\sqrt(2T/m)$ (n entries)
-!                enrat         - ratio of eion to the background species energy (n entries)
+!                enrat         - ratio of e0 to the background species energy (n entries)
 
   integer :: n,i, i_end
   double precision, dimension(:) :: m,Z,dens,temp,efcolf,velrat,enrat
   double precision, dimension(:), allocatable :: lambda
-  double precision :: am0,Z0,eion
+  double precision :: m0,Z0,e0
   double precision :: v0
   double precision :: pi,pmass,emass,e,ev,frecol_base
   double precision :: k
   logical, intent(in), optional :: boole_no_electrons
+  integer, intent(in), optional :: species_in
+  integer :: species = 1
+
+  if (present(species_in)) species = species_in
 
   pi=3.14159265358979d0
   pmass=1.6726d-24
@@ -125,7 +131,7 @@ subroutine collis_init(am0,Z0,m,Z,dens,temp,eion,v0,efcolf,velrat,enrat,boole_no
   n = size(temp)
   allocate(lambda(n))
 
-  v0=sqrt(2.d0*eion*ev/(pmass*am0))
+  v0=sqrt(2.d0*e0*ev/m0)
 
   i_end = n-1
   if (present(boole_no_electrons)) then
@@ -133,13 +139,12 @@ subroutine collis_init(am0,Z0,m,Z,dens,temp,eion,v0,efcolf,velrat,enrat,boole_no
   endif
 
   do i = 1,i_end !go through all ion species in the loop and treat electrons afterwards
-    enrat(i)=eion/temp(i)
-    velrat(i)=v0/sqrt(2.d0*temp(i)*ev/(pmass*m(i)))
-    lambda(i)=23.d0-log(max(epsilon(1.d0), &
-          sqrt(dens(i)*Z(i)**2/temp(i))*Z0*Z(i)*(am0+m(i))/(am0*temp(i)+m(i)*eion)))
+    enrat(i)=e0/temp(i)
+    velrat(i)=v0/sqrt(2.d0*temp(i)*ev/m(i))
+    call lambda_alpha_beta(species, 1, Z0, Z(i), m0, m(i), e0, temp(i), 0.d0, dens(i), lambda(i))
   enddo
 
-  frecol_base=2.d0*pi*dens(i_end)*e**4*Z0**2/((am0*pmass)**2*v0**3) !usual
+  frecol_base=2.d0*pi*dens(i_end)*e**4*Z0**2/(m0**2*v0**3) !usual
   frecol_base=frecol_base/v0                                  !normalized
 
   do i=1,i_end
@@ -147,21 +152,54 @@ subroutine collis_init(am0,Z0,m,Z,dens,temp,eion,v0,efcolf,velrat,enrat,boole_no
   enddo
 
   if (i_end.eq.n-1) then
-    enrat(n)=eion/temp(n)
+    enrat(n)=e0/temp(n)
     velrat(n)=v0/sqrt(2.d0*temp(n)*ev/emass)
     dens(n)=sum(dens(1:n-1)*Z)
-    if (temp(n).lt.eion*emass/(am0*pmass)) then
-      lambda(n)=16.d0-log(sqrt(dens(n))*eion**(-1.5)*Z0**2*am0)
-    elseif (temp(n).lt.10*Z0**2) then
-      lambda(n)=23.d0-log(sqrt(dens(n))*Z0*temp(n)**(-1.5))
-    else
-      lambda(n)=24.d0-log(sqrt(dens(n))/temp(n))
-    endif
-
+    call lambda_alpha_beta(species, 2, Z0, -1.d0, m0, emass, e0, temp(n), 0.d0, dens(n), lambda(n))
     efcolf(n)=frecol_base*lambda(n)
   endif
 
   efcolf=efcolf*velrat
+
+  contains
+
+  subroutine lambda_alpha_beta(species1, species2, z1, z2, m1, m2, T1, T2, n1, n2, lambda_ab)
+
+    integer, intent(in) :: species1, species2
+    real(dp), intent(in) :: z1, z2, m1, m2, T1, T2, n1, n2
+    real(dp), intent(out) :: lambda_ab
+    real(dp) :: ne, ni, zi, Te, Ti, mi
+
+    if ((species1.eq.1).and.(species2.eq.1)) then
+      lambda_ab = 23.d0-log(max(epsilon(1.d0), z1*z2*(m1+m2)  /  (m1*T2+m2*T1) * sqrt(n1*z1**2/T1 + n2*z2**2/T2)))
+    elseif ((species1.eq.2).and.(species2.eq.2)) then
+      lambda_ab = 23.5d0 - log(max(epsilon(1.d0), sqrt(n2)*T2**(-5.d0/4.d0))) - sqrt(1.d-5 + (log(T2)-2.d0)**2/16.d0)
+    else
+      if (species1.eq.1) then
+        ne = n2
+        ni = n1
+        zi = z1
+        Te = T2
+        Ti = T1
+        mi = m1
+      else
+        ne = n1
+        ni = n2
+        zi = z2
+        Te = T1
+        Ti = T2
+        mi = m2
+      endif
+      if (Te.lt.Ti*emass/(mi)) then
+        lambda_ab = 16.d0-log(max(epsilon(1.d0), sqrt(ni)*Ti**(-1.5d0)*zi**2*mi/pmass))
+      elseif (Te.lt.10*zi**2) then
+        lambda_ab = 23.d0-log(max(epsilon(1.d0), sqrt(ne)*zi*Te**(-1.5d0)))
+      else
+        lambda_ab = 24.d0-log(max(epsilon(1.d0), sqrt(ne)/Te))
+      endif
+    endif
+
+  end subroutine lambda_alpha_beta
 
 end subroutine collis_init
 !

@@ -117,9 +117,12 @@ subroutine calc_self_consistent_electric_field
         do species = 1,2 !trace electrons and ions
             call prepare_next_round_of_parallelised_particle_pushing(1)
             if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
-            call parallelised_particle_pushing(species)
+            call parallelised_particle_pushing(species,i)
             call normalise_prism_moments_and_prism_moments_squared
             ep%rho_prism = ep%rho_prism + output%prism_moments(1,:)*start%particle_charge(species)
+
+            print*, 'reference location = ', start%x(:,1,1)
+            stop
         enddo
         call perform_electric_potential_update(i)
     enddo
@@ -141,10 +144,11 @@ subroutine calc_self_consistent_electric_field
     if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
          print*, 'number of times that particles were pushed across the inside hole = ', counter%lost_inside
     endif
+    print*, 'Average Delta Phi at all the electric potential updates = ', ep%average_phi_elec_from_rho
 
 end subroutine calc_self_consistent_electric_field
 
-subroutine parallelised_particle_pushing(species)
+subroutine parallelised_particle_pushing(species,j)
 
     use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start
     use tetra_grid_mod, only: ntetr
@@ -153,7 +157,7 @@ subroutine parallelised_particle_pushing(species)
     add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
     initialise_seed_for_random_numbers_for_each_thread
 
-    integer, intent(in)                      :: species
+    integer, intent(in)                      :: species, j
     integer                                  :: kpart, iantithetic, ind_tetr, iface
     integer                                  :: p, l, n, i
     real(dp), dimension(3)                   :: x
@@ -170,7 +174,7 @@ subroutine parallelised_particle_pushing(species)
     if (in%boole_antithetic_variate) iantithetic = 2
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start) &
+    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j) &
     !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status) &
     !$OMP& FIRSTPRIVATE(thread_flag)
     print*, 'get number of threads', omp_get_num_threads()
@@ -180,7 +184,7 @@ subroutine parallelised_particle_pushing(species)
     do p = 1,in%num_particles/iantithetic
 
         if ((.not.in%boole_precalc_collisions).and.thread_flag) then
-            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num())
+            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num(), j)
             thread_flag = .false.
         endif
 

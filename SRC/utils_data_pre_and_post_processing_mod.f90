@@ -312,21 +312,21 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     if (.not.allocated(c%efcolf_mat)) allocate(c%efcolf_mat(c%n,ntetr))
     if (.not.allocated(c%velrat_mat)) allocate(c%velrat_mat(c%n,ntetr))
     if (.not.allocated(c%enrat_mat))  allocate(c%enrat_mat(c%n,ntetr))
-    if (.not.allocated(c%mass_num))   allocate(c%mass_num(c%n-1))
+    if (.not.allocated(c%mass))       allocate(c%mass(c%n-1))
     if (.not.allocated(c%charge_num)) allocate(c%charge_num(c%n-1))
     if (.not.allocated(c%dens))       allocate(c%dens(c%n))
     if (.not.allocated(c%temp))       allocate(c%temp(c%n))
     if (.not.allocated(efcolf))       allocate(efcolf(c%n))
     if (.not.allocated(velrat))       allocate(velrat(c%n))
     if (.not.allocated(enrat))        allocate(enrat(c%n))
-    c%mass_num = 0
+    c%mass = 0
     c%charge_num = 0
-    c%mass_num(1) = 2
-    !c%mass_num(2) = 3
+    c%mass(1) = 2*amp
+    !c%mass(2) = 3*amp
     c%charge_num(1) = 1
     !c%charge_num(2) = 2
     c%vpar_mat = 0 !ask Sergei when this will be needed!!!
-    m0 = particle_mass/amp
+    m0 = particle_mass
     z0 = particle_charge/echarge
     
     open(newunit = Te_unit, file = 'background/Te_d.dat')
@@ -364,7 +364,8 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
                 if (j.lt.c%n) c%dens(j) = c%dens_mat(j,i)
                 c%temp(j) = c%temp_mat(j,i)
             enddo
-            call collis_init(m0,z0,c%mass_num,c%charge_num,c%dens,c%temp,in%energy_eV,start%v0(species),efcolf,velrat,enrat)
+            call collis_init(m0,z0,c%mass,c%charge_num,c%dens,c%temp,in%energy_eV,start%v0(species), &
+                             efcolf,velrat,enrat,species_in = species)
             c%efcolf_mat(:,i) = efcolf
             c%velrat_mat(:,i) = velrat
             c%enrat_mat(:,i) = enrat
@@ -372,10 +373,10 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     endif
     
     if (in%boole_precalc_collisions) then
-        if (.not.allocated(c%randcol)) allocate(c%randcol(in%num_particles,c%randcoli,3))
+        if (.not.allocated(c%randcol)) allocate(c%randcol(in%num_particles,c%randcoli,3,in%n_species))
         call RANDOM_NUMBER(c%randcol)
         !3.464102_dp = sqrt(12), this creates a random number with zero average and unit variance
-        c%randcol(:,:,1:3:2) =  3.464102_dp*(c%randcol(:,:,1:3:2)-0.5_dp)
+        c%randcol(:,:,1:3:2,:) =  3.464102_dp*(c%randcol(:,:,1:3:2,:)-0.5_dp)
     endif
 end subroutine calc_collision_coefficients_for_all_tetrahedra
 
@@ -406,7 +407,7 @@ end subroutine perform_background_density_update
 
 subroutine initialise_electric_potential_type
 
-    use gorilla_applets_types_mod, only: ep
+    use gorilla_applets_types_mod, only: ep, in
     use tetra_grid_mod, only: ntetr, nvert
     use tetra_grid_settings_mod, only: grid_size
 
@@ -414,11 +415,13 @@ subroutine initialise_electric_potential_type
     allocate(ep%rho_flux_tube(grid_size(1)))
     allocate(ep%rho_vert(nvert))
     allocate(ep%phi_elec_from_rho(nvert))
+    allocate(ep%average_phi_elec_from_rho(in%n_electric_potential_updates))
 
-    ep%rho_prism(ntetr/3) = 0
-    ep%rho_flux_tube(grid_size(1)) = 0
-    ep%rho_vert(nvert) = 0
-    ep%phi_elec_from_rho(nvert) = 0
+    ep%rho_prism = 0
+    ep%rho_flux_tube = 0
+    ep%rho_vert = 0
+    ep%phi_elec_from_rho = 0
+    ep%average_phi_elec_from_rho = 0
 
 end subroutine initialise_electric_potential_type
 
@@ -431,7 +434,6 @@ subroutine perform_electric_potential_update(i)
     use field_mod, only: ipert
 
     integer, intent(in) :: i
-    real(dp), dimension(:), allocatable :: phi_elec_from_rho
     real(dp) :: r=0.99_dp !under-relaxation factor
 
     if (boole_time_Hamiltonian.eqv..false.) then
@@ -446,7 +448,8 @@ subroutine perform_electric_potential_update(i)
     !giving i_option = 12 as input variable prevents make_tetra_physics from overwriting phi_elec
     call make_tetra_physics(coord_system,ipert,i_option = 12) 
 
-    print*, "electric potential update ", i, " complete"
+    ep%average_phi_elec_from_rho(i) = sum(ep%phi_elec_from_rho)/size(ep%phi_elec_from_rho)
+    print*, "electric potential update ", i, " complete. Average Delta Phi is ", ep%average_phi_elec_from_rho(i)
 
 end subroutine perform_electric_potential_update
 

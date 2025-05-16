@@ -62,14 +62,14 @@ module gorilla_applets_types_mod
     type(flux_t) :: flux
 
     type collisions_t
-    real(dp), dimension(:,:,:), allocatable :: randcol
+    real(dp), dimension(:,:,:,:), allocatable :: randcol
     real(dp), dimension(:,:), allocatable :: dens_mat
     real(dp), dimension(:,:), allocatable :: temp_mat
     real(dp), dimension(:,:), allocatable :: vpar_mat
     real(dp), dimension(:,:), allocatable :: efcolf_mat
     real(dp), dimension(:,:), allocatable :: velrat_mat
     real(dp), dimension(:,:), allocatable :: enrat_mat
-    real(dp), dimension(:), allocatable :: mass_num
+    real(dp), dimension(:), allocatable :: mass
     real(dp), dimension(:), allocatable :: charge_num
     real(dp), dimension(:), allocatable :: dens
     real(dp), dimension(:), allocatable :: temp
@@ -176,6 +176,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: rho_flux_tube
     real(dp), dimension(:), allocatable :: rho_vert
     real(dp), dimension(:), allocatable :: phi_elec_from_rho
+    real(dp), dimension(:), allocatable :: average_phi_elec_from_rho
     end type electric_potential_t
 
     type(electric_potential_t) :: ep

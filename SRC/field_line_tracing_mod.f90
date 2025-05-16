@@ -68,7 +68,7 @@ subroutine calc_field_lines
     double precision :: dtau, dphi,dtaumin, t_step
     double precision, dimension(5) :: z, zet
     double precision :: m0,z0
-    double precision, dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass_num,charge_num,dens,temp
+    double precision, dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass,charge_num,dens,temp
     type(counter_t) :: counter, local_counter
     integer :: ipert_unit, Te_unit, Ti_unit, ne_unit
 
@@ -127,23 +127,23 @@ print*, 'calc_starting_conditions finished'
         allocate(efcolf_mat(num_background_species,ntetr))
         allocate(velrat_mat(num_background_species,ntetr))
         allocate(enrat_mat(num_background_species,ntetr))
-        allocate(mass_num(num_background_species-1))
+        allocate(mass(num_background_species-1))
         allocate(charge_num(num_background_species-1))
         allocate(dens(num_background_species))
         allocate(temp(num_background_species))
         allocate(efcolf(num_background_species))
         allocate(velrat(num_background_species))
         allocate(enrat(num_background_species))
-        mass_num = 0
+        mass = 0
         charge_num = 0
-        mass_num(1) = 2
-        !mass_num(2) = 3
+        mass(1) = 2*amp
+        !mass(2) = 3*amp
         charge_num(1) = 1
         !charge_num(2) = 2
         dens_mat = 5.0d13
         temp_mat = energy_eV
         vpar_mat = 0
-        m0 = particle_mass/amp
+        m0 = particle_mass
         z0 = particle_charge/echarge
         print*, 'm0 = ', m0, 'z0 = ', z0
 
@@ -179,7 +179,7 @@ print*, 'calc_starting_conditions finished'
                 if (j.lt.num_background_species) dens(j) = sum(dens_mat_tetr(j,tetra_grid(i)%ind_knot([1,2,3,4])))/4
                 temp(j) = sum(temp_mat_tetr(j,tetra_grid(i)%ind_knot([1,2,3,4])))/4
             enddo
-            call collis_init(m0,z0,mass_num,charge_num,dens,temp,energy_eV,v0,efcolf,velrat,enrat)
+            call collis_init(m0,z0,mass,charge_num,dens,temp,energy_eV,v0,efcolf,velrat,enrat)
             efcolf_mat(:,i) = efcolf
             velrat_mat(:,i) = velrat
             enrat_mat(:,i) = enrat

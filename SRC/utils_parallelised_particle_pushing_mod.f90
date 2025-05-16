@@ -176,9 +176,9 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
 
     do j = 1,c%n-1
         
-        m0 = particle_mass/amp
+        m0 = particle_mass
         z0 = particle_charge/echarge
-        m = c%mass_num(j)
+        m = c%mass(j)
         z = c%charge_num(j)
         dens = c%dens_mat(j,ind_tetr)
         temp = c%temp_mat(j,ind_tetr)
@@ -194,7 +194,7 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
         
         if (in%boole_precalc_collisions) then
-            randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:) 
+            randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species) 
             call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*start%v0(species),randnum)
         else
             call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*start%v0(species))
@@ -260,7 +260,7 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
 
     if (in%boole_precalc_collisions) then
-        randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:) 
+        randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species) 
         call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*start%v0(species),randnum)
     else
         call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*start%v0(species))
@@ -339,20 +339,29 @@ function linspace(start, stop, n) result(x)
     end do
 end function linspace
 
-subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num)
+subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num, second_factor)
     !This routine sets an individual seed for random number generation in each thread. It does so by adding the thread number
-    !to a given array of integers and using the sum as a put argument of random_seed. Since the seed has very low entropy (every
-    !value of the array is identical), the first random numbers produced are likely to be very non-random. Thus, n random
+    !to a given array of integers and using the sum as a put argument of random_seed. Since the seed has rather low entropy (values
+    !of the array are multiples of each other), the first random numbers produced are likely to be non-random. Thus, n random
     !numbers are generated to get rid of these potentially corrupted numnbers (compare with 
     !https://stackoverflow.com/questions/51893720/correctly-setting-random-seeds-for-repeatability, also check
     !https://stats.stackexchange.com/questions/354373/what-exactly-is-a-seed-in-a-random-number-generator)
 
     integer, intent(in) :: thread_num
+    integer, intent(in), optional :: second_factor
     real(dp) :: randnum
     integer :: i,n, state(33)
 
     n = 1000
     state = 20180815
+
+    do i = 1, size(state)
+        if (present(second_factor)) then 
+            state(i) = (state(i)+thread_num+second_factor)*i
+        else
+            state(i) = (state(i)+thread_num)*i
+        endif
+    enddo
 
     call random_seed(put=state+thread_num)
 
