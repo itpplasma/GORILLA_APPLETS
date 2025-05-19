@@ -121,25 +121,27 @@ print*, 'calc_starting_conditions finished'
     !write subroutine collis_precomp
     if (boole_collisions) then
         num_background_species = 2
-        allocate(dens_mat(num_background_species-1,size(verts_rphiz(1,:))))
+        allocate(dens_mat(num_background_species,size(verts_rphiz(1,:))))
         allocate(temp_mat(num_background_species,size(verts_rphiz(1,:))))
         allocate(vpar_mat(num_background_species,ntetr))
         allocate(efcolf_mat(num_background_species,ntetr))
         allocate(velrat_mat(num_background_species,ntetr))
         allocate(enrat_mat(num_background_species,ntetr))
-        allocate(mass(num_background_species-1))
-        allocate(charge_num(num_background_species-1))
+        allocate(mass(num_background_species))
+        allocate(charge_num(num_background_species))
         allocate(dens(num_background_species))
         allocate(temp(num_background_species))
         allocate(efcolf(num_background_species))
         allocate(velrat(num_background_species))
         allocate(enrat(num_background_species))
         mass = 0
-        charge_num = 0
+        charge_num = 0.0d0
         mass(1) = 2*amp
         !mass(2) = 3*amp
-        charge_num(1) = 1
+        mass(num_background_species) = ame
+        charge_num(1) = 1.0d0
         !charge_num(2) = 2
+        charge_num(num_background_species) = -1.0d0
         dens_mat = 5.0d13
         temp_mat = energy_eV
         vpar_mat = 0
@@ -149,7 +151,7 @@ print*, 'calc_starting_conditions finished'
 
 !!!!!!!!!!!!!!!!!!!! Alternative route is taken because data is not available per vertex but per tetrahedron !!!!!!!!!!!!!!!!!!!!!!!
 
-        allocate(dens_mat_tetr(num_background_species-1,ntetr))
+        allocate(dens_mat_tetr(num_background_species,ntetr))
         allocate(temp_mat_tetr(num_background_species,ntetr))
 
         open(newunit = Te_unit, file = 'background/Te_d.dat')
@@ -162,6 +164,7 @@ print*, 'calc_starting_conditions finished'
 
         open(newunit = ne_unit, file = 'background/ne_d.dat')
         read(ne_unit,'(e16.9)') (dens_mat_tetr(1,i),i=1,ntetr/grid_size(2),3)
+        dens_mat_tetr(2,:) = dens_mat_tetr(1,:)
         close(ne_unit)
 
         do i = 1,grid_size(2)-1
@@ -175,8 +178,7 @@ print*, 'calc_starting_conditions finished'
 
         do i = 1, ntetr
             do j = 1,num_background_species
-                !following if statement because electron density will be calculated in collis init
-                if (j.lt.num_background_species) dens(j) = sum(dens_mat_tetr(j,tetra_grid(i)%ind_knot([1,2,3,4])))/4
+                dens(j) = sum(dens_mat_tetr(j,tetra_grid(i)%ind_knot([1,2,3,4])))/4
                 temp(j) = sum(temp_mat_tetr(j,tetra_grid(i)%ind_knot([1,2,3,4])))/4
             enddo
             call collis_init(m0,z0,mass,charge_num,dens,temp,energy_eV,v0,efcolf,velrat,enrat)
@@ -614,7 +616,6 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     use find_tetra_mod, only: find_tetra
     use tetra_grid_settings_mod, only: grid_kind
     use tetra_physics_mod, only: coord_system
-    use collis_ions, only: collis_init, stost
 
     double precision, intent(in)                                   :: v0
     double precision, dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat

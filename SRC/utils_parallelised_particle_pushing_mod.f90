@@ -182,7 +182,7 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         z = c%charge_num(j)
         dens = c%dens_mat(j,ind_tetr)
         temp = c%temp_mat(j,ind_tetr)
-        call collis_init(m0,z0, m,z, dens, temp, in%energy_eV, start%v0(species), efcolf, velrat, enrat, boole_no_electrons=.true.)
+        call collis_init(m0,z0, m,z, dens, temp, in%energy_eV, start%v0(species), efcolf, velrat, enrat)
 
         vpar_save = vpar
         vperp_save = vperp

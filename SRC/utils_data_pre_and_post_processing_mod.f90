@@ -292,7 +292,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     use gorilla_applets_types_mod, only: in, c, start
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge
-    use constants, only: echarge,amp
+    use constants, only: echarge,amp, ame
     use tetra_grid_settings_mod, only: grid_size
     use collis_ions, only: collis_init
     
@@ -306,14 +306,14 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     if (present(species_in)) species = species_in
     
     c%n = 2 !number of background species
-    if (.not.allocated(c%dens_mat))   allocate(c%dens_mat(c%n-1,ntetr))
+    if (.not.allocated(c%dens_mat))   allocate(c%dens_mat(c%n,ntetr))
     if (.not.allocated(c%temp_mat))   allocate(c%temp_mat(c%n,ntetr))
     if (.not.allocated(c%vpar_mat))   allocate(c%vpar_mat(c%n,ntetr))
     if (.not.allocated(c%efcolf_mat)) allocate(c%efcolf_mat(c%n,ntetr))
     if (.not.allocated(c%velrat_mat)) allocate(c%velrat_mat(c%n,ntetr))
     if (.not.allocated(c%enrat_mat))  allocate(c%enrat_mat(c%n,ntetr))
-    if (.not.allocated(c%mass))       allocate(c%mass(c%n-1))
-    if (.not.allocated(c%charge_num)) allocate(c%charge_num(c%n-1))
+    if (.not.allocated(c%mass))       allocate(c%mass(c%n))
+    if (.not.allocated(c%charge_num)) allocate(c%charge_num(c%n))
     if (.not.allocated(c%dens))       allocate(c%dens(c%n))
     if (.not.allocated(c%temp))       allocate(c%temp(c%n))
     if (.not.allocated(efcolf))       allocate(efcolf(c%n))
@@ -322,9 +322,11 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     c%mass = 0
     c%charge_num = 0
     c%mass(1) = 2*amp
+    c%mass(c%n) = ame
     !c%mass(2) = 3*amp
-    c%charge_num(1) = 1
+    c%charge_num(1) = 1.0d0
     !c%charge_num(2) = 2
+    c%charge_num(c%n) = -1.0d0
     c%vpar_mat = 0 !ask Sergei when this will be needed!!!
     m0 = particle_mass
     z0 = particle_charge/echarge
@@ -339,6 +341,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     
     open(newunit = ne_unit, file = 'background/ne_d.dat')
     read(ne_unit,'(e16.9)') (c%dens_mat(1,i),i=1,ntetr/grid_size(2),3)
+    c%dens_mat(2,:) = c%dens_mat(1,:)
     close(ne_unit)
     
     do i = 1,grid_size(2)-1 !copy data from first phi slice to all other phi slices
@@ -351,7 +354,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     enddo
 
     !for now, use constant background profiles
-    do i = 1, c%n-1
+    do i = 1, c%n
         c%dens_mat(i,:) = sum(c%dens_mat(i,:))/ntetr
         c%temp_mat(i,:) = sum(c%temp_mat(i,:))/ntetr
     enddo
@@ -360,12 +363,11 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     if (.not.in%boole_preserve_energy_and_momentum_during_collisions) then
         do i = 1, ntetr
             do j = 1,c%n
-                !> if statement because electron density will be calculated in collis init
-                if (j.lt.c%n) c%dens(j) = c%dens_mat(j,i)
+                c%dens(j) = c%dens_mat(j,i)
                 c%temp(j) = c%temp_mat(j,i)
             enddo
             call collis_init(m0,z0,c%mass,c%charge_num,c%dens,c%temp,in%energy_eV,start%v0(species), &
-                             efcolf,velrat,enrat,species_in = species)
+                             efcolf,velrat,enrat)
             c%efcolf_mat(:,i) = efcolf
             c%velrat_mat(:,i) = velrat
             c%enrat_mat(:,i) = enrat
