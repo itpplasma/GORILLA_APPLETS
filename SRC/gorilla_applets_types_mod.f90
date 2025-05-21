@@ -39,6 +39,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:),     allocatable :: cm_over_e !used in self consistent electric field computation
     real(dp), dimension(:),     allocatable :: v0 !This is the thermal velocity, not the particle velocity; 
                                                   !used in self consistent electric field computation
+    real(dp), dimension(:),     allocatable :: t !tracing time, used in self consistent electric field computation
     logical, dimension(:,:),    allocatable :: lost
     end type start_t
 

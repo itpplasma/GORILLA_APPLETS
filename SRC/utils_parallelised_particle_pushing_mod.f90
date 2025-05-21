@@ -9,7 +9,7 @@ contains
 subroutine print_progress(num_particles,kpart,n)
 
     integer :: num_particles, kpart, n
-    logical :: print_progress_for_very_particle = .false.
+    logical :: print_progress_for_very_particle = .true.
 
     if (print_progress_for_very_particle) then
         print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
@@ -62,6 +62,7 @@ particle_status%lost = .false.
 particle_status%initialized = .false.
 particle_status%exit = .false.
 t%step = in%time_step
+if (present(species_in)) t%step = start%t(species)
 t%confined = 0.0_dp
 if (l.eq.1) local_tetr_moments = 0.0_dp
 pitchpar = start%pitch(n,species)
@@ -140,7 +141,7 @@ subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, specie
     integer :: ind_tetr, iface
 
     if (present(species_in)) species = species_in
-    
+
     if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
     if (.not.(ind_tetr.eq.-1)) then
         if (in%boole_preserve_energy_and_momentum_during_collisions) then
@@ -172,7 +173,11 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     real(dp) :: vpar_background
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar, vpar_mat_save, vpar_mat
     integer :: err, j, p
-    real(dp) ::  w_v = 1.0_dp, w_t = 1.0_dp, particle_to_background_coupling_strength = 0.0001_dp
+    real(dp) ::  w_v, w_t, particle_to_background_coupling_strength
+
+    w_v = 1.0_dp
+    w_t = 1.0_dp
+    particle_to_background_coupling_strength = 0.0001_dp
 
     do j = 1,c%n-1
         
@@ -195,9 +200,9 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         
         if (in%boole_precalc_collisions) then
             randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species) 
-            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*start%v0(species),randnum)
+            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(start%t(species)-t%confined)*start%v0(species),randnum)
         else
-            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*start%v0(species))
+            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(start%t(species)-t%confined)*start%v0(species))
         endif
         
         vpar = zet(5)*zet(4)*start%v0(species)+vpar_background
@@ -261,9 +266,9 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
 
     if (in%boole_precalc_collisions) then
         randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species) 
-        call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*start%v0(species),randnum)
+        call stost(efcolf,velrat,enrat,zet,t%step,1,err,(start%t(species)-t%confined)*start%v0(species),randnum)
     else
-        call stost(efcolf,velrat,enrat,zet,t%step,1,err,(in%time_step-t%confined)*start%v0(species))
+        call stost(efcolf,velrat,enrat,zet,t%step,1,err,(start%t(species)-t%confined)*start%v0(species))
     endif
 
     vpar = zet(5)*zet(4)*start%v0(species)+vpar_background(1)
@@ -308,6 +313,7 @@ subroutine update_start_type(x,vpar,vperp,n,species,ind_tetr)
     real(dp), intent(in)               :: vpar, vperp
     integer, intent(in)                :: n, species, ind_tetr
     real(dp), dimension(3)             :: x_local
+    real(dp)                           :: v
 
     if (ind_tetr.eq.-1) then
         start%lost(n,species) = .true.
@@ -315,9 +321,9 @@ subroutine update_start_type(x,vpar,vperp,n,species,ind_tetr)
     endif
 
     start%x(:,n,species) = x
-    start%v0(species) = sqrt(vpar**2+vperp**2)
-    start%pitch(n,species) = vpar/start%v0(species)
-    start%energy(n,species) = 0.5_dp*start%v0(species)**2*start%particle_mass(species)/ev2erg
+    v = sqrt(vpar**2+vperp**2)
+    start%pitch(n,species) = vpar/v
+    start%energy(n,species) = 0.5_dp*v**2*start%particle_mass(species)/ev2erg
 
     x_local = x-tetra_physics(ind_tetr)%x1
     start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(x_local,ind_tetr))*(-1)

@@ -115,14 +115,11 @@ subroutine calc_self_consistent_electric_field
     do i = 1, max(in%n_electric_potential_updates,1)
         ep%rho_prism = 0
         do species = 1,2 !trace electrons and ions
-            call prepare_next_round_of_parallelised_particle_pushing(1)
+            call prepare_next_round_of_parallelised_particle_pushing(species)
             if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
             call parallelised_particle_pushing(species,i)
-            call normalise_prism_moments_and_prism_moments_squared
-            ep%rho_prism = ep%rho_prism + output%prism_moments(1,:)*start%particle_charge(species)
-
-            print*, 'reference location = ', start%x(:,1,1)
-            stop
+            call normalise_prism_moments_and_prism_moments_squared(species)
+            ep%rho_prism = ep%rho_prism + output%prism_moments(species,:)*start%particle_charge(species)
         enddo
         call perform_electric_potential_update(i)
     enddo
@@ -198,14 +195,12 @@ subroutine parallelised_particle_pushing(species,j)
             call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp,species)
 
             i = 0
-            do while (t%confined.lt.in%time_step)
+            do while (t%confined.lt.start%t(species))
                 i = i+1
-
                 if (in%boole_collisions) then
                     call carry_out_collisions(i, n, t, x, vpar,vperp,ind_tetr, iface, species)
                     t%step = t%step/start%v0(species) !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
-
                 call orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t%step,particle_status,ind_tetr,iface,n,&
                             & local_tetr_moments, local_counter,t%remain)
 
@@ -215,6 +210,7 @@ subroutine parallelised_particle_pushing(species,j)
                     call handle_lost_particles(local_counter, particle_status%lost)
                     exit
                 endif
+                
             enddo
 
             !$omp critical

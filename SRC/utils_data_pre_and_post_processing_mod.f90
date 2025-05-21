@@ -163,6 +163,7 @@ subroutine allocate_start_type
     allocate(start%particle_charge(in%n_species))
     allocate(start%particle_mass(in%n_species))
     allocate(start%cm_over_e(in%n_species))
+    allocate(start%t(in%n_species))
 
 end subroutine allocate_start_type
 
@@ -178,11 +179,11 @@ subroutine set_starting_positions(rand_matrix)
     !compute starting conditions
     if (in%boole_point_source) then
         if (grid_kind.eq.2) then
-            start%x(1,:,:) = 160 !170.8509699_dp
-            start%x(2,:,:) = 0.0_dp
-            start%x(3,:,:) = 70 !8.922304_dp
+            start%x(1,:,:) = 160.0_dp !170.8509699_dp
+            start%x(2,:,:) = 0.01_dp
+            start%x(3,:,:) = 70.0_dp !8.922304_dp
         elseif (grid_kind.eq.4) then
-            start%x(1,:,:) = 205_dp
+            start%x(1,:,:) = 205.0_dp
             start%x(2,:,:) = 0.0_dp
             start%x(3,:,:) = 0.0_dp
         endif
@@ -235,10 +236,12 @@ subroutine set_rest_of_start_type(rand_matrix)
     start%particle_charge = particle_charge
     start%particle_mass = particle_mass
     start%cm_over_e = cm_over_e
+    start%t = in%time_step
     if (i_option.eq.12) then
         start%particle_charge(2) = echarge
         start%particle_mass(2) = ame
         start%cm_over_e(2) = clight*ame/echarge
+        start%t(2) = in%time_step/42.0_dp
     endif
 
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
@@ -358,7 +361,6 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
         c%dens_mat(i,:) = sum(c%dens_mat(i,:))/ntetr
         c%temp_mat(i,:) = sum(c%temp_mat(i,:))/ntetr
     enddo
-    c%temp_mat(c%n,:) = sum(c%temp_mat(c%n,:))/ntetr
 
     if (.not.in%boole_preserve_energy_and_momentum_during_collisions) then
         do i = 1, ntetr
@@ -575,7 +577,7 @@ end subroutine associate_flux_labels_with_tetrahedra_and_vertices
 
 subroutine prepare_next_round_of_parallelised_particle_pushing(species)
 
-    use gorilla_applets_types_mod, only: start, output
+    use gorilla_applets_types_mod, only: start, output, moment_specs
     use constants, only: echarge,ame,clight
     use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
     use gorilla_applets_settings_mod, only: i_option
@@ -597,21 +599,26 @@ subroutine prepare_next_round_of_parallelised_particle_pushing(species)
     !some factor, so we need to get rid of it again. Potentially set weights to updated densities
     output%tetr_moments = 0.0_dp
     output%prism_moments = 0.0_dp
-    output%prism_moments_squared = 0.0_dp
+    if (moment_specs%boole_squared_moments) output%prism_moments_squared = 0.0_dp
 
 end subroutine prepare_next_round_of_parallelised_particle_pushing
 
-subroutine normalise_prism_moments_and_prism_moments_squared
+subroutine normalise_prism_moments_and_prism_moments_squared(species)
 
-    use gorilla_applets_types_mod, only: moment_specs, output, in
+    use gorilla_applets_types_mod, only: moment_specs, output, in, start
     
+    integer, intent(in), optional :: species
     integer :: n
+    real(dp) :: time
+
+    time = in%time_step
+    if (present(species)) time = start%t(species)
     
     do n = 1,moment_specs%n_moments
-        output%prism_moments(n,:) = output%prism_moments(n,:)/(output%prism_volumes*in%time_step*in%n_particles)
+        output%prism_moments(n,:) = output%prism_moments(n,:)/(output%prism_volumes*time*in%n_particles)
         if (moment_specs%boole_squared_moments) then
             output%prism_moments_squared(n,:) = output%prism_moments_squared(n,:)/ &
-                    (output%prism_volumes**2*in%time_step**2*in%n_particles)
+                    (output%prism_volumes**2*time**2*in%n_particles)
         endif
         if (in%boole_refined_sqrt_g) then
             output%prism_moments(n,:) = output%prism_moments(n,:)*output%prism_volumes/output%refined_prism_volumes

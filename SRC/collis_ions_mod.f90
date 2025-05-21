@@ -3,13 +3,13 @@ module collis_ions
       use, intrinsic :: iso_fortran_env, only: dp => real64
 
 implicit none
-!
+
 contains
 !
 !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
 subroutine coleff(efcolf,velrat,enrat,p,dpp_vec,dhh_vec,fpeff_vec)
-!
+
 !  Computes local values of dimensionless contravariant components
 !  of collisional diffusion tensor and friction force for nonrelativistic
 !  plasma. Backgound temperature is the same for all sorts.
@@ -25,44 +25,43 @@ subroutine coleff(efcolf,velrat,enrat,p,dpp_vec,dhh_vec,fpeff_vec)
 !                dhh    - dimensionless pitch angle diffusion coeff.
 !                fpeff  - effective dimensionless drag force (prop. to linear
 !                         deviation in Fokker-Planck eq.)
-!
+
   integer :: i, n
   real(dp), dimension(:), intent(in) :: efcolf,velrat,enrat
-  real(dp), dimension(3) :: dpp_vec,dhh_vec,fpeff_vec
+  real(dp), dimension(:), intent(out) :: dpp_vec,dhh_vec,fpeff_vec
   real(dp) :: p,plim,xbeta,dpd
-!
+
   plim=max(p,1.d-8)
   n = size(efcolf)
-!
+
   do i=1,n
     xbeta=p*velrat(i)
-!
+
     call onseff(xbeta,dpp_vec(i),dhh_vec(i),dpd)
-!
+
     fpeff_vec(i) = (dpd/plim-2.0*dpp_vec(i)*p*enrat(i))*efcolf(i)
     dpp_vec(i) = dpp_vec(i)*efcolf(i)
     dhh_vec(i) = dhh_vec(i)*efcolf(i)
   enddo
-!
+
   dhh_vec = dhh_vec/plim**2
-!
-  return
+
 end subroutine coleff
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
 subroutine onseff(v,dp,dh,dpd)
-!
+
 !  dp - dimensionless dpp
 !  dh - dhh*p^2     (p - dmls)
 !  dpd - (1/p)(d/dp)p^2*dp   (p - dmls)
-!
+
 ! square root of pi
   double precision, parameter :: sqp=1.7724538d0
 ! cons=4./(3.*sqrt(pi))
   double precision, parameter :: cons=.75225278d0
   double precision :: v,dp,dh,dpd,v2,v3,ex,er
-!
+
   v2=v**2
   v3=v2*v
   if(v.lt.0.01d0) then
@@ -206,7 +205,7 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
   real(dp), dimension(:), allocatable :: dpp_vec,dhh_vec,fpeff_vec
   real(dp), optional :: tau
   real(dp), dimension(3), intent(in), optional :: randnum
-!
+
   epsilon = 0.1
   q = 0.3
   upper_limit = 30
@@ -214,42 +213,42 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
   allocate(dpp_vec(n))
   allocate(dhh_vec(n))
   allocate(fpeff_vec(n))
-!
+
   p=z(4)
   call coleff(efcolf,velrat,enrat,p,dpp_vec,dhh_vec,fpeff_vec)
 
   dpp = sum(dpp_vec)
   dhh = sum(dhh_vec)
   fpeff = sum(fpeff_vec)
-!
+
   ierr=0
-!
+
   if (present(tau)) then
     dtau = min(epsilon**2/(2*dhh),tau,upper_limit)
     if (z(4).lt.q) then
       dtau = min(dtau*(q/z(4))**2,tau)
     endif
   endif
-!
+
   if(iswmode.eq.1.or.iswmode.eq.4) then
     alam=z(5)
     coala=1.d0-alam**2
-!
+
     if(coala.lt.0.d0) then
       ierr=1
       return
     endif
-!  
+
     if (present(randnum)) ur = randnum(1)
     if (.not.present(randnum)) call getran(1,ur)
-!
+
     dalam=sqrt(2.d0*dhh*coala*dtau)*dble(ur)-2.d0*alam*dhh*dtau
-!
+
     if(abs(dalam).gt.1.d0) then
       ierr=2
       if (present(randnum)) ur = randnum(2)
       if (.not.present(randnum)) call random_number(ur)
-!
+
       alam=2.d0*(dble(ur)-0.5d0)
     else
       alam=alam+dalam
@@ -261,26 +260,26 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
         alam=-2.d0-alam
       endif
     endif
-!
+
     z(5)=alam
     if(iswmode.eq.4) return
   endif
-!
+
   if(iswmode.lt.3) then
-!
+
   if (present(randnum)) ur = randnum(3)
   if (.not.present(randnum)) call getran(0,ur)
-!
+
     z(4)=z(4)+sqrt(abs(2.d0*dpp*dtau))*dble(ur)+fpeff*dtau
   else
     z(4)=z(4)+fpeff*dtau
   endif
-!
+
   if(z(4).lt.pmin) then
     ierr=ierr+10
     z(4)=pmin+abs(pmin-z(4))
   endif
-!
+
   return
 end subroutine stost
 !
@@ -307,7 +306,7 @@ subroutine getran(irand,ur)
         ur=-1.
       endif
     endif
-    return
+
 end subroutine getran
 !
 !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
