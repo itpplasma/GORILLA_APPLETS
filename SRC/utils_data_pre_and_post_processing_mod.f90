@@ -416,13 +416,13 @@ subroutine initialise_electric_potential_type
     use tetra_grid_settings_mod, only: grid_size
 
     allocate(ep%rho_prism(ntetr/3))
-    allocate(ep%rho_flux_tube(grid_size(1)))
+    allocate(ep%rho_flux_layer(grid_size(1)))
     allocate(ep%rho_vert(nvert))
     allocate(ep%phi_elec_from_rho(nvert))
     allocate(ep%average_phi_elec_from_rho(in%n_electric_potential_updates))
 
     ep%rho_prism = 0
-    ep%rho_flux_tube = 0
+    ep%rho_flux_layer = 0
     ep%rho_vert = 0
     ep%phi_elec_from_rho = 0
     ep%average_phi_elec_from_rho = 0
@@ -464,7 +464,7 @@ subroutine calc_phi_elec_from_rho
 
     if (in%update_dimension.eq.1) then
 
-        call calc_average_density_per_flux_tube
+        call calc_average_density_per_flux_layer
         call calc_rho_on_vertices
         ep%phi_elec_from_rho = factor * ep%rho_vert
         
@@ -472,7 +472,7 @@ subroutine calc_phi_elec_from_rho
 
 end subroutine calc_phi_elec_from_rho
 
-subroutine calc_average_density_per_flux_tube
+subroutine calc_average_density_per_flux_layer
 
     use gorilla_applets_types_mod, only:  g, output, ep
     use tetra_grid_mod, only: nvert
@@ -485,31 +485,67 @@ subroutine calc_average_density_per_flux_tube
         prism_volumes = 0
         do j = 1, grid_size(2)*grid_size(3)*2
             ind_prism = g%prisms_per_flux_tube(ns,j)
-            ep%rho_flux_tube(ns) = ep%rho_flux_tube(ns) + output%prism_moments(1,ind_prism)*output%refined_prism_volumes(ind_prism)
+            ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns) +output%prism_moments(1,ind_prism)*output%refined_prism_volumes(ind_prism)
             prism_volumes = prism_volumes + output%refined_prism_volumes(ind_prism)
         enddo
-        ep%rho_flux_tube(ns) = ep%rho_flux_tube(ns)/prism_volumes
+        ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns)/prism_volumes
     enddo
 
-end subroutine calc_average_density_per_flux_tube
+end subroutine calc_average_density_per_flux_layer
 
 subroutine calc_rho_on_vertices
 
-    use tetra_grid_mod, only: nvert
+    use tetra_grid_mod, only: nvert, verts_rphiz, verts_sthetaphi
     use tetra_grid_settings_mod, only: grid_size
     use gorilla_applets_types_mod, only: g, ep
+    use tetra_physics_mod, only: tetra_physics, coord_system, mag_axis_R0, mag_axis_Z0
 
     integer :: ns
     real(dp) :: value_to_be_set
-
-    call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(1,:), ep%rho_flux_tube(1))
-
+    real(dp) :: rho_surface_2, rho_surface_3, rho_surface_end_minus_1, rho_surface_end_minus_2
+    real(dp) :: distance_a, distance_b, extrapolation_factor
+    
     do ns = 2,grid_size(1)
-        value_to_be_set = 0.5_dp*(ep%rho_flux_tube(ns-1)+ep%rho_flux_tube(ns))
+        value_to_be_set = 0.5_dp*(ep%rho_flux_layer(ns-1)+ep%rho_flux_layer(ns))
         call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(ns,:), value_to_be_set)
     enddo
 
-    call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(grid_size(1)+1,:), ep%rho_flux_tube(grid_size(1)))
+    rho_surface_2 =           0.5_dp*(ep%rho_flux_layer(1             )+ep%rho_flux_layer(2             ))
+    rho_surface_3 =           0.5_dp*(ep%rho_flux_layer(2             )+ep%rho_flux_layer(3             ))
+    rho_surface_end_minus_2 = 0.5_dp*(ep%rho_flux_layer(grid_size(1)-2)+ep%rho_flux_layer(grid_size(1)-1))
+    rho_surface_end_minus_1 = 0.5_dp*(ep%rho_flux_layer(grid_size(1)-1)+ep%rho_flux_layer(grid_size(1)  ))
+
+    !fill first surface by extrapolating from the second and the third surface
+    if (coord_system.eq.2) then
+        distance_a = (verts_sthetaphi(1,grid_size(3)+1)-verts_sthetaphi(1,1))
+        distance_b = (verts_sthetaphi(1,grid_size(3)*2+1)-verts_sthetaphi(1,grid_size(3)+1))
+    else
+        distance_a = sqrt((verts_rphiz(1,grid_size(3)+1)-verts_rphiz(1,1))**2 + &
+                          (verts_rphiz(3,grid_size(3)+1)-verts_rphiz(3,1))**2)
+        distance_b = sqrt((verts_rphiz(1,grid_size(3)*2+1)-verts_rphiz(1,grid_size(3)+1))**2 + &
+                          (verts_rphiz(3,grid_size(3)*2+1)-verts_rphiz(3,grid_size(3)+1))**2)
+    endif
+    extrapolation_factor = distance_a/distance_b
+    value_to_be_set = rho_surface_2 + extrapolation_factor*(rho_surface_2 - rho_surface_3)
+    call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(1,:), value_to_be_set)
+
+    print*, 'extrapolation_factor 1 = ', extrapolation_factor
+
+    !fill last surface by extrapolating from the second to last and third to last surface
+    if (coord_system.eq.2) then
+        distance_a = (verts_sthetaphi(1,grid_size(3)*(grid_size(1)-1)+1)-verts_sthetaphi(1,grid_size(3)*(grid_size(1)-2)+1))
+        distance_b = (verts_sthetaphi(1,grid_size(3)*(grid_size(1)-2)+1)-verts_sthetaphi(1,grid_size(3)*(grid_size(1)-3)+1))
+    else
+        distance_a = sqrt((verts_rphiz(1,grid_size(3)*(grid_size(1)-1)+1)-verts_rphiz(1,grid_size(3)*(grid_size(1)-2)+1))**2 + &
+                          (verts_rphiz(3,grid_size(3)*(grid_size(1)-1)+1)-verts_rphiz(3,grid_size(3)*(grid_size(1)-2)+1))**2)
+        distance_b = sqrt((verts_rphiz(1,grid_size(3)*(grid_size(1)-2)+1)-verts_rphiz(1,grid_size(3)*(grid_size(1)-3)+1))**2 + &
+                          (verts_rphiz(3,grid_size(3)*(grid_size(1)-2)+1)-verts_rphiz(3,grid_size(3)*(grid_size(1)-3)+1))**2)
+    endif
+    extrapolation_factor = distance_a/distance_b
+    value_to_be_set = rho_surface_end_minus_1 + extrapolation_factor*(rho_surface_end_minus_1 - rho_surface_end_minus_2)
+    call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(grid_size(1)+1,:), value_to_be_set)
+
+    print*, 'extrapolation_factor end = ', extrapolation_factor
 
     contains
 
