@@ -447,13 +447,12 @@ subroutine perform_electric_potential_update(i)
 
     call calc_phi_elec_from_rho
 
-    phi_elec = r*phi_elec + (1-r)*ep%phi_elec_from_rho !make it a module variable there
+    phi_elec = r*phi_elec + (1-r)*ep%phi_elec_from_rho
 
     !giving i_option = 12 as input variable prevents make_tetra_physics from overwriting phi_elec
-    call make_tetra_physics(coord_system,ipert,i_option = 12) 
+    call make_tetra_physics(coord_system,ipert,i_option = 12)
 
-    ep%average_phi_elec_from_rho(i) = sum(ep%phi_elec_from_rho)/size(ep%phi_elec_from_rho)
-    print*, "electric potential update ", i, " complete. Average Delta Phi is ", ep%average_phi_elec_from_rho(i)
+    call print_results_of_electric_potential_update(i)
 
 end subroutine perform_electric_potential_update
 
@@ -530,6 +529,26 @@ subroutine calc_rho_on_vertices
     end subroutine fill_vector_parts_with_value
 
 end subroutine calc_rho_on_vertices
+
+subroutine print_results_of_electric_potential_update(i)
+
+    use gorilla_applets_types_mod, only: c, output, grid_t, in, ep
+
+    integer, intent(in) :: i
+    integer :: ep_unit
+    character(len=100) :: filename_ep, i_str
+
+    write(i_str, '(I0)') i  ! Convert integer to string without leading spaces
+    filename_ep = 'rho_per_vertex_during_electric_potential_update_' // trim(i_str) // '.dat'
+    open(newunit = ep_unit, file = filename_ep)
+    write(ep_unit,'(ES20.10E4)') ep%rho_vert
+    close(ep_unit)
+
+    ep%average_phi_elec_from_rho(i) = sum(ep%phi_elec_from_rho)/size(ep%phi_elec_from_rho)
+
+    print*, "electric potential update ", i, " complete. Average Delta Phi is ", ep%average_phi_elec_from_rho(i)
+
+end subroutine print_results_of_electric_potential_update
 
 subroutine associate_flux_labels_with_tetrahedra_and_vertices
 
