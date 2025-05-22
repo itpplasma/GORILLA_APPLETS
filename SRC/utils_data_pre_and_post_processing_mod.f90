@@ -238,9 +238,9 @@ subroutine set_rest_of_start_type(rand_matrix)
     start%cm_over_e = cm_over_e
     start%t = in%time_step
     if (i_option.eq.12) then
-        start%particle_charge(2) = echarge
+        start%particle_charge(2) = -echarge
         start%particle_mass(2) = ame
-        start%cm_over_e(2) = clight*ame/echarge
+        start%cm_over_e(2) = -clight*ame/echarge
         start%t(2) = in%time_step/42.0_dp
     endif
 
