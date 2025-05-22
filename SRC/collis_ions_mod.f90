@@ -120,7 +120,7 @@ subroutine collis_init(m1,Z1,m,Z,dens,temp,e0,v0,efcolf,velrat,enrat)
   frecol_base = 2.d0*pi*echarge**4*Z1**2/(m1**2*v0**3)
 
   do i = 1,n
-    call lambda_alpha_beta(Z1, Z(i), m1, m(i), e0, temp(i), 0.d0, dens(i), lambda(i))
+    call lambda_alpha_beta(Z1, Z(i), m1, m(i), temp(i), temp(i), dens(i), dens(i), lambda(i))
     enrat(i)=e0/temp(i)
     velrat(i)=v0/sqrt(2.d0*temp(i)*ev2erg/m(i))
     efcolf(i)=frecol_base*Z(i)**2*lambda(i)*dens(i)*velrat(i)/v0
