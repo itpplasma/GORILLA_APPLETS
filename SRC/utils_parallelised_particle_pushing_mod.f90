@@ -9,14 +9,14 @@ contains
 subroutine print_progress(num_particles,kpart,n)
 
     integer :: num_particles, kpart, n
-    logical :: print_progress_for_very_particle = .true.
+    logical :: print_progress_for_very_particle = .false.
 
-    if (print_progress_for_very_particle) then
-        print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
-    else
-        if (modulo(kpart,int(num_particles/10)).eq.0) then
+    if ((.not.print_progress_for_very_particle).and.(num_particles.gt.10)) then
+                if (modulo(kpart,int(num_particles/10)).eq.0) then
             print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
         endif
+    else
+        print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
     endif    
 
 end subroutine print_progress
@@ -77,23 +77,27 @@ endif
 
 end subroutine initialise_loop_variables
 
-subroutine add_local_tetr_moments_to_output(local_tetr_moments)
+subroutine add_local_tetr_moments_to_output(local_tetr_moments,species_in)
 
     use gorilla_applets_types_mod, only: moment_specs, output
     use tetra_grid_mod, only: ntetr
     
     complex(dp), dimension(:,:), intent(in) :: local_tetr_moments
+    integer, intent(in), optional :: species_in
+    integer :: species = 1
     integer :: k, n_prisms
+
+    if (present(species_in)) species = species_in
     
     n_prisms = ntetr/3
     
-    output%tetr_moments = output%tetr_moments + local_tetr_moments
-    output%prism_moments = output%prism_moments + &
+    output%tetr_moments(:,:,species) = output%tetr_moments(:,:,species) + local_tetr_moments
+    output%prism_moments(:,:,species) = output%prism_moments(:,:,species) + &
         & (local_tetr_moments(:,(/(1+3*k,k = 0,n_prisms-1)/)) + &
         &  local_tetr_moments(:,(/(2+3*k,k = 0,n_prisms-1)/)) + &
         &  local_tetr_moments(:,(/(3+3*k,k = 0,n_prisms-1)/)))
     if (moment_specs%boole_squared_moments) then
-        output%prism_moments_squared = output%prism_moments_squared + &
+        output%prism_moments_squared(:,:,species) = output%prism_moments_squared(:,:,species) + &
             & (local_tetr_moments(:,(/(1+3*k,k = 0,n_prisms-1)/)) + &
             &  local_tetr_moments(:,(/(2+3*k,k = 0,n_prisms-1)/)) + &
             &  local_tetr_moments(:,(/(3+3*k,k = 0,n_prisms-1)/)))**2
@@ -281,24 +285,27 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
 
 end subroutine collisions_without_background_updates
 
-subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_0_mappings)
+subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_0_mappings,species_in)
 
     use gorilla_applets_types_mod, only: exit_data, in
 
-    integer, intent(in)    :: i, n
-    integer, optional      :: phi_0_mappings
-    real(dp), dimension(3) :: x
-    real(dp)               :: t_confined, vpar, vperp
-    logical                :: boole_particle_lost
+    integer, intent(in)                 :: i, n
+    integer, intent(in), optional       :: phi_0_mappings, species_in
+    real(dp), dimension(3), intent(in)  :: x
+    real(dp), intent(in)                :: t_confined, vpar, vperp
+    logical, intent(in)                 :: boole_particle_lost
+    integer                             :: species = 1
 
-    if (boole_particle_lost.eqv..true.) exit_data%lost(n) = 1
-    if (boole_particle_lost.eqv..false.) exit_data%lost(n) = 0
-    exit_data%t_confined(n) = t_confined
-    exit_data%x(:,n) = x
-    exit_data%vpar(n) = vpar
-    exit_data%vperp(n) = vperp 
-    exit_data%integration_step(n) = i
-    if(present(phi_0_mappings)) exit_data%phi_0_mappings(n) = phi_0_mappings
+    if (present(species_in)) species = species_in
+
+    if (boole_particle_lost.eqv..true.) exit_data%lost(n,species) = 1
+    if (boole_particle_lost.eqv..false.) exit_data%lost(n,species) = 0
+    exit_data%t_confined(n,species) = t_confined
+    exit_data%x(:,n,species) = x
+    exit_data%vpar(n,species) = vpar
+    exit_data%vperp(n,species) = vperp 
+    exit_data%integration_step(n,species) = i
+    if(present(phi_0_mappings)) exit_data%phi_0_mappings(n,species) = phi_0_mappings
 
 end subroutine update_exit_data
 
@@ -315,19 +322,18 @@ subroutine update_start_type(x,vpar,vperp,n,species,ind_tetr)
     real(dp), dimension(3)             :: x_local
     real(dp)                           :: v
 
-    if (ind_tetr.eq.-1) then
-        start%lost(n,species) = .true.
-        return
-    endif
-
     start%x(:,n,species) = x
     v = sqrt(vpar**2+vperp**2)
     start%pitch(n,species) = vpar/v
     start%energy(n,species) = 0.5_dp*v**2*start%particle_mass(species)/ev2erg
 
-    x_local = x-tetra_physics(ind_tetr)%x1
-    start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(x_local,ind_tetr))*(-1)
-    !-1 because of negative gyrophase
+    if (ind_tetr.eq.-1) then
+        start%lost(n,species) = .true.
+    else
+        x_local = x-tetra_physics(ind_tetr)%x1
+        start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(x_local,ind_tetr))*(-1)
+        !-1 because of negative gyrophase
+    endif
 
 end subroutine update_start_type
 

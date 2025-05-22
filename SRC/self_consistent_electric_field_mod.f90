@@ -87,7 +87,7 @@ subroutine calc_self_consistent_electric_field
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
     find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution, &
     perform_electric_potential_update, set_weights, prepare_next_round_of_parallelised_particle_pushing, &
-    associate_flux_labels_with_tetrahedra_and_vertices, initialise_electric_potential_type
+    associate_flux_labels_with_tetrahedra_and_vertices, allocate_electric_potential_type
     use gorilla_applets_types_mod, only: output, ep
 
     real(dp), dimension(:,:), allocatable :: verts
@@ -105,7 +105,7 @@ subroutine calc_self_consistent_electric_field
     call initialize_exit_data
     call calc_starting_conditions(verts)
     call calc_poloidal_flux(verts)
-    call initialise_electric_potential_type
+    call allocate_electric_potential_type
     call give_file_names
     call unlink_files
 
@@ -119,7 +119,7 @@ subroutine calc_self_consistent_electric_field
             if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
             call parallelised_particle_pushing(species,i)
             call normalise_prism_moments_and_prism_moments_squared(species)
-            ep%rho_prism = ep%rho_prism + output%prism_moments(species,:)*start%particle_charge(species)
+            ep%rho_prism = ep%rho_prism + real(output%prism_moments(1,:,species))*start%particle_charge(species)
         enddo
         call perform_electric_potential_update(i)
     enddo
@@ -141,18 +141,19 @@ subroutine calc_self_consistent_electric_field
     if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
          print*, 'number of times that particles were pushed across the inside hole = ', counter%lost_inside
     endif
-    print*, 'Average Delta Phi at all the electric potential updates = ', ep%average_phi_elec_from_rho
+    print*, 'Average abs Delta Phi at all the electric potential updates = ', ep%average_abs_phi_elec_from_rho
 
 end subroutine calc_self_consistent_electric_field
 
 subroutine parallelised_particle_pushing(species,j)
 
-    use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start
+    use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, exit_data
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
     add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
     initialise_seed_for_random_numbers_for_each_thread
+    
 
     integer, intent(in)                      :: species, j
     integer                                  :: kpart, iantithetic, ind_tetr, iface
@@ -202,7 +203,7 @@ subroutine parallelised_particle_pushing(species,j)
                     t%step = t%step/start%v0(species) !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
                 call orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t%step,particle_status,ind_tetr,iface,n,&
-                            & local_tetr_moments, local_counter,t%remain)
+                            & local_tetr_moments, local_counter,t%remain, species, j)
 
                 t%confined = t%confined + t%step - t%remain
 
@@ -210,19 +211,19 @@ subroutine parallelised_particle_pushing(species,j)
                     call handle_lost_particles(local_counter, particle_status%lost)
                     exit
                 endif
-                
             enddo
+
 
             !$omp critical
             counter%integration_steps = counter%integration_steps + i
             c%maxcol = max(dble(i)/dble(c%randcoli),c%maxcol)
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
-            call update_exit_data(particle_status%lost,t%confined,x,vpar,vperp,i,n)
+            call update_exit_data(particle_status%lost,t%confined,x,vpar,vperp,i,n,species_in=species)
             call update_start_type(x,vpar,vperp,n,species,ind_tetr)
         enddo
         !$omp critical
-        call add_local_tetr_moments_to_output(local_tetr_moments)
+        call add_local_tetr_moments_to_output(local_tetr_moments,species)
         !$omp end critical
     enddo !n
     !$OMP END DO
@@ -231,7 +232,7 @@ subroutine parallelised_particle_pushing(species,j)
 end subroutine parallelised_particle_pushing
 
 subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particle_status,ind_tetr,iface, n,local_tetr_moments, &
-                                            local_counter, t_remain_out)
+                                            local_counter, t_remain_out,species, j)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly
@@ -240,11 +241,12 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, g
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, g, start
     use tetra_grid_settings_mod, only: grid_kind
     use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
                                         initialize_constants_of_motion, calc_particle_weights_and_jperp, compute_radial_fluxes
 
+    integer, intent(in)                          :: species, j
     type(counter_t), intent(inout)               :: local_counter
     type(particle_status_t), intent(inout)       :: particle_status
     real(dp), dimension(3), intent(inout)        :: x
@@ -268,7 +270,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
             return
         endif
         z_save = x-tetra_physics(ind_tetr)%x1
-        call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
+        if (j.eq.1) call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species)
         particle_status%initialized = .true.
     endif
           
@@ -327,6 +329,8 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
     enddo !Loop for tetrahedron pushings
 
     vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
+
+
 
 end subroutine orbit_timestep_gorilla_self_consistent_ef
 

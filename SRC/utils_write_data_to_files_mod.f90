@@ -157,27 +157,28 @@ subroutine write_moments
     if (moment_specs%n_moments.gt.0) then
         do l = 1,n_prisms
             do i = 1,moment_specs%n_moments - 1
-                write(p_moments_unit,'(2ES20.10E4)',advance="no") real(output%prism_moments(i,l)), aimag(output%prism_moments(i,l))
+                write(p_moments_unit,'(2ES20.10E4)',advance="no") real(output%prism_moments(i,l,1)), &
+                                                                 aimag(output%prism_moments(i,l,1))
             enddo
-                write(p_moments_unit,'(2ES20.10E4)') real(output%prism_moments(moment_specs%n_moments,l)), &
-                                                     aimag(output%prism_moments(moment_specs%n_moments,l))
+                write(p_moments_unit,'(2ES20.10E4)') real(output%prism_moments(moment_specs%n_moments,l,1)), &
+                                                    aimag(output%prism_moments(moment_specs%n_moments,l,1))
         enddo
         if (moment_specs%boole_squared_moments) then
             do l = 1,n_prisms
                 do i = 1,moment_specs%n_moments - 1
-                    write(pmss_unit,'(2ES20.10E4)',advance="no") real(output%prism_moments_squared(i,l)), &
-                                                                    & aimag(output%prism_moments_squared(i,l))
+                    write(pmss_unit,'(2ES20.10E4)',advance="no") real(output%prism_moments_squared(i,l,1)), &
+                                                              & aimag(output%prism_moments_squared(i,l,1))
                 enddo
-                    write(pmss_unit,'(2ES20.10E4)') real(output%prism_moments_squared(moment_specs%n_moments,l)), &
-                                                    aimag(output%prism_moments_squared(moment_specs%n_moments,l))
+                    write(pmss_unit,'(2ES20.10E4)') real(output%prism_moments_squared(moment_specs%n_moments,l,1)), &
+                                                   aimag(output%prism_moments_squared(moment_specs%n_moments,l,1))
             enddo
         endif
         do l = 1,ntetr
             do i = 1,moment_specs%n_moments - 1
-                write(t_moments_unit,'(2ES20.10E4)',advance="no") real(output%tetr_moments(i,l)), aimag(output%tetr_moments(i,l))
+                write(t_moments_unit,'(2ES20.10E4)',advance="no") real(output%tetr_moments(i,l,1)),aimag(output%tetr_moments(i,l,1))
             enddo
-                write(t_moments_unit,'(2ES20.10E4)') real(output%tetr_moments(moment_specs%n_moments,l)), &
-                                                     aimag(output%tetr_moments(moment_specs%n_moments,l))
+                write(t_moments_unit,'(2ES20.10E4)') real(output%tetr_moments(moment_specs%n_moments,l,1)), &
+                                                     aimag(output%tetr_moments(moment_specs%n_moments,l,1))
         enddo
     endif
 
@@ -215,8 +216,8 @@ subroutine write_exit_data
 
     open(newunit = ed_unit, file = filenames%exit_data)
     do i = 1,in%num_particles
-        write(ed_unit,*) i, exit_data%lost(i), exit_data%t_confined(i), exit_data%x(:,i), exit_data%vpar(i), &
-                        exit_data%vperp(i), exit_data%integration_step(i), exit_data%phi_0_mappings(i)
+        write(ed_unit,*) i, exit_data%lost(i,1), exit_data%t_confined(i,1), exit_data%x(:,i,1), exit_data%vpar(i,1), &
+                        exit_data%vperp(i,1), exit_data%integration_step(i,1), exit_data%phi_0_mappings(i,1)
     enddo
     close (ed_unit)
 

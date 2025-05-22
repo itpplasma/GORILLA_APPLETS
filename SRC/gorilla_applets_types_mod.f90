@@ -20,10 +20,11 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: electric_potential
     real(dp), dimension(:), allocatable :: boltzmann_density
     real(dp), dimension(:), allocatable :: radial_flux
-    complex(dp), dimension(:,:), allocatable :: tetr_moments
-    complex(dp), dimension(:,:), allocatable :: prism_moments
-    complex(dp), dimension(:,:), allocatable :: prism_moments_squared
+    complex(dp), dimension(:,:,:), allocatable :: tetr_moments
+    complex(dp), dimension(:,:,:), allocatable :: prism_moments
+    complex(dp), dimension(:,:,:), allocatable :: prism_moments_squared
     complex(dp), dimension(:,:,:), allocatable :: moments_in_frequency_space
+    !In moments_in_frequency_space, third dimension is not particle species but fourier mode
     end type output_t
 
     type(output_t) :: output
@@ -144,13 +145,13 @@ module gorilla_applets_types_mod
     type(filenames_t) :: filenames
 
     type exit_data_t
-    integer, dimension(:), allocatable :: lost
-    real(dp), dimension(:), allocatable :: t_confined
-    real(dp), dimension(:,:), allocatable :: x
-    real(dp), dimension(:), allocatable :: vpar
-    real(dp), dimension(:), allocatable :: vperp
-    integer, dimension(:), allocatable :: integration_step
-    integer, dimension(:), allocatable :: phi_0_mappings
+    integer, dimension(:,:), allocatable :: lost
+    real(dp), dimension(:,:), allocatable :: t_confined
+    real(dp), dimension(:,:,:), allocatable :: x
+    real(dp), dimension(:,:), allocatable :: vpar
+    real(dp), dimension(:,:), allocatable :: vperp
+    integer, dimension(:,:), allocatable :: integration_step
+    integer, dimension(:,:), allocatable :: phi_0_mappings
     end type exit_data_t
 
     type(exit_data_t) :: exit_data
@@ -177,7 +178,9 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: rho_flux_layer
     real(dp), dimension(:), allocatable :: rho_vert
     real(dp), dimension(:), allocatable :: phi_elec_from_rho
-    real(dp), dimension(:), allocatable :: average_phi_elec_from_rho
+    real(dp), dimension(:), allocatable :: average_abs_phi_elec_from_rho
+    real(dp), dimension(:), allocatable :: total_tracing_time
+    real(dp) :: mean_abs_rho_at_first_update
     end type electric_potential_t
 
     type(electric_potential_t) :: ep

@@ -62,7 +62,7 @@ end subroutine set_moment_specifications
 subroutine initialise_output
 
     use tetra_grid_mod, only: ntetr
-    use gorilla_applets_types_mod, only: moment_specs, output
+    use gorilla_applets_types_mod, only: moment_specs, output, in
     use tetra_grid_settings_mod, only: grid_size
     
     integer :: n_prisms
@@ -74,20 +74,20 @@ subroutine initialise_output
     allocate(output%electric_potential(n_prisms))
     allocate(output%boltzmann_density(n_prisms))
     allocate(output%radial_flux(grid_size(1)+1))
-    allocate(output%tetr_moments(moment_specs%n_moments,ntetr))
-    allocate(output%prism_moments(moment_specs%n_moments,n_prisms))
-    if (moment_specs%boole_squared_moments) allocate(output%prism_moments_squared(moment_specs%n_moments,n_prisms))
+    allocate(output%tetr_moments(moment_specs%n_moments,ntetr,in%n_species))
+    allocate(output%prism_moments(moment_specs%n_moments,n_prisms,in%n_species))
+    if (moment_specs%boole_squared_moments) allocate(output%prism_moments_squared(moment_specs%n_moments,n_prisms,in%n_species))
     allocate(output%moments_in_frequency_space(moment_specs%n_moments,moment_specs%n_triangles,moment_specs%n_fourier_modes))
     
-    output%prism_volumes = 0
-    output%refined_prism_volumes = 0
-    output%electric_potential = 0
-    output%boltzmann_density = 0
-    output%radial_flux = 0
-    output%tetr_moments = 0
-    output%prism_moments = 0
-    if (moment_specs%boole_squared_moments) output%prism_moments_squared = 0
-    output%moments_in_frequency_space = 0
+    output%prism_volumes = 0.0_dp
+    output%refined_prism_volumes = 0.0_dp
+    output%electric_potential = 0.0_dp
+    output%boltzmann_density = 0.0_dp
+    output%radial_flux = 0.0_dp
+    output%tetr_moments = 0.0_dp
+    output%prism_moments = 0.0_dp
+    if (moment_specs%boole_squared_moments) output%prism_moments_squared = 0.0_dp
+    output%moments_in_frequency_space = 0.0_dp
     
 end subroutine initialise_output
 
@@ -252,13 +252,13 @@ subroutine initialize_exit_data
 
     use gorilla_applets_types_mod, only: in, exit_data
 
-    allocate(exit_data%lost(in%num_particles))
-    allocate(exit_data%t_confined(in%num_particles))
-    allocate(exit_data%x(3,in%num_particles))
-    allocate(exit_data%vpar(in%num_particles))
-    allocate(exit_data%vperp(in%num_particles))
-    allocate(exit_data%phi_0_mappings(in%num_particles))
-    allocate(exit_data%integration_step(in%num_particles))
+    allocate(exit_data%lost(in%num_particles,in%n_species))
+    allocate(exit_data%t_confined(in%num_particles,in%n_species))
+    allocate(exit_data%x(3,in%num_particles,in%n_species))
+    allocate(exit_data%vpar(in%num_particles,in%n_species))
+    allocate(exit_data%vperp(in%num_particles,in%n_species))
+    allocate(exit_data%phi_0_mappings(in%num_particles,in%n_species))
+    allocate(exit_data%integration_step(in%num_particles,in%n_species))
 
     exit_data%lost = 0
     exit_data%t_confined = 0.0_dp
@@ -267,7 +267,6 @@ subroutine initialize_exit_data
     exit_data%vperp = 0.0_dp 
     exit_data%integration_step = 0
     exit_data%phi_0_mappings = 0
-
 
 end subroutine initialize_exit_data
 
@@ -399,9 +398,9 @@ subroutine perform_background_density_update(i)
         stop
     endif
 
-    density_from_particle_trajectories(1:ntetr:3) = output%prism_moments(1,:)
-    density_from_particle_trajectories(2:ntetr:3) = output%prism_moments(1,:)
-    density_from_particle_trajectories(3:ntetr:3) = output%prism_moments(1,:)
+    density_from_particle_trajectories(1:ntetr:3) = real(output%prism_moments(1,:,1))
+    density_from_particle_trajectories(2:ntetr:3) = real(output%prism_moments(1,:,1))
+    density_from_particle_trajectories(3:ntetr:3) = real(output%prism_moments(1,:,1))
 
     c%dens_mat(1,:) = r*c%dens_mat(1,:) + (1-r)*density_from_particle_trajectories
 
@@ -409,7 +408,7 @@ subroutine perform_background_density_update(i)
 
 end subroutine perform_background_density_update
 
-subroutine initialise_electric_potential_type
+subroutine allocate_electric_potential_type
 
     use gorilla_applets_types_mod, only: ep, in
     use tetra_grid_mod, only: ntetr, nvert
@@ -419,15 +418,10 @@ subroutine initialise_electric_potential_type
     allocate(ep%rho_flux_layer(grid_size(1)))
     allocate(ep%rho_vert(nvert))
     allocate(ep%phi_elec_from_rho(nvert))
-    allocate(ep%average_phi_elec_from_rho(in%n_electric_potential_updates))
+    allocate(ep%average_abs_phi_elec_from_rho(in%n_electric_potential_updates))
+    allocate(ep%total_tracing_time(in%n_electric_potential_updates))
 
-    ep%rho_prism = 0
-    ep%rho_flux_layer = 0
-    ep%rho_vert = 0
-    ep%phi_elec_from_rho = 0
-    ep%average_phi_elec_from_rho = 0
-
-end subroutine initialise_electric_potential_type
+end subroutine allocate_electric_potential_type
 
 subroutine perform_electric_potential_update(i)
 
@@ -438,60 +432,81 @@ subroutine perform_electric_potential_update(i)
     use field_mod, only: ipert
 
     integer, intent(in) :: i
-    real(dp) :: r=0.99_dp !under-relaxation factor
+    real(dp) :: r=0.5_dp !under-relaxation factor
 
     if (boole_time_Hamiltonian.eqv..false.) then
         print*, "Error, variable 'boole_time_Hamiltonian' must be set to '.true.' for electric potential update to work"
         stop
     endif
 
-    call calc_phi_elec_from_rho
+    call calc_phi_elec_from_rho(i)
 
     phi_elec = r*phi_elec + (1-r)*ep%phi_elec_from_rho
 
     !giving i_option = 12 as input variable prevents make_tetra_physics from overwriting phi_elec
     call make_tetra_physics(coord_system,ipert,i_option = 12)
 
-    call print_results_of_electric_potential_update(i)
+    call print_data(i)
 
 end subroutine perform_electric_potential_update
 
-subroutine calc_phi_elec_from_rho
+subroutine calc_phi_elec_from_rho(i)
 
     use gorilla_applets_types_mod, only: in, ep
+    use constants, only: ev2erg, eps
 
-    real(dp) :: factor = 0.0_dp
+    integer, intent(in) :: i
+    real(dp) :: factor
 
+    ep%rho_prism = 0
+    ep%rho_flux_layer = 0
+    ep%rho_vert = 0
+    ep%phi_elec_from_rho = 0
+    ep%average_abs_phi_elec_from_rho(i) = 0
+    ep%total_tracing_time(i) = 0
+    
     if (in%update_dimension.eq.1) then
 
-        call calc_average_density_per_flux_layer
+        call calc_average_charge_density_per_flux_layer
         call calc_rho_on_vertices
+
+        if (i.eq.1) ep%mean_abs_rho_at_first_update = sum(abs(ep%rho_vert))/size(ep%rho_vert)
+
+        if (ep%mean_abs_rho_at_first_update.gt.eps) then
+            factor = in%energy_eV*ev2erg/ep%mean_abs_rho_at_first_update
+        else
+            factor = 1.0_dp
+        endif
+
         ep%phi_elec_from_rho = factor * ep%rho_vert
         
     endif
 
 end subroutine calc_phi_elec_from_rho
 
-subroutine calc_average_density_per_flux_layer
+subroutine calc_average_charge_density_per_flux_layer
 
-    use gorilla_applets_types_mod, only:  g, output, ep
+    use gorilla_applets_types_mod, only:  g, output, ep, in, start
     use tetra_grid_mod, only: nvert
     use tetra_grid_settings_mod, only: grid_size
 
-    integer :: ns, j, ind_prism
+    integer :: ns, j, species, ind_prism
     real(dp) :: prism_volumes
 
     do ns = 1,grid_size(1)
         prism_volumes = 0
         do j = 1, grid_size(2)*grid_size(3)*2
             ind_prism = g%prisms_per_flux_tube(ns,j)
-            ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns) +output%prism_moments(1,ind_prism)*output%refined_prism_volumes(ind_prism)
             prism_volumes = prism_volumes + output%refined_prism_volumes(ind_prism)
+            do species = 1,in%n_species
+                ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns) + real(output%prism_moments(1,ind_prism,species))* &
+                                        output%refined_prism_volumes(ind_prism)*start%particle_charge(species)
+            enddo
         enddo
         ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns)/prism_volumes
     enddo
 
-end subroutine calc_average_density_per_flux_layer
+end subroutine calc_average_charge_density_per_flux_layer
 
 subroutine calc_rho_on_vertices
 
@@ -529,8 +544,6 @@ subroutine calc_rho_on_vertices
     value_to_be_set = rho_surface_2 + extrapolation_factor*(rho_surface_2 - rho_surface_3)
     call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(1,:), value_to_be_set)
 
-    print*, 'extrapolation_factor 1 = ', extrapolation_factor
-
     !fill last surface by extrapolating from the second to last and third to last surface
     if (coord_system.eq.2) then
         distance_a = (verts_sthetaphi(1,grid_size(3)*(grid_size(1)-1)+1)-verts_sthetaphi(1,grid_size(3)*(grid_size(1)-2)+1))
@@ -544,8 +557,6 @@ subroutine calc_rho_on_vertices
     extrapolation_factor = distance_a/distance_b
     value_to_be_set = rho_surface_end_minus_1 + extrapolation_factor*(rho_surface_end_minus_1 - rho_surface_end_minus_2)
     call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(grid_size(1)+1,:), value_to_be_set)
-
-    print*, 'extrapolation_factor end = ', extrapolation_factor
 
     contains
 
@@ -566,25 +577,44 @@ subroutine calc_rho_on_vertices
 
 end subroutine calc_rho_on_vertices
 
-subroutine print_results_of_electric_potential_update(i)
+subroutine print_data(i)
 
-    use gorilla_applets_types_mod, only: c, output, grid_t, in, ep
+    use gorilla_applets_types_mod, only: c, output, grid_t, in, ep, exit_data
 
     integer, intent(in) :: i
-    integer :: ep_unit
-    character(len=100) :: filename_ep, i_str
+    integer :: ep_unit, ed_unit, j, species
+    character(len=100) :: filename_ep, filename_ed, i_str
 
     write(i_str, '(I0)') i  ! Convert integer to string without leading spaces
+
     filename_ep = 'rho_per_vertex_during_electric_potential_update_' // trim(i_str) // '.dat'
     open(newunit = ep_unit, file = filename_ep)
     write(ep_unit,'(ES20.10E4)') ep%rho_vert
     close(ep_unit)
 
-    ep%average_phi_elec_from_rho(i) = sum(ep%phi_elec_from_rho)/size(ep%phi_elec_from_rho)
+    filename_ed = 'exit_data_' // trim(i_str) // '.dat'
+    open(newunit = ed_unit, file = filename_ed)
+    do j=1,in%num_particles
+        write(ed_unit,*) exit_data%t_confined(j,1), dble(exit_data%integration_step(j,1))
+    enddo
+    do j=1,in%num_particles
+        write(ed_unit,*) exit_data%t_confined(j,2), dble(exit_data%integration_step(j,2))
+    enddo
+    close(ed_unit)
 
-    print*, "electric potential update ", i, " complete. Average Delta Phi is ", ep%average_phi_elec_from_rho(i)
+    do j = 1,in%num_particles
+        do species = 1,2
+            ep%total_tracing_time(i) = ep%total_tracing_time(i) + exit_data%t_confined(j,species)
+        enddo
+    enddo
 
-end subroutine print_results_of_electric_potential_update
+    ep%average_abs_phi_elec_from_rho(i) = sum(abs(ep%phi_elec_from_rho))/size(ep%phi_elec_from_rho)
+
+    print*, "electric potential update ", i, " complete."
+    print*, "Average abs(Delta Phi) is ", ep%average_abs_phi_elec_from_rho(i)
+    print*, "Total tracing time is ", ep%total_tracing_time(i)
+
+end subroutine print_data
 
 subroutine associate_flux_labels_with_tetrahedra_and_vertices
 
@@ -650,11 +680,11 @@ subroutine prepare_next_round_of_parallelised_particle_pushing(species)
         endif
     endif
 
-    call set_weights !weights need to be set again because in orbit_timestep_gorilla_boltzmannn they are multiplied with 
-    !some factor, so we need to get rid of it again. Potentially set weights to updated densities
-    output%tetr_moments = 0.0_dp
-    output%prism_moments = 0.0_dp
-    if (moment_specs%boole_squared_moments) output%prism_moments_squared = 0.0_dp
+    if ((.not.(i_option.eq.12)).or.((i_option.eq.12).and.(species.eq.1))) then
+        output%tetr_moments = 0.0_dp
+        output%prism_moments = 0.0_dp
+        if (moment_specs%boole_squared_moments) output%prism_moments_squared = 0.0_dp
+    endif
 
 end subroutine prepare_next_round_of_parallelised_particle_pushing
 
@@ -670,15 +700,15 @@ subroutine normalise_prism_moments_and_prism_moments_squared(species)
     if (present(species)) time = start%t(species)
     
     do n = 1,moment_specs%n_moments
-        output%prism_moments(n,:) = output%prism_moments(n,:)/(output%prism_volumes*time*in%n_particles)
+        output%prism_moments(n,:,species) = output%prism_moments(n,:,species)/(output%prism_volumes*time*in%n_particles)
         if (moment_specs%boole_squared_moments) then
-            output%prism_moments_squared(n,:) = output%prism_moments_squared(n,:)/ &
+            output%prism_moments_squared(n,:,species) = output%prism_moments_squared(n,:,species)/ &
                     (output%prism_volumes**2*time**2*in%n_particles)
         endif
         if (in%boole_refined_sqrt_g) then
-            output%prism_moments(n,:) = output%prism_moments(n,:)*output%prism_volumes/output%refined_prism_volumes
+            output%prism_moments(n,:,species) = output%prism_moments(n,:,species)*output%prism_volumes/output%refined_prism_volumes
             if (moment_specs%boole_squared_moments) then
-                output%prism_moments_squared(n,:) = output%prism_moments_squared(n,:)* &
+                output%prism_moments_squared(n,:,species) = output%prism_moments_squared(n,:,species)* &
                     output%prism_volumes**2/output%refined_prism_volumes**2
             endif
         endif
@@ -705,7 +735,7 @@ subroutine fourier_transform_moments
     moment_specs%n_triangles = n_prisms/grid_size(2)
     allocate(prism_moments_ordered_for_ft(moment_specs%n_moments,moment_specs%n_triangles,grid_size(2)))
     do q = 1,grid_size(2)
-        prism_moments_ordered_for_ft(:,:,q) = output%prism_moments(:,moment_specs%n_triangles*(q-1)+1:moment_specs%n_triangles*q)
+        prism_moments_ordered_for_ft(:,:,q) = output%prism_moments(:,moment_specs%n_triangles*(q-1)+1:moment_specs%n_triangles*q,1)
     enddo
     
     if (moment_specs%n_fourier_modes.gt.grid_size(2)) then
