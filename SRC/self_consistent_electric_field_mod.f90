@@ -65,7 +65,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%update_dimension = update_dimension
     in%n_species = n_species
 
-    print *,'GORILLA: Loaded input data from self_consistent_ef.inp'
+    print *,'GORILLA_APPLETS: Loaded input data from self_consistent_ef.inp'
 
 end subroutine read_self_consistent_electric_field_inp_into_type
 
@@ -79,7 +79,7 @@ subroutine calc_self_consistent_electric_field
     use gorilla_settings_mod, only: ispecies
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
-    use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
+    use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals_in_flux_coordinates
     use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
@@ -101,7 +101,7 @@ subroutine calc_self_consistent_electric_field
     call set_moment_specifications
     call initialise_output
     call calc_square_root_g
-    call calc_volume_integrals(in%boole_boltzmann_energies,in%boole_refined_sqrt_g, in%density, in%energy_eV)
+    call calc_volume_integrals_in_flux_coordinates
     call initialize_exit_data
     call calc_starting_conditions(verts)
     call calc_poloidal_flux(verts)
@@ -329,8 +329,6 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
     enddo !Loop for tetrahedron pushings
 
     vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
-
-
 
 end subroutine orbit_timestep_gorilla_self_consistent_ef
 

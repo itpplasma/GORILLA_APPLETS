@@ -12,7 +12,7 @@
  !Coordinate system
  !1 ... (R,phi,Z) cylindrical coordinate system
  !2 ... (s,theta,phi) symmetry flux coordinate system 
- coord_system = 1 ,
+ coord_system = 2 ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
@@ -75,7 +75,7 @@
  ! 1 ... Time tracing in 0th order approximation: dt / dtau = const. in each tetrahedral cell
  ! 2 ... (Correct) Hamiltonian time tracing in adequate polynomial order
  !       Dependencies:  ipusher must be 2 (Polynomial pusher)
- i_time_tracing_option = 2 ,
+ i_time_tracing_option = 1 ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
@@ -154,7 +154,7 @@
 !
   !boolean for precalculation of rectangular grid to improve find_tetra (sensible for n_particles >> 1)
   boole_grid_for_find_tetra = .true. ,
-  a_factor = 2 ,
+  a_factor = 1 ,
   b_factor = 0 ,!if either b_factor or c_factor are set to zero, they are calculated automatically such as to make delta_b and delta_c to be about in the range of delta_a (see module find tetra)
   c_factor = 0 ,
 !

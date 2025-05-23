@@ -12,7 +12,7 @@
   n_species = 2
 !
   !Number of particles to be traced
-  n_particles = 1.0d4 ,
+  n_particles = 1.0d3 ,
 !
   !Compute squares of moments 
   boole_squared_moments = .false.,
@@ -30,7 +30,7 @@
   boole_preserve_energy_and_momentum_during_collisions = .false.,
 !
   !Number of electric potential updates
-  n_electric_potential_updates = 1,
+  n_electric_potential_updates = 0,
 !
   !type of electric potential update
   !1 ... 1D 
@@ -40,8 +40,8 @@
   !Simulated density of particles
   density = 1,
 !
-  !refined jacobian determinant
-  boole_refined_sqrt_g = .true.,
+  !refined jacobian determinant, must be set to .false. since this can only be made use of in cylindrical coordinates
+  boole_refined_sqrt_g = .false.,
 !
   !work with boltzmann energies instead of with monoenergetic articles
   boole_boltzmann_energies = .true.,
@@ -70,8 +70,8 @@
   !write data to files
   boole_write_vertex_indices = .true. ,
   boole_write_vertex_coordinates = .true. ,
-  boole_write_prism_volumes = .false. ,
-  boole_write_refined_prism_volumes = .true. ,
+  boole_write_prism_volumes = .true. ,
+  boole_write_refined_prism_volumes = .false. , !Must be set to .false., since boole_refined_sqrt_g is also set to .false.
   boole_write_boltzmann_density = .false. ,
   boole_write_electric_potential = .false. ,
   boole_write_moments = .true. ,

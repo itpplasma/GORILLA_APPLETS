@@ -418,8 +418,8 @@ subroutine allocate_electric_potential_type
     allocate(ep%rho_flux_layer(grid_size(1)))
     allocate(ep%rho_vert(nvert))
     allocate(ep%phi_elec_from_rho(nvert))
-    allocate(ep%average_abs_phi_elec_from_rho(in%n_electric_potential_updates))
-    allocate(ep%total_tracing_time(in%n_electric_potential_updates))
+    allocate(ep%average_abs_phi_elec_from_rho(max(1,in%n_electric_potential_updates)))
+    allocate(ep%total_tracing_time(max(1,in%n_electric_potential_updates)))
 
 end subroutine allocate_electric_potential_type
 
@@ -497,10 +497,10 @@ subroutine calc_average_charge_density_per_flux_layer
         prism_volumes = 0
         do j = 1, grid_size(2)*grid_size(3)*2
             ind_prism = g%prisms_per_flux_tube(ns,j)
-            prism_volumes = prism_volumes + output%refined_prism_volumes(ind_prism)
+            prism_volumes = prism_volumes + output%prism_volumes(ind_prism)
             do species = 1,in%n_species
                 ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns) + real(output%prism_moments(1,ind_prism,species))* &
-                                        output%refined_prism_volumes(ind_prism)*start%particle_charge(species)
+                                        output%prism_volumes(ind_prism)*start%particle_charge(species)
             enddo
         enddo
         ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns)/prism_volumes
