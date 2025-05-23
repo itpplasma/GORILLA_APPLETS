@@ -108,9 +108,7 @@ subroutine calc_self_consistent_electric_field
     call allocate_electric_potential_type
     call give_file_names
     call unlink_files
-
-    if (in%i_integrator_type.eq.2) print*, 'Error: i_integrator_type set to 2, this module only works with &
-                                    & i_integrator_type set to 1'
+    call print_errors_for_bad_inputs
 
     do i = 1, max(in%n_electric_potential_updates,1)
         ep%rho_prism = 0
@@ -331,5 +329,31 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
     vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
 
 end subroutine orbit_timestep_gorilla_self_consistent_ef
+
+subroutine print_errors_for_bad_inputs
+
+    use gorilla_applets_types_mod, only: in
+
+    if (in%i_integrator_type.eq.2) then
+        print*, 'Error: i_integrator_type set to 2, this module only works with i_integrator_type set to 1'
+        print*, 'Program terminated'
+        stop
+    endif
+
+    if (in%boole_refined_sqrt_g.eqv..true.) then
+        print*, 'Error: boole_refined_sqrt_g set to .true., but this only works for cylindrical coordinates. This module &
+                 works with flux coordinates.'
+        print*, 'Program terminated'
+        stop
+    endif
+
+    if (in%boole_write_refined_prism_volumes.eqv..true.) then
+        print*, 'Error: boole_write_refined_prism_volumes set to .true., but this only works for cylindrical coordinates. &
+                 This module works with flux coordinates.'
+        print*, 'Program terminated'
+        stop
+    endif
+
+end subroutine print_errors_for_bad_inputs
 
 end module self_consistent_electric_field_mod

@@ -12,10 +12,10 @@
   n_species = 2
 !
   !Number of particles to be traced
-  n_particles = 1.0d2 ,
+  n_particles = 1.0d3 ,
 !
   !Compute squares of moments 
-  boole_squared_moments = .true.,
+  boole_squared_moments = .false.,
 !
   !Start all particles from the same physical position
   boole_point_source = .false.,
@@ -24,12 +24,12 @@
   boole_collisions = .true.,
 !
   !precalcualte random numbers for collisions
-  boole_precalc_collisions = .true.,
+  boole_precalc_collisions = .false.,
 !
   !make collisions energy and momentum conserving
   boole_preserve_energy_and_momentum_during_collisions = .false.,
 !
-  !decides how often electric potential should be updated
+  !Number of electric potential updates
   n_electric_potential_updates = 0,
 !
   !type of electric potential update
@@ -40,21 +40,21 @@
   !Simulated density of particles
   density = 1,
 !
-  !refined jacobian determinant
-  boole_refined_sqrt_g = .true.,
+  !refined jacobian determinant, must be set to .false. since this can only be made use of in cylindrical coordinates
+  boole_refined_sqrt_g = .false.,
 !
   !work with boltzmann energies instead of with monoenergetic articles
   boole_boltzmann_energies = .true.,
 !
   !make density a linear function of poloidal flux
-  boole_linear_density_simulation = .true.,
+  boole_linear_density_simulation = .false.,
 !
   !always initiate pairs of particles where both particles start at the same position but move
   !in opposite direction, this helps to reduce statistical noise
-  boole_antithetic_variate = .true.,
+  boole_antithetic_variate = .false.,
 !
   !make temperature a linear function of poloidal flux
-  boole_linear_temperature_simulation = .true.,
+  boole_linear_temperature_simulation = .false.,
 !
   !Set integrator type
   !(must be 1, otherwise it currently does not work)
@@ -68,13 +68,13 @@
   seed_option = 2
 
   !write data to files
-  boole_write_vertex_indices = .false. ,
-  boole_write_vertex_coordinates = .false. ,
-  boole_write_prism_volumes = .false. ,
-  boole_write_refined_prism_volumes = .true. ,
+  boole_write_vertex_indices = .true. ,
+  boole_write_vertex_coordinates = .true. ,
+  boole_write_prism_volumes = .true. ,
+  boole_write_refined_prism_volumes = .false. , !Must be set to .false., since boole_refined_sqrt_g is also set to .false.
   boole_write_boltzmann_density = .false. ,
   boole_write_electric_potential = .false. ,
-  boole_write_moments = .false. ,
+  boole_write_moments = .true. ,
   boole_write_fourier_moments = .true. ,
   boole_write_exit_data = .true. ,
   boole_write_grid_data = .true.
