@@ -75,22 +75,21 @@ subroutine calc_self_consistent_electric_field
     use constants, only: ev2erg,pi,echarge
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
     use tetra_grid_settings_mod, only: grid_kind
-    use tetra_grid_mod, only: ntetr
+    use tetra_grid_mod, only: ntetr, verts_sthetaphi
     use gorilla_settings_mod, only: ispecies
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
-    use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals_in_flux_coordinates
+    use volume_integrals_and_sqrt_g_mod, only: calc_volume_integrals_in_flux_coordinates
     use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
-    get_ipert, set_moment_specifications, initialise_output, calc_starting_conditions, initialize_exit_data, calc_poloidal_flux, &
+    get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
     find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution, &
     perform_electric_potential_update, set_weights, prepare_next_round_of_parallelised_particle_pushing, &
     associate_flux_labels_with_tetrahedra_and_vertices, allocate_electric_potential_type
     use gorilla_applets_types_mod, only: output, ep
 
-    real(dp), dimension(:,:), allocatable :: verts
     integer :: i, species
 
     call set_seed_for_random_numbers
@@ -100,11 +99,10 @@ subroutine calc_self_consistent_electric_field
     call associate_flux_labels_with_tetrahedra_and_vertices
     call set_moment_specifications
     call initialise_output
-    call calc_square_root_g
     call calc_volume_integrals_in_flux_coordinates
     call initialize_exit_data
-    call calc_starting_conditions(verts)
-    call calc_poloidal_flux(verts)
+    call calc_starting_conditions
+    call calc_poloidal_flux(verts_sthetaphi)
     call allocate_electric_potential_type
     call give_file_names
     call unlink_files
@@ -242,7 +240,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
     use gorilla_applets_types_mod, only: counter_t, particle_status_t, g, start
     use tetra_grid_settings_mod, only: grid_kind
     use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
-                                        initialize_constants_of_motion, calc_particle_weights_and_jperp, compute_radial_fluxes
+                                        initialize_constants_of_motion, compute_radial_fluxes
 
     integer, intent(in)                          :: species, j
     type(counter_t), intent(inout)               :: local_counter
@@ -309,7 +307,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
         select case(ipusher) !Calculate trajectory
             case(1)
                 call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper_phi)
-            case(2)
+            case(2) 
                 call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_remain,&
                                                     & t_pass,boole_t_finished,iper_phi,optional_quantities)
         end select
@@ -355,5 +353,132 @@ subroutine print_errors_for_bad_inputs
     endif
 
 end subroutine print_errors_for_bad_inputs
+
+subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species_in)
+
+    use gorilla_applets_types_mod, only: in, flux, start
+    use tetra_physics_mod, only: tetra_physics
+    use constants, only: ev2erg, pi
+    use volume_integrals_and_sqrt_g_mod, only: sqrt_g
+    use supporting_functions_mod, only: bmod_func
+
+    real(dp), intent(in) :: vpar, vperp
+    real(dp), dimension(3), intent(in) :: z_save
+    integer, intent(in) :: n,ind_tetr
+    integer, intent(in), optional :: species_in
+    integer :: species = 1
+    real(dp) :: local_poloidal_flux, phi_elec_func, temperature, epsilon_max
+
+    if (present(species_in)) species = species_in
+
+    start%weight(n,species) = start%weight(n,species)*abs((tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save)))
+
+    if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then
+        local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
+    endif
+    if (in%boole_linear_density_simulation) then
+        start%weight(n,species) = start%weight(n,species)*(flux%poloidal_max*1.1_dp-local_poloidal_flux)/(flux%poloidal_max*1.1_dp)
+    endif
+
+    if (in%boole_boltzmann_energies) then
+        phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
+        epsilon_max = 5*in%energy_eV*ev2erg
+        start%weight(n,species) = start%weight(n,species)*epsilon_max*2/sqrt(pi)*sqrt(start%energy(n,species)*ev2erg)
+        if (.not. in%boole_linear_temperature_simulation) then
+            start%weight(n,species) =start%weight(n,species) /(in%energy_eV*ev2erg)**1.5_dp* &
+                        & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/(in%energy_eV*ev2erg))
+        else
+            temperature = in%energy_eV*ev2erg*(flux%poloidal_max*1.1_dp-local_poloidal_flux)/(flux%poloidal_max*1.1_dp)
+            start%weight(n,species) = start%weight(n,species)/temperature**1.5_dp* &
+            & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
+        endif
+    endif
+
+    start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
+    !-1 because of negative gyrophase
+
+end subroutine calc_particle_weights_and_jperp
+
+subroutine calc_starting_conditions
+
+    use gorilla_applets_types_mod, only: in
+    
+    real(dp), dimension(:,:,:), allocatable                :: rand_matrix
+
+    allocate(rand_matrix(5,in%num_particles,in%n_species))
+    call RANDOM_NUMBER(rand_matrix)
+
+    call allocate_start_type
+    call set_starting_positions(rand_matrix)
+    call set_rest_of_start_type(rand_matrix)
+
+end subroutine calc_starting_conditions
+
+subroutine allocate_start_type
+
+    use gorilla_applets_types_mod, only: start, in
+    use gorilla_applets_settings_mod, only: i_option
+
+    allocate(start%x(3,in%num_particles,in%n_species))
+    allocate(start%pitch(in%num_particles,in%n_species))
+    allocate(start%energy(in%num_particles,in%n_species))
+    allocate(start%weight(in%num_particles,in%n_species))
+    allocate(start%jperp(in%num_particles,in%n_species))
+    allocate(start%lost(in%num_particles,in%n_species))
+    allocate(start%particle_charge(in%n_species))
+    allocate(start%particle_mass(in%n_species))
+    allocate(start%cm_over_e(in%n_species))
+    allocate(start%t(in%n_species))
+
+end subroutine allocate_start_type
+
+subroutine set_starting_positions(rand_matrix)
+
+    use gorilla_applets_types_mod, only: in, start, g
+    use tetra_physics_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
+    use constants, only: pi
+    use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods
+
+    real(dp), dimension(:,:,:), intent(in) :: rand_matrix
+
+    start%x(1,:,:) = sfc_s_min + rand_matrix(1,:,:)*(1-sfc_s_min) !s
+    start%x(2,:,:) = 2*pi*rand_matrix(2,:,:) !theta
+    start%x(3,:,:) = 2*pi/n_field_periods*rand_matrix(3,:,:) !phi
+
+end subroutine set_starting_positions
+
+subroutine set_rest_of_start_type(rand_matrix)
+
+    use gorilla_applets_types_mod, only: in, start
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
+    use gorilla_applets_settings_mod, only: i_option
+    use constants, only: echarge,ame,clight, ev2erg, pi
+    use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods
+
+    real(dp), dimension(:,:,:), intent(in) :: rand_matrix
+
+    start%pitch(:,:) = 2*rand_matrix(4,:,:)-1 !pitch parameter
+    start%energy = in%energy_eV
+    if (in%boole_boltzmann_energies) then
+        start%energy = 5*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
+    endif
+    
+    if (in%boole_antithetic_variate) then
+        start%x(:,1:in%num_particles:2,:) = start%x(:,2:in%num_particles:2,:)
+        start%pitch(1:in%num_particles:2,:) = -start%pitch(2:in%num_particles:2,:)
+        start%energy(1:in%num_particles:2,:) = start%energy(2:in%num_particles:2,:)
+    endif
+
+    start%particle_charge = (/particle_charge, -echarge/)
+    start%particle_mass = (/particle_mass, ame/)
+    start%cm_over_e = (/cm_over_e, -clight*ame/echarge/)
+    start%t = (/in%time_step, in%time_step/42.0_dp/)
+
+    start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
+
+    start%weight = in%density*(1-sfc_s_min)*4*pi**2/n_field_periods
+
+end subroutine set_rest_of_start_type
 
 end module self_consistent_electric_field_mod
