@@ -103,7 +103,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     !This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by 
     !only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine 
     !(this is necessary for the energy and momentum conserving collision operator)
-    start%weight(n,species) =  start%weight(n,species)*in%energy_eV*ev2erg 
+    if (in%boole_boltzmann_energies) start%weight(n,species) =  start%weight(n,species)*in%energy_eV*ev2erg 
 
     r = z_save(1)
     phi = z_save(2)

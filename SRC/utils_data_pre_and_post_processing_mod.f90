@@ -688,16 +688,18 @@ subroutine prepare_next_round_of_parallelised_particle_pushing(species)
 
 end subroutine prepare_next_round_of_parallelised_particle_pushing
 
-subroutine normalise_prism_moments_and_prism_moments_squared(species)
+subroutine normalise_prism_moments_and_prism_moments_squared(species_in)
 
     use gorilla_applets_types_mod, only: moment_specs, output, in, start
     
-    integer, intent(in), optional :: species
+    integer, intent(in), optional :: species_in
+    integer :: species = 1
     integer :: n
     real(dp) :: time
 
     time = in%time_step
-    if (present(species)) time = start%t(species)
+    if (present(species_in)) species = species_in
+    time = start%t(species)
     
     do n = 1,moment_specs%n_moments
         output%prism_moments(n,:,species) = output%prism_moments(n,:,species)/(output%prism_volumes*time*in%n_particles)
