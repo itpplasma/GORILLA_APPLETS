@@ -14,6 +14,9 @@
   !Number of particles to be traced
   n_particles = 1.0d3 ,
 !
+  !Keep electron density constant
+  boole_static_ne = .false. ,
+!
   !Compute squares of moments 
   boole_squared_moments = .false.,
 !

@@ -293,17 +293,18 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
     use gorilla_applets_types_mod, only: in, c, start
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
-    use tetra_physics_mod, only: particle_mass,particle_charge
-    use constants, only: echarge,amp, ame
+    use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
+    use constants, only: echarge,amp, ame, ev2erg
     use tetra_grid_settings_mod, only: grid_size
     use collis_ions, only: collis_init
+    use gorilla_settings_mod, only: coord_system
     
     integer, intent(in), optional :: species_in
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
     integer :: Te_unit, Ti_unit, ne_unit
     integer :: i, j
     integer :: species = 1
-    real(dp) :: m0, z0
+    real(dp) :: m0, z0, n0, s
 
     if (present(species_in)) species = species_in
     
@@ -345,6 +346,16 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     read(ne_unit,'(e16.9)') (c%dens_mat(1,i),i=1,ntetr/grid_size(2),3)
     c%dens_mat(2,:) = c%dens_mat(1,:)
     close(ne_unit)
+
+    !If working in flux coordinates, use background density linear in s
+    if (coord_system.eq.2) then
+        n0 = 3.0_dp * 10.0_dp**13
+        do i = 1,ntetr/grid_size(2),3
+            s = tetra_physics(i)%x1(1)
+            c%dens_mat(1,i) = n0*(1-s*0.9_dp)
+        enddo
+        c%dens_mat(2,:) = c%dens_mat(1,:)
+    endif
     
     do i = 1,grid_size(2)-1 !copy data from first phi slice to all other phi slices
         c%temp_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%temp_mat(:,1:ntetr/grid_size(2):3)
@@ -355,11 +366,13 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
         c%dens_mat(:,1+i:ntetr:3) = c%dens_mat(:,1:ntetr:3)
     enddo
 
-    !for now, use constant background profiles
+    !for now, use constant background temperature
     do i = 1, c%n
-        c%dens_mat(i,:) = sum(c%dens_mat(i,:))/ntetr
         c%temp_mat(i,:) = sum(c%temp_mat(i,:))/ntetr
+        if (coord_system.eq.1) c%dens_mat(i,:) = sum(c%dens_mat(i,:))/ntetr
+        if (coord_system.eq.2) c%temp_mat(i,:) = in%energy_eV
     enddo
+
 
     if (.not.in%boole_preserve_energy_and_momentum_during_collisions) then
         do i = 1, ntetr
@@ -453,7 +466,7 @@ end subroutine perform_electric_potential_update
 subroutine calc_phi_elec_from_rho(i)
 
     use gorilla_applets_types_mod, only: in, ep
-    use constants, only: ev2erg, eps
+    use constants, only: ev2erg, eps, echarge
 
     integer, intent(in) :: i
     real(dp) :: factor
@@ -461,6 +474,7 @@ subroutine calc_phi_elec_from_rho(i)
     ep%rho_prism = 0
     ep%rho_flux_layer = 0
     ep%rho_vert = 0
+    
     ep%phi_elec_from_rho = 0
     ep%average_abs_phi_elec_from_rho(i) = 0
     ep%total_tracing_time(i) = 0
@@ -472,8 +486,8 @@ subroutine calc_phi_elec_from_rho(i)
 
         if (i.eq.1) ep%mean_abs_rho_at_first_update = sum(abs(ep%rho_vert))/size(ep%rho_vert)
 
-        if (ep%mean_abs_rho_at_first_update.gt.eps) then
-            factor = in%energy_eV*ev2erg/ep%mean_abs_rho_at_first_update
+        if (ep%mean_abs_rho_at_first_update.gt.eps**2) then
+            factor = in%energy_eV*ev2erg/echarge/ep%mean_abs_rho_at_first_update
         else
             factor = 1.0_dp
         endif
@@ -487,21 +501,28 @@ end subroutine calc_phi_elec_from_rho
 subroutine calc_average_charge_density_per_flux_layer
 
     use gorilla_applets_types_mod, only:  g, output, ep, in, start
-    use tetra_grid_mod, only: nvert
+    use tetra_grid_mod, only: nvert, verts_sthetaphi
     use tetra_grid_settings_mod, only: grid_size
+    use constants, only: echarge
 
-    integer :: ns, j, species, ind_prism
-    real(dp) :: prism_volumes
+    integer :: ns, j, species, ind_prism, n_species
+    real(dp) :: prism_volumes, s
+
+    n_species = in%n_species
+    if (in%boole_static_ne) species = in%n_species-1
 
     do ns = 1,grid_size(1)
         prism_volumes = 0
+        s = (verts_sthetaphi(1, grid_size(3)*(ns-1)+1) + verts_sthetaphi(1,grid_size(3)*ns+1))/2.0_dp
         do j = 1, grid_size(2)*grid_size(3)*2
             ind_prism = g%prisms_per_flux_tube(ns,j)
             prism_volumes = prism_volumes + output%prism_volumes(ind_prism)
-            do species = 1,in%n_species
+            do species = 1,n_species
                 ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns) + real(output%prism_moments(1,ind_prism,species))* &
                                         output%prism_volumes(ind_prism)*start%particle_charge(species)
             enddo
+            if (in%boole_static_ne) ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns) + &
+                                                            output%prism_volumes(ind_prism)*in%density*(-echarge)*(1.0_dp-0.9_dp*s)
         enddo
         ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns)/prism_volumes
     enddo
@@ -514,49 +535,59 @@ subroutine calc_rho_on_vertices
     use tetra_grid_settings_mod, only: grid_size
     use gorilla_applets_types_mod, only: g, ep
     use tetra_physics_mod, only: tetra_physics, coord_system, mag_axis_R0, mag_axis_Z0
+    use constants, only: pi
 
     integer :: ns
     real(dp) :: value_to_be_set
     real(dp) :: rho_surface_2, rho_surface_3, rho_surface_end_minus_1, rho_surface_end_minus_2
     real(dp) :: distance_a, distance_b, extrapolation_factor
-    
-    do ns = 2,grid_size(1)
-        value_to_be_set = 0.5_dp*(ep%rho_flux_layer(ns-1)+ep%rho_flux_layer(ns))
-        call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(ns,:), value_to_be_set)
+    real(dp), dimension(grid_size(1)) :: delta_s
+    real(dp), dimension(grid_size(1)+1) :: rho_per_flux_surface
+
+    !compute delta s between consecutive flux surfaces
+    do ns = 1,grid_size(1)
+        if (coord_system.eq.2) then
+            delta_s(ns) = (verts_sthetaphi(1,grid_size(3)*ns+1)-verts_sthetaphi(1,grid_size(3)*(ns-1)+1))
+        else 
+            delta_s(ns) = sqrt((verts_rphiz(1,grid_size(3)*ns+1)-verts_rphiz(1,grid_size(3)*(ns-1)+1))**2 + &
+                               (verts_rphiz(3,grid_size(3)*ns+1)-verts_rphiz(3,grid_size(3)*(ns-1)+1))**2)
+        endif
     enddo
 
-    rho_surface_2 =           0.5_dp*(ep%rho_flux_layer(1             )+ep%rho_flux_layer(2             ))
-    rho_surface_3 =           0.5_dp*(ep%rho_flux_layer(2             )+ep%rho_flux_layer(3             ))
-    rho_surface_end_minus_2 = 0.5_dp*(ep%rho_flux_layer(grid_size(1)-2)+ep%rho_flux_layer(grid_size(1)-1))
-    rho_surface_end_minus_1 = 0.5_dp*(ep%rho_flux_layer(grid_size(1)-1)+ep%rho_flux_layer(grid_size(1)  ))
+    !set rho on even flux surfaces
+    do ns = 2,grid_size(1),2
+        value_to_be_set = 0.5_dp*(ep%rho_flux_layer(ns-1)+ep%rho_flux_layer(ns))
+        !remove this line in the future >
+        !value_to_be_set = -sin(dble(ns-1)/dble(grid_size(1)-1)*pi)
+        call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(ns,:), value_to_be_set)
+        rho_per_flux_surface(ns) = value_to_be_set
+    enddo
 
-    !fill first surface by extrapolating from the second and the third surface
-    if (coord_system.eq.2) then
-        distance_a = (verts_sthetaphi(1,grid_size(3)+1)-verts_sthetaphi(1,1))
-        distance_b = (verts_sthetaphi(1,grid_size(3)*2+1)-verts_sthetaphi(1,grid_size(3)+1))
-    else
-        distance_a = sqrt((verts_rphiz(1,grid_size(3)+1)-verts_rphiz(1,1))**2 + &
-                          (verts_rphiz(3,grid_size(3)+1)-verts_rphiz(3,1))**2)
-        distance_b = sqrt((verts_rphiz(1,grid_size(3)*2+1)-verts_rphiz(1,grid_size(3)+1))**2 + &
-                          (verts_rphiz(3,grid_size(3)*2+1)-verts_rphiz(3,grid_size(3)+1))**2)
-    endif
-    extrapolation_factor = distance_a/distance_b
-    value_to_be_set = rho_surface_2 + extrapolation_factor*(rho_surface_2 - rho_surface_3)
+    !set rho on odd flux surfaces (without borders)
+    do ns = 3,grid_size(1)-1,2
+        value_to_be_set = (rho_per_flux_surface(ns-1)*delta_s(ns) + rho_per_flux_surface(ns+1)*delta_s(ns-1))/ &
+                          (delta_s(ns-1)+delta_s(ns))
+        call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(ns,:), value_to_be_set)
+        rho_per_flux_surface(ns) = value_to_be_set
+    enddo
+
+    !set rho on first flux surface
+    value_to_be_set = rho_per_flux_surface(2) + (rho_per_flux_surface(2)-rho_per_flux_surface(3))*(delta_s(1)/delta_s(2))
     call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(1,:), value_to_be_set)
+    rho_per_flux_surface(1) = value_to_be_set
 
-    !fill last surface by extrapolating from the second to last and third to last surface
-    if (coord_system.eq.2) then
-        distance_a = (verts_sthetaphi(1,grid_size(3)*(grid_size(1)-1)+1)-verts_sthetaphi(1,grid_size(3)*(grid_size(1)-2)+1))
-        distance_b = (verts_sthetaphi(1,grid_size(3)*(grid_size(1)-2)+1)-verts_sthetaphi(1,grid_size(3)*(grid_size(1)-3)+1))
-    else
-        distance_a = sqrt((verts_rphiz(1,grid_size(3)*(grid_size(1)-1)+1)-verts_rphiz(1,grid_size(3)*(grid_size(1)-2)+1))**2 + &
-                          (verts_rphiz(3,grid_size(3)*(grid_size(1)-1)+1)-verts_rphiz(3,grid_size(3)*(grid_size(1)-2)+1))**2)
-        distance_b = sqrt((verts_rphiz(1,grid_size(3)*(grid_size(1)-2)+1)-verts_rphiz(1,grid_size(3)*(grid_size(1)-3)+1))**2 + &
-                          (verts_rphiz(3,grid_size(3)*(grid_size(1)-2)+1)-verts_rphiz(3,grid_size(3)*(grid_size(1)-3)+1))**2)
+    if (mod(grid_size(1),2).eq.1) then !there is an odd number of flux surfaces and the last but one flux surface has to be set
+        value_to_be_set = rho_per_flux_surface(grid_size(1)-1) + (delta_s(grid_size(1)-1)/delta_s(grid_size(1)-2))* &
+                         (rho_per_flux_surface(grid_size(1)-1)-rho_per_flux_surface(grid_size(1)-2))
+        call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(grid_size(1),:), value_to_be_set)
+        rho_per_flux_surface(grid_size(1)) = value_to_be_set
     endif
-    extrapolation_factor = distance_a/distance_b
-    value_to_be_set = rho_surface_end_minus_1 + extrapolation_factor*(rho_surface_end_minus_1 - rho_surface_end_minus_2)
+
+    !set rho on last flux surface
+    value_to_be_set = rho_per_flux_surface(grid_size(1)) + (delta_s(grid_size(1))/delta_s(grid_size(1)-1))* &
+                     (rho_per_flux_surface(grid_size(1))-rho_per_flux_surface(grid_size(1)-1))
     call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(grid_size(1)+1,:), value_to_be_set)
+    rho_per_flux_surface(grid_size(1)+1) = value_to_be_set
 
     contains
 
@@ -580,19 +611,34 @@ end subroutine calc_rho_on_vertices
 subroutine print_data(i)
 
     use gorilla_applets_types_mod, only: c, output, grid_t, in, ep, exit_data
+    use tetra_physics_mod, only: phi_elec
 
     integer, intent(in) :: i
-    integer :: ep_unit, ed_unit, j, species
-    character(len=100) :: filename_ep, filename_ed, i_str
+    integer :: ep_unit, ed_unit, pe_unit, id_unit, j, species
+    character(len=100) :: filename_ep, filename_ed, i_str, filename_phi_elec, filename_ion_densities
 
     write(i_str, '(I0)') i  ! Convert integer to string without leading spaces
 
     filename_ep = 'rho_per_vertex_during_electric_potential_update_' // trim(i_str) // '.dat'
+    call unlink(filename_ep)
     open(newunit = ep_unit, file = filename_ep)
     write(ep_unit,'(ES20.10E4)') ep%rho_vert
     close(ep_unit)
 
+    filename_phi_elec = 'phi_elec_after_electric_potential_update_' // trim(i_str) // '.dat'
+    call unlink(filename_phi_elec)
+    open(newunit = pe_unit, file = filename_phi_elec)
+    write(pe_unit,'(ES20.10E4)') phi_elec
+    close(pe_unit)
+
+    filename_ion_densities = 'ion_densities_after_electric_potential_update_' // trim(i_str) // '.dat'
+    call unlink(filename_ion_densities)
+    open(newunit = id_unit, file = filename_ion_densities)
+    write(id_unit,'(ES20.10E4)') real(output%prism_moments(1,:,1))
+    close(id_unit)
+
     filename_ed = 'exit_data_' // trim(i_str) // '.dat'
+    call unlink(filename_ed)
     open(newunit = ed_unit, file = filename_ed)
     do j=1,in%num_particles
         write(ed_unit,*) exit_data%t_confined(j,1), dble(exit_data%integration_step(j,1))
@@ -612,6 +658,7 @@ subroutine print_data(i)
 
     print*, "electric potential update ", i, " complete."
     print*, "Average abs(Delta Phi) is ", ep%average_abs_phi_elec_from_rho(i)
+    print*, "Maximum abs(Delta Phi) is ", maxval(abs(ep%phi_elec_from_rho))
     print*, "Total tracing time is ", ep%total_tracing_time(i)
 
 end subroutine print_data
@@ -680,11 +727,9 @@ subroutine prepare_next_round_of_parallelised_particle_pushing(species)
         endif
     endif
 
-    if ((.not.(i_option.eq.12)).or.((i_option.eq.12).and.(species.eq.1))) then
-        output%tetr_moments = 0.0_dp
-        output%prism_moments = 0.0_dp
-        if (moment_specs%boole_squared_moments) output%prism_moments_squared = 0.0_dp
-    endif
+    output%tetr_moments(:,:,species) = 0.0_dp
+    output%prism_moments(:,:,species) = 0.0_dp
+    if (moment_specs%boole_squared_moments) output%prism_moments_squared(:,:,species) = 0.0_dp
 
 end subroutine prepare_next_round_of_parallelised_particle_pushing
 

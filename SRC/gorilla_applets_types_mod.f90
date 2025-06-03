@@ -112,6 +112,7 @@ module gorilla_applets_types_mod
     logical  :: boole_write_grid_data
     logical  :: boole_preserve_energy_and_momentum_during_collisions = .false.
     integer  :: n_background_density_updates = 0
+    logical  :: boole_static_ne !used in self consistent electric field computation
     integer  :: n_species = 1 !used in self consistent electric field computation
     integer  :: n_electric_potential_updates !used in self consistent electric field computation
     integer  :: update_dimension = 1 !used in self consistent electric field computation

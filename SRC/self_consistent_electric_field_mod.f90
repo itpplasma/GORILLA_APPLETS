@@ -16,7 +16,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-               boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
+               boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, boole_static_ne
     integer :: i_integrator_type, seed_option, n_electric_potential_updates, update_dimension, n_species
 
     integer :: s_inp_unit
@@ -28,7 +28,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_electric_potential_updates, update_dimension, &
-    & n_species
+    & n_species, boole_static_ne
 
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
     read(s_inp_unit,nml=self_consistent_ef_nml)
@@ -64,6 +64,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%n_electric_potential_updates = n_electric_potential_updates
     in%update_dimension = update_dimension
     in%n_species = n_species
+    in%boole_static_ne = boole_static_ne
 
     print *,'GORILLA_APPLETS: Loaded input data from self_consistent_ef.inp'
 
@@ -111,6 +112,7 @@ subroutine calc_self_consistent_electric_field
     do i = 1, max(in%n_electric_potential_updates,1)
         ep%rho_prism = 0
         do species = 1,2 !trace electrons and ions
+            if ((species.eq.2).and.(in%boole_static_ne)) cycle
             call prepare_next_round_of_parallelised_particle_pushing(species)
             if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
             call parallelised_particle_pushing(species,i)
@@ -208,7 +210,6 @@ subroutine parallelised_particle_pushing(species,j)
                     exit
                 endif
             enddo
-
 
             !$omp critical
             counter%integration_steps = counter%integration_steps + i
@@ -314,7 +315,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
 
         t_remain = t_remain - t_pass
 
-        call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities)
+        call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities,species)
         if((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
 
         if(boole_t_finished) then !Orbit stops within cell, because "flight"-time t_step has finished
@@ -331,6 +332,7 @@ end subroutine orbit_timestep_gorilla_self_consistent_ef
 subroutine print_errors_for_bad_inputs
 
     use gorilla_applets_types_mod, only: in
+    use tetra_physics_mod, only: coord_system
 
     if (in%i_integrator_type.eq.2) then
         print*, 'Error: i_integrator_type set to 2, this module only works with i_integrator_type set to 1'
@@ -352,11 +354,17 @@ subroutine print_errors_for_bad_inputs
         stop
     endif
 
+    if (coord_system.eq.1) then
+        print*, 'Error: coord_system set to 1, but this module works with flux coordinates.'
+        print*, 'Program terminated'
+        stop
+    endif
+
 end subroutine print_errors_for_bad_inputs
 
-subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species_in)
+subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species)
 
-    use gorilla_applets_types_mod, only: in, flux, start
+    use gorilla_applets_types_mod, only: in, start
     use tetra_physics_mod, only: tetra_physics
     use constants, only: ev2erg, pi
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
@@ -364,20 +372,16 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
 
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
+    real(dp), dimension(3) :: x
     integer, intent(in) :: n,ind_tetr
-    integer, intent(in), optional :: species_in
-    integer :: species = 1
-    real(dp) :: local_poloidal_flux, phi_elec_func, temperature, epsilon_max
+    integer, intent(in) :: species
+    real(dp) :: phi_elec_func, temperature, epsilon_max
 
-    if (present(species_in)) species = species_in
-
+    x = tetra_physics(ind_tetr)%x1 + z_save
     start%weight(n,species) = start%weight(n,species)*abs((tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save)))
 
-    if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then
-        local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
-    endif
     if (in%boole_linear_density_simulation) then
-        start%weight(n,species) = start%weight(n,species)*(flux%poloidal_max*1.1_dp-local_poloidal_flux)/(flux%poloidal_max*1.1_dp)
+        start%weight(n,species) = start%weight(n,species)*(1.0_dp-0.9*x(1))
     endif
 
     if (in%boole_boltzmann_energies) then
@@ -388,7 +392,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
             start%weight(n,species) =start%weight(n,species) /(in%energy_eV*ev2erg)**1.5_dp* &
                         & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/(in%energy_eV*ev2erg))
         else
-            temperature = in%energy_eV*ev2erg*(flux%poloidal_max*1.1_dp-local_poloidal_flux)/(flux%poloidal_max*1.1_dp)
+            temperature = in%energy_eV*ev2erg*(1.0_dp-0.9*x(1))
             start%weight(n,species) = start%weight(n,species)/temperature**1.5_dp* &
             & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
         endif
@@ -474,6 +478,7 @@ subroutine set_rest_of_start_type(rand_matrix)
     start%particle_mass = (/particle_mass, ame/)
     start%cm_over_e = (/cm_over_e, -clight*ame/echarge/)
     start%t = (/in%time_step, in%time_step/42.0_dp/)
+    if (in%boole_static_ne) start%t(2) = 0.0_dp
 
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
 
