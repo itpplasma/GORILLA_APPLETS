@@ -9,7 +9,7 @@ contains
 subroutine print_progress(num_particles,kpart,n)
 
     integer :: num_particles, kpart, n
-    logical :: print_progress_for_very_particle = .true.
+    logical :: print_progress_for_very_particle = .false.
 
     if ((.not.print_progress_for_very_particle).and.(num_particles.gt.10)) then
                 if (modulo(kpart,int(num_particles/10)).eq.0) then
@@ -115,6 +115,7 @@ subroutine set_counter_zero(counter)
     counter%lost_inside = 0
     counter%tetr_pushings = 0
     counter%phi_0_mappings = 0
+    counter%integration_steps = 0
     
 end subroutine set_counter_zero
 
