@@ -186,6 +186,17 @@ module gorilla_applets_types_mod
 
     type(electric_potential_t) :: ep
 
+    type delta_s_delta_s_squared_t
+    real(dp), dimension(:), allocatable :: delta_s
+    real(dp), dimension(:), allocatable :: delta_s_squared
+    real(dp), dimension(:), allocatable :: time
+    integer                             :: k
+    real(dp)                            :: s0
+    integer, dimension(:), allocatable  :: check
+    end type delta_s_delta_s_squared_t
+
+    type(delta_s_delta_s_squared_t) :: s
+
     type particle_status_t
     logical :: initialized
     logical :: lost
