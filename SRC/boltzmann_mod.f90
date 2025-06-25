@@ -292,12 +292,14 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
                 call identify_particles_entering_annulus(x,local_counter,boole_lost_inside)
                 if (boole_lost_inside) then
                     x_new = 3*(/g%raxis,x(2),g%zaxis/) - 2*x
+                    vperp = vperp_func(z_save,perpinv,ind_tetr_save)
                     call find_tetra(x_new,vpar,vperp,ind_tetr,iface)
                     x = x_new
-                    print*, "particle pushing across the hole surrounding the magnetic axis was successful"
                     if (ind_tetr.eq.-1) then
                         print*, "ATTENTION: particle pushing across the hole surrounding the magnetic axis was unsuccessful"
                         exit
+                    else
+                        print*, "particle pushing across the hole surrounding the magnetic axis was successful"
                     endif
                 else
                     exit
