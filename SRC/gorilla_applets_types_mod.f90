@@ -197,6 +197,21 @@ module gorilla_applets_types_mod
 
     type(delta_s_delta_s_squared_t) :: s
 
+    type diffusion_coefficients 
+    real(dp), dimension(:), allocatable :: A
+    real(dp), dimension(:), allocatable :: B
+    end type diffusion_coefficients
+
+    type(diffusion_coefficients) dc
+
+    type one_d_t
+    real(dp), dimension(:,:), allocatable :: densities
+    logical                               :: boole_print_densities
+    end type one_d_t
+
+    type(one_d_t) one_d
+
+
     type particle_status_t
     logical :: initialized
     logical :: lost

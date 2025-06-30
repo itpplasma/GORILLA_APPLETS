@@ -16,14 +16,15 @@ add_library(GORILLA_APPLETS STATIC
   poincare_invariances_mod.f90
   pusher_tetra_field_lines_mod.f90
   reversibility_test_mod.f90
-  self_consistent_electric_field_mod.f90
-  sub_alpha_lifetime_can.f90
   utils_data_pre_and_post_processing_mod.f90
+  sub_alpha_lifetime_can.f90
   utils_orbit_timestep_mod.f90
   utils_parallelised_particle_pushing_mod.f90
   utils_write_data_to_files_mod.f90
+  utils_self_consistent_ef_mod.f90
   volume_integrals_and_sqrt_g_mod.f90
   zzg.f90
+  self_consistent_electric_field_mod.f90
   )
 target_link_libraries(GORILLA_APPLETS 
   GORILLA

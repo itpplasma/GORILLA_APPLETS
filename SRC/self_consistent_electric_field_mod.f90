@@ -6,70 +6,6 @@ module self_consistent_electric_field_mod
    
 contains
 
-subroutine read_self_consistent_electric_field_inp_into_type
-
-    use gorilla_applets_types_mod, only: in
-
-    real(dp) :: time_step,energy_eV,n_particles, density
-    logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
-               boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
-               boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
-               boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
-               boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-               boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, boole_static_ne
-    integer :: i_integrator_type, seed_option, n_electric_potential_updates, update_dimension, n_species
-
-    integer :: s_inp_unit
-
-    !Namelist for self consistent electric field input
-    NAMELIST /self_consistent_ef_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions, &
-    & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
-    & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
-    & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
-    & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_electric_potential_updates, update_dimension, &
-    & n_species, boole_static_ne
-
-    open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
-    read(s_inp_unit,nml=self_consistent_ef_nml)
-    close(s_inp_unit)
-
-    in%time_step = time_step
-    in%energy_eV = energy_eV
-    in%n_particles = n_particles
-    in%density = density
-    in%boole_squared_moments = boole_squared_moments
-    in%boole_point_source = boole_point_source
-    in%boole_collisions = boole_collisions
-    in%boole_precalc_collisions = boole_precalc_collisions
-    in%boole_refined_sqrt_g = boole_refined_sqrt_g
-    in%boole_boltzmann_energies = boole_boltzmann_energies
-    in%boole_linear_density_simulation = boole_linear_density_simulation
-    in%boole_antithetic_variate = boole_antithetic_variate
-    in%boole_linear_temperature_simulation = boole_linear_temperature_simulation
-    in%i_integrator_type = i_integrator_type
-    in%seed_option = seed_option
-    in%num_particles = int(n_particles)
-    in%boole_write_vertex_indices = boole_write_vertex_indices
-    in%boole_write_vertex_coordinates = boole_write_vertex_coordinates
-    in%boole_write_prism_volumes = boole_write_prism_volumes
-    in%boole_write_refined_prism_volumes = boole_write_refined_prism_volumes
-    in%boole_write_boltzmann_density = boole_write_boltzmann_density
-    in%boole_write_electric_potential = boole_write_electric_potential
-    in%boole_write_moments = boole_write_moments
-    in%boole_write_fourier_moments = boole_write_fourier_moments
-    in%boole_write_exit_data = boole_write_exit_data
-    in%boole_write_grid_data = boole_write_grid_data
-    in%boole_preserve_energy_and_momentum_during_collisions = boole_preserve_energy_and_momentum_during_collisions
-    in%n_electric_potential_updates = n_electric_potential_updates
-    in%update_dimension = update_dimension
-    in%n_species = n_species
-    in%boole_static_ne = boole_static_ne
-
-    print *,'GORILLA_APPLETS: Loaded input data from self_consistent_ef.inp'
-
-end subroutine read_self_consistent_electric_field_inp_into_type
-
 subroutine calc_self_consistent_electric_field
 
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
@@ -81,14 +17,16 @@ subroutine calc_self_consistent_electric_field
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_volume_integrals_in_flux_coordinates
-    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, s
+    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, s, output
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
     get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
     find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution, &
-    perform_electric_potential_update, set_weights, prepare_next_round_of_parallelised_particle_pushing, &
-    associate_flux_labels_with_tetrahedra_and_vertices, allocate_electric_potential_type
+    set_weights, prepare_next_round_of_parallelised_particle_pushing
+    use utils_self_consistent_ef_mod, only: allocate_electric_potential_type, perform_electric_potential_update, &
+    associate_flux_labels_with_tetrahedra_and_vertices, print_errors_for_bad_inputs, &
+    read_self_consistent_electric_field_inp_into_type
     use gorilla_applets_types_mod, only: output, ep
 
     integer :: i, species
@@ -141,6 +79,8 @@ subroutine calc_self_consistent_electric_field
          print*, 'number of times that particles were pushed across the inside hole = ', counter%lost_inside
     endif
     print*, 'Average abs Delta Phi at all the electric potential updates = ', ep%average_abs_phi_elec_from_rho
+    print*, sum(start%weight(:,1))/(in%num_particles*in%density*sum(output%prism_volumes(:)))
+    print*, sum(output%prism_volumes(:)*output%prism_moments(1,:,1))/(sum(output%prism_volumes(:))*in%density)
 
 end subroutine calc_self_consistent_electric_field
 
@@ -261,6 +201,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
     use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
                                         initialize_constants_of_motion, compute_radial_fluxes
     use constants, only: echarge
+    use utils_self_consistent_ef_mod, only: mirror_particles_on_domain_boundaries, treat_particles_that_are_lost_but_should_not_be
 
     integer, intent(in)                          :: species, j
     real(dp), intent(inout)                      :: t_step_s
@@ -272,13 +213,12 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
     real(dp), intent(in)                         :: t_step
     integer, intent(inout)                       :: ind_tetr,iface
     real(dp), intent(out), optional              :: t_remain_out
-    real(dp), dimension(3)                       :: z_save, x_save
-    real(dp)                                     :: t_remain,t_pass,perpinv
+    real(dp), dimension(3)                       :: z_save, x_save, z_save_at_x_save
+    real(dp)                                     :: t_remain,t_pass,perpinv, vpar_save, vperp_save
     logical                                      :: boole_t_finished, boole_lost_inside
     integer                                      :: ind_tetr_save,iper_phi,n,k
     type(optional_quantities_type)               :: optional_quantities
-    real(dp), dimension(3)                       :: x_new
-    real(dp)                                     :: tau
+    real(dp)                                     :: tau, v
     
     if(.not.particle_status%initialized) then !If orbit_timestep is called for the first time without grid position
         call check_coordinate_domain(x) !Check coordinate domain (optionally perform modulo operation)
@@ -304,16 +244,19 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
 
         if(ind_tetr.eq.-1) then
             if(present(t_remain_out)) t_remain_out = t_remain
-            if((.not.(x(1).gt.sfc_s_min)).or.(.not.(x(1).lt.1.0_dp))) then
+            if((.not.(x(1).gt.1.01_dp*sfc_s_min)).or.(.not.(x(1).lt.0.99_dp))) then
                 call mirror_particles_on_domain_boundaries(x,vpar,n,ind_tetr,iface,z_save,perpinv,ind_tetr_save)
                 if (ind_tetr.eq.-1) exit
             else
-                exit
+                call treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_tetr_save,z_save,x_save,x,vpar,vperp, &
+                                                                     perpinv,ind_tetr,vpar_save)
             endif
         endif
 
         ind_tetr_save = ind_tetr
         x_save = x
+        z_save_at_x_save = z_save
+        vpar_save = vpar
 
         select case(ipusher) !Calculate trajectory
             case(1)
@@ -323,6 +266,8 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
                 call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_remain, &
                                                     & t_pass,boole_t_finished,iper_phi,optional_quantities)
         end select
+
+
 !print*, t_remain,t_step_s,min(t_remain,t_step_s), boole_t_finished, k, n
 
         ! if (boole_t_finished.and.(t_remain.ge.t_step_s)) then
@@ -353,75 +298,6 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
     vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
 
 end subroutine orbit_timestep_gorilla_self_consistent_ef
-
-subroutine mirror_particles_on_domain_boundaries(x,vpar,n,ind_tetr,iface,z_save,perpinv,ind_tetr_save)
-
-    use supporting_functions_mod, only: vperp_func
-    use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods
-    use find_tetra_mod, only: find_tetra
-    use gorilla_settings_mod, only: poly_order
-    use constants, only: pi
-
-    real(dp), dimension(3), intent(inout) :: x, z_save
-    real(dp), intent(in) :: perpinv
-    real(dp), intent(inout) :: vpar
-    integer, intent(in) :: n, ind_tetr_save
-    integer, intent(inout) :: ind_tetr, iface
-    real(dp) :: vperp
-    real(dp), dimension(3) :: x_new
-    logical :: boole_diag = .false.
-
-    x_new = (/x(1),-x(2)+2*pi,-x(3)+2*pi/n_field_periods/)
-    vpar = -vpar
-    vperp = vperp_func(z_save,perpinv,ind_tetr_save)
-    call find_tetra(x_new,vpar,vperp,ind_tetr,iface)
-
-    if (.not.(x(1).gt.sfc_s_min)) then
-        if (boole_diag) print*, "particle ", n, " is being pushed across the central annulus at s = ", x(1)
-    else
-        if (boole_diag) print*, "particle ", n, " is being mirrored at s = ", x(1)
-    endif
-    if (ind_tetr.eq.-1) then
-        if (boole_diag) print*, "ATTENTION: particle pushing was unsuccessful"
-    else
-        if (boole_diag) print*, "particle pushing was successful"
-        x = x_new
-    endif
-
-end subroutine mirror_particles_on_domain_boundaries
-
-subroutine print_errors_for_bad_inputs
-
-    use gorilla_applets_types_mod, only: in
-    use tetra_physics_mod, only: coord_system
-
-    if (in%i_integrator_type.eq.2) then
-        print*, 'Error: i_integrator_type set to 2, this module only works with i_integrator_type set to 1'
-        print*, 'Program terminated'
-        stop
-    endif
-
-    if (in%boole_refined_sqrt_g.eqv..true.) then
-        print*, 'Error: boole_refined_sqrt_g set to .true., but this only works for cylindrical coordinates. This module &
-                 works with flux coordinates.'
-        print*, 'Program terminated'
-        stop
-    endif
-
-    if (in%boole_write_refined_prism_volumes.eqv..true.) then
-        print*, 'Error: boole_write_refined_prism_volumes set to .true., but this only works for cylindrical coordinates. &
-                 This module works with flux coordinates.'
-        print*, 'Program terminated'
-        stop
-    endif
-
-    if (coord_system.eq.1) then
-        print*, 'Error: coord_system set to 1, but this module works with flux coordinates.'
-        print*, 'Program terminated'
-        stop
-    endif
-
-end subroutine print_errors_for_bad_inputs
 
 subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species)
 
@@ -548,5 +424,68 @@ subroutine set_rest_of_start_type(rand_matrix)
     start%weight = in%density*(1-sfc_s_min)*4*pi**2/n_field_periods
 
 end subroutine set_rest_of_start_type
+
+subroutine calc_electron_diffusion_coefficients !call this before the first ion pushing
+
+    use gorilla_applets_types_mod, only: in, time_t, dc
+    use tetra_grid_settings_mod, only: grid_size
+    use tetra_grid_mod, only: verts_sthetaphi
+
+    type(time_t) :: t
+    integer :: ns
+    real(dp) :: s0
+
+    allocate(dc%A(grid_size(1)))
+    allocate(dc%B(grid_size(1)))
+
+    t%step = in%time_step/42.0_dp/grid_size(1) !check afterwards if this was too little time
+
+    do ns = 1,grid_size(1)
+
+        s0 = (verts_sthetaphi(1, grid_size(3)*(ns-1)+1) + verts_sthetaphi(1,grid_size(3)*ns+1))/2.0_dp
+
+        !initiate electrons at s0
+        !call parallelised particle pushing
+        !compute A and B via delta s and (delta s)^2 (use functions from mono-energetic-diffusion-coefficient)
+        dc%A(ns) = 0.0_dp !A
+        dc%B(ns) = 0.0_dp !B
+    enddo
+
+    !rather calculate A and B on vertices and then also save gradients in dc, also save a vector with s_vertices in dc
+
+end subroutine calc_electron_diffusion_coefficients
+
+subroutine calc_electron_density !call this after every ion pushing sequence
+
+    use gorilla_applets_types_mod, only: in, time_t
+    use tetra_grid_settings_mod, only: grid_size
+
+    real(dp) :: delta_t
+    integer :: i, ns
+    real(dp), dimension(:), allocatable :: electron_density
+    type(time_t) :: t
+
+    allocate(electron_density(grid_size(1)))
+    electron_density = 0.0_dp
+
+    t%step = in%time_step
+    t%confined = 0.0_dp
+
+    !select appropriate delta t (always dependent on local A and B?)
+    !add delta t to the local 1D gridbox
+    !fill prism moments in the end using g%vertices_per_flux_surface and fill_vector_parts_with_value,
+    !turn the latter into an independent function
+
+    do i = 1,in%num_particles
+        do while (t%confined.lt.t%step)
+            !compute random number and delta x
+            ns = 1
+            electron_density(ns) = electron_density(ns) + delta_t
+            t%confined = t%confined + delta_t
+
+        enddo
+    enddo
+
+end subroutine calc_electron_density
 
 end module self_consistent_electric_field_mod
