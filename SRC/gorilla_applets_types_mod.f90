@@ -181,6 +181,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: phi_elec_from_rho
     real(dp), dimension(:), allocatable :: average_abs_phi_elec_from_rho
     real(dp), dimension(:), allocatable :: total_tracing_time
+    real(dp), dimension(:), allocatable :: s_shell_volumes
     real(dp) :: mean_abs_rho_at_first_update
     end type electric_potential_t
 

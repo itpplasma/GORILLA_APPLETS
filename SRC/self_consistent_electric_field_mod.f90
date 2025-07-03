@@ -27,7 +27,7 @@ subroutine calc_self_consistent_electric_field
     use utils_self_consistent_ef_mod, only: allocate_electric_potential_type, perform_electric_potential_update, &
     associate_flux_labels_with_tetrahedra_and_vertices, print_errors_for_bad_inputs, &
     read_self_consistent_electric_field_inp_into_type, calc_starting_conditions, calc_electron_diffusion_coefficients, &
-    parallelised_particle_pushing
+    parallelised_particle_pushing, calc_s_shell_volumes
     use gorilla_applets_types_mod, only: output, ep
 
     integer :: i, species
@@ -44,6 +44,7 @@ subroutine calc_self_consistent_electric_field
     call calc_starting_conditions
     call calc_poloidal_flux(verts_sthetaphi)
     call allocate_electric_potential_type
+    call calc_s_shell_volumes
     call give_file_names
     call unlink_files
     call print_errors_for_bad_inputs

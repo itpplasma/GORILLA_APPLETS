@@ -379,18 +379,16 @@ subroutine calc_average_charge_density_per_flux_layer(i)
 
     integer, intent(in) :: i 
     integer :: ns, j, species, ind_prism, n_species
-    real(dp), dimension(:), allocatable :: s_shell_volumes, electron_densities
+    real(dp), dimension(:), allocatable :: electron_densities
     real(dp) :: s, electron_density_factor, factor_from_ion_weights
 
     n_species = in%n_species
 
-    allocate(s_shell_volumes(grid_size(1)),electron_densities(grid_size(1)))
+    allocate(electron_densities(grid_size(1)))
     if (one_d%boole_print_densities) then
         if (.not.allocated(one_d%densities)) allocate(one_d%densities(grid_size(1),in%n_species))
         one_d%densities = 0.0_dp
     endif
-
-    s_shell_volumes = 0.0_dp
 
     do j = 1,in%num_particles
         do species = 1,2
@@ -398,15 +396,13 @@ subroutine calc_average_charge_density_per_flux_layer(i)
         enddo
     enddo
 
-    !Compute s_shell_volumes and if in%boole_static_ne compute electron_densities
-    do ns = 1,grid_size(1)
-        s = (verts_sthetaphi(1, grid_size(3)*(ns-1)+1) + verts_sthetaphi(1,grid_size(3)*ns+1))/2.0_dp
-        if (in%boole_static_ne) electron_densities(ns) = in%density*(1.0_dp-0.9_dp*s)
-        do j = 1, grid_size(2)*grid_size(3)*2
-            ind_prism = g%prisms_per_flux_tube(ns,j)
-            s_shell_volumes(ns) = s_shell_volumes(ns) + output%prism_volumes(ind_prism)
+    !If in%boole_static_ne compute electron_densities
+    if (in%boole_static_ne) then
+        do ns = 1,grid_size(1)
+            s = (verts_sthetaphi(1, grid_size(3)*(ns-1)+1) + verts_sthetaphi(1,grid_size(3)*ns+1))/2.0_dp
+            electron_densities(ns) = in%density*(1.0_dp-0.9_dp*s)
         enddo
-    enddo
+    endif
 
     if (in%boole_static_ne) then
         n_species = in%n_species-1
@@ -414,7 +410,7 @@ subroutine calc_average_charge_density_per_flux_layer(i)
             electron_density_factor = 1.0d0
         else
             factor_from_ion_weights = sum(start%weight(:,1))/(in%num_particles*in%density*sum(output%prism_volumes(:)))
-            electron_density_factor = in%density/(sum(electron_densities*s_shell_volumes)/sum(s_shell_volumes))*&
+            electron_density_factor = in%density/(sum(electron_densities*ep%s_shell_volumes)/sum(ep%s_shell_volumes))*&
                                       factor_from_ion_weights
         endif
     endif
@@ -438,8 +434,8 @@ subroutine calc_average_charge_density_per_flux_layer(i)
                                                  !*ep%total_tracing_time(i)/(in%num_particles*in%time_step)
             endif
         enddo
-        ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns)/s_shell_volumes(ns)
-        if (one_d%boole_print_densities) one_d%densities(ns,:) = one_d%densities(ns,:)/s_shell_volumes(ns)
+        ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns)/ep%s_shell_volumes(ns)
+        if (one_d%boole_print_densities) one_d%densities(ns,:) = one_d%densities(ns,:)/ep%s_shell_volumes(ns)
     enddo
 
 end subroutine calc_average_charge_density_per_flux_layer
@@ -920,6 +916,28 @@ subroutine set_particle_type_specifications
 
 end subroutine set_particle_type_specifications
 
+subroutine calc_s_shell_volumes
+
+    use gorilla_applets_types_mod, only:  g, output, ep
+    use tetra_grid_mod, only: verts_sthetaphi
+    use tetra_grid_settings_mod, only: grid_size
+
+    integer :: ns, j, ind_prism
+    real(dp) :: s
+
+    allocate(ep%s_shell_volumes(grid_size(1)))
+    ep%s_shell_volumes = 0.0_dp
+
+    do ns = 1,grid_size(1)
+        s = (verts_sthetaphi(1, grid_size(3)*(ns-1)+1) + verts_sthetaphi(1,grid_size(3)*ns+1))/2.0_dp
+        do j = 1, grid_size(2)*grid_size(3)*2
+            ind_prism = g%prisms_per_flux_tube(ns,j)
+            ep%s_shell_volumes(ns) = ep%s_shell_volumes(ns) + output%prism_volumes(ind_prism)
+        enddo
+    enddo
+
+end subroutine calc_s_shell_volumes
+
 subroutine calc_electron_diffusion_coefficients !call this before the first ion pushing
 
     use gorilla_applets_types_mod, only: in, dc, start, s
@@ -1006,33 +1024,57 @@ end subroutine calc_electron_diffusion_coefficients
 
 subroutine calc_electron_density !call this after every ion pushing sequence
 
-    use gorilla_applets_types_mod, only: in, time_t
+    use gorilla_applets_types_mod, only: in, time_t, dc, ep, g, output
     use tetra_grid_settings_mod, only: grid_size
+    use binsrc_mod, only: binsrc
+    use tetra_grid_mod, only: ntetr
 
-    real(dp) :: delta_t
-    integer :: i, ns
-    real(dp), dimension(:), allocatable :: electron_density
+    real(dp) :: delta_x, delta_t, xi, A, B, cell_size
+    integer :: i, ns, k, num_steps_min, num_electrons
+    real(dp), dimension(:), allocatable :: electron_density, positions, electron_prism_densities
     type(time_t) :: t
 
-    allocate(electron_density(grid_size(1)))
+    allocate(electron_density(grid_size(1)), electron_prism_densities(ntetr/3))
     electron_density = 0.0_dp
+
+    num_electrons = in%num_particles
+
+    allocate(positions(num_electrons))
+    call RANDOM_NUMBER(positions)
 
     t%step = in%time_step
     t%confined = 0.0_dp
+    num_steps_min = 1000
 
-    !select appropriate delta t (always dependent on local A and B?)
-    !add delta t to the local 1D gridbox
-    !fill prism moments in the end using g%vertices_per_flux_surface and fill_vector_parts_with_value,
-    !turn the latter into an independent function
-
-    do i = 1,in%num_particles
+    do i = 1,num_electrons
         do while (t%confined.lt.t%step)
-            !compute random number and delta x
-            ns = 1
-            electron_density(ns) = electron_density(ns) + delta_t
-            t%confined = t%confined + delta_t
 
+            !binsrc finds k such that dc%s_vertices(k-1) < positions(i) < dc%s_vertices(k)
+            call binsrc(dc%s_vertices,1,grid_size(1)+1,positions(i),k) 
+            k = k-1 
+            cell_size = dc%s_vertices(k+1) - dc%s_vertices(k)
+            A = dc%A(k) + dc%grad_A(k)*(positions(i)-dc%s_vertices(k))
+            B = dc%B(k) + dc%grad_B(k)*(positions(i)-dc%s_vertices(k))
+
+            delta_t = min(t%step/num_steps_min, cell_size/((A+B)*2), t%step - t%confined) !control maximum possible jump
+            call random_number(xi)
+            delta_x = sqrt(2*delta_t*B)*xi + A*delta_t
+
+            electron_density(k) = electron_density(k) + delta_t
+            t%confined = t%confined + delta_t
         enddo
+    enddo
+
+    do i = 1,grid_size(1)
+        electron_density(i) = electron_density(i)/(ep%s_shell_volumes(i)*t%step*num_electrons)
+        call fill_vector_parts_with_value(electron_prism_densities, g%vertices_per_flux_surface(i,:), electron_density(i))
+    enddo
+
+    !This is a bit cumbersome haveing to use electron_prism_densities and a loop over all prisms instead of simply putting 
+    !output%prism_moments into fill_vector_parts_with_value, but that does not work because the latter does not accept 
+    !a complex argument. Think about a solution to this problem
+    do i = 1,ntetr/3
+        output%prism_moments(1,i,2) = complex(electron_prism_densities(i), 0.0_dp)
     enddo
 
 end subroutine calc_electron_density
