@@ -70,6 +70,221 @@ subroutine read_self_consistent_electric_field_inp_into_type
 
 end subroutine read_self_consistent_electric_field_inp_into_type
 
+subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
+
+    use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, exit_data, s
+    use tetra_grid_mod, only: ntetr
+    use omp_lib, only: omp_get_num_threads, omp_get_thread_num
+    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
+    add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
+    initialise_seed_for_random_numbers_for_each_thread
+    
+
+    integer, intent(in)                      :: species, j
+    logical, intent(in)                      :: boole_diffusion_coefficient
+    integer                                  :: kpart, iantithetic, ind_tetr, iface
+    integer                                  :: p, l, n, i, k
+    real(dp), dimension(3)                   :: x
+    real(dp)                                 :: vpar,vperp, t_step_s
+    type(time_t)                             :: t
+    type(counter_t)                          :: local_counter
+    type(particle_status_t)                  :: particle_status
+    complex(dp), dimension(:,:), allocatable :: local_tetr_moments
+    logical                                  :: thread_flag = .true.
+
+    allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
+    kpart = 0
+    iantithetic = 1
+    if (in%boole_antithetic_variate) iantithetic = 2
+
+    if (boole_diffusion_coefficient) then
+        s%delta_s = 0.0_dp
+        s%delta_s_squared = 0.0_dp
+        s%check = 0
+    endif
+
+    !$OMP PARALLEL DEFAULT(NONE) &
+    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient) &
+    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status, t_step_s, k) &
+    !$OMP& FIRSTPRIVATE(thread_flag)
+    print*, 'get number of threads', omp_get_num_threads()
+    !$OMP DO SCHEDULE(static)
+
+    !Loop over particles
+    do p = 1,in%num_particles/iantithetic
+
+        if ((.not.in%boole_precalc_collisions).and.thread_flag) then
+            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num(), j)
+            thread_flag = .false.
+        endif
+
+        do l = 1,iantithetic
+            n = (p-1)*iantithetic+l
+            !$omp critical
+            kpart = kpart+1 !in general not equal to n becuase of parallelisation
+            call print_progress(in%num_particles,kpart,n)
+            !$omp end critical
+
+            call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp,species)
+
+            i = 0
+            do while (t%confined.lt.start%t(species))
+                i = i+1
+                if (in%boole_collisions) then
+                    call carry_out_collisions(i, n, t, x, vpar,vperp,ind_tetr, iface, species)
+                    t%step = t%step/start%v0(species) !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
+                endif
+
+                if (boole_diffusion_coefficient) then
+                    t_step_s = start%t(species)/s%k - (t%confined - start%t(species)/s%k*int(t%confined/(start%t(species)/s%k)))
+                    k = int(t%confined/(start%t(species)/s%k)) + 1
+                else 
+                    k = 1.0_dp !if boole_diffusion_coefficient.eqv..false., k is meaningless
+                endif
+
+                call orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t%step,particle_status,ind_tetr,iface,n,&
+                            & local_tetr_moments, local_counter,t%remain, species, j, t_step_s, k, boole_diffusion_coefficient)
+
+                t%confined = t%confined + t%step - t%remain
+
+                if (ind_tetr.eq.-1) then
+                    call handle_lost_particles(local_counter, particle_status%lost)
+                    exit
+                endif
+            enddo
+
+            !$omp critical
+            counter%integration_steps = counter%integration_steps + i
+            c%maxcol = max(dble(i)/dble(c%randcoli),c%maxcol)
+            call add_local_counter_to_counter(local_counter)
+            !$omp end critical
+            call update_exit_data(particle_status%lost,t%confined,x,vpar,vperp,i,n,species_in=species)
+            call update_start_type(x,vpar,vperp,n,species,ind_tetr)
+        enddo
+        !$omp critical
+        call add_local_tetr_moments_to_output(local_tetr_moments,species)
+        !$omp end critical
+    enddo !n
+    !$OMP END DO
+    !$OMP END PARALLEL
+
+end subroutine parallelised_particle_pushing
+
+subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particle_status,ind_tetr,iface, n,local_tetr_moments, &
+                                            local_counter, t_remain_out,species, j, t_step_s, k, boole_diffusion_coefficient)
+
+    use pusher_tetra_rk_mod, only: pusher_tetra_rk
+    use pusher_tetra_poly_mod, only: pusher_tetra_poly
+    use tetra_physics_mod, only: tetra_physics
+    use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
+    use orbit_timestep_gorilla_mod, only: check_coordinate_domain
+    use supporting_functions_mod, only: vperp_func
+    use find_tetra_mod, only: find_tetra
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, g, start, s, in
+    use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
+    use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
+                                        initialize_constants_of_motion, compute_radial_fluxes
+    use constants, only: echarge
+    !use utils_self_consistent_ef_mod, only: calc_particle_weights_and_jperp, mirror_particles_on_domain_boundaries, &
+    !treat_particles_that_are_lost_but_should_not_be
+
+    integer, intent(in)                          :: species, j
+    logical, intent(in)                          :: boole_diffusion_coefficient
+    real(dp), intent(inout)                      :: t_step_s
+    type(counter_t), intent(inout)               :: local_counter
+    type(particle_status_t), intent(inout)       :: particle_status
+    real(dp), dimension(3), intent(inout)        :: x
+    complex(dp), dimension(:,:), intent (inout)  :: local_tetr_moments
+    real(dp), intent(inout)                      :: vpar,vperp
+    real(dp), intent(in)                         :: t_step
+    integer, intent(inout)                       :: ind_tetr,iface
+    real(dp), intent(out), optional              :: t_remain_out
+    real(dp), dimension(3)                       :: z_save, x_save, z_save_at_x_save
+    real(dp)                                     :: t_remain,t_pass,perpinv, vpar_save, vperp_save
+    logical                                      :: boole_t_finished, boole_lost_inside
+    integer                                      :: ind_tetr_save,iper_phi,n,k
+    type(optional_quantities_type)               :: optional_quantities
+    real(dp)                                     :: tau, v, t
+    
+    if(.not.particle_status%initialized) then !If orbit_timestep is called for the first time without grid position
+        call check_coordinate_domain(x) !Check coordinate domain (optionally perform modulo operation)
+        call find_tetra(x,vpar,vperp,ind_tetr,iface) !Find tetrahedron index and face index for position x
+        if(ind_tetr.eq.-1) then !If particle doesn't lie inside any tetrahedron
+            t_remain_out = t_step
+            return
+        endif
+        z_save = x-tetra_physics(ind_tetr)%x1
+        if (j.eq.1) call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species)
+        particle_status%initialized = .true.
+    endif
+          
+    if(t_step.eq.0.0_dp) return !Exit the subroutine after initialization, if time step equals zero
+    if(particle_status%initialized) z_save = x-tetra_physics(ind_tetr)%x1
+    call initialize_constants_of_motion(vperp,z_save,ind_tetr,perpinv)
+    t_remain = t_step
+    boole_t_finished = .false.
+    local_counter%tetr_pushings = local_counter%tetr_pushings -1 !set tetr_pushings to -1 because when entering the loop it will go back to one without pushing
+
+    do !Loop for tetrahedron pushings until t_step is reached
+        local_counter%tetr_pushings = local_counter%tetr_pushings +1
+
+        if(ind_tetr.eq.-1) then
+            if(present(t_remain_out)) t_remain_out = t_remain
+            if((.not.(x(1).gt.1.01_dp*sfc_s_min)).or.(.not.(x(1).lt.0.99_dp))) then
+                call mirror_particles_on_domain_boundaries(x,vpar,n,ind_tetr,iface,z_save,perpinv,ind_tetr_save)
+                if (ind_tetr.eq.-1) exit
+            else
+                call treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_tetr_save,z_save,x_save,x,vpar,vperp, &
+                                                                     perpinv,ind_tetr,vpar_save)
+            endif
+        endif
+
+        ind_tetr_save = ind_tetr
+        x_save = x
+        z_save_at_x_save = z_save
+        vpar_save = vpar
+        t = t_remain
+        if (boole_diffusion_coefficient) t = min(t_remain,t_step_s)
+
+        select case(ipusher) !Calculate trajectory
+            case(1)
+                call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper_phi)
+            case(2)
+                call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t, &
+                                                    & t_pass,boole_t_finished,iper_phi,optional_quantities)
+        end select
+
+        if (boole_diffusion_coefficient) then
+            if (boole_t_finished.and.(t_remain.ge.t_step_s)) then
+                if (t_remain.gt.t_step_s) boole_t_finished = .false.
+                t_step_s = start%t(species)/s%k + t_pass
+                local_counter%tetr_pushings = local_counter%tetr_pushings -1
+                !$omp critical
+                s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)/in%num_particles
+                s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2/in%num_particles
+                s%check(k) = s%check(k) + 1
+                !$omp end critical
+                k = k+1
+            endif
+        endif
+
+        t_remain = t_remain - t_pass
+        t_step_s = t_step_s - t_pass
+
+        call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities,species)
+        if((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
+
+        if(boole_t_finished) then !Orbit stops within cell, because "flight"-time t_step has finished
+            if( present(t_remain_out)) t_remain_out = t_remain
+            exit
+        endif
+
+    enddo !Loop for tetrahedron pushings
+
+    vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
+
+end subroutine orbit_timestep_gorilla_self_consistent_ef
+
 subroutine allocate_electric_potential_type
 
     use gorilla_applets_types_mod, only: ep, in
@@ -532,10 +747,12 @@ subroutine treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_
     print*, 'x_save, vpar_save, vperp_save = ', x_save, vpar_save, vperp_save
     print*, 'x, vpar, vperp = ', x, vpar, vperp
 
+    !$omp critical
     open(newunit = problem_unit, file = 'pushing_problems.dat', position = 'append')
     write(problem_unit,*) 'x_save, vpar_save, vperp_save = ', x_save, vpar_save, vperp_save
     write(problem_unit,*) 'x, vpar, vperp = ', x, vpar, vperp
     close(problem_unit)
+    !$omp end critical
 
     !Continue tracing the particle from the previous tetrahedron crossing:
     !this time half the value of vpar to avoid running into the same problem again
@@ -548,5 +765,276 @@ subroutine treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_
     z_save = z_save_at_x_save
 
 end subroutine treat_particles_that_are_lost_but_should_not_be
+
+subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species)
+
+    use gorilla_applets_types_mod, only: in, start
+    use tetra_physics_mod, only: tetra_physics
+    use constants, only: ev2erg, pi
+    use volume_integrals_and_sqrt_g_mod, only: sqrt_g
+    use supporting_functions_mod, only: bmod_func
+
+    real(dp), intent(in) :: vpar, vperp
+    real(dp), dimension(3), intent(in) :: z_save
+    real(dp), dimension(3) :: x
+    integer, intent(in) :: n,ind_tetr
+    integer, intent(in) :: species
+    real(dp) :: phi_elec_func, temperature, epsilon_max
+
+    x = tetra_physics(ind_tetr)%x1 + z_save
+    start%weight(n,species) = start%weight(n,species)*abs((tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save)))
+
+    if (in%boole_linear_density_simulation) then
+        start%weight(n,species) = start%weight(n,species)*(1.0_dp-0.9_dp*x(1))
+    endif
+
+    if (in%boole_boltzmann_energies) then
+        phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
+        epsilon_max = 5*in%energy_eV*ev2erg
+        start%weight(n,species) = start%weight(n,species)*epsilon_max*2/sqrt(pi)*sqrt(start%energy(n,species)*ev2erg)
+        if (.not. in%boole_linear_temperature_simulation) then
+            start%weight(n,species) =start%weight(n,species) /(in%energy_eV*ev2erg)**1.5_dp* &
+                        & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/(in%energy_eV*ev2erg))
+        else
+            temperature = in%energy_eV*ev2erg*(1.0_dp-0.9*x(1))
+            start%weight(n,species) = start%weight(n,species)/temperature**1.5_dp* &
+            & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
+        endif
+    endif
+
+    start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
+    !-1 because of negative gyrophase
+
+end subroutine calc_particle_weights_and_jperp
+
+subroutine calc_starting_conditions
+
+    use gorilla_applets_types_mod, only: in
+    
+    real(dp), dimension(:,:,:), allocatable                :: rand_matrix
+
+    allocate(rand_matrix(5,in%num_particles,in%n_species))
+    call RANDOM_NUMBER(rand_matrix)
+
+    call allocate_start_type
+    call set_starting_positions(rand_matrix)
+    call set_rest_of_individual_particle_specifications(rand_matrix)
+    call set_particle_type_specifications
+
+end subroutine calc_starting_conditions
+
+subroutine allocate_start_type
+
+    use gorilla_applets_types_mod, only: start, in
+    use gorilla_applets_settings_mod, only: i_option
+
+    allocate(start%x(3,in%num_particles,in%n_species))
+    allocate(start%pitch(in%num_particles,in%n_species))
+    allocate(start%energy(in%num_particles,in%n_species))
+    allocate(start%weight(in%num_particles,in%n_species))
+    allocate(start%jperp(in%num_particles,in%n_species))
+    allocate(start%lost(in%num_particles,in%n_species))
+    allocate(start%particle_charge(in%n_species))
+    allocate(start%particle_mass(in%n_species))
+    allocate(start%cm_over_e(in%n_species))
+    allocate(start%t(in%n_species))
+
+end subroutine allocate_start_type
+
+subroutine set_starting_positions(rand_matrix,species_in,s0)
+
+    use gorilla_applets_types_mod, only: in, start, g
+    use tetra_physics_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
+    use constants, only: pi
+    use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods
+
+    real(dp), dimension(:,:,:), intent(in) :: rand_matrix
+    integer, dimension(:), intent(in), optional :: species_in
+    integer, dimension(:), allocatable :: species
+    integer :: i
+    real(dp), intent(in), optional :: s0
+
+    if (present(species_in)) then 
+        allocate(species(size(species_in)))
+        species = species_in
+    else
+        allocate(species(in%n_species))
+        species = [(i,i=1,in%n_species)]
+    endif
+
+    start%x(1,:,species) = sfc_s_min + rand_matrix(1,:,:)*(1-sfc_s_min)
+    if (present(s0))  start%x(1,:,species) = s0
+    start%x(2,:,species) = 2*pi*rand_matrix(2,:,:) !theta
+    start%x(3,:,species) = 2*pi/n_field_periods*rand_matrix(3,:,:) !phi
+
+end subroutine set_starting_positions
+
+subroutine set_rest_of_individual_particle_specifications(rand_matrix,species_in)
+
+    use gorilla_applets_types_mod, only: in, start
+
+    real(dp), dimension(:,:,:), intent(in) :: rand_matrix
+    integer, dimension(:), intent(in), optional :: species_in
+    integer, dimension(:), allocatable :: species
+    integer :: i
+
+    if (present(species_in)) then 
+        allocate(species(size(species_in)))
+        species = species_in
+    else
+        allocate(species(in%n_species))
+        species = [(i,i=1,in%n_species)]
+    endif
+
+    start%pitch(:,species) = 2*rand_matrix(4,:,:)-1 !pitch parameter
+    start%energy(:,species) = in%energy_eV
+    if (in%boole_boltzmann_energies) then
+        start%energy(:,species) = 5*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
+    endif
+    
+    if (in%boole_antithetic_variate) then
+        start%x(:,1:in%num_particles:2,species) = start%x(:,2:in%num_particles:2,species)
+        start%pitch(1:in%num_particles:2,species) = -start%pitch(2:in%num_particles:2,species)
+        start%energy(1:in%num_particles:2,species) = start%energy(2:in%num_particles:2,species)
+    endif
+
+end subroutine set_rest_of_individual_particle_specifications
+
+subroutine set_particle_type_specifications
+
+    use gorilla_applets_types_mod, only: in, start
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
+    use constants, only: echarge,ame,clight, ev2erg, pi
+    use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods
+
+    start%particle_charge = (/particle_charge, -echarge/)
+    start%particle_mass = (/particle_mass, ame/)
+    start%cm_over_e = (/cm_over_e, -clight*ame/echarge/)
+    start%t = (/in%time_step, in%time_step/42.0_dp/)
+    if (in%boole_static_ne) start%t(2) = 0.0_dp
+
+    start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
+
+    start%weight = in%density*(1-sfc_s_min)*4*pi**2/n_field_periods
+
+end subroutine set_particle_type_specifications
+
+subroutine calc_electron_diffusion_coefficients !call this before the first ion pushing
+
+    use gorilla_applets_types_mod, only: in, dc, start, s
+    use tetra_grid_settings_mod, only: grid_size
+    use tetra_grid_mod, only: verts_sthetaphi
+    use utils_data_pre_and_post_processing_mod, only: prepare_next_round_of_parallelised_particle_pushing, &
+    calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared
+    use llsq_mod, only: llsq
+
+    integer :: ns, i
+    real(dp) :: extrapolation_factor, A, B, offset
+    real(dp), dimension(:,:,:), allocatable :: rand_matrix
+
+    allocate(rand_matrix(5,in%num_particles,1))
+    allocate(dc%s_vertices(grid_size(1)+1))
+    allocate(dc%A(grid_size(1)+1)) !diffusion coefficients will be computed on every flux layer (including inner and outer boundaries)
+    allocate(dc%B(grid_size(1)+1)) !diffusion coefficients will be computed on every flux layer (including inner and outer boundaries)
+    allocate(dc%grad_A(grid_size(1)))
+    allocate(dc%grad_B(grid_size(1)))
+
+    start%t(2) = in%time_step/42.0_dp/grid_size(1) !check afterwards if this was too little time
+    dc%s_vertices = verts_sthetaphi(1, [(grid_size(3)*(ns-1)+1,ns=1,grid_size(1)+1)])
+
+    s%k = 1000
+    allocate(s%delta_s(s%k))
+    allocate(s%delta_s_squared(s%k))
+    allocate(s%time(s%k))
+    allocate(s%check(s%k))
+    s%time = [(start%t(2)/s%k*i,i = 1,s%k)]
+
+    call prepare_next_round_of_parallelised_particle_pushing(2)
+    if ((in%boole_collisions)) call calc_collision_coefficients_for_all_tetrahedra(2)
+
+
+    do ns = 2,grid_size(1)
+
+        print*, 'ns = ', ns, '/', grid_size(1)
+
+        !Initiate electrons at the different flux surfaces leaving out the boundaries
+        s%s0 = dc%s_vertices(ns)
+        call RANDOM_NUMBER(rand_matrix)
+        call set_starting_positions(rand_matrix,(/2/), s%s0)
+
+        call set_rest_of_individual_particle_specifications(rand_matrix,(/2/))
+        
+        call parallelised_particle_pushing(2,1,.true.)
+
+        ! Starting index (Throw away first 20 percent of values)
+        i = ceiling(dble(s%k)*0.2_dp)
+
+        call llsq ( int(s%k - i + 1, kind=8), s%time(i:s%k), s%delta_s(i:s%k),         A, offset)
+        A = A/2
+        call llsq ( int(s%k - i + 1, kind=8), s%time(i:s%k), s%delta_s_squared(i:s%k), B, offset)
+        B = B/2
+
+        !compute A and B via delta s and (delta s)^2 (use functions from mono-energetic-diffusion-coefficient)
+        dc%A(ns) = A
+        dc%B(ns) = B
+
+    enddo
+
+    !Extrapolate values to the boundaries
+    extrapolation_factor = (dc%s_vertices(2)-dc%s_vertices(1))/(dc%s_vertices(3)-dc%s_vertices(2))
+    dc%A(1) =     dc%A(2) + (dc%A(2)-dc%A(3))*extrapolation_factor
+    dc%B(1) = max(dc%B(2) + (dc%B(2)-dc%B(3))*extrapolation_factor, 0.0_dp)
+    extrapolation_factor = (dc%s_vertices(grid_size(1)+1)-dc%s_vertices(grid_size(1)))/ &
+                           (dc%s_vertices(grid_size(1))-dc%s_vertices(grid_size(1)-1))
+    dc%A(grid_size(1)+1) =     dc%A(grid_size(1)) + (dc%A(grid_size(1))-dc%A(grid_size(1)-1))*extrapolation_factor
+    dc%B(grid_size(1)+1) = max(dc%B(grid_size(1)) + (dc%B(grid_size(1))-dc%B(grid_size(1)-1))*extrapolation_factor, 0.0_dp)
+
+    !Calculate gradients
+    do ns = 1,grid_size(1)
+        dc%grad_A(ns) = (dc%A(ns+1)-dc%A(ns))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
+        dc%grad_B(ns) = (dc%B(ns+1)-dc%B(ns))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
+    enddo
+
+    ! open(23,file = 'A_and_B.dat')
+    ! do i = 1,grid_size(1)+1
+    !     write(23,*) dc%A(i), dc%B(i)
+    ! enddo
+    ! close(23)
+
+end subroutine calc_electron_diffusion_coefficients
+
+subroutine calc_electron_density !call this after every ion pushing sequence
+
+    use gorilla_applets_types_mod, only: in, time_t
+    use tetra_grid_settings_mod, only: grid_size
+
+    real(dp) :: delta_t
+    integer :: i, ns
+    real(dp), dimension(:), allocatable :: electron_density
+    type(time_t) :: t
+
+    allocate(electron_density(grid_size(1)))
+    electron_density = 0.0_dp
+
+    t%step = in%time_step
+    t%confined = 0.0_dp
+
+    !select appropriate delta t (always dependent on local A and B?)
+    !add delta t to the local 1D gridbox
+    !fill prism moments in the end using g%vertices_per_flux_surface and fill_vector_parts_with_value,
+    !turn the latter into an independent function
+
+    do i = 1,in%num_particles
+        do while (t%confined.lt.t%step)
+            !compute random number and delta x
+            ns = 1
+            electron_density(ns) = electron_density(ns) + delta_t
+            t%confined = t%confined + delta_t
+
+        enddo
+    enddo
+
+end subroutine calc_electron_density
 
 end module utils_self_consistent_ef_mod

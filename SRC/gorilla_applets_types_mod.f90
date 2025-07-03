@@ -200,6 +200,9 @@ module gorilla_applets_types_mod
     type diffusion_coefficients 
     real(dp), dimension(:), allocatable :: A
     real(dp), dimension(:), allocatable :: B
+    real(dp), dimension(:), allocatable :: grad_A
+    real(dp), dimension(:), allocatable :: grad_B
+    real(dp), dimension(:), allocatable :: s_vertices
     end type diffusion_coefficients
 
     type(diffusion_coefficients) dc

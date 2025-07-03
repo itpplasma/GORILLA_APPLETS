@@ -43,7 +43,6 @@ subroutine initialise_loop_variables(l, n, local_counter,particle_status,t,local
 
 use gorilla_applets_types_mod, only: in, counter_t, start, time_t, particle_status_t
 use constants, only: ev2erg
-use tetra_physics_mod, only: particle_mass
 
 integer, intent(in) :: l, n
 integer, intent(in), optional :: species_in
@@ -70,7 +69,7 @@ x = start%x(:,n,species)
 vpar = pitchpar * start%v0(species)
 vperp = sqrt(start%v0(species)**2-vpar**2)
 if (in%boole_boltzmann_energies) then
-    v = sqrt(start%energy(n,species)*ev2erg*2/particle_mass)
+    v = sqrt(start%energy(n,species)*ev2erg*2/start%particle_mass(species))
     vpar = pitchpar * v
     vperp = sqrt(v**2-vpar**2)
 endif
