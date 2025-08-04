@@ -5,7 +5,7 @@
 !    
  !Grid Size
  !Rectangular: nR, Field-aligned: ns
- n1 = 100 ,
+ n1 = 30 ,
  !Rectangular: nphi, Field-aligned: nphi                  			
  n2 = 30, 
  !Rectangular: nZ, Field-aligned: ntheta                          		

@@ -3,7 +3,7 @@
 &self_consistent_ef_nml
 !
   !time for tracing particles
-  time_step = 2.0d-4 ,
+  time_step = 4.0d-2 ,
 !
   !Kinetic energy of particles
   energy_eV = 3.5d3 ,
@@ -12,10 +12,10 @@
   n_species = 2
 !
   !Number of particles to be traced
-  n_particles = 1.0d4 ,
+  n_particles = 1.0d2 ,
 !
   !Keep electron density constant
-  boole_static_ne = .true. ,
+  boole_static_ne = .false. ,
 !
   !Compute squares of moments 
   boole_squared_moments = .false.,
@@ -50,7 +50,7 @@
   boole_boltzmann_energies = .true.,
 !
   !make density a linear function of poloidal flux
-  boole_linear_density_simulation = .true.,
+  boole_linear_density_simulation = .false.,
 !
   !always initiate pairs of particles where both particles start at the same position but move
   !in opposite direction, this helps to reduce statistical noise

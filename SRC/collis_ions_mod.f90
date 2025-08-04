@@ -197,7 +197,7 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
 !                   prescribed minimum, reflection was performed.
 !
   integer :: iswmode,ierr,n
-  real(dp), parameter :: pmin=1.e-8
+  real(dp), parameter :: pmin=5.e-2
   real(dp) :: dtau,p,dpp,dhh,fpeff,alam,dalam,coala, upper_limit
   real(dp), dimension(5) :: z
   real(dp) :: ur, epsilon, q
@@ -205,6 +205,7 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
   real(dp), dimension(:), allocatable :: dpp_vec,dhh_vec,fpeff_vec
   real(dp), optional :: tau
   real(dp), dimension(3), intent(in), optional :: randnum
+  real(dp) :: z4_save
 
   epsilon = 0.1
   q = 0.3
@@ -226,7 +227,8 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
   if (present(tau)) then
     dtau = min(epsilon**2/(2*dhh),tau,upper_limit)
     if (z(4).lt.q) then
-      dtau = min(dtau*(q/z(4))**2,tau)
+      !dtau = min(dtau*(q/z(4))**2,tau),upper_limit)
+      dtau = min(1.0d-2/(2*dhh),tau,upper_limit)
     endif
   endif
 
@@ -267,10 +269,14 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
 
   if(iswmode.lt.3) then
 
-  if (present(randnum)) ur = randnum(3)
-  if (.not.present(randnum)) call getran(0,ur)
+    if (present(randnum)) ur = randnum(3)
+    if (.not.present(randnum)) call getran(0,ur)
 
+    z4_save = z(4)
     z(4)=z(4)+sqrt(abs(2.d0*dpp*dtau))*dble(ur)+fpeff*dtau
+    if (z(4)/z4_save.gt.10) then
+        print*, 'v_old/v0 = ', z4_save, 'v_new/v0 = ', z(4), 'ratio =', z(4)/z4_save  !, 'v_old = ', z4_save*3.508831372d9
+    endif
   else
     z(4)=z(4)+fpeff*dtau
   endif
