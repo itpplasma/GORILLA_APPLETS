@@ -85,12 +85,13 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
     integer                                  :: kpart, iantithetic, ind_tetr, iface
     integer                                  :: p, l, n, i, k
     real(dp), dimension(3)                   :: x
-    real(dp)                                 :: vpar,vperp, t_step_s
+    real(dp)                                 :: vpar,vperp, t_step_s, v
     type(time_t)                             :: t
     type(counter_t)                          :: local_counter
     type(particle_status_t)                  :: particle_status
     complex(dp), dimension(:,:), allocatable :: local_tetr_moments
     logical                                  :: thread_flag = .true.
+    
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
     kpart = 0
@@ -101,11 +102,12 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
         s%delta_s = 0.0_dp
         s%delta_s_squared = 0.0_dp
         s%check = 0
+        s%f_v = 0
     endif
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient) &
-    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status, t_step_s, k) &
+    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v) &
     !$OMP& FIRSTPRIVATE(thread_flag)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO SCHEDULE(static)
@@ -128,12 +130,25 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
             call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp,species)
 
             i = 0
+
+    ! if (s%s0.lt.2.0d-2) then
+    !      open(1000+n)
+    ! endif
+
             do while (t%confined.lt.start%t(species))
                 i = i+1
+                ! if (sqrt(vpar**2+vperp**2)/v.gt.10) then
+                !     print*, 'n =', n, 't%confined =', t%confined, 'v =', v, 'v_new = ', sqrt(vpar**2+vperp**2), 'ratio =', &
+                !     sqrt(vpar**2+vperp**2)/v
+                ! endif
+                !if ((i.gt.1).and.((v/sqrt(vpar**2+vperp**2).gt.1.1_dp).or.(v/sqrt(vpar**2+vperp**2).lt.0.9_dp))) &
+                !print*, v/sqrt(vpar**2+vperp**2)
                 if (in%boole_collisions) then
+                    
                     call carry_out_collisions(i, n, t, x, vpar,vperp,ind_tetr, iface, species)
                     t%step = t%step/start%v0(species) !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
+                !v = sqrt(vpar**2+vperp**2)
 
                 if (boole_diffusion_coefficient) then
                     t_step_s = start%t(species)/s%k - (t%confined - start%t(species)/s%k*int(t%confined/(start%t(species)/s%k)))
@@ -143,7 +158,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
                 endif
 
                 call orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t%step,particle_status,ind_tetr,iface,n,&
-                            & local_tetr_moments, local_counter,t%remain, species, j, t_step_s, k, boole_diffusion_coefficient)
+                        & local_tetr_moments, local_counter,t%remain, species, j, t_step_s, k, boole_diffusion_coefficient)
 
                 t%confined = t%confined + t%step - t%remain
 
@@ -152,6 +167,10 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
                     exit
                 endif
             enddo
+
+    ! if (s%s0.lt.2.0d-2) then
+    !      close(1000+n)
+    ! endif
 
             !$omp critical
             counter%integration_steps = counter%integration_steps + i
@@ -202,10 +221,11 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
     real(dp), dimension(3)                       :: z_save, x_save, z_save_at_x_save
     real(dp)                                     :: t_remain,t_pass,perpinv, vpar_save, vperp_save
     logical                                      :: boole_t_finished, boole_lost_inside
-    integer                                      :: ind_tetr_save,iper_phi,n,k
+    integer                                      :: ind_tetr_save,iper_phi,n,k,i
     type(optional_quantities_type)               :: optional_quantities
     real(dp)                                     :: tau, v, t
-    
+
+    v = sqrt(vpar**2+vperp**2)
     if(.not.particle_status%initialized) then !If orbit_timestep is called for the first time without grid position
         call check_coordinate_domain(x) !Check coordinate domain (optionally perform modulo operation)
         call find_tetra(x,vpar,vperp,ind_tetr,iface) !Find tetrahedron index and face index for position x
@@ -263,8 +283,15 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
                 s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)/in%num_particles
                 s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2/in%num_particles
                 s%check(k) = s%check(k) + 1
+                i = min(int(s%j/10*v/start%v0(species))+1, s%j)
+                if (int(10*v/start%v0(species))+1.gt.s%j) print*, 'ATTENTION: particle is faster than 10*v_t'
+                s%f_v(k,i) = s%f_v(k,i) + (x(1) - s%s0)**2/in%num_particles 
                 !$omp end critical
+                ! if (s%s0.lt.2.0d-2) then
+                !      write(1000+n,*) s%time(k), x, vpar, v
+                ! endif
                 k = k+1
+
             endif
         endif
 
@@ -948,8 +975,9 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     use llsq_mod, only: llsq
 
     integer :: ns, i
-    real(dp) :: extrapolation_factor, A, B, offset
+    real(dp) :: extrapolation_factor, A, B, offset, tau_c_ei
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
+    character(len=100) :: filename, ns_str
 
     allocate(rand_matrix(5,in%num_particles,1))
     allocate(dc%s_vertices(grid_size(1)+1))
@@ -958,32 +986,34 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     allocate(dc%grad_A(grid_size(1)))
     allocate(dc%grad_B(grid_size(1)))
 
-    start%t(2) = in%time_step/42.0_dp/grid_size(1) !check afterwards if this was too little time
+    tau_c_ei = 5.0_dp*1.0d-5 !rough estimate from nrl formula booklet
+    start%t(2) = max(in%time_step/42.0_dp/grid_size(1),100*tau_c_ei) !check afterwards if this was too little time
     dc%s_vertices = verts_sthetaphi(1, [(grid_size(3)*(ns-1)+1,ns=1,grid_size(1)+1)])
 
     s%k = 1000
+    s%j = 100
     allocate(s%delta_s(s%k))
     allocate(s%delta_s_squared(s%k))
     allocate(s%time(s%k))
+    allocate(s%f_v(s%k,s%j))
     allocate(s%check(s%k))
     s%time = [(start%t(2)/s%k*i,i = 1,s%k)]
 
     call prepare_next_round_of_parallelised_particle_pushing(2)
     if ((in%boole_collisions)) call calc_collision_coefficients_for_all_tetrahedra(2)
 
-
     do ns = 2,grid_size(1)
 
         print*, 'ns = ', ns, '/', grid_size(1)
 
         !Initiate electrons at the different flux surfaces leaving out the boundaries
-        s%s0 = dc%s_vertices(ns)
+        s%s0 = (dc%s_vertices(ns) + dc%s_vertices(ns-1))/2
         call RANDOM_NUMBER(rand_matrix)
         call set_starting_positions(rand_matrix,(/2/), s%s0)
 
         call set_rest_of_individual_particle_specifications(rand_matrix,(/2/))
         
-        call parallelised_particle_pushing(2,1,.true.)
+        call parallelised_particle_pushing(species = 2,j = 1,boole_diffusion_coefficient = .true.)
 
         ! Starting index (Throw away first 20 percent of values)
         i = ceiling(dble(s%k)*0.2_dp)
@@ -996,6 +1026,22 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
         !compute A and B via delta s and (delta s)^2 (use functions from mono-energetic-diffusion-coefficient)
         dc%A(ns) = A
         dc%B(ns) = B
+
+    write(ns_str, '(I0)') ns
+    filename = 'data' // trim(ns_str) // '.dat'
+    open(23,file = filename)
+        do i = 1,s%k
+            write(23,*) s%time(i), s%delta_s(i), s%delta_s_squared(i)
+        enddo
+    close(23)
+
+    open(23,file = 'f_v.dat')
+        do i = 1,s%j
+            write(23,*) s%f_v(:,i)
+        enddo
+    close(23)
+
+    stop
 
     enddo
 
@@ -1014,11 +1060,13 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
         dc%grad_B(ns) = (dc%B(ns+1)-dc%B(ns))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
     enddo
 
-    ! open(23,file = 'A_and_B.dat')
-    ! do i = 1,grid_size(1)+1
-    !     write(23,*) dc%A(i), dc%B(i)
-    ! enddo
-    ! close(23)
+    open(23,file = 'A_and_B.dat')
+    do i = 1,grid_size(1)+1
+        write(23,*) dc%A(i), dc%B(i)
+    enddo
+    close(23)
+
+    stop
 
 end subroutine calc_electron_diffusion_coefficients
 
