@@ -41,7 +41,7 @@ subroutine calc_self_consistent_electric_field
     call initialise_output
     call calc_volume_integrals_in_flux_coordinates
     call initialize_exit_data
-    call calc_starting_conditions
+    !call calc_starting_conditions
     call calc_poloidal_flux(verts_sthetaphi)
     call allocate_electric_potential_type
     call calc_s_shell_volumes
@@ -49,20 +49,23 @@ subroutine calc_self_consistent_electric_field
     call unlink_files
     call print_errors_for_bad_inputs
 
-    if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
+    !if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
 
     !call perform_electric_potential_update(0)
     do i = 1, max(in%n_electric_potential_updates,1)
+        call calc_starting_conditions
         ep%rho_prism = 0
         do species = 1,2 !trace electrons and ions
             if ((species.eq.2).and.(in%boole_static_ne)) cycle
             call prepare_next_round_of_parallelised_particle_pushing(species)
             if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
-            call parallelised_particle_pushing(species,i,.false.)
+            call parallelised_particle_pushing(species,i,boole_diffusion_coefficient=.false.)
             call normalise_prism_moments_and_prism_moments_squared(species)
             ep%rho_prism = ep%rho_prism + real(output%prism_moments(1,:,species))*start%particle_charge(species)
         enddo
         call perform_electric_potential_update(i)
+        print*, 'average ion weight is ', sum(start%weight(:,1))/in%n_particles
+        print*, 'average electron weight is ', sum(start%weight(:,2))/in%n_particles
     enddo
 
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments

@@ -168,6 +168,8 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
                 endif
             enddo
 
+            print*, 'Confinement time for particle ', n, ' (species ', species, '): ', t%confined
+
     ! if (s%s0.lt.2.0d-2) then
     !      close(1000+n)
     ! endif
@@ -204,8 +206,6 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
     use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
                                         initialize_constants_of_motion, compute_radial_fluxes
     use constants, only: echarge
-    !use utils_self_consistent_ef_mod, only: calc_particle_weights_and_jperp, mirror_particles_on_domain_boundaries, &
-    !treat_particles_that_are_lost_but_should_not_be
 
     integer, intent(in)                          :: species, j
     logical, intent(in)                          :: boole_diffusion_coefficient
@@ -234,7 +234,8 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
             return
         endif
         z_save = x-tetra_physics(ind_tetr)%x1
-        if (j.eq.1) call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species)
+        !if (j.eq.1)
+        call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species,boole_diffusion_coefficient)
         particle_status%initialized = .true.
     endif
           
@@ -250,12 +251,14 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
 
         if(ind_tetr.eq.-1) then
             if(present(t_remain_out)) t_remain_out = t_remain
-            if((.not.(x(1).gt.1.01_dp*sfc_s_min)).or.(.not.(x(1).lt.0.99_dp))) then
+            if((.not.(x(1).gt.1.01_dp*sfc_s_min))) then !.or.(.not.(x(1).lt.0.99_dp)) <-- include this if you also want a mirror term at s=1
                 call mirror_particles_on_domain_boundaries(x,vpar,n,ind_tetr,iface,z_save,perpinv,ind_tetr_save)
                 if (ind_tetr.eq.-1) exit
-            else
+            elseif (x(1).lt.0.99_dp) then
                 call treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_tetr_save,z_save,x_save,x,vpar,vperp, &
                                                                      perpinv,ind_tetr,vpar_save)
+            else
+                exit
             endif
         endif
 
@@ -391,7 +394,12 @@ subroutine calc_phi_elec_from_rho(i)
         
         factor = in%energy_eV*ev2erg/(echarge**2*in%density)!T/(n_0*e^2)= 4*pi*r_D^2
 
+        !decrease factor in case very few particles are simulated
+        if (in%n_particles.lt.100.0_dp) factor = factor*in%n_particles/100.0_dp
+
         ep%phi_elec_from_rho =  ep%rho_vert*factor
+        
+        if (i.gt.0) ep%phi_elec_from_rho = ep%phi_elec_from_rho/sqrt(dble(i))
         
     endif
 
@@ -789,7 +797,7 @@ subroutine treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_
 
 end subroutine treat_particles_that_are_lost_but_should_not_be
 
-subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species)
+subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species, boole_diffusion_coefficient)
 
     use gorilla_applets_types_mod, only: in, start
     use tetra_physics_mod, only: tetra_physics
@@ -797,6 +805,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
 
+    logical, intent(in) :: boole_diffusion_coefficient
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
     real(dp), dimension(3) :: x
@@ -811,7 +820,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
         start%weight(n,species) = start%weight(n,species)*(1.0_dp-0.9_dp*x(1))
     endif
 
-    if (in%boole_boltzmann_energies) then
+    if (in%boole_boltzmann_energies.or.boole_diffusion_coefficient) then
         phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
         epsilon_max = 5*in%energy_eV*ev2erg
         start%weight(n,species) = start%weight(n,species)*epsilon_max*2/sqrt(pi)*sqrt(start%energy(n,species)*ev2erg)
@@ -833,6 +842,7 @@ end subroutine calc_particle_weights_and_jperp
 subroutine calc_starting_conditions
 
     use gorilla_applets_types_mod, only: in
+    use tetra_grid_settings_mod, only: sfc_s_min
     
     real(dp), dimension(:,:,:), allocatable                :: rand_matrix
 
@@ -840,7 +850,7 @@ subroutine calc_starting_conditions
     call RANDOM_NUMBER(rand_matrix)
 
     call allocate_start_type
-    call set_starting_positions(rand_matrix)
+    call set_starting_positions(rand_matrix,s0=sfc_s_min*1.1_dp)
     call set_rest_of_individual_particle_specifications(rand_matrix)
     call set_particle_type_specifications
 
@@ -851,6 +861,7 @@ subroutine allocate_start_type
     use gorilla_applets_types_mod, only: start, in
     use gorilla_applets_settings_mod, only: i_option
 
+    if (allocated(start%x)) return
     allocate(start%x(3,in%num_particles,in%n_species))
     allocate(start%pitch(in%num_particles,in%n_species))
     allocate(start%energy(in%num_particles,in%n_species))
@@ -891,14 +902,21 @@ subroutine set_starting_positions(rand_matrix,species_in,s0)
     start%x(2,:,species) = 2*pi*rand_matrix(2,:,:) !theta
     start%x(3,:,species) = 2*pi/n_field_periods*rand_matrix(3,:,:) !phi
 
+    !unless a single species is initiated, make elctrons and ions start at identical positions in real space
+    if (size(species).gt.1) then 
+        start%x(:,:,in%n_species) = start%x(:,:,1)
+    endif
+
 end subroutine set_starting_positions
 
-subroutine set_rest_of_individual_particle_specifications(rand_matrix,species_in)
+subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diffusion_coefficient_in,species_in)
 
     use gorilla_applets_types_mod, only: in, start
 
     real(dp), dimension(:,:,:), intent(in) :: rand_matrix
     integer, dimension(:), intent(in), optional :: species_in
+    logical, intent(in), optional :: boole_diffusion_coefficient_in
+    logical :: boole_diffusion_coefficient=.false.
     integer, dimension(:), allocatable :: species
     integer :: i
 
@@ -910,9 +928,11 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,species_in
         species = [(i,i=1,in%n_species)]
     endif
 
+    if (present(boole_diffusion_coefficient_in)) boole_diffusion_coefficient = boole_diffusion_coefficient_in
+
     start%pitch(:,species) = 2*rand_matrix(4,:,:)-1 !pitch parameter
     start%energy(:,species) = in%energy_eV
-    if (in%boole_boltzmann_energies) then
+    if (in%boole_boltzmann_energies.or.boole_diffusion_coefficient) then
         start%energy(:,species) = 5*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
     endif
     
@@ -927,14 +947,35 @@ end subroutine set_rest_of_individual_particle_specifications
 subroutine set_particle_type_specifications
 
     use gorilla_applets_types_mod, only: in, start
-    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
-    use constants, only: echarge,ame,clight, ev2erg, pi
+    use constants, only: echarge,ame,clight, ev2erg, pi, amp
     use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods
+    use gorilla_settings_mod, only: ispecies
 
-    start%particle_charge = (/particle_charge, -echarge/)
-    start%particle_mass = (/particle_mass, ame/)
+    real(dp) :: charge, mass, cm_over_e
+
+    select case(ispecies)
+        case(1) !electron
+            charge = -echarge
+            mass = ame
+            cm_over_e = -clight*ame/echarge
+        case(2) !deuterium ion
+            charge = echarge
+            mass = 2.d0*amp
+            cm_over_e=2.d0*clight*amp/echarge
+        case(3) !alpha particle
+            charge = 2.d0*echarge
+            mass = 4.d0*amp
+            cm_over_e=2.d0*clight*amp/echarge
+        case(4) !ionised tungsten
+            charge = 74.d0*echarge
+            mass = 184.d0*amp
+            cm_over_e= 184.d0*clight*amp/(74.d0*echarge)
+    end select  
+
+    start%particle_charge = (/charge, -echarge/)
+    start%particle_mass = (/mass, ame/)
     start%cm_over_e = (/cm_over_e, -clight*ame/echarge/)
-    start%t = (/in%time_step, in%time_step/42.0_dp/)
+    start%t = (/in%time_step, in%time_step/) !/42.0_dp
     if (in%boole_static_ne) start%t(2) = 0.0_dp
 
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
@@ -1009,10 +1050,9 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
         !Initiate electrons at the different flux surfaces leaving out the boundaries
         s%s0 = (dc%s_vertices(ns) + dc%s_vertices(ns-1))/2
         call RANDOM_NUMBER(rand_matrix)
+        call allocate_start_type
         call set_starting_positions(rand_matrix,(/2/), s%s0)
-
-        call set_rest_of_individual_particle_specifications(rand_matrix,(/2/))
-        
+        call set_rest_of_individual_particle_specifications(rand_matrix,boole_diffusion_coefficient_in = .true.,species_in=(/2/))
         call parallelised_particle_pushing(species = 2,j = 1,boole_diffusion_coefficient = .true.)
 
         ! Starting index (Throw away first 20 percent of values)

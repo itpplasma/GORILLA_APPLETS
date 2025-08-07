@@ -372,6 +372,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
         if (coord_system.eq.1) c%dens_mat(i,:) = sum(c%dens_mat(i,:))/ntetr
         if (coord_system.eq.2) c%temp_mat(i,:) = in%energy_eV
     enddo
+    if (coord_system.eq.2) c%temp_mat(2,:) = c%temp_mat(2,:)*2.0_dp
 
 
     if (.not.in%boole_preserve_energy_and_momentum_during_collisions) then

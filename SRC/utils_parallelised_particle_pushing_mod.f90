@@ -66,13 +66,9 @@ t%confined = 0.0_dp
 if (l.eq.1) local_tetr_moments = 0.0_dp
 pitchpar = start%pitch(n,species)
 x = start%x(:,n,species)
-vpar = pitchpar * start%v0(species)
-vperp = sqrt(start%v0(species)**2-vpar**2)
-if (in%boole_boltzmann_energies) then
-    v = sqrt(start%energy(n,species)*ev2erg*2/start%particle_mass(species))
-    vpar = pitchpar * v
-    vperp = sqrt(v**2-vpar**2)
-endif
+v = sqrt(start%energy(n,species)*ev2erg*2/start%particle_mass(species))
+vpar = pitchpar * v
+vperp = sqrt(v**2-vpar**2)
 
 end subroutine initialise_loop_variables
 
