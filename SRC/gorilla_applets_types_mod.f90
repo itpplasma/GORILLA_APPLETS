@@ -195,6 +195,7 @@ module gorilla_applets_types_mod
     integer                                :: k, j
     real(dp)                               :: s0
     integer, dimension(:), allocatable     :: check
+    integer                                :: n_particles
     end type delta_s_delta_s_squared_t
 
     type(delta_s_delta_s_squared_t) :: s

@@ -70,7 +70,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
 
 end subroutine read_self_consistent_electric_field_inp_into_type
 
-subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
+subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n_particles_in)
 
     use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, exit_data, s
     use tetra_grid_mod, only: ntetr
@@ -81,8 +81,9 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
     
 
     integer, intent(in)                      :: species, j
+    integer, intent(in), optional            :: n_particles_in
     logical, intent(in)                      :: boole_diffusion_coefficient
-    integer                                  :: kpart, iantithetic, ind_tetr, iface
+    integer                                  :: kpart, iantithetic, ind_tetr, iface, n_particles
     integer                                  :: p, l, n, i, k
     real(dp), dimension(3)                   :: x
     real(dp)                                 :: vpar,vperp, t_step_s, v
@@ -91,6 +92,12 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
     type(particle_status_t)                  :: particle_status
     complex(dp), dimension(:,:), allocatable :: local_tetr_moments
     logical                                  :: thread_flag = .true.
+
+    if (present(n_particles_in)) then
+        n_particles = n_particles_in
+    else
+        n_particles = in%num_particles
+    endif
     
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
@@ -106,14 +113,14 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
     endif
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient) &
+    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles) &
     !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v) &
     !$OMP& FIRSTPRIVATE(thread_flag)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO SCHEDULE(static)
 
     !Loop over particles
-    do p = 1,in%num_particles/iantithetic
+    do p = 1,n_particles/iantithetic
 
         if ((.not.in%boole_precalc_collisions).and.thread_flag) then
             call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num(), j)
@@ -124,7 +131,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
             n = (p-1)*iantithetic+l
             !$omp critical
             kpart = kpart+1 !in general not equal to n becuase of parallelisation
-            call print_progress(in%num_particles,kpart,n)
+            call print_progress(n_particles,kpart,n)
             !$omp end critical
 
             call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp,species)
@@ -136,6 +143,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
     ! endif
 
             do while (t%confined.lt.start%t(species))
+
                 i = i+1
                 ! if (sqrt(vpar**2+vperp**2)/v.gt.10) then
                 !     print*, 'n =', n, 't%confined =', t%confined, 'v =', v, 'v_new = ', sqrt(vpar**2+vperp**2), 'ratio =', &
@@ -168,7 +176,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient)
                 endif
             enddo
 
-            print*, 'Confinement time for particle ', n, ' (species ', species, '): ', t%confined
+            !print*, 'Confinement time for particle ', n, ' (species ', species, '): ', t%confined
 
     ! if (s%s0.lt.2.0d-2) then
     !      close(1000+n)
@@ -283,12 +291,12 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
                 t_step_s = start%t(species)/s%k + t_pass
                 local_counter%tetr_pushings = local_counter%tetr_pushings -1
                 !$omp critical
-                s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)/in%num_particles
-                s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2/in%num_particles
+                s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)/s%n_particles
+                s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2/s%n_particles
                 s%check(k) = s%check(k) + 1
                 i = min(int(s%j/10*v/start%v0(species))+1, s%j)
                 if (int(10*v/start%v0(species))+1.gt.s%j) print*, 'ATTENTION: particle is faster than 10*v_t'
-                s%f_v(k,i) = s%f_v(k,i) + (x(1) - s%s0)**2/in%num_particles 
+                s%f_v(k,i) = s%f_v(k,i) + (x(1) - s%s0)**2/s%n_particles 
                 !$omp end critical
                 ! if (s%s0.lt.2.0d-2) then
                 !      write(1000+n,*) s%time(k), x, vpar, v
@@ -856,24 +864,53 @@ subroutine calc_starting_conditions
 
 end subroutine calc_starting_conditions
 
-subroutine allocate_start_type
+subroutine allocate_start_type(n_particles_in)
 
     use gorilla_applets_types_mod, only: start, in
-    use gorilla_applets_settings_mod, only: i_option
 
-    if (allocated(start%x)) return
-    allocate(start%x(3,in%num_particles,in%n_species))
-    allocate(start%pitch(in%num_particles,in%n_species))
-    allocate(start%energy(in%num_particles,in%n_species))
-    allocate(start%weight(in%num_particles,in%n_species))
-    allocate(start%jperp(in%num_particles,in%n_species))
-    allocate(start%lost(in%num_particles,in%n_species))
+    integer, intent(in), optional :: n_particles_in
+    integer :: n_particles
+
+    if (present(n_particles_in)) then
+        n_particles = n_particles_in
+    else
+        n_particles = in%num_particles
+    endif
+
+    !before allocating, deallocate if necessary
+    call deallocate_start_type
+
+    allocate(start%x(3,n_particles,in%n_species))
+    allocate(start%pitch(n_particles,in%n_species))
+    allocate(start%energy(n_particles,in%n_species))
+    allocate(start%weight(n_particles,in%n_species))
+    allocate(start%jperp(n_particles,in%n_species))
+    allocate(start%lost(n_particles,in%n_species))
     allocate(start%particle_charge(in%n_species))
     allocate(start%particle_mass(in%n_species))
     allocate(start%cm_over_e(in%n_species))
     allocate(start%t(in%n_species))
+    allocate(start%v0(in%n_species))
 
 end subroutine allocate_start_type
+
+subroutine deallocate_start_type
+
+    use gorilla_applets_types_mod, only: start
+
+    if (allocated(start%x))               deallocate(start%x)
+    if (allocated(start%pitch))           deallocate(start%pitch)
+    if (allocated(start%energy))          deallocate(start%energy)
+    if (allocated(start%weight))          deallocate(start%weight)
+    if (allocated(start%jperp))           deallocate(start%jperp)
+    if (allocated(start%lost))            deallocate(start%lost)
+    if (allocated(start%particle_charge)) deallocate(start%particle_charge)
+    if (allocated(start%particle_mass))   deallocate(start%particle_mass)
+    if (allocated(start%cm_over_e))       deallocate(start%cm_over_e)
+    if (allocated(start%t))               deallocate(start%t)
+    if (allocated(start%v0))              deallocate(start%v0)
+
+end subroutine deallocate_start_type
 
 subroutine set_starting_positions(rand_matrix,species_in,s0)
 
@@ -909,7 +946,7 @@ subroutine set_starting_positions(rand_matrix,species_in,s0)
 
 end subroutine set_starting_positions
 
-subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diffusion_coefficient_in,species_in)
+subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diffusion_coefficient_in,species_in,n_particles_in)
 
     use gorilla_applets_types_mod, only: in, start
 
@@ -919,6 +956,8 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
     logical :: boole_diffusion_coefficient=.false.
     integer, dimension(:), allocatable :: species
     integer :: i
+    integer, intent(in), optional :: n_particles_in
+    integer :: n_particles
 
     if (present(species_in)) then 
         allocate(species(size(species_in)))
@@ -926,6 +965,12 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
     else
         allocate(species(in%n_species))
         species = [(i,i=1,in%n_species)]
+    endif
+
+    if (present(n_particles_in)) then
+        n_particles = n_particles_in
+    else
+        n_particles = in%num_particles
     endif
 
     if (present(boole_diffusion_coefficient_in)) boole_diffusion_coefficient = boole_diffusion_coefficient_in
@@ -937,9 +982,9 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
     endif
     
     if (in%boole_antithetic_variate) then
-        start%x(:,1:in%num_particles:2,species) = start%x(:,2:in%num_particles:2,species)
-        start%pitch(1:in%num_particles:2,species) = -start%pitch(2:in%num_particles:2,species)
-        start%energy(1:in%num_particles:2,species) = start%energy(2:in%num_particles:2,species)
+        start%x(:,1:n_particles:2,species) = start%x(:,2:n_particles:2,species)
+        start%pitch(1:n_particles:2,species) = -start%pitch(2:n_particles:2,species)
+        start%energy(1:n_particles:2,species) = start%energy(2:n_particles:2,species)
     endif
 
 end subroutine set_rest_of_individual_particle_specifications
@@ -947,8 +992,7 @@ end subroutine set_rest_of_individual_particle_specifications
 subroutine set_particle_type_specifications
 
     use gorilla_applets_types_mod, only: in, start
-    use constants, only: echarge,ame,clight, ev2erg, pi, amp
-    use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods
+    use constants, only: echarge,ame,clight, ev2erg, amp
     use gorilla_settings_mod, only: ispecies
 
     real(dp) :: charge, mass, cm_over_e
@@ -980,9 +1024,19 @@ subroutine set_particle_type_specifications
 
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
 
-    start%weight = in%density*(1-sfc_s_min)*4*pi**2/n_field_periods
+    call set_weight
 
 end subroutine set_particle_type_specifications
+
+subroutine set_weight
+
+    use gorilla_applets_types_mod, only: start, in
+    use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods
+    use constants, only: pi
+
+    start%weight = in%density*(1-sfc_s_min)*4*pi**2/n_field_periods
+
+end subroutine set_weight
 
 subroutine calc_s_shell_volumes
 
@@ -1012,36 +1066,43 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     use tetra_grid_settings_mod, only: grid_size
     use tetra_grid_mod, only: verts_sthetaphi
     use utils_data_pre_and_post_processing_mod, only: prepare_next_round_of_parallelised_particle_pushing, &
-    calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared
+    calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, initialize_exit_data
     use llsq_mod, only: llsq
+    use tetra_physics_mod, only: particle_mass
 
-    integer :: ns, i
+    integer :: ns, i, n_particles
     real(dp) :: extrapolation_factor, A, B, offset, tau_c_ei
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str
 
-    allocate(rand_matrix(5,in%num_particles,1))
+    s%n_particles = 100
+
+    allocate(rand_matrix(5,s%n_particles,1))
     allocate(dc%s_vertices(grid_size(1)+1))
     allocate(dc%A(grid_size(1)+1)) !diffusion coefficients will be computed on every flux layer (including inner and outer boundaries)
     allocate(dc%B(grid_size(1)+1)) !diffusion coefficients will be computed on every flux layer (including inner and outer boundaries)
     allocate(dc%grad_A(grid_size(1)))
     allocate(dc%grad_B(grid_size(1)))
 
-    tau_c_ei = 5.0_dp*1.0d-5 !rough estimate from nrl formula booklet
-    start%t(2) = max(in%time_step/42.0_dp/grid_size(1),100*tau_c_ei) !check afterwards if this was too little time
     dc%s_vertices = verts_sthetaphi(1, [(grid_size(3)*(ns-1)+1,ns=1,grid_size(1)+1)])
 
     s%k = 1000
     s%j = 100
+
     allocate(s%delta_s(s%k))
     allocate(s%delta_s_squared(s%k))
     allocate(s%time(s%k))
     allocate(s%f_v(s%k,s%j))
     allocate(s%check(s%k))
-    s%time = [(start%t(2)/s%k*i,i = 1,s%k)]
 
-    call prepare_next_round_of_parallelised_particle_pushing(2)
-    if ((in%boole_collisions)) call calc_collision_coefficients_for_all_tetrahedra(2)
+    call allocate_start_type(s%n_particles)
+    call set_particle_type_specifications
+    call initialize_exit_data(s%n_particles)
+
+    tau_c_ei = 5.0_dp*1.0d-5 !rough estimate from nrl formula booklet
+    start%t(2) = 10*tau_c_ei !check afterwards if this was too little time
+
+    s%time = [(start%t(2)/s%k*i,i = 1,s%k)]
 
     do ns = 2,grid_size(1)
 
@@ -1049,11 +1110,18 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
 
         !Initiate electrons at the different flux surfaces leaving out the boundaries
         s%s0 = (dc%s_vertices(ns) + dc%s_vertices(ns-1))/2
+
         call RANDOM_NUMBER(rand_matrix)
-        call allocate_start_type
         call set_starting_positions(rand_matrix,(/2/), s%s0)
-        call set_rest_of_individual_particle_specifications(rand_matrix,boole_diffusion_coefficient_in = .true.,species_in=(/2/))
-        call parallelised_particle_pushing(species = 2,j = 1,boole_diffusion_coefficient = .true.)
+        call set_rest_of_individual_particle_specifications(rand_matrix,boole_diffusion_coefficient_in = .true., &
+                                                            species_in=(/2/),n_particles_in=s%n_particles)
+        call set_weight
+
+        call prepare_next_round_of_parallelised_particle_pushing(2)
+
+        if (ns.eq.2) call calc_collision_coefficients_for_all_tetrahedra(2)
+
+        call parallelised_particle_pushing(species = 2,j = 1,boole_diffusion_coefficient = .true.,n_particles_in=s%n_particles)
 
         ! Starting index (Throw away first 20 percent of values)
         i = ceiling(dble(s%k)*0.2_dp)
@@ -1075,13 +1143,11 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
         enddo
     close(23)
 
-    open(23,file = 'f_v.dat')
-        do i = 1,s%j
-            write(23,*) s%f_v(:,i)
-        enddo
-    close(23)
-
-    stop
+    ! open(23,file = 'f_v.dat')
+    !     do i = 1,s%j
+    !         write(23,*) s%f_v(:,i)
+    !     enddo
+    ! close(23)
 
     enddo
 
@@ -1105,8 +1171,6 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
         write(23,*) dc%A(i), dc%B(i)
     enddo
     close(23)
-
-    stop
 
 end subroutine calc_electron_diffusion_coefficients
 

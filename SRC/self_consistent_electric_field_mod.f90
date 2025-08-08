@@ -29,6 +29,7 @@ subroutine calc_self_consistent_electric_field
     read_self_consistent_electric_field_inp_into_type, calc_starting_conditions, calc_electron_diffusion_coefficients, &
     parallelised_particle_pushing, calc_s_shell_volumes
     use gorilla_applets_types_mod, only: output, ep
+    use tetra_physics_mod, only: particle_mass
 
     integer :: i, species
 
@@ -36,20 +37,21 @@ subroutine calc_self_consistent_electric_field
     call read_self_consistent_electric_field_inp_into_type
     call get_ipert()
     call initialize_gorilla(i_option,ipert)
-    call associate_flux_labels_with_tetrahedra_and_vertices
+    
     call set_moment_specifications
     call initialise_output
     call calc_volume_integrals_in_flux_coordinates
+
+    if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
+
     call initialize_exit_data
-    !call calc_starting_conditions
+    call associate_flux_labels_with_tetrahedra_and_vertices
     call calc_poloidal_flux(verts_sthetaphi)
     call allocate_electric_potential_type
     call calc_s_shell_volumes
     call give_file_names
     call unlink_files
-    call print_errors_for_bad_inputs
-
-    !if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
+    call print_errors_for_bad_inputs    
 
     !call perform_electric_potential_update(0)
     do i = 1, max(in%n_electric_potential_updates,1)

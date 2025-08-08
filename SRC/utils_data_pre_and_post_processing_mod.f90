@@ -248,17 +248,34 @@ subroutine set_rest_of_start_type(rand_matrix)
 
 end subroutine set_rest_of_start_type
 
-subroutine initialize_exit_data
+subroutine initialize_exit_data(n_particles_in)
 
     use gorilla_applets_types_mod, only: in, exit_data
 
-    allocate(exit_data%lost(in%num_particles,in%n_species))
-    allocate(exit_data%t_confined(in%num_particles,in%n_species))
-    allocate(exit_data%x(3,in%num_particles,in%n_species))
-    allocate(exit_data%vpar(in%num_particles,in%n_species))
-    allocate(exit_data%vperp(in%num_particles,in%n_species))
-    allocate(exit_data%phi_0_mappings(in%num_particles,in%n_species))
-    allocate(exit_data%integration_step(in%num_particles,in%n_species))
+    integer, intent(in), optional :: n_particles_in 
+    integer                       :: n_particles
+
+    if (allocated(exit_data%lost))              deallocate(exit_data%lost)
+    if (allocated(exit_data%t_confined))        deallocate(exit_data%t_confined)
+    if (allocated(exit_data%x))                 deallocate(exit_data%x)
+    if (allocated(exit_data%vpar))              deallocate(exit_data%vpar)
+    if (allocated(exit_data%vperp))             deallocate(exit_data%vperp)
+    if (allocated(exit_data%phi_0_mappings))    deallocate(exit_data%phi_0_mappings)
+    if (allocated(exit_data%integration_step))  deallocate(exit_data%integration_step)
+
+    if(present(n_particles_in)) then
+        n_particles = n_particles_in
+    else
+        n_particles = in%num_particles
+    endif
+
+    allocate(exit_data%lost(n_particles,in%n_species))
+    allocate(exit_data%t_confined(n_particles,in%n_species))
+    allocate(exit_data%x(3,n_particles,in%n_species))
+    allocate(exit_data%vpar(n_particles,in%n_species))
+    allocate(exit_data%vperp(n_particles,in%n_species))
+    allocate(exit_data%phi_0_mappings(n_particles,in%n_species))
+    allocate(exit_data%integration_step(n_particles,in%n_species))
 
     exit_data%lost = 0
     exit_data%t_confined = 0.0_dp
