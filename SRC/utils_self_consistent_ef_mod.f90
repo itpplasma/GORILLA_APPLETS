@@ -819,7 +819,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     real(dp), dimension(3) :: x
     integer, intent(in) :: n,ind_tetr
     integer, intent(in) :: species
-    real(dp) :: phi_elec_func, temperature, epsilon_max
+    real(dp) :: phi_elec_func, temperature
 
     x = tetra_physics(ind_tetr)%x1 + z_save
     start%weight(n,species) = start%weight(n,species)*abs((tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save)))
@@ -830,8 +830,8 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
 
     if (in%boole_boltzmann_energies.or.boole_diffusion_coefficient) then
         phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
-        epsilon_max = 5*in%energy_eV*ev2erg
-        start%weight(n,species) = start%weight(n,species)*epsilon_max*2/sqrt(pi)*sqrt(start%energy(n,species)*ev2erg)
+        start%weight(n,species) = start%weight(n,species)*&
+                                  start%epsilon_max*in%energy_eV*ev2erg*2/sqrt(pi)*sqrt(start%energy(n,species)*ev2erg)
         if (.not. in%boole_linear_temperature_simulation) then
             start%weight(n,species) =start%weight(n,species) /(in%energy_eV*ev2erg)**1.5_dp* &
                         & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/(in%energy_eV*ev2erg))
@@ -978,7 +978,7 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
     start%pitch(:,species) = 2*rand_matrix(4,:,:)-1 !pitch parameter
     start%energy(:,species) = in%energy_eV
     if (in%boole_boltzmann_energies.or.boole_diffusion_coefficient) then
-        start%energy(:,species) = 5*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
+        start%energy(:,species) = start%epsilon_max*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
     endif
     
     if (in%boole_antithetic_variate) then
@@ -1023,6 +1023,7 @@ subroutine set_particle_type_specifications
     if (in%boole_static_ne) start%t(2) = 0.0_dp
 
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
+    start%epsilon_max = 16.0_dp
 
     call set_weight
 
@@ -1060,6 +1061,7 @@ subroutine calc_s_shell_volumes
 
 end subroutine calc_s_shell_volumes
 
+
 subroutine calc_electron_diffusion_coefficients !call this before the first ion pushing
 
     use gorilla_applets_types_mod, only: in, dc, start, s
@@ -1069,13 +1071,14 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, initialize_exit_data
     use llsq_mod, only: llsq
     use tetra_physics_mod, only: particle_mass
+    use russian_roulette_mod, only: prepare_russian_roulette
 
     integer :: ns, i, n_particles
     real(dp) :: extrapolation_factor, A, B, offset, tau_c_ei
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str
 
-    s%n_particles = 100
+    s%n_particles = 1000
 
     allocate(rand_matrix(5,s%n_particles,1))
     allocate(dc%s_vertices(grid_size(1)+1))
@@ -1098,9 +1101,10 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     call allocate_start_type(s%n_particles)
     call set_particle_type_specifications
     call initialize_exit_data(s%n_particles)
+    call prepare_russian_roulette(2)
 
     tau_c_ei = 5.0_dp*1.0d-5 !rough estimate from nrl formula booklet
-    start%t(2) = 10*tau_c_ei !check afterwards if this was too little time
+    start%t(2) = 5*tau_c_ei !check afterwards if this was too little time
 
     s%time = [(start%t(2)/s%k*i,i = 1,s%k)]
 

@@ -41,6 +41,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:),     allocatable :: v0 !This is the thermal velocity, not the particle velocity; 
                                                   !used in self consistent electric field computation
     real(dp), dimension(:),     allocatable :: t !tracing time, used in self consistent electric field computation
+    real(dp)                                :: epsilon_max
     logical, dimension(:,:),    allocatable :: lost
     end type start_t
 
@@ -216,7 +217,6 @@ module gorilla_applets_types_mod
     end type one_d_t
 
     type(one_d_t) one_d
-
 
     type particle_status_t
     logical :: initialized

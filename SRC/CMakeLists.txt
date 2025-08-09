@@ -16,6 +16,7 @@ add_library(GORILLA_APPLETS STATIC
   poincare_invariances_mod.f90
   pusher_tetra_field_lines_mod.f90
   reversibility_test_mod.f90
+  russian_roulette_mod.f90
   utils_data_pre_and_post_processing_mod.f90
   sub_alpha_lifetime_can.f90
   utils_orbit_timestep_mod.f90
