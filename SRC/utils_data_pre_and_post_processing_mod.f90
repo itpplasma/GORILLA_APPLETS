@@ -308,7 +308,7 @@ end subroutine calc_poloidal_flux
 
 subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
-    use gorilla_applets_types_mod, only: in, c, start
+    use gorilla_applets_types_mod, only: in, c, start, s
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
     use constants, only: echarge,amp, ame, ev2erg
@@ -321,7 +321,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     integer :: Te_unit, Ti_unit, ne_unit
     integer :: i, j
     integer :: species = 1
-    real(dp) :: m0, z0, n0, s
+    real(dp) :: m0, z0, n0, s_value
 
     if (present(species_in)) species = species_in
     
@@ -368,8 +368,8 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     if (coord_system.eq.2) then
         n0 = 3.0_dp * 10.0_dp**13
         do i = 1,ntetr/grid_size(2),3
-            s = tetra_physics(i)%x1(1)
-            c%dens_mat(1,i) = n0*(1-s*0.9_dp)
+            s_value = tetra_physics(i)%x1(1)
+            c%dens_mat(1,i) = n0*(1-s_value*0.9_dp)
         enddo
         c%dens_mat(2,:) = c%dens_mat(1,:)
     endif
@@ -387,9 +387,9 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     do i = 1, c%n
         c%temp_mat(i,:) = sum(c%temp_mat(i,:))/ntetr
         if (coord_system.eq.1) c%dens_mat(i,:) = sum(c%dens_mat(i,:))/ntetr
-        if (coord_system.eq.2) c%temp_mat(i,:) = in%energy_eV
     enddo
-    if (coord_system.eq.2) c%temp_mat(2,:) = c%temp_mat(2,:)*2.0_dp
+    s%temperature = 2.0_dp*in%energy_eV
+    if (coord_system.eq.2) c%temp_mat(2,:) = s%temperature
 
 
     if (.not.in%boole_preserve_energy_and_momentum_during_collisions) then

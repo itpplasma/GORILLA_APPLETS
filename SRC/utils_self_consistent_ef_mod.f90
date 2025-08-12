@@ -78,20 +78,22 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
     add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
     initialise_seed_for_random_numbers_for_each_thread
+    use russian_roulette_mod, only: play_russian_roulette, initiate_next_split_particle, rr, local_rr_t, initiate_local_rr
     
 
-    integer, intent(in)                      :: species, j
-    integer, intent(in), optional            :: n_particles_in
-    logical, intent(in)                      :: boole_diffusion_coefficient
-    integer                                  :: kpart, iantithetic, ind_tetr, iface, n_particles
-    integer                                  :: p, l, n, i, k
-    real(dp), dimension(3)                   :: x
-    real(dp)                                 :: vpar,vperp, t_step_s, v
-    type(time_t)                             :: t
-    type(counter_t)                          :: local_counter
-    type(particle_status_t)                  :: particle_status
-    complex(dp), dimension(:,:), allocatable :: local_tetr_moments
-    logical                                  :: thread_flag = .true.
+    integer, intent(in)                               :: species, j
+    integer, intent(in), optional                     :: n_particles_in
+    logical, intent(in)                               :: boole_diffusion_coefficient
+    integer                                           :: kpart, iantithetic, ind_tetr, iface, n_particles
+    integer                                           :: p, l, n, i, k
+    real(dp), dimension(3)                            :: x
+    real(dp)                                          :: vpar,vperp, t_step_s, v, vpar_save, vperp_save
+    type(time_t)                                      :: t
+    type(counter_t)                                   :: local_counter
+    type(particle_status_t)                           :: particle_status
+    complex(dp), dimension(:,:), allocatable          :: local_tetr_moments
+    logical                                           :: thread_flag = .true.
+    type(local_rr_t)                                  :: local_rr
 
     if (present(n_particles_in)) then
         n_particles = n_particles_in
@@ -112,10 +114,14 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
         s%f_v = 0
     endif
 
+    if (rr%boole_russian_roulette) call initiate_local_rr(local_rr,100)
+
+
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles) &
-    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v) &
-    !$OMP& FIRSTPRIVATE(thread_flag)
+    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr) &
+    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
+    !$OMP& vpar_save, vperp_save) &
+    !$OMP& FIRSTPRIVATE(thread_flag,local_rr)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO SCHEDULE(static)
 
@@ -145,18 +151,24 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
             do while (t%confined.lt.start%t(species))
 
                 i = i+1
-                ! if (sqrt(vpar**2+vperp**2)/v.gt.10) then
-                !     print*, 'n =', n, 't%confined =', t%confined, 'v =', v, 'v_new = ', sqrt(vpar**2+vperp**2), 'ratio =', &
-                !     sqrt(vpar**2+vperp**2)/v
-                ! endif
-                !if ((i.gt.1).and.((v/sqrt(vpar**2+vperp**2).gt.1.1_dp).or.(v/sqrt(vpar**2+vperp**2).lt.0.9_dp))) &
-                !print*, v/sqrt(vpar**2+vperp**2)
+
+                vpar_save = vpar
+                vperp_save = vperp
+
                 if (in%boole_collisions) then
-                    
                     call carry_out_collisions(i, n, t, x, vpar,vperp,ind_tetr, iface, species)
                     t%step = t%step/start%v0(species) !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
-                !v = sqrt(vpar**2+vperp**2)
+
+                if (rr%boole_russian_roulette) then
+                    if (local_rr%boole_eliminated) then 
+                        call initiate_next_split_particle(local_rr)!,t,x,vpar,vperp,particle_status,ind_tetr,iface)
+                        exit
+                    else
+                        call play_russian_roulette(vpar_save,vperp_save,vpar,vperp,t,x,particle_status,ind_tetr,iface, &
+                                                    species,n,local_rr)
+                    endif
+                endif
 
                 if (boole_diffusion_coefficient) then
                     t_step_s = start%t(species)/s%k - (t%confined - start%t(species)/s%k*int(t%confined/(start%t(species)/s%k)))
@@ -165,12 +177,12 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                     k = 1.0_dp !if boole_diffusion_coefficient.eqv..false., k is meaningless
                 endif
 
-                call orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t%step,particle_status,ind_tetr,iface,n,&
-                        & local_tetr_moments, local_counter,t%remain, species, j, t_step_s, k, boole_diffusion_coefficient)
+                call orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_status,ind_tetr,iface,n,&
+                &local_tetr_moments, local_counter, species, j, t_step_s, k, boole_diffusion_coefficient,local_rr)
 
                 t%confined = t%confined + t%step - t%remain
 
-                if (ind_tetr.eq.-1) then
+                if ((ind_tetr.eq.-1).and.(.not.local_rr%boole_eliminated)) then
                     call handle_lost_particles(local_counter, particle_status%lost)
                     exit
                 endif
@@ -199,8 +211,8 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
 
 end subroutine parallelised_particle_pushing
 
-subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particle_status,ind_tetr,iface, n,local_tetr_moments, &
-                                            local_counter, t_remain_out,species, j, t_step_s, k, boole_diffusion_coefficient)
+subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_status,ind_tetr,iface, n,local_tetr_moments, &
+                                local_counter,species, j, t_step_s, k, boole_diffusion_coefficient,local_rr)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly
@@ -209,36 +221,37 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, g, start, s, in
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, g, start, s, in, time_t
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
     use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
                                         initialize_constants_of_motion, compute_radial_fluxes
     use constants, only: echarge
+    use russian_roulette_mod, only: play_russian_roulette, rr, local_rr_t
 
-    integer, intent(in)                          :: species, j
+    integer, intent(in)                          :: species, j, n
     logical, intent(in)                          :: boole_diffusion_coefficient
     real(dp), intent(inout)                      :: t_step_s
     type(counter_t), intent(inout)               :: local_counter
     type(particle_status_t), intent(inout)       :: particle_status
+    type(time_t)                                 :: t
     real(dp), dimension(3), intent(inout)        :: x
     complex(dp), dimension(:,:), intent (inout)  :: local_tetr_moments
     real(dp), intent(inout)                      :: vpar,vperp
-    real(dp), intent(in)                         :: t_step
     integer, intent(inout)                       :: ind_tetr,iface
-    real(dp), intent(out), optional              :: t_remain_out
     real(dp), dimension(3)                       :: z_save, x_save, z_save_at_x_save
     real(dp)                                     :: t_remain,t_pass,perpinv, vpar_save, vperp_save
     logical                                      :: boole_t_finished, boole_lost_inside
-    integer                                      :: ind_tetr_save,iper_phi,n,k,i
+    integer                                      :: ind_tetr_save,iper_phi,k,i
     type(optional_quantities_type)               :: optional_quantities
-    real(dp)                                     :: tau, v, t
+    real(dp)                                     :: tau, v, t_pusher
+    type(local_rr_t)                             :: local_rr
 
     v = sqrt(vpar**2+vperp**2)
     if(.not.particle_status%initialized) then !If orbit_timestep is called for the first time without grid position
         call check_coordinate_domain(x) !Check coordinate domain (optionally perform modulo operation)
         call find_tetra(x,vpar,vperp,ind_tetr,iface) !Find tetrahedron index and face index for position x
         if(ind_tetr.eq.-1) then !If particle doesn't lie inside any tetrahedron
-            t_remain_out = t_step
+            t%remain = t%step
             return
         endif
         z_save = x-tetra_physics(ind_tetr)%x1
@@ -247,24 +260,24 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
         particle_status%initialized = .true.
     endif
           
-    if(t_step.eq.0.0_dp) return !Exit the subroutine after initialization, if time step equals zero
+    if(t%step.eq.0.0_dp) return !Exit the subroutine after initialization, if time step equals zero
     if(particle_status%initialized) z_save = x-tetra_physics(ind_tetr)%x1
     call initialize_constants_of_motion(vperp,z_save,ind_tetr,perpinv)
-    t_remain = t_step
+    t_remain = t%step
     boole_t_finished = .false.
     local_counter%tetr_pushings = local_counter%tetr_pushings -1 !set tetr_pushings to -1 because when entering the loop it will go back to one without pushing
 
-    do !Loop for tetrahedron pushings until t_step is reached
+    do !Loop for tetrahedron pushings until t%step is reached
         local_counter%tetr_pushings = local_counter%tetr_pushings +1
 
         if(ind_tetr.eq.-1) then
-            if(present(t_remain_out)) t_remain_out = t_remain
+            t%remain = t_remain
             if((.not.(x(1).gt.1.01_dp*sfc_s_min))) then !.or.(.not.(x(1).lt.0.99_dp)) <-- include this if you also want a mirror term at s=1
                 call mirror_particles_on_domain_boundaries(x,vpar,n,ind_tetr,iface,z_save,perpinv,ind_tetr_save)
                 if (ind_tetr.eq.-1) exit
             elseif (x(1).lt.0.99_dp) then
                 call treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_tetr_save,z_save,x_save,x,vpar,vperp, &
-                                                                     perpinv,ind_tetr,vpar_save)
+                                                                     perpinv,ind_tetr,vpar_save,vperp_save)
             else
                 exit
             endif
@@ -274,14 +287,15 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
         x_save = x
         z_save_at_x_save = z_save
         vpar_save = vpar
-        t = t_remain
-        if (boole_diffusion_coefficient) t = min(t_remain,t_step_s)
+        vperp_save = vperp!_func(z_save_at_x_save,perpinv,ind_tetr_save)
+        t_pusher = t_remain
+        if (boole_diffusion_coefficient) t_pusher = min(t_remain,t_step_s)
 
         select case(ipusher) !Calculate trajectory
             case(1)
                 call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper_phi)
             case(2)
-                call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t, &
+                call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_pusher, &
                                                     & t_pass,boole_t_finished,iper_phi,optional_quantities)
         end select
 
@@ -302,7 +316,6 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
                 !      write(1000+n,*) s%time(k), x, vpar, v
                 ! endif
                 k = k+1
-
             endif
         endif
 
@@ -312,14 +325,17 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t_step,particl
         call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities,species)
         if((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
 
-        if(boole_t_finished) then !Orbit stops within cell, because "flight"-time t_step has finished
-            if( present(t_remain_out)) t_remain_out = t_remain
+        vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
+
+        if (rr%boole_russian_roulette) call play_russian_roulette(vpar_save,vperp_save,vpar,vperp,t,x,particle_status,ind_tetr, &
+                                        iface,species,n,local_rr)
+
+        if(boole_t_finished.or.local_rr%boole_eliminated) then !Orbit stops within cell, because "flight"-time t%step has finished
+            t%remain = t_remain
             exit
         endif
 
     enddo !Loop for tetrahedron pushings
-
-    vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
 
 end subroutine orbit_timestep_gorilla_self_consistent_ef
 
@@ -765,7 +781,7 @@ subroutine fill_vector_parts_with_value(vector,indices,set_value)
 end subroutine fill_vector_parts_with_value
 
 subroutine treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_tetr_save,z_save,x_save,x,vpar,vperp, &
-                                                                                                        perpinv,ind_tetr,vpar_save)
+                                                                                            perpinv,ind_tetr,vpar_save,vperp_save)
 
     use utils_orbit_timestep_mod, only: initialize_constants_of_motion
     use supporting_functions_mod, only: vperp_func
@@ -773,14 +789,12 @@ subroutine treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_
     integer, intent(in)                          :: ind_tetr_save
     real(dp), dimension(3), intent(in)           :: z_save_at_x_save, x_save
     real(dp), dimension(3), intent(inout)        :: x, z_save
-    real(dp), intent(inout)                      :: vpar,vperp, perpinv, vpar_save
+    real(dp), intent(inout)                      :: vpar,vperp, perpinv, vpar_save, vperp_save
     integer, intent(inout)                       :: ind_tetr
-    real(dp)                                     :: vperp_save
     real(dp)                                     :: v
     integer                                      :: problem_unit
 
     print*, 'This should not happen.'
-    vperp_save = vperp_func(z_save_at_x_save,perpinv,ind_tetr_save)
     vperp      = vperp_func(z_save,          perpinv,ind_tetr_save)
 
     print*, 'x_save, vpar_save, vperp_save = ', x_save, vpar_save, vperp_save
@@ -1101,10 +1115,9 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     call allocate_start_type(s%n_particles)
     call set_particle_type_specifications
     call initialize_exit_data(s%n_particles)
-    call prepare_russian_roulette(2)
 
     tau_c_ei = 5.0_dp*1.0d-5 !rough estimate from nrl formula booklet
-    start%t(2) = 5*tau_c_ei !check afterwards if this was too little time
+    start%t(2) = 100*tau_c_ei !check afterwards if this was too little time
 
     s%time = [(start%t(2)/s%k*i,i = 1,s%k)]
 
@@ -1123,9 +1136,24 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
 
         call prepare_next_round_of_parallelised_particle_pushing(2)
 
-        if (ns.eq.2) call calc_collision_coefficients_for_all_tetrahedra(2)
+        if (ns.eq.2) then 
+            call calc_collision_coefficients_for_all_tetrahedra(2)
+            call prepare_russian_roulette(2)
+        endif
+
+        ! open(23,file = 'energy_before_pushing.dat')
+        !     do i = 1,s%n_particles
+        !         write(23,*) start%energy(i,2)
+        !     enddo
+        ! close(23)
 
         call parallelised_particle_pushing(species = 2,j = 1,boole_diffusion_coefficient = .true.,n_particles_in=s%n_particles)
+
+        ! open(23,file = 'energy_after_pushing.dat')
+        !     do i = 1,s%n_particles
+        !         write(23,*) start%energy(i,2)
+        !     enddo
+        ! close(23)
 
         ! Starting index (Throw away first 20 percent of values)
         i = ceiling(dble(s%k)*0.2_dp)
