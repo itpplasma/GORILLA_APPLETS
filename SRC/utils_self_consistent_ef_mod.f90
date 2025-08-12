@@ -87,7 +87,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     integer                                           :: kpart, iantithetic, ind_tetr, iface, n_particles
     integer                                           :: p, l, n, i, k
     real(dp), dimension(3)                            :: x
-    real(dp)                                          :: vpar,vperp, t_step_s, v, vpar_save, vperp_save
+    real(dp)                                          :: vpar,vperp, t_step_s, v, vpar_save, vperp_save, t_tot = 0.0_dp
     type(time_t)                                      :: t
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
@@ -114,11 +114,9 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
         s%f_v = 0
     endif
 
-    if (rr%boole_russian_roulette) call initiate_local_rr(local_rr,100)
-
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr) &
+    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr,t_tot) &
     !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
     !$OMP& vpar_save, vperp_save) &
     !$OMP& FIRSTPRIVATE(thread_flag,local_rr)
@@ -144,6 +142,8 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
 
             i = 0
 
+            if (rr%boole_russian_roulette) call initiate_local_rr(local_rr,100)
+
     ! if (s%s0.lt.2.0d-2) then
     !      open(1000+n)
     ! endif
@@ -162,11 +162,10 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
 
                 if (rr%boole_russian_roulette) then
                     if (local_rr%boole_eliminated) then 
-                        call initiate_next_split_particle(local_rr)!,t,x,vpar,vperp,particle_status,ind_tetr,iface)
-                        exit
+                        call initiate_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,particle_status,n)
+                        if (local_rr%boole_eliminated) exit
                     else
-                        call play_russian_roulette(vpar_save,vperp_save,vpar,vperp,t,x,particle_status,ind_tetr,iface, &
-                                                    species,n,local_rr)
+                        call play_russian_roulette(vpar_save,vperp_save,vpar,vperp,t,x,ind_tetr,iface,species,n,local_rr)
                     endif
                 endif
 
@@ -181,6 +180,9 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                 &local_tetr_moments, local_counter, species, j, t_step_s, k, boole_diffusion_coefficient,local_rr)
 
                 t%confined = t%confined + t%step - t%remain
+                !$omp critical
+                t_tot = t_tot + t%step - t%remain
+                !$omp end critical
 
                 if ((ind_tetr.eq.-1).and.(.not.local_rr%boole_eliminated)) then
                     call handle_lost_particles(local_counter, particle_status%lost)
@@ -208,6 +210,13 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     enddo !n
     !$OMP END DO
     !$OMP END PARALLEL
+
+    print*, 'Total tracing time of all particles divided by number of particles is: ', t_tot/n_particles, 's'
+    print*, 'Maximum storage = ', rr%maximum_storage
+    print*, 'Boundary fluxes plus = ', rr%boundary_fluxes_plus
+    print*, 'Boundary fluxes minus = ', rr%boundary_fluxes_minus
+    print*, 'total fluxes = ', rr%boundary_fluxes_plus - rr%boundary_fluxes_minus
+    print*, 'Roulette numbers = ', rr%roulette_numbers
 
 end subroutine parallelised_particle_pushing
 
@@ -239,11 +248,11 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     real(dp), intent(inout)                      :: vpar,vperp
     integer, intent(inout)                       :: ind_tetr,iface
     real(dp), dimension(3)                       :: z_save, x_save, z_save_at_x_save
-    real(dp)                                     :: t_remain,t_pass,perpinv, vpar_save, vperp_save
+    real(dp)                                     :: t_pass,perpinv, vpar_save, vperp_save
     logical                                      :: boole_t_finished, boole_lost_inside
     integer                                      :: ind_tetr_save,iper_phi,k,i
     type(optional_quantities_type)               :: optional_quantities
-    real(dp)                                     :: tau, v, t_pusher
+    real(dp)                                     :: tau, v, t_pusher, normalisation
     type(local_rr_t)                             :: local_rr
 
     v = sqrt(vpar**2+vperp**2)
@@ -263,7 +272,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     if(t%step.eq.0.0_dp) return !Exit the subroutine after initialization, if time step equals zero
     if(particle_status%initialized) z_save = x-tetra_physics(ind_tetr)%x1
     call initialize_constants_of_motion(vperp,z_save,ind_tetr,perpinv)
-    t_remain = t%step
+    t%remain = t%step
     boole_t_finished = .false.
     local_counter%tetr_pushings = local_counter%tetr_pushings -1 !set tetr_pushings to -1 because when entering the loop it will go back to one without pushing
 
@@ -271,7 +280,6 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         local_counter%tetr_pushings = local_counter%tetr_pushings +1
 
         if(ind_tetr.eq.-1) then
-            t%remain = t_remain
             if((.not.(x(1).gt.1.01_dp*sfc_s_min))) then !.or.(.not.(x(1).lt.0.99_dp)) <-- include this if you also want a mirror term at s=1
                 call mirror_particles_on_domain_boundaries(x,vpar,n,ind_tetr,iface,z_save,perpinv,ind_tetr_save)
                 if (ind_tetr.eq.-1) exit
@@ -288,25 +296,26 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         z_save_at_x_save = z_save
         vpar_save = vpar
         vperp_save = vperp!_func(z_save_at_x_save,perpinv,ind_tetr_save)
-        t_pusher = t_remain
-        if (boole_diffusion_coefficient) t_pusher = min(t_remain,t_step_s)
+        t_pusher = t%remain
+        if (boole_diffusion_coefficient) t_pusher = min(t%remain,t_step_s)
 
         select case(ipusher) !Calculate trajectory
             case(1)
-                call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper_phi)
+                call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t%remain,t_pass,boole_t_finished,iper_phi)
             case(2)
                 call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_pusher, &
                                                     & t_pass,boole_t_finished,iper_phi,optional_quantities)
         end select
 
         if (boole_diffusion_coefficient) then
-            if (boole_t_finished.and.(t_remain.ge.t_step_s)) then
-                if (t_remain.gt.t_step_s) boole_t_finished = .false.
+            if (boole_t_finished.and.(t%remain.ge.t_step_s)) then
+                if (t%remain.gt.t_step_s) boole_t_finished = .false.
                 t_step_s = start%t(species)/s%k + t_pass
                 local_counter%tetr_pushings = local_counter%tetr_pushings -1
+                normalisation = start%weight(n,species)/(rr%starting_weight*s%n_particles)
                 !$omp critical
-                s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)/s%n_particles
-                s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2/s%n_particles
+                s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)/normalisation
+                s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2/normalisation
                 s%check(k) = s%check(k) + 1
                 i = min(int(s%j/10*v/start%v0(species))+1, s%j)
                 if (int(10*v/start%v0(species))+1.gt.s%j) print*, 'ATTENTION: particle is faster than 10*v_t'
@@ -319,7 +328,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
             endif
         endif
 
-        t_remain = t_remain - t_pass
+        t%remain = t%remain - t_pass
         t_step_s = t_step_s - t_pass
 
         call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities,species)
@@ -327,11 +336,10 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
 
         vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
 
-        if (rr%boole_russian_roulette) call play_russian_roulette(vpar_save,vperp_save,vpar,vperp,t,x,particle_status,ind_tetr, &
-                                        iface,species,n,local_rr)
+        if (rr%boole_russian_roulette) call play_russian_roulette(vpar_save,vperp_save,vpar,vperp,t,x,ind_tetr, &
+                                                                    iface,species,n,local_rr)
 
         if(boole_t_finished.or.local_rr%boole_eliminated) then !Orbit stops within cell, because "flight"-time t%step has finished
-            t%remain = t_remain
             exit
         endif
 
@@ -1092,7 +1100,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str
 
-    s%n_particles = 1000
+    s%n_particles = 100
 
     allocate(rand_matrix(5,s%n_particles,1))
     allocate(dc%s_vertices(grid_size(1)+1))
@@ -1117,7 +1125,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     call initialize_exit_data(s%n_particles)
 
     tau_c_ei = 5.0_dp*1.0d-5 !rough estimate from nrl formula booklet
-    start%t(2) = 100*tau_c_ei !check afterwards if this was too little time
+    start%t(2) = 3*tau_c_ei !check afterwards if this was too little time
 
     s%time = [(start%t(2)/s%k*i,i = 1,s%k)]
 
@@ -1203,6 +1211,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
         write(23,*) dc%A(i), dc%B(i)
     enddo
     close(23)
+    stop
 
 end subroutine calc_electron_diffusion_coefficients
 
