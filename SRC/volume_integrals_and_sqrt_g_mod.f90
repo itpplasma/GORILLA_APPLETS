@@ -272,7 +272,7 @@ subroutine calc_volume_integrals_in_flux_coordinates
     use tetra_grid_mod, only: ntetr, verts_sthetaphi, tetra_grid
     use tetra_grid_settings_mod, only: grid_size, n_field_periods
     use tetra_physics_mod, only: tetra_physics
-    use gorilla_applets_types_mod, only: output, in
+    use gorilla_applets_types_mod, only: output, in, g
 
     integer                   :: n_prisms, i, k, ind_tetr, even, odd
     real(dp), dimension(2)    :: verts_s, verts_phi, verts_theta
@@ -336,6 +336,8 @@ subroutine calc_volume_integrals_in_flux_coordinates
         output%prism_volumes(i) = basic_volume*abs(sqrtg)
 
     enddo
+
+    g%total_volume = sum(output%prism_volumes(:))
 
     print*, 'calc_volume_integrals finished'
 

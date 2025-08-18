@@ -166,6 +166,7 @@ module gorilla_applets_types_mod
     real(dp) :: raxis
     real(dp) :: zaxis
     real(dp) :: dist_from_o_point_within_grid !minimum radius of circle centered at magnetic axis completely contained in the grid
+    real(dp) :: total_volume
     integer  :: ind_a
     integer  :: ind_b
     integer  :: ind_c
@@ -198,6 +199,7 @@ module gorilla_applets_types_mod
     integer, dimension(:), allocatable     :: check
     integer                                :: n_particles
     real(dp)                               :: temperature
+    real(dp)                               :: integral_for_weight_normalisation
     end type delta_s_delta_s_squared_t
 
     type(delta_s_delta_s_squared_t) :: s
