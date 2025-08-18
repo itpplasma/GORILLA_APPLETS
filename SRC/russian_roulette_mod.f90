@@ -36,6 +36,7 @@ contains
 subroutine prepare_russian_roulette(species)
 
     use gorilla_applets_types_mod, only: start
+    use utils_data_pre_and_post_processing_mod, only: integrate_function, x3_exp_neg_x, x2_exp_minus_x2
 
     integer, intent(in) :: species
     real(dp) :: v0, v_max
@@ -63,28 +64,30 @@ subroutine prepare_russian_roulette(species)
 
     rr%starting_weight = start%weight(1,species)
 
+    n_intervals = 1000
+
     do j = 2,n_domains
 
         lower_limit = rr%velocity_bounds(1)/v0
         upper_limit = rr%velocity_bounds(n_domains+1)/v0
-        n_intervals = 1000
+       
         normalise_integral1 = integrate_function(x2_exp_minus_x2, lower_limit, upper_limit, n_intervals)
-        normalise_integral2 = integrate_function(x_power_1, lower_limit, upper_limit, n_intervals)
+        normalise_integral2 = integrate_function(x3_exp_neg_x, lower_limit, upper_limit, n_intervals)
 
         lower_limit = rr%velocity_bounds(j-1)/v0
         upper_limit = rr%velocity_bounds(j)/v0
-        n_intervals = 1000
+
 
         integral1 = integrate_function(x2_exp_minus_x2, lower_limit, upper_limit, n_intervals)/normalise_integral1
-        integral2 = integrate_function(x_power_1, lower_limit, upper_limit, n_intervals)/normalise_integral2
+        integral2 = integrate_function(x3_exp_neg_x, lower_limit, upper_limit, n_intervals)/normalise_integral2
 
         rr%roulette_numbers(j) = integral2/integral1
 
         lower_limit = rr%velocity_bounds(j)/v0
         upper_limit = rr%velocity_bounds(j+1)/v0
-        n_intervals = 1000
+
         integral1 = integrate_function(x2_exp_minus_x2, lower_limit, upper_limit, n_intervals)/normalise_integral1
-        integral2 = integrate_function(x_power_1, lower_limit, upper_limit, n_intervals)/normalise_integral2
+        integral2 = integrate_function(x3_exp_neg_x, lower_limit, upper_limit, n_intervals)/normalise_integral2
 
         rr%roulette_numbers(j) = rr%roulette_numbers(j)*integral1/integral2
     enddo
@@ -101,7 +104,6 @@ subroutine play_russian_roulette(vpar_save,vperp_save,vpar,vperp,t,x,ind_tetr,if
     type(time_t), intent(in) :: t
     real(dp), dimension(3) :: x
     type(local_rr_t) :: local_rr
-    type(local_rr_t) :: local_rr_for_movealloc
     real(dp) :: v_old,v_new,roulette_number, xi, splitting_number, passing_probability
     integer :: ind_old,ind_new,n_domains,ind_boundary, j, splitting_id, i
     integer, dimension(2) :: nearest_ints
@@ -124,14 +126,15 @@ subroutine play_russian_roulette(vpar_save,vperp_save,vpar,vperp,t,x,ind_tetr,if
     else
         rr%boundary_fluxes_minus(ind_boundary) = rr%boundary_fluxes_minus(ind_boundary) + 1
     endif
-    if (ind_new.lt.ind_old) roulette_number = 1.0_dp/roulette_number
     !$omp end critical
+
+    if (ind_new.lt.ind_old) roulette_number = 1.0_dp/roulette_number
 
     if (roulette_number.gt.1.0_dp) then
         passing_probability = 1.0_dp/roulette_number
         call random_number(xi)
         if (xi.lt.passing_probability) then
-            start%weight(n,species) =  start%weight(n,species)*roulette_number! + local_rr%weight_deposits(ind_boundary)
+            start%weight(n,species) =  start%weight(n,species) + local_rr%weight_deposits(ind_boundary)!*roulette_number
             local_rr%weight_deposits(ind_boundary) = 0.0_dp
         else
             local_rr%boole_eliminated = .true.
@@ -148,15 +151,14 @@ subroutine play_russian_roulette(vpar_save,vperp_save,vpar,vperp,t,x,ind_tetr,if
         endif
 
         splitting_id = findloc(local_rr%multiplicity,0,dim=1)
-        if (splitting_id.eq.0) then
-            ! i = size(local_rr%v)
-            ! call initiate_local_rr(local_rr_for_movealloc,i+100)
-            ! call copy_local_rr(local_rr,local_rr_for_movealloc)
-            ! call move_alloc(local_rr_for_movealloc,local_rr)
-            ! print*, 'hello', i+100
 
-            !put endif here and start with another if down below
-        elseif ((nearest_ints(j)-1).gt.0) then
+        if (splitting_id.eq.0) then
+            i = size(local_rr%v)
+            call enlarge_local_rr(local_rr)
+            splitting_id = i+1
+        endif
+
+        if (nearest_ints(j).gt.1) then
             local_rr%x(:,splitting_id) = x
             local_rr%vpar(splitting_id) = vpar
             local_rr%vperp(splitting_id) = vperp
@@ -175,27 +177,41 @@ subroutine play_russian_roulette(vpar_save,vperp_save,vpar,vperp,t,x,ind_tetr,if
 
 end subroutine play_russian_roulette
 
-subroutine initiate_local_rr(local_rr, j)
+subroutine initiate_local_rr(local_rr, i)
 
-    integer, intent(in) :: j
+    integer, intent(in) :: i
     type(local_rr_t) :: local_rr
 
     if (.not.allocated(local_rr%weight_deposits)) allocate(local_rr%weight_deposits(size(rr%boundary_fluxes_plus)))
     local_rr%weight_deposits = 0.0_dp
     local_rr%boole_eliminated = .false.
-    if (.not.allocated(local_rr%x))            allocate(local_rr%x(3,j))
-    if (.not.allocated(local_rr%vpar))         allocate(local_rr%vpar(j))
-    if (.not.allocated(local_rr%vperp))        allocate(local_rr%vperp(j))
-    if (.not.allocated(local_rr%weight))       allocate(local_rr%weight(j))
-    if (.not.allocated(local_rr%ind_tetr))     allocate(local_rr%ind_tetr(j))
-    if (.not.allocated(local_rr%iface))        allocate(local_rr%iface(j))
-    if (.not.allocated(local_rr%multiplicity)) allocate(local_rr%multiplicity(j))
+    if (.not.allocated(local_rr%x))            allocate(local_rr%x(3,i))
+    if (.not.allocated(local_rr%vpar))         allocate(local_rr%vpar(i))
+    if (.not.allocated(local_rr%vperp))        allocate(local_rr%vperp(i))
+    if (.not.allocated(local_rr%weight))       allocate(local_rr%weight(i))
+    if (.not.allocated(local_rr%ind_tetr))     allocate(local_rr%ind_tetr(i))
+    if (.not.allocated(local_rr%iface))        allocate(local_rr%iface(i))
+    if (.not.allocated(local_rr%multiplicity)) allocate(local_rr%multiplicity(i))
     local_rr%multiplicity = 0
-    if (.not.allocated(local_rr%v))            allocate(local_rr%v(j))
+    if (.not.allocated(local_rr%v))            allocate(local_rr%v(i))
     local_rr%v = 0.0_dp
-    if (.not.allocated(local_rr%t))            allocate(local_rr%t(j))
+    if (.not.allocated(local_rr%t))            allocate(local_rr%t(i))
 
 end subroutine initiate_local_rr
+
+subroutine enlarge_local_rr(local_rr)
+
+    type(local_rr_t) :: local_rr
+    type(local_rr_t) :: local_rr_for_movealloc
+    integer :: i
+
+    i = size(local_rr%v)
+    call initiate_local_rr(local_rr_for_movealloc,i+100)
+    call copy_local_rr(local_rr,local_rr_for_movealloc)
+    call move_allocation(local_rr,local_rr_for_movealloc)
+    print*, 'hello', i+100, size(local_rr%v), size(local_rr_for_movealloc%v)
+
+end subroutine enlarge_local_rr
 
 subroutine copy_local_rr(rr_small,rr_big)
 
@@ -216,10 +232,27 @@ subroutine copy_local_rr(rr_small,rr_big)
     rr_big%multiplicity(1:size_small) = rr_small%multiplicity
     rr_big%v(1:size_small) = rr_small%v
     rr_big%t(1:size_small) = rr_small%t
+
     rr_big%multiplicity(size_small+1:size_big) = 0
     rr_big%v(size_small+1:size_big) = 0.0_dp
 
 end subroutine copy_local_rr
+
+subroutine move_allocation(rr_small,rr_big)
+
+    type(local_rr_t) :: rr_small,rr_big
+
+    call move_alloc(rr_big%x, rr_small%x)
+    call move_alloc(rr_big%vpar, rr_small%vpar)
+    call move_alloc(rr_big%vperp, rr_small%vperp)
+    call move_alloc(rr_big%weight, rr_small%weight)
+    call move_alloc(rr_big%ind_tetr, rr_small%ind_tetr)
+    call move_alloc(rr_big%iface, rr_small%iface)
+    call move_alloc(rr_big%multiplicity, rr_small%multiplicity)
+    call move_alloc(rr_big%v, rr_small%v)
+    call move_alloc(rr_big%t, rr_small%t)
+
+end subroutine move_allocation
 
 subroutine initiate_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,particle_status,n)
 
@@ -255,60 +288,5 @@ subroutine initiate_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,p
     endif
 
 end subroutine initiate_next_split_particle
-
-function integrate_function(func, a, b, n) result(integral)
-
-    implicit none
-
-    interface
-        function func(xx)
-            use, intrinsic :: iso_fortran_env, only: dp => real64
-            real(dp), intent(in) :: xx
-            real(dp) :: func
-        end function func
-    end interface
-
-    real(dp), intent(in) :: a, b
-    integer, intent(in) :: n
-    real(dp) :: integral
-
-    real(dp) :: h, x
-    integer :: i
-
-    if (n <= 0) then
-        integral = 0.0_dp
-        return
-    end if
-
-    h = (b - a) / real(n, dp)
-    integral = 0.5_dp * (func(a) + func(b))
-
-    do i = 1, n - 1
-        x = a + real(i, dp) * h
-        integral = integral + func(x)
-    end do
-
-    integral = integral * h
-
-end function integrate_function
-
-function x2_exp_minus_x2(x) result(f)
-
-    use gorilla_applets_types_mod, only: s, in
-
-    implicit none
-    real(dp), intent(in) :: x
-    real(dp) :: f
-    
-    f = x**2 * exp(-x**2/(s%temperature/in%energy_eV))
-end function x2_exp_minus_x2
-
-function x_power_1(x) result(f)
-    implicit none
-    real(dp), intent(in) :: x
-    real(dp) :: f
-    
-    f = x**1.0_dp
-end function x_power_1
 
 end module russian_roulette_mod

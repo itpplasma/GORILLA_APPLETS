@@ -72,7 +72,7 @@ end subroutine read_self_consistent_electric_field_inp_into_type
 
 subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n_particles_in)
 
-    use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, exit_data, s
+    use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, exit_data, s, g
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
@@ -87,7 +87,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     integer                                           :: kpart, iantithetic, ind_tetr, iface, n_particles
     integer                                           :: p, l, n, i, k
     real(dp), dimension(3)                            :: x
-    real(dp)                                          :: vpar,vperp, t_step_s, v, vpar_save, vperp_save, t_tot = 0.0_dp
+    real(dp)                                          :: vpar,vperp, t_step_s, v, vpar_save, vperp_save, t_tot
     type(time_t)                                      :: t
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
@@ -114,6 +114,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
         s%f_v = 0
     endif
 
+    t_tot = 0.0_dp
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr,t_tot) &
@@ -312,10 +313,10 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
                 if (t%remain.gt.t_step_s) boole_t_finished = .false.
                 t_step_s = start%t(species)/s%k + t_pass
                 local_counter%tetr_pushings = local_counter%tetr_pushings -1
-                normalisation = start%weight(n,species)/(rr%starting_weight*s%n_particles)
+                normalisation = start%weight(n,species)/(s%n_particles*in%density*g%total_volume)!(rr%starting_weight*s%n_particles)
                 !$omp critical
-                s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)/normalisation
-                s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2/normalisation
+                s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)*normalisation
+                s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2*normalisation
                 s%check(k) = s%check(k) + 1
                 i = min(int(s%j/10*v/start%v0(species))+1, s%j)
                 if (int(10*v/start%v0(species))+1.gt.s%j) print*, 'ATTENTION: particle is faster than 10*v_t'
@@ -829,7 +830,7 @@ end subroutine treat_particles_that_are_lost_but_should_not_be
 
 subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species, boole_diffusion_coefficient)
 
-    use gorilla_applets_types_mod, only: in, start
+    use gorilla_applets_types_mod, only: in, start, s
     use tetra_physics_mod, only: tetra_physics
     use constants, only: ev2erg, pi
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
@@ -845,6 +846,10 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
 
     x = tetra_physics(ind_tetr)%x1 + z_save
     start%weight(n,species) = start%weight(n,species)*abs((tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save)))
+    if (boole_diffusion_coefficient) then
+    start%weight(n,species) = start%weight(n,species)/&
+    (start%energy(n,species)**3.0d0*exp(-start%energy(n,species)/s%temperature)/(6*s%temperature**4)) !the last term is the integral of the function from zero to inf
+    endif
 
     if (in%boole_linear_density_simulation) then
         start%weight(n,species) = start%weight(n,species)*(1.0_dp-0.9_dp*x(1))
@@ -980,6 +985,7 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
     integer :: i
     integer, intent(in), optional :: n_particles_in
     integer :: n_particles
+    real(dp), dimension(:,:), allocatable :: radial_transport_energies
 
     if (present(species_in)) then 
         allocate(species(size(species_in)))
@@ -999,8 +1005,13 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
 
     start%pitch(:,species) = 2*rand_matrix(4,:,:)-1 !pitch parameter
     start%energy(:,species) = in%energy_eV
-    if (in%boole_boltzmann_energies.or.boole_diffusion_coefficient) then
+    if (in%boole_boltzmann_energies) then
         start%energy(:,species) = start%epsilon_max*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
+    endif
+    if (boole_diffusion_coefficient) then
+        allocate(radial_transport_energies(n_particles,size(species)))
+        call generate_distribution_x3_exp_neg_x(start%epsilon_max,radial_transport_energies)
+        start%energy(:,species) = radial_transport_energies*in%energy_eV !boltzmann energy distribution
     endif
     
     if (in%boole_antithetic_variate) then
@@ -1083,7 +1094,6 @@ subroutine calc_s_shell_volumes
 
 end subroutine calc_s_shell_volumes
 
-
 subroutine calc_electron_diffusion_coefficients !call this before the first ion pushing
 
     use gorilla_applets_types_mod, only: in, dc, start, s
@@ -1100,7 +1110,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str
 
-    s%n_particles = 100
+    s%n_particles = 300
 
     allocate(rand_matrix(5,s%n_particles,1))
     allocate(dc%s_vertices(grid_size(1)+1))
@@ -1113,6 +1123,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
 
     s%k = 1000
     s%j = 100
+    s%temperature = 2.0_dp*in%energy_eV
 
     allocate(s%delta_s(s%k))
     allocate(s%delta_s_squared(s%k))
@@ -1271,5 +1282,45 @@ subroutine calc_electron_density !call this after every ion pushing sequence
     enddo
 
 end subroutine calc_electron_density
+
+subroutine generate_distribution_x3_exp_neg_x(b, output_array)
+
+     use gorilla_applets_types_mod, only: s, in
+
+    real(dp), dimension(:,:), intent(out) :: output_array
+    real(dp), intent(in) :: b
+    
+    real(dp), dimension(:), allocatable :: uniform_random
+    real(dp) :: x, y, max_value
+    integer :: j, accept_count, i, num_cols, row, num_rows
+
+    num_cols = size(output_array, 1)
+    num_rows = size(output_array, 2)
+    allocate(uniform_random(num_cols))
+
+    max_value = 3.0_dp**3.0_dp * (s%temperature/in%energy_eV)**3.0_dp*exp(-3.0_dp)
+    
+    do row = 1, num_rows
+        accept_count = 0
+        
+        do while (accept_count < num_cols)
+            call random_number(uniform_random)
+            
+            do j = 1, num_cols
+                if (accept_count >= num_cols) exit
+                
+                x = b * uniform_random(j)
+                y = x**3.0_dp * exp(-x/(s%temperature/in%energy_eV))
+                
+                call random_number(uniform_random(j))
+                if (uniform_random(j) * max_value <= y) then
+                    accept_count = accept_count + 1
+                    output_array(accept_count, row) = x
+                endif
+            enddo
+        enddo
+    enddo
+
+end subroutine generate_distribution_x3_exp_neg_x
 
 end module utils_self_consistent_ef_mod

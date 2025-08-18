@@ -388,7 +388,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
         c%temp_mat(i,:) = sum(c%temp_mat(i,:))/ntetr
         if (coord_system.eq.1) c%dens_mat(i,:) = sum(c%dens_mat(i,:))/ntetr
     enddo
-    s%temperature = 2.0_dp*in%energy_eV
+    
     if (coord_system.eq.2) c%temp_mat(2,:) = s%temperature
 
 
@@ -619,5 +619,63 @@ subroutine analyse_particle_weight_distribution
     print*, "average particle weight = ", average_weight
 
 end subroutine analyse_particle_weight_distribution
+
+function integrate_function(func, a, b, n) result(integral)
+
+    implicit none
+
+    interface
+        function func(xx)
+            use, intrinsic :: iso_fortran_env, only: dp => real64
+            real(dp), intent(in) :: xx
+            real(dp) :: func
+        end function func
+    end interface
+
+    real(dp), intent(in) :: a, b
+    integer, intent(in) :: n
+    real(dp) :: integral
+
+    real(dp) :: h, x
+    integer :: i
+
+    if (n <= 0) then
+        integral = 0.0_dp
+        return
+    end if
+
+    h = (b - a) / real(n, dp)
+    integral = 0.5_dp * (func(a) + func(b))
+
+    do i = 1, n - 1
+        x = a + real(i, dp) * h
+        integral = integral + func(x)
+    end do
+
+    integral = integral * h
+
+end function integrate_function
+
+function x3_exp_neg_x(x) result(f)
+
+    use gorilla_applets_types_mod, only: s, in
+
+    implicit none
+    real(dp), intent(in) :: x
+    real(dp) :: f
+    
+    f = x**7 * exp(-x**2/(s%temperature/in%energy_eV))
+end function x3_exp_neg_x
+
+function x2_exp_minus_x2(x) result(f)
+
+    use gorilla_applets_types_mod, only: s, in
+
+    implicit none
+    real(dp), intent(in) :: x
+    real(dp) :: f
+    
+    f = x**2 * exp(-x**2/(s%temperature/in%energy_eV))
+end function x2_exp_minus_x2
 
 end module utils_data_pre_and_post_processing_mod
