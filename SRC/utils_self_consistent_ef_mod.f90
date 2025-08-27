@@ -847,8 +847,9 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     x = tetra_physics(ind_tetr)%x1 + z_save
     start%weight(n,species) = start%weight(n,species)*abs((tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save)))
     if (boole_diffusion_coefficient) then
-    start%weight(n,species) = start%weight(n,species)/&
-    (start%energy(n,species)**3.0d0*exp(-start%energy(n,species)/s%temperature)/(6*s%temperature**4)) !the last term is the integral of the function from zero to inf
+        start%weight(n,species) = start%weight(n,species)/  &
+        (sqrt(start%energy(n,species)/s%temperature)*exp(-start%energy(n,species)/s%temperature)/(s%temperature*ev2erg*sqrt(pi)/2))
+        !the last term is the integral of the function from zero to inf over energy in correct units
     endif
 
     if (in%boole_linear_density_simulation) then
@@ -857,13 +858,18 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
 
     if (in%boole_boltzmann_energies.or.boole_diffusion_coefficient) then
         phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
-        start%weight(n,species) = start%weight(n,species)*&
-                                  start%epsilon_max*in%energy_eV*ev2erg*2/sqrt(pi)*sqrt(start%energy(n,species)*ev2erg)
+        start%weight(n,species) = start%weight(n,species)*2/sqrt(pi)*sqrt(start%energy(n,species)*ev2erg)
+        if (.not.boole_diffusion_coefficient) then 
+            start%weight(n,species) = start%weight(n,species)*start%epsilon_max*in%energy_eV*ev2erg
+        endif
         if (.not. in%boole_linear_temperature_simulation) then
-            start%weight(n,species) =start%weight(n,species) /(in%energy_eV*ev2erg)**1.5_dp* &
-                        & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/(in%energy_eV*ev2erg))
+            temperature = in%energy_eV*ev2erg
+            if (boole_diffusion_coefficient) temperature = s%temperature*ev2erg
+            start%weight(n,species) =start%weight(n,species)/temperature**1.5_dp* &
+                        & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
         else
             temperature = in%energy_eV*ev2erg*(1.0_dp-0.9*x(1))
+            if (boole_diffusion_coefficient) temperature = s%temperature*ev2erg*(1.0_dp-0.9*x(1))
             start%weight(n,species) = start%weight(n,species)/temperature**1.5_dp* &
             & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
         endif
@@ -975,7 +981,7 @@ end subroutine set_starting_positions
 
 subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diffusion_coefficient_in,species_in,n_particles_in)
 
-    use gorilla_applets_types_mod, only: in, start
+    use gorilla_applets_types_mod, only: in, start, s
 
     real(dp), dimension(:,:,:), intent(in) :: rand_matrix
     integer, dimension(:), intent(in), optional :: species_in
@@ -1010,8 +1016,8 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
     endif
     if (boole_diffusion_coefficient) then
         allocate(radial_transport_energies(n_particles,size(species)))
-        call generate_distribution_x3_exp_neg_x(start%epsilon_max,radial_transport_energies)
-        start%energy(:,species) = radial_transport_energies*in%energy_eV !boltzmann energy distribution
+        call generate_distribution_sqrt_x_exp_neg_x(start%epsilon_max,radial_transport_energies)
+        start%energy(:,species) = radial_transport_energies*s%temperature !boltzmann energy distribution
     endif
     
     if (in%boole_antithetic_variate) then
@@ -1096,13 +1102,13 @@ end subroutine calc_s_shell_volumes
 
 subroutine calc_electron_diffusion_coefficients !call this before the first ion pushing
 
-    use gorilla_applets_types_mod, only: in, dc, start, s
+    use gorilla_applets_types_mod, only: in, dc, start, s, g
     use tetra_grid_settings_mod, only: grid_size
     use tetra_grid_mod, only: verts_sthetaphi
     use utils_data_pre_and_post_processing_mod, only: prepare_next_round_of_parallelised_particle_pushing, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, initialize_exit_data
     use llsq_mod, only: llsq
-    use tetra_physics_mod, only: particle_mass
+    use tetra_physics_mod, only: particle_mass,tetra_physics
     use russian_roulette_mod, only: prepare_russian_roulette
 
     integer :: ns, i, n_particles
@@ -1283,7 +1289,7 @@ subroutine calc_electron_density !call this after every ion pushing sequence
 
 end subroutine calc_electron_density
 
-subroutine generate_distribution_x3_exp_neg_x(b, output_array)
+subroutine generate_distribution_x4_exp_neg_x(b, output_array)
 
      use gorilla_applets_types_mod, only: s, in
 
@@ -1298,7 +1304,7 @@ subroutine generate_distribution_x3_exp_neg_x(b, output_array)
     num_rows = size(output_array, 2)
     allocate(uniform_random(num_cols))
 
-    max_value = 3.0_dp**3.0_dp * (s%temperature/in%energy_eV)**3.0_dp*exp(-3.0_dp)
+    max_value = 4.0_dp**4.0_dp * (s%temperature/in%energy_eV)**4.0_dp*exp(-4.0_dp)
     
     do row = 1, num_rows
         accept_count = 0
@@ -1310,7 +1316,7 @@ subroutine generate_distribution_x3_exp_neg_x(b, output_array)
                 if (accept_count >= num_cols) exit
                 
                 x = b * uniform_random(j)
-                y = x**3.0_dp * exp(-x/(s%temperature/in%energy_eV))
+                y = x**4.0_dp * exp(-x/(s%temperature/in%energy_eV))
                 
                 call random_number(uniform_random(j))
                 if (uniform_random(j) * max_value <= y) then
@@ -1321,6 +1327,46 @@ subroutine generate_distribution_x3_exp_neg_x(b, output_array)
         enddo
     enddo
 
-end subroutine generate_distribution_x3_exp_neg_x
+end subroutine generate_distribution_x4_exp_neg_x
+
+subroutine generate_distribution_sqrt_x_exp_neg_x(b, output_array)
+
+    use gorilla_applets_types_mod, only: s, in
+
+    real(dp), dimension(:,:), intent(out) :: output_array
+    real(dp), intent(in) :: b
+    
+    real(dp), dimension(:), allocatable :: uniform_random
+    real(dp) :: x, y, max_value
+    integer :: j, accept_count, i, num_cols, row, num_rows
+
+    num_cols = size(output_array, 1)
+    num_rows = size(output_array, 2)
+    allocate(uniform_random(num_cols))
+
+    max_value = sqrt(0.5_dp) * exp(-0.5_dp)
+    
+    do row = 1, num_rows
+        accept_count = 0
+        
+        do while (accept_count < num_cols)
+            call random_number(uniform_random)
+            
+            do j = 1, num_cols
+                if (accept_count >= num_cols) exit
+                
+                x = b * uniform_random(j)
+                y = sqrt(x) * exp(-x)
+                
+                call random_number(uniform_random(j))
+                if (uniform_random(j) * max_value <= y) then
+                    accept_count = accept_count + 1
+                    output_array(accept_count, row) = x
+                endif
+            enddo
+        enddo
+    enddo
+
+end subroutine generate_distribution_sqrt_x_exp_neg_x
 
 end module utils_self_consistent_ef_mod
