@@ -313,7 +313,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
                 if (t%remain.gt.t_step_s) boole_t_finished = .false.
                 t_step_s = start%t(species)/s%k + t_pass
                 local_counter%tetr_pushings = local_counter%tetr_pushings -1
-                normalisation = start%weight(n,species)/(s%n_particles*in%density*g%total_volume)!(rr%starting_weight*s%n_particles)
+                normalisation = start%weight(n,species)/(s%n_particles*in%density*g%total_volume)
                 !$omp critical
                 s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)*normalisation
                 s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2*normalisation

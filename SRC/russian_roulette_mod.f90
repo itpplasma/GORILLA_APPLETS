@@ -12,7 +12,7 @@ module russian_roulette_mod
     integer, dimension(:), allocatable     :: boundary_fluxes_minus
     integer                                :: maximum_storage = 0
     logical                                :: boole_russian_roulette = .true.
-    real(dp)                               :: starting_weight
+    logical                                :: boole_weight_windows = .true.
     end type russian_roulette_t
 
     type(russian_roulette_t) :: rr
@@ -36,18 +36,29 @@ contains
 subroutine prepare_russian_roulette(species)
 
     use gorilla_applets_types_mod, only: start
-    use utils_data_pre_and_post_processing_mod, only: integrate_function, x3_exp_neg_x, x2_exp_minus_x2
 
     integer, intent(in) :: species
+    real(dp) :: v0, v_max
+    integer :: n_domains
+
+    n_domains = 10
+    v0 = start%v0(species)
+    v_max = v0*sqrt(start%epsilon_max)
+
+    if (.not.rr%boole_weight_windows) call prepare_rr_with_boundary_fluxes(n_domains,v0,v_max)
+    if (     rr%boole_weight_windows) call prepare_rr_with_weight_windows(n_domains,v0,v_max)
+
+end subroutine prepare_russian_roulette
+
+subroutine prepare_rr_with_boundary_fluxes(n_domains,v0,v_max)
+
+    use utils_data_pre_and_post_processing_mod, only: integrate_function, x3_exp_neg_x, x2_exp_minus_x2
+
     real(dp) :: v0, v_max
     integer :: n_domains, j
     real(dp) :: integral1, integral2, normalise_integral1, normalise_integral2
     real(dp) :: lower_limit, upper_limit
     integer :: n_intervals
-
-    n_domains = 10
-    v0 = start%v0(species)
-    v_max = v0*sqrt(start%epsilon_max)
 
     allocate(rr%boundary_fluxes_plus(n_domains+1))
     rr%boundary_fluxes_plus = 0
@@ -61,8 +72,6 @@ subroutine prepare_russian_roulette(species)
     allocate(rr%roulette_numbers(n_domains+1))
     rr%roulette_numbers(1) = 1.0_dp
     rr%roulette_numbers(n_domains+1) = 1.0_dp
-
-    rr%starting_weight = start%weight(1,species)
 
     n_intervals = 1000
 
@@ -92,9 +101,63 @@ subroutine prepare_russian_roulette(species)
         rr%roulette_numbers(j) = rr%roulette_numbers(j)*integral1/integral2
     enddo
 
-end subroutine prepare_russian_roulette
+end subroutine prepare_rr_with_boundary_fluxes
+
+subroutine prepare_rr_with_weight_windows(n_domains,v0,v_max)
+
+    use utils_data_pre_and_post_processing_mod, only: integrate_function, x2_exp_minus_x2
+    use gorilla_applets_types_mod, only : g, in
+
+    real(dp) :: v0, v_max
+    integer :: n_domains, j
+    real(dp) :: weights_before_redistribution, factor
+    real(dp), dimension(:), allocatable :: maxwellian_integrals
+    real(dp) :: lower_limit, upper_limit
+    integer :: n_intervals
+
+    allocate(rr%velocity_bounds(n_domains+1))
+    rr%velocity_bounds = [(v_max/n_domains*(j-1), j=1,n_domains+1)]
+    allocate(rr%roulette_numbers(n_domains))
+    allocate(maxwellian_integrals(n_domains))
+
+    weights_before_redistribution = g%total_volume*in%density
+
+    n_intervals = 1000
+
+    do j = 1,n_domains
+        lower_limit = rr%velocity_bounds(j)/v0
+        upper_limit = rr%velocity_bounds(j+1)/v0
+
+        rr%roulette_numbers(j) = 1.0_dp/(upper_limit**8 - lower_limit**8)
+        maxwellian_integrals(j) = integrate_function(x2_exp_minus_x2, lower_limit, upper_limit, n_intervals)
+    enddo
+
+    factor = sum(weights_before_redistribution*maxwellian_integrals/rr%roulette_numbers)
+    rr%roulette_numbers = rr%roulette_numbers*factor
+
+end subroutine prepare_rr_with_weight_windows
+
 
 subroutine play_russian_roulette(vpar_save,vperp_save,vpar,vperp,t,x,ind_tetr,iface,species,n,local_rr)
+
+    real(dp), intent(in) :: vpar_save,vperp_save,vpar,vperp
+    integer, intent(in) :: species, ind_tetr, iface, n
+    type(time_t), intent(in) :: t
+    real(dp), dimension(3) :: x
+    type(local_rr_t) :: local_rr
+    real(dp) :: v_old,v_new,roulette_number, xi, splitting_number, passing_probability
+    integer :: ind_old,ind_new,n_domains,ind_boundary, j, splitting_id, i
+    integer, dimension(2) :: nearest_ints
+
+    if (rr%boole_weight_windows) then 
+        call play_rr_with_weight_windows(vpar,vperp,t,x,ind_tetr,iface,species,n,local_rr)
+    else
+        call play_rr_with_boundary_fluxes(vpar_save,vperp_save,vpar,vperp,t,x,ind_tetr,iface,species,n,local_rr)
+    endif
+
+end subroutine play_russian_roulette
+
+subroutine play_rr_with_boundary_fluxes(vpar_save,vperp_save,vpar,vperp,t,x,ind_tetr,iface,species,n,local_rr)
 
     use binsrc_mod, only: binsrc
     use gorilla_applets_types_mod, only: start, time_t
@@ -175,7 +238,38 @@ subroutine play_russian_roulette(vpar_save,vperp_save,vpar,vperp,t,x,ind_tetr,if
         start%weight(n,species) = start%weight(n,species)/splitting_number
     endif
 
-end subroutine play_russian_roulette
+end subroutine play_rr_with_boundary_fluxes
+
+subroutine play_rr_with_weight_windows(vpar,vperp,t,x,ind_tetr,iface,species,n,local_rr)
+
+    use gorilla_applets_types_mod, only: start, time_t
+    use binsrc_mod, only: binsrc
+
+    real(dp), intent(in) :: vpar,vperp
+    integer, intent(in) :: species, ind_tetr, iface, n
+    type(time_t), intent(in) :: t
+    real(dp), dimension(3) :: x
+    type(local_rr_t) :: local_rr
+    real(dp) :: v, factor
+    integer :: ind_v, n_domains
+
+    v = sqrt(vpar**2+vperp**2)
+
+    n_domains = size(rr%velocity_bounds)-1
+    call binsrc(rr%velocity_bounds,1,n_domains+1,v,ind_v)
+    ind_v = ind_v - 1
+
+    factor = start%weight(n,species)/rr%roulette_numbers(ind_v)
+
+    if ((factor.gt.0.5_dp).and.(factor.lt.2.0_dp)) return
+
+    if (factor.lt.0.5_dp) then
+        !play roulette and maybe eliminate particle
+    else
+        !split particle
+    endif
+
+end subroutine play_rr_with_weight_windows
 
 subroutine initiate_local_rr(local_rr, i)
 

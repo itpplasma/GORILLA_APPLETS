@@ -658,24 +658,20 @@ end function integrate_function
 
 function x3_exp_neg_x(x) result(f)
 
-    use gorilla_applets_types_mod, only: s, in
-
     implicit none
     real(dp), intent(in) :: x
     real(dp) :: f
     
-    f = x**7 * exp(-x**2/(s%temperature/in%energy_eV))
+    f = x**7 * exp(-x**2)
 end function x3_exp_neg_x
 
 function x2_exp_minus_x2(x) result(f)
 
-    use gorilla_applets_types_mod, only: s, in
-
     implicit none
     real(dp), intent(in) :: x
     real(dp) :: f
     
-    f = x**2 * exp(-x**2/(s%temperature/in%energy_eV))
+    f = x**2 * exp(-x**2)
 end function x2_exp_minus_x2
 
 end module utils_data_pre_and_post_processing_mod
