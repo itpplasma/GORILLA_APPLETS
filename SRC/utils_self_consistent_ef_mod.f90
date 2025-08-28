@@ -172,8 +172,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                         v = sqrt(vpar**2+vperp**2)
                         reals = (/vpar,vperp,t%confined,t%remain,t%step,x/)
                         integers = (/ind_tetr,iface/)
-                        call play_russian_roulette(start%weight(n,species),v,v_save,reals,integers,vpar,vperp,t,x,&
-                        ind_tetr,iface,local_rr)
+                        call play_russian_roulette(start%weight(n,species),v,v_save,reals,integers,local_rr)
                     endif
                 endif
 
@@ -347,7 +346,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         if (rr%boole_russian_roulette) then 
             reals = (/vpar,vperp,t%confined,t%remain,t%step,x/)
             integers = (/ind_tetr,iface/)
-            call play_russian_roulette(start%weight(n,species),v,v_save,reals,integers,vpar,vperp,t,x,ind_tetr,iface,local_rr)
+            call play_russian_roulette(start%weight(n,species),v,v_save,reals,integers,local_rr)
         endif
 
         if(boole_t_finished.or.local_rr%boole_eliminated) then !Orbit stops within cell, because "flight"-time t%step has finished
@@ -371,18 +370,18 @@ subroutine initiate_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,p
     type(particle_status_t) :: particle_status
     integer :: id
 
-    call prepare_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,id)
+    call prepare_next_split_particle(local_rr,id)
 
     if (local_rr%boole_eliminated.eqv..false.) then
 
-        ! vpar = local_rr%particle_state_reals(id,1)
-        ! vperp = local_rr%particle_state_reals(id,2)
-        ! t%confined = local_rr%particle_state_reals(id,3)
-        ! t%remain = local_rr%particle_state_reals(id,4)
-        ! t%step = local_rr%particle_state_reals(id,5)
-        ! x = local_rr%particle_state_reals(id,6:8)
-        ! ind_tetr = local_rr%particle_state_integers(1)
-        ! iface = local_rr%particle_state_integers(2)
+        vpar =       local_rr%particle_state_reals(id,1)
+        vperp =      local_rr%particle_state_reals(id,2)
+        t%confined = local_rr%particle_state_reals(id,3)
+        t%remain =   local_rr%particle_state_reals(id,4)
+        t%step =     local_rr%particle_state_reals(id,5)
+        x =          local_rr%particle_state_reals(id,6:8)
+        ind_tetr =   local_rr%particle_state_integers(id,1)
+        iface =      local_rr%particle_state_integers(id,2)
 
         particle_status%lost = .false.
         particle_status%initialized = .true.

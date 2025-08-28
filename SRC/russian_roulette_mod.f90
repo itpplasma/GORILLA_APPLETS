@@ -1,7 +1,6 @@
 module russian_roulette_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use gorilla_applets_types_mod, only: time_t
 
     implicit none
 
@@ -23,14 +22,6 @@ module russian_roulette_mod
     integer,  dimension(:),   allocatable   :: multiplicity
     real(dp), dimension(:),   allocatable   :: v
     real(dp), dimension(:),   allocatable   :: weight
-
-    real(dp), dimension(:,:), allocatable   :: x
-    real(dp), dimension(:),   allocatable   :: vpar
-    real(dp), dimension(:),   allocatable   :: vperp
-    integer,  dimension(:),   allocatable   :: ind_tetr
-    integer,  dimension(:),   allocatable   :: iface
-    type(time_t), dimension(:), allocatable :: t
-
     real(dp), dimension(:,:), allocatable   :: particle_state_reals
     integer, dimension(:,:), allocatable    :: particle_state_integers
     end type local_rr_t
@@ -138,36 +129,28 @@ end subroutine prepare_rr_with_weight_windows
 !Preparation of russian roulette finished, start playing russian rouletette
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine play_russian_roulette(weight,v,v_old,reals,integers,vpar,vperp,t,x,ind_tetr,iface,local_rr)
+subroutine play_russian_roulette(weight,v,v_old,reals,integers,local_rr)
 
-    real(dp), intent(in) :: v,v_old,vpar,vperp
+    real(dp), intent(in) :: v,v_old
     real(dp),dimension(n_reals), intent(in) :: reals
     integer, dimension(n_integers), intent(in) :: integers
     real(dp), intent(inout) :: weight
-    integer, intent(in) :: ind_tetr, iface
-    type(time_t), intent(in) :: t
-    real(dp), dimension(3) :: x
     type(local_rr_t) :: local_rr
 
     if (rr%boole_weight_windows) then 
-        call play_rr_with_weight_windows(weight,v,reals, integers, vpar,vperp,t,x,ind_tetr,iface,local_rr)
+        call play_rr_with_weight_windows(weight,v,reals, integers,local_rr)
     else
-        call play_rr_with_boundary_fluxes(weight,v,v_old,reals, integers, vpar,vperp,t,x,ind_tetr,iface,local_rr)
+        call play_rr_with_boundary_fluxes(weight,v,v_old,reals, integers,local_rr)
     endif
 
 end subroutine play_russian_roulette
 
-subroutine play_rr_with_boundary_fluxes(weight,v,v_old,reals, integers,vpar,vperp,t,x,ind_tetr,iface,local_rr)
+subroutine play_rr_with_boundary_fluxes(weight,v,v_old,reals, integers,local_rr)
 
-    use gorilla_applets_types_mod, only: time_t
-
-    real(dp), intent(in) :: v,v_old,vpar,vperp
+    real(dp), intent(in) :: v,v_old
     real(dp),dimension(n_reals), intent(in) :: reals
     integer, dimension(n_integers), intent(in) :: integers
     real(dp), intent(inout) :: weight
-    integer, intent(in) :: ind_tetr, iface
-    type(time_t), intent(in) :: t
-    real(dp), dimension(3) :: x
     type(local_rr_t) :: local_rr
     real(dp) :: roulette_number, xi, splitting_number, passing_probability
     integer :: ind_old,ind_new,n_domains,ind_boundary
@@ -203,22 +186,19 @@ subroutine play_rr_with_boundary_fluxes(weight,v,v_old,reals, integers,vpar,vper
         endif
     else
         splitting_number = 1.0_dp/roulette_number
-        call split_particle(weight,reals,integers,vpar,vperp,t,x,ind_tetr,iface,local_rr,splitting_number)
+        call split_particle(weight,v,reals,integers,local_rr,splitting_number)
     endif
 
 end subroutine play_rr_with_boundary_fluxes
 
-subroutine play_rr_with_weight_windows(weight, v, reals, integers, vpar,vperp,t,x,ind_tetr,iface,local_rr)
+subroutine play_rr_with_weight_windows(weight, v, reals, integers,local_rr)
 
     use gorilla_applets_types_mod, only: time_t
 
-    real(dp), intent(in) :: vpar,vperp, v
+    real(dp), intent(in) :: v
     real(dp),dimension(n_reals), intent(in) :: reals
     integer, dimension(n_integers), intent(in) :: integers
     real(dp), intent(inout) :: weight
-    integer, intent(in) :: ind_tetr, iface
-    type(time_t), intent(in) :: t
-    real(dp), dimension(3) :: x
     type(local_rr_t) :: local_rr
     real(dp) :: factor, xi
     integer :: ind_v, n_domains
@@ -237,22 +217,17 @@ subroutine play_rr_with_weight_windows(weight, v, reals, integers, vpar,vperp,t,
             local_rr%boole_eliminated = .true.
         endif
     elseif (factor.gt.2.0_dp) then
-        call split_particle(weight,reals,integers,vpar,vperp,t,x,ind_tetr,iface,local_rr,factor)
+        call split_particle(weight,v,reals,integers,local_rr,factor)
     endif
 
 end subroutine play_rr_with_weight_windows
 
-subroutine split_particle(weight,reals,integers,vpar,vperp,t,x,ind_tetr,iface,local_rr,splitting_number)
+subroutine split_particle(weight,v,reals,integers,local_rr,splitting_number)
 
-    use gorilla_applets_types_mod, only: time_t
-
-    real(dp), intent(in) :: vpar,vperp,splitting_number
+    real(dp), intent(in) :: v,splitting_number
     real(dp),dimension(n_reals), intent(in) :: reals
     integer, dimension(n_integers), intent(in) :: integers
     real(dp), intent(inout) :: weight
-    integer, intent(in) :: ind_tetr, iface
-    type(time_t), intent(in) :: t
-    real(dp), dimension(3) :: x
     type(local_rr_t) :: local_rr
     real(dp) :: xi
     integer :: j, splitting_id, i
@@ -275,16 +250,9 @@ subroutine split_particle(weight,reals,integers,vpar,vperp,t,x,ind_tetr,iface,lo
     endif
 
     if (nearest_ints(j).gt.1) then
-        local_rr%x(:,splitting_id) = x
-        local_rr%vpar(splitting_id) = vpar
-        local_rr%vperp(splitting_id) = vperp
-        local_rr%v(splitting_id) = sqrt(vpar**2+vperp**2)
+        local_rr%v(splitting_id) = v
         local_rr%weight(splitting_id) = weight/splitting_number
-        local_rr%ind_tetr(splitting_id) = ind_tetr
-        local_rr%iface(splitting_id) = iface
         local_rr%multiplicity(splitting_id) = nearest_ints(j)-1
-        local_rr%t(splitting_id) = t
-
         local_rr%particle_state_reals(splitting_id,:) = reals
         local_rr%particle_state_integers(splitting_id,:) = integers
         !$omp critical
@@ -303,18 +271,13 @@ subroutine initiate_local_rr(local_rr, i)
     if (.not.allocated(local_rr%weight_deposits)) allocate(local_rr%weight_deposits(size(rr%boundary_fluxes_plus)))
     local_rr%weight_deposits = 0.0_dp
     local_rr%boole_eliminated = .false.
-    if (.not.allocated(local_rr%x))                       allocate(local_rr%x(3,i))
-    if (.not.allocated(local_rr%vpar))                    allocate(local_rr%vpar(i))
-    if (.not.allocated(local_rr%vperp))                   allocate(local_rr%vperp(i))
-    if (.not.allocated(local_rr%weight))                  allocate(local_rr%weight(i))
-    if (.not.allocated(local_rr%ind_tetr))                allocate(local_rr%ind_tetr(i))
-    if (.not.allocated(local_rr%iface))                   allocate(local_rr%iface(i))
+
     if (.not.allocated(local_rr%multiplicity))            allocate(local_rr%multiplicity(i))
+    if (.not.allocated(local_rr%weight))                  allocate(local_rr%weight(i))
     local_rr%multiplicity = 0
     if (.not.allocated(local_rr%v))                       allocate(local_rr%v(i))
     local_rr%v = 0.0_dp
-    if (.not.allocated(local_rr%t))                       allocate(local_rr%t(i))
-
+    
     if (.not.allocated(local_rr%particle_state_integers)) allocate(local_rr%particle_state_integers(i,n_integers))
     if (.not.allocated(local_rr%particle_state_reals))    allocate(local_rr%particle_state_reals(i,n_reals))
 
@@ -347,13 +310,6 @@ subroutine copy_local_rr(rr_small,rr_big)
     rr_big%v(1:size_small) = rr_small%v
     rr_big%weight(1:size_small) = rr_small%weight
 
-    rr_big%x(:,1:size_small) = rr_small%x
-    rr_big%vpar(1:size_small) = rr_small%vpar
-    rr_big%vperp(1:size_small) = rr_small%vperp
-    rr_big%ind_tetr(1:size_small) = rr_small%ind_tetr
-    rr_big%iface(1:size_small) = rr_small%iface
-    rr_big%t(1:size_small) = rr_small%t
-
     rr_big%particle_state_integers(1:size_small,:) = rr_small%particle_state_integers
     rr_big%particle_state_reals(1:size_small,:) = rr_small%particle_state_reals
 
@@ -369,47 +325,21 @@ subroutine move_allocation(rr_small,rr_big)
     call move_alloc(rr_big%multiplicity, rr_small%multiplicity)
     call move_alloc(rr_big%v, rr_small%v)
     call move_alloc(rr_big%weight, rr_small%weight)
-
-    call move_alloc(rr_big%x, rr_small%x)
-    call move_alloc(rr_big%vpar, rr_small%vpar)
-    call move_alloc(rr_big%vperp, rr_small%vperp)
-    call move_alloc(rr_big%ind_tetr, rr_small%ind_tetr)
-    call move_alloc(rr_big%iface, rr_small%iface)
-    call move_alloc(rr_big%t, rr_small%t)
-
     call move_alloc(rr_big%particle_state_integers, rr_small%particle_state_integers)
     call move_alloc(rr_big%particle_state_reals, rr_small%particle_state_reals)
 
 end subroutine move_allocation
 
-subroutine prepare_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,id)
+subroutine prepare_next_split_particle(local_rr,id)
 
     type(local_rr_t):: local_rr
-
-    real(dp) :: vpar,vperp
-    integer :: ind_tetr, iface
-    type(time_t) :: t
-    real(dp), dimension(3) :: x
     integer, intent(out) :: id 
 
     id = maxloc(local_rr%v,dim=1)
 
     if (local_rr%v(id).eq.0.0_dp) then
         local_rr%boole_eliminated = .true.
-    else 
-
-
-
-
-        vpar = local_rr%vpar(id)
-        vperp = local_rr%vperp(id)
-        t = local_rr%t(id)
-        x = local_rr%x(:,id)
-        ind_tetr = local_rr%ind_tetr(id)
-        iface = local_rr%iface(id)
-
-
-
+    else
         local_rr%multiplicity(id) = local_rr%multiplicity(id) -1
         if (local_rr%multiplicity(id).eq.0) then
              local_rr%v(id) = 0.0_dp
