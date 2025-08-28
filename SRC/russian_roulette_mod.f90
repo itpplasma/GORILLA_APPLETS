@@ -1,7 +1,7 @@
 module russian_roulette_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use gorilla_applets_types_mod, only: particle_status_t, time_t
+    use gorilla_applets_types_mod, only: time_t
 
     implicit none
 
@@ -18,41 +18,34 @@ module russian_roulette_mod
     type(russian_roulette_t) :: rr
 
     type local_rr_t
-    real(dp), dimension(:), allocatable    :: weight_deposits
     logical :: boole_eliminated = .false.
-    real(dp), dimension(:,:), allocatable :: x
-    real(dp), dimension(:),   allocatable :: vpar
-    real(dp), dimension(:),   allocatable :: vperp
-    real(dp), dimension(:),   allocatable :: weight
-    integer,  dimension(:),   allocatable :: ind_tetr
-    integer,  dimension(:),   allocatable :: iface
-    integer,  dimension(:),   allocatable :: multiplicity
-    real(dp), dimension(:),   allocatable :: v
+    real(dp), dimension(:), allocatable     :: weight_deposits
+    real(dp), dimension(:,:), allocatable   :: x
+    real(dp), dimension(:),   allocatable   :: vpar
+    real(dp), dimension(:),   allocatable   :: vperp
+    real(dp), dimension(:),   allocatable   :: weight
+    integer,  dimension(:),   allocatable   :: ind_tetr
+    integer,  dimension(:),   allocatable   :: iface
+    integer,  dimension(:),   allocatable   :: multiplicity
+    real(dp), dimension(:),   allocatable   :: v
     type(time_t), dimension(:), allocatable :: t
     end type local_rr_t
 
 contains
 
-subroutine prepare_russian_roulette(species)
+subroutine prepare_russian_roulette(v0,v_max,weights_before_redistribution)
 
-    use gorilla_applets_types_mod, only: start
-
-    integer, intent(in) :: species
-    real(dp) :: v0, v_max
+    real(dp), intent(in) :: v0, v_max, weights_before_redistribution
     integer :: n_domains
 
     n_domains = 10
-    v0 = start%v0(species)
-    v_max = v0*sqrt(start%epsilon_max)
 
     if (.not.rr%boole_weight_windows) call prepare_rr_with_boundary_fluxes(n_domains,v0,v_max)
-    if (     rr%boole_weight_windows) call prepare_rr_with_weight_windows(n_domains,v0,v_max)
+    if (     rr%boole_weight_windows) call prepare_rr_with_weight_windows(n_domains,v0,v_max,weights_before_redistribution)
 
 end subroutine prepare_russian_roulette
 
 subroutine prepare_rr_with_boundary_fluxes(n_domains,v0,v_max)
-
-    use utils_data_pre_and_post_processing_mod, only: integrate_function, x3_exp_neg_x, x2_exp_minus_x2
 
     real(dp) :: v0, v_max
     integer :: n_domains, j
@@ -103,10 +96,7 @@ subroutine prepare_rr_with_boundary_fluxes(n_domains,v0,v_max)
 
 end subroutine prepare_rr_with_boundary_fluxes
 
-subroutine prepare_rr_with_weight_windows(n_domains,v0,v_max)
-
-    use utils_data_pre_and_post_processing_mod, only: integrate_function, x2_exp_minus_x2
-    use gorilla_applets_types_mod, only : g, in
+subroutine prepare_rr_with_weight_windows(n_domains,v0,v_max,weights_before_redistribution)
 
     real(dp) :: v0, v_max
     integer :: n_domains, j
@@ -120,15 +110,13 @@ subroutine prepare_rr_with_weight_windows(n_domains,v0,v_max)
     allocate(rr%roulette_numbers(n_domains))
     allocate(maxwellian_integrals(n_domains))
 
-    weights_before_redistribution = g%total_volume*in%density
-
     n_intervals = 1000
 
     do j = 1,n_domains
         lower_limit = rr%velocity_bounds(j)/v0
         upper_limit = rr%velocity_bounds(j+1)/v0
 
-        rr%roulette_numbers(j) = 1.0_dp/(upper_limit**8 - lower_limit**8)
+        rr%roulette_numbers(j) = 1.0_dp/(((upper_limit + lower_limit)/2)**7+1)
         maxwellian_integrals(j) = integrate_function(x2_exp_minus_x2, lower_limit, upper_limit, n_intervals)
     enddo
 
@@ -145,9 +133,6 @@ subroutine play_russian_roulette(vpar_save,vperp_save,vpar,vperp,t,x,ind_tetr,if
     type(time_t), intent(in) :: t
     real(dp), dimension(3) :: x
     type(local_rr_t) :: local_rr
-    real(dp) :: v_old,v_new,roulette_number, xi, splitting_number, passing_probability
-    integer :: ind_old,ind_new,n_domains,ind_boundary, j, splitting_id, i
-    integer, dimension(2) :: nearest_ints
 
     if (rr%boole_weight_windows) then 
         call play_rr_with_weight_windows(vpar,vperp,t,x,ind_tetr,iface,species,n,local_rr)
@@ -159,7 +144,6 @@ end subroutine play_russian_roulette
 
 subroutine play_rr_with_boundary_fluxes(vpar_save,vperp_save,vpar,vperp,t,x,ind_tetr,iface,species,n,local_rr)
 
-    use binsrc_mod, only: binsrc
     use gorilla_applets_types_mod, only: start, time_t
 
     real(dp), intent(in) :: vpar_save,vperp_save,vpar,vperp
@@ -168,8 +152,7 @@ subroutine play_rr_with_boundary_fluxes(vpar_save,vperp_save,vpar,vperp,t,x,ind_
     real(dp), dimension(3) :: x
     type(local_rr_t) :: local_rr
     real(dp) :: v_old,v_new,roulette_number, xi, splitting_number, passing_probability
-    integer :: ind_old,ind_new,n_domains,ind_boundary, j, splitting_id, i
-    integer, dimension(2) :: nearest_ints
+    integer :: ind_old,ind_new,n_domains,ind_boundary
 
     v_old = sqrt(vpar_save**2+vperp_save**2)
     v_new = sqrt(vpar**2+vperp**2)
@@ -205,37 +188,7 @@ subroutine play_rr_with_boundary_fluxes(vpar_save,vperp_save,vpar,vperp,t,x,ind_
         endif
     else
         splitting_number = 1.0_dp/roulette_number
-        nearest_ints = (/floor(splitting_number),ceiling(splitting_number)/)
-        call random_number(xi)
-        if (xi.lt. (dble(nearest_ints(2))-splitting_number)) then
-            j = 1
-        else
-            j = 2
-        endif
-
-        splitting_id = findloc(local_rr%multiplicity,0,dim=1)
-
-        if (splitting_id.eq.0) then
-            i = size(local_rr%v)
-            call enlarge_local_rr(local_rr)
-            splitting_id = i+1
-        endif
-
-        if (nearest_ints(j).gt.1) then
-            local_rr%x(:,splitting_id) = x
-            local_rr%vpar(splitting_id) = vpar
-            local_rr%vperp(splitting_id) = vperp
-            local_rr%v(splitting_id) = sqrt(vpar**2+vperp**2)
-            local_rr%weight(splitting_id) = start%weight(n,species)/splitting_number
-            local_rr%ind_tetr(splitting_id) = ind_tetr
-            local_rr%iface(splitting_id) = iface
-            local_rr%multiplicity(splitting_id) = nearest_ints(j)-1
-            local_rr%t(splitting_id) = t
-            !$omp critical
-            rr%maximum_storage = max(rr%maximum_storage,splitting_id)
-            !$omp end critical
-        endif
-        start%weight(n,species) = start%weight(n,species)/splitting_number
+        call split_particle(vpar,vperp,t,x,ind_tetr,iface,species,n,local_rr,splitting_number)
     endif
 
 end subroutine play_rr_with_boundary_fluxes
@@ -243,14 +196,13 @@ end subroutine play_rr_with_boundary_fluxes
 subroutine play_rr_with_weight_windows(vpar,vperp,t,x,ind_tetr,iface,species,n,local_rr)
 
     use gorilla_applets_types_mod, only: start, time_t
-    use binsrc_mod, only: binsrc
 
     real(dp), intent(in) :: vpar,vperp
     integer, intent(in) :: species, ind_tetr, iface, n
     type(time_t), intent(in) :: t
     real(dp), dimension(3) :: x
     type(local_rr_t) :: local_rr
-    real(dp) :: v, factor
+    real(dp) :: v, factor, xi
     integer :: ind_v, n_domains
 
     v = sqrt(vpar**2+vperp**2)
@@ -261,15 +213,65 @@ subroutine play_rr_with_weight_windows(vpar,vperp,t,x,ind_tetr,iface,species,n,l
 
     factor = start%weight(n,species)/rr%roulette_numbers(ind_v)
 
-    if ((factor.gt.0.5_dp).and.(factor.lt.2.0_dp)) return
-
-    if (factor.lt.0.5_dp) then
-        !play roulette and maybe eliminate particle
-    else
-        !split particle
+    if (factor.lt.0.5_dp) then !play roulette and maybe eliminate particle
+        call random_number(xi)
+        if (xi.lt.factor) then
+            start%weight(n,species) =  start%weight(n,species)/factor
+        else
+            local_rr%boole_eliminated = .true.
+        endif
+    elseif (factor.gt.2.0_dp) then
+        call split_particle(vpar,vperp,t,x,ind_tetr,iface,species,n,local_rr,factor)
     endif
 
 end subroutine play_rr_with_weight_windows
+
+subroutine split_particle(vpar,vperp,t,x,ind_tetr,iface,species,n,local_rr,splitting_number)
+
+    use gorilla_applets_types_mod, only: start, time_t
+
+    real(dp), intent(in) :: vpar,vperp,splitting_number
+    integer, intent(in) :: species, ind_tetr, iface, n
+    type(time_t), intent(in) :: t
+    real(dp), dimension(3) :: x
+    type(local_rr_t) :: local_rr
+    real(dp) :: xi
+    integer :: j, splitting_id, i
+    integer, dimension(2) :: nearest_ints
+
+    nearest_ints = (/floor(splitting_number),ceiling(splitting_number)/)
+    call random_number(xi)
+    if (xi.lt. (dble(nearest_ints(2))-splitting_number)) then
+        j = 1
+    else
+        j = 2
+    endif
+
+    splitting_id = findloc(local_rr%multiplicity,0,dim=1)
+
+    if (splitting_id.eq.0) then
+        i = size(local_rr%v)
+        call enlarge_local_rr(local_rr)
+        splitting_id = i+1
+    endif
+
+    if (nearest_ints(j).gt.1) then
+        local_rr%x(:,splitting_id) = x
+        local_rr%vpar(splitting_id) = vpar
+        local_rr%vperp(splitting_id) = vperp
+        local_rr%v(splitting_id) = sqrt(vpar**2+vperp**2)
+        local_rr%weight(splitting_id) = start%weight(n,species)/splitting_number
+        local_rr%ind_tetr(splitting_id) = ind_tetr
+        local_rr%iface(splitting_id) = iface
+        local_rr%multiplicity(splitting_id) = nearest_ints(j)-1
+        local_rr%t(splitting_id) = t
+        !$omp critical
+        rr%maximum_storage = max(rr%maximum_storage,splitting_id)
+        !$omp end critical
+        start%weight(n,species) = start%weight(n,species)/nearest_ints(j)
+    endif
+
+end subroutine split_particle
 
 subroutine initiate_local_rr(local_rr, i)
 
@@ -303,7 +305,6 @@ subroutine enlarge_local_rr(local_rr)
     call initiate_local_rr(local_rr_for_movealloc,i+100)
     call copy_local_rr(local_rr,local_rr_for_movealloc)
     call move_allocation(local_rr,local_rr_for_movealloc)
-    print*, 'hello', i+100, size(local_rr%v), size(local_rr_for_movealloc%v)
 
 end subroutine enlarge_local_rr
 
@@ -382,5 +383,89 @@ subroutine initiate_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,p
     endif
 
 end subroutine initiate_next_split_particle
+
+subroutine binsrc(p,nmin,nmax,xi,i)
+
+! Finds the index  i  of the array of increasing numbers   p  with dimension  n 
+! which satisfies   p(i-1) <  xi  <  p(i) . Uses binary search algorithm.
+
+  implicit none
+
+  integer                                :: n,nmin,nmax,i,imin,imax,k
+  double precision                       :: xi
+  double precision, dimension(nmin:nmax) :: p
+
+  imin=nmin
+  imax=nmax
+  n=nmax-nmin
+
+  do k=1,n
+    i=(imax-imin)/2+imin
+    if(p(i).gt.xi) then
+      imax=i
+    else
+      imin=i
+    endif
+    if(imax.eq.imin+1) exit
+  enddo
+
+  i=imax
+
+  return
+end subroutine binsrc
+
+function integrate_function(func, a, b, n) result(integral)
+
+    implicit none
+
+    interface
+        function func(xx)
+            use, intrinsic :: iso_fortran_env, only: dp => real64
+            real(dp), intent(in) :: xx
+            real(dp) :: func
+        end function func
+    end interface
+
+    real(dp), intent(in) :: a, b
+    integer, intent(in) :: n
+    real(dp) :: integral
+
+    real(dp) :: h, x
+    integer :: i
+
+    if (n <= 0) then
+        integral = 0.0_dp
+        return
+    end if
+
+    h = (b - a) / real(n, dp)
+    integral = 0.5_dp * (func(a) + func(b))
+
+    do i = 1, n - 1
+        x = a + real(i, dp) * h
+        integral = integral + func(x)
+    end do
+
+    integral = integral * h
+
+end function integrate_function
+
+function x3_exp_neg_x(x) result(f)
+
+    implicit none
+    real(dp), intent(in) :: x
+    real(dp) :: f
+    
+    f = x**7 * exp(-x**2)
+end function x3_exp_neg_x
+
+function x2_exp_minus_x2(x) result(f)
+
+    implicit none
+    real(dp), intent(in) :: x
+    real(dp) :: f
+    
+    f = x**2 * exp(-x**2)
+end function x2_exp_minus_x2
 
 end module russian_roulette_mod

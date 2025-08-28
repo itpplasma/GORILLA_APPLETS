@@ -214,10 +214,6 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
 
     print*, 'Total tracing time of all particles divided by number of particles is: ', t_tot/n_particles, 's'
     print*, 'Maximum storage = ', rr%maximum_storage
-    print*, 'Boundary fluxes plus = ', rr%boundary_fluxes_plus
-    print*, 'Boundary fluxes minus = ', rr%boundary_fluxes_minus
-    print*, 'total fluxes = ', rr%boundary_fluxes_plus - rr%boundary_fluxes_minus
-    print*, 'Roulette numbers = ', rr%roulette_numbers
 
 end subroutine parallelised_particle_pushing
 
@@ -1112,11 +1108,11 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     use russian_roulette_mod, only: prepare_russian_roulette
 
     integer :: ns, i, n_particles
-    real(dp) :: extrapolation_factor, A, B, offset, tau_c_ei
+    real(dp) :: extrapolation_factor, A, B, offset, tau_c_ei, v0, v_max, weights_before_redistribution
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str
 
-    s%n_particles = 300
+    s%n_particles = 1000
 
     allocate(rand_matrix(5,s%n_particles,1))
     allocate(dc%s_vertices(grid_size(1)+1))
@@ -1163,7 +1159,10 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
 
         if (ns.eq.2) then 
             call calc_collision_coefficients_for_all_tetrahedra(2)
-            call prepare_russian_roulette(2)
+            v0 = start%v0(2)
+            v_max = v0*sqrt(start%epsilon_max)
+            weights_before_redistribution = g%total_volume*in%density
+            call prepare_russian_roulette(v0,v_max,weights_before_redistribution)
         endif
 
         ! open(23,file = 'energy_before_pushing.dat')
