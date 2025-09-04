@@ -197,7 +197,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                 endif
             enddo
 
-            !print*, 'Confinement time for particle ', n, ' (species ', species, '): ', t%confined
+            print*, 'Confinement time for particle ', n, ' (species ', species, '): ', t%confined
 
     ! if (s%s0.lt.2.0d-2) then
     !      close(1000+n)
@@ -890,15 +890,17 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
 
     x = tetra_physics(ind_tetr)%x1 + z_save
     start%weight(n,species) = start%weight(n,species)*abs((tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save)))
-  !print*, 'weight before = ', start%weight(n,species), n, (start%energy(n,species)/s%temperature)**0.5_dp, start%energy(n,species)
-    if (boole_diffusion_coefficient) then
-        start%weight(n,species) = start%weight(n,species)/  &
-        (sqrt(start%energy(n,species)/s%temperature)*exp(-start%energy(n,species)/s%temperature)/(s%temperature*ev2erg*sqrt(pi)/2))
-        !the last term is the integral of the function from zero to inf over energy in correct units
-        !start%weight(n,species) = start%weight(n,species)/((1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))*  &
-        !sqrt(start%energy(n,species)/s%temperature)*exp(-start%energy(n,species)/s%temperature)/(s%temperature*ev2erg*14035.0_dp))
-        !the last term is the integral of the function from zero to inf over energy in correct units
-    endif
+    !print*, 'weight before = ', start%weight(n,species), n
+
+    temperature = in%energy_eV
+    if (boole_diffusion_coefficient) temperature = s%temperature
+    start%weight(n,species) = start%weight(n,species)/  &
+    (sqrt(start%energy(n,species)/temperature)*exp(-start%energy(n,species)/temperature)/(temperature*ev2erg*sqrt(pi)/2))
+    !the last term is the integral of the function from zero to inf over energy in correct units
+    !start%weight(n,species) = start%weight(n,species)/((1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))*  &
+    !sqrt(start%energy(n,species)/s%temperature)*exp(-start%energy(n,species)/s%temperature)/(s%temperature*ev2erg*14035.0_dp))
+    !the last term is the integral of the function from zero to inf over energy in correct units
+
 
     if (in%boole_linear_density_simulation) then
         start%weight(n,species) = start%weight(n,species)*(1.0_dp-0.9_dp*x(1))
@@ -907,9 +909,9 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     if (in%boole_boltzmann_energies.or.boole_diffusion_coefficient) then
         phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
         start%weight(n,species) = start%weight(n,species)*2/sqrt(pi)*sqrt(start%energy(n,species)*ev2erg)
-        if (.not.boole_diffusion_coefficient) then 
-            start%weight(n,species) = start%weight(n,species)*start%epsilon_max*in%energy_eV*ev2erg
-        endif
+        ! if (.not.boole_diffusion_coefficient) then 
+        !     start%weight(n,species) = start%weight(n,species)*start%epsilon_max*in%energy_eV*ev2erg
+        ! endif
         if (.not. in%boole_linear_temperature_simulation) then
             temperature = in%energy_eV*ev2erg
             if (boole_diffusion_coefficient) temperature = s%temperature*ev2erg
@@ -1044,6 +1046,7 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
     integer, intent(in), optional :: n_particles_in
     integer :: n_particles
     real(dp), dimension(:,:), allocatable :: radial_transport_energies
+    real(dp) :: temperature
 
     if (present(species_in)) then 
         allocate(species(size(species_in)))
@@ -1065,12 +1068,12 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
     start%energy(:,species) = in%energy_eV
     if (in%boole_boltzmann_energies) then
         start%energy(:,species) = start%epsilon_max*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
-    endif
-    if (boole_diffusion_coefficient) then
+        temperature = in%energy_eV
+        if (boole_diffusion_coefficient) temperature = s%temperature
         allocate(radial_transport_energies(n_particles,size(species)))
         call generate_distribution_sqrt_x_exp_neg_x(start%epsilon_max,radial_transport_energies)
         !call generate_marker_distribution(start%epsilon_max,radial_transport_energies)
-        start%energy(:,species) = radial_transport_energies*s%temperature !boltzmann energy distribution
+        start%energy(:,species) = radial_transport_energies*temperature !boltzmann energy distribution
     endif
     
     if (in%boole_antithetic_variate) then
@@ -1360,10 +1363,10 @@ j = 0
             endif
             if (position(i).gt.1.0_dp)    then
                 boole_lost = .true.
-                exit_data%t_confined(i,2) = t%confined
                 j = j+1
             endif
         enddo
+        exit_data%t_confined(i,2) = t%confined
     enddo
 
     do ns = 1, grid_size(1)
@@ -1372,10 +1375,11 @@ j = 0
 
     do i = 1,grid_size(1)
         electron_density(i) = electron_density(i)/(ep%s_shell_volumes(i)*t%step*in%num_particles)
-        call fill_vector_parts_with_value(electron_prism_densities, g%vertices_per_flux_surface(i,:), electron_density(i))
+        call fill_vector_parts_with_value(electron_prism_densities, g%prisms_per_flux_tube(i,:), electron_density(i))
     enddo
 
-    !This is a bit cumbersome haveing to use electron_prism_densities and a loop over all prisms instead of simply putting 
+
+    !This is a bit cumbersome having to use electron_prism_densities and a loop over all prisms instead of simply putting 
     !output%prism_moments into fill_vector_parts_with_value, but that does not work because the latter does not accept 
     !a complex argument. Think about a solution to this problem
     do i = 1,ntetr/3
@@ -1384,6 +1388,8 @@ j = 0
 
     print*, 'Total tracing time of all electrons divided by number of particles is: ', &
     sum(exit_data%t_confined(:,2))/in%num_particles, 's'
+    print*, 'exit times are : ', exit_data%t_confined(:,2)
+    stop
 
 end subroutine calc_electron_density_via_random_walk
 

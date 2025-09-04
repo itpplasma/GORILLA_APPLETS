@@ -42,7 +42,7 @@ subroutine calc_self_consistent_electric_field
     call set_moment_specifications
     call initialise_output
     call calc_volume_integrals_in_flux_coordinates
-    s%temperature = 2.0_dp*in%energy_eV
+    s%temperature = in%energy_eV
 
     !if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
 
