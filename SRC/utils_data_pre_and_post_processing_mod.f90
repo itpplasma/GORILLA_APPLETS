@@ -321,7 +321,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     integer :: Te_unit, Ti_unit, ne_unit
     integer :: i, j
     integer :: species = 1
-    real(dp) :: m0, z0, n0, s_value
+    real(dp) :: m0, z0, n0, s_value, v0
 
     if (present(species_in)) species = species_in
     
@@ -398,7 +398,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
                 c%dens(j) = c%dens_mat(j,i)
                 c%temp(j) = c%temp_mat(j,i)
             enddo
-            call collis_init(m0,z0,c%mass,c%charge_num,c%dens,c%temp,in%energy_eV,start%v0(species), &
+            call collis_init(m0,z0,c%mass,c%charge_num,c%dens,c%temp,in%energy_eV,v0, &
                              efcolf,velrat,enrat)
             c%efcolf_mat(:,i) = efcolf
             c%velrat_mat(:,i) = velrat

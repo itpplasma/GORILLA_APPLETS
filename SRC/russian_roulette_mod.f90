@@ -7,11 +7,12 @@ module russian_roulette_mod
     type russian_roulette_t
     real(dp), dimension(:), allocatable    :: velocity_bounds
     real(dp), dimension(:), allocatable    :: roulette_numbers
+    real(dp)                               :: v0
     integer, dimension(:), allocatable     :: boundary_fluxes_plus
     integer, dimension(:), allocatable     :: boundary_fluxes_minus
     integer                                :: maximum_storage = 0
-    logical                                :: boole_russian_roulette = .true.
-    logical                                :: boole_weight_windows = .true.
+    logical                                :: boole_russian_roulette = .false.
+    logical                                :: boole_continuous_rr = .true.
     end type russian_roulette_t
 
     type(russian_roulette_t) :: rr
@@ -22,36 +23,34 @@ module russian_roulette_mod
     integer,  dimension(:),   allocatable   :: multiplicity
     real(dp), dimension(:),   allocatable   :: v
     real(dp), dimension(:),   allocatable   :: weight
-    real(dp), dimension(:,:), allocatable   :: particle_state_reals
-    integer, dimension(:,:), allocatable    :: particle_state_integers
+    real(dp), dimension(:,:), allocatable   :: particle_state
     end type local_rr_t
 
-    integer :: n_reals, n_integers
+    integer :: n_particle_state
 
 contains
 
-subroutine prepare_russian_roulette(v0,v_max,weights_before_redistribution, num_reals, num_integers)
+subroutine prepare_russian_roulette(v0,v_max,weights_before_redistribution, num_particle_state)
 
     real(dp), intent(in) :: v0, v_max, weights_before_redistribution
-    integer, intent(in) :: num_reals, num_integers
-    integer :: n_domains
+    integer, intent(in) :: num_particle_state
 
-    n_domains = 10
-    n_reals = num_reals
-    n_integers = num_integers
+    n_particle_state = num_particle_state
 
-    if (.not.rr%boole_weight_windows) call prepare_rr_with_boundary_fluxes(n_domains,v0,v_max)
-    if (     rr%boole_weight_windows) call prepare_rr_with_weight_windows(n_domains,v0,v_max,weights_before_redistribution)
+    if (.not.rr%boole_continuous_rr) call prepare_rr_with_boundary_fluxes(v0,v_max)
+    if (     rr%boole_continuous_rr) call prepare_continuous_rr(v0,weights_before_redistribution)
 
 end subroutine prepare_russian_roulette
 
-subroutine prepare_rr_with_boundary_fluxes(n_domains,v0,v_max)
+subroutine prepare_rr_with_boundary_fluxes(v0,v_max)
 
     real(dp) :: v0, v_max
     integer :: n_domains, j
     real(dp) :: integral1, integral2, normalise_integral1, normalise_integral2
     real(dp) :: lower_limit, upper_limit
     integer :: n_intervals
+
+    n_domains = 10
 
     allocate(rr%boundary_fluxes_plus(n_domains+1))
     rr%boundary_fluxes_plus = 0
@@ -96,60 +95,40 @@ subroutine prepare_rr_with_boundary_fluxes(n_domains,v0,v_max)
 
 end subroutine prepare_rr_with_boundary_fluxes
 
-subroutine prepare_rr_with_weight_windows(n_domains,v0,v_max,weights_before_redistribution)
+subroutine prepare_continuous_rr(v0,weights_before_redistribution)
 
-    real(dp) :: v0, v_max
-    integer :: n_domains, j
-    real(dp) :: weights_before_redistribution, factor
-    real(dp), dimension(:), allocatable :: maxwellian_integrals
-    real(dp) :: lower_limit, upper_limit
-    integer :: n_intervals
+    real(dp) :: v0, weights_before_redistribution
 
-    allocate(rr%velocity_bounds(n_domains+1))
-    rr%velocity_bounds = [(v_max/n_domains*(j-1), j=1,n_domains+1)]
-    allocate(rr%roulette_numbers(n_domains))
-    allocate(maxwellian_integrals(n_domains))
+    allocate(rr%roulette_numbers(1))
 
-    n_intervals = 1000
+    rr%roulette_numbers = weights_before_redistribution
+    rr%v0 = v0
 
-    do j = 1,n_domains
-        lower_limit = rr%velocity_bounds(j)/v0
-        upper_limit = rr%velocity_bounds(j+1)/v0
-
-        rr%roulette_numbers(j) = 1.0_dp/(((upper_limit + lower_limit)/2)**7+1)
-        maxwellian_integrals(j) = integrate_function(x2_exp_minus_x2, lower_limit, upper_limit, n_intervals)
-    enddo
-
-    factor = sum(weights_before_redistribution*maxwellian_integrals/rr%roulette_numbers)
-    rr%roulette_numbers = rr%roulette_numbers*factor
-
-end subroutine prepare_rr_with_weight_windows
+end subroutine prepare_continuous_rr
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !Preparation of russian roulette finished, start playing russian rouletette
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine play_russian_roulette(weight,v,v_old,reals,integers,local_rr)
+subroutine play_russian_roulette(weight,v,v_old,particle_state,local_rr)
 
     real(dp), intent(in) :: v,v_old
-    real(dp),dimension(n_reals), intent(in) :: reals
-    integer, dimension(n_integers), intent(in) :: integers
+    real(dp),dimension(n_particle_state), intent(in) :: particle_state
     real(dp), intent(inout) :: weight
     type(local_rr_t) :: local_rr
 
-    if (rr%boole_weight_windows) then 
-        call play_rr_with_weight_windows(weight,v,reals, integers,local_rr)
+    if (rr%boole_continuous_rr) then 
+        call play_continuous_rr(weight,v,particle_state,local_rr)
     else
-        call play_rr_with_boundary_fluxes(weight,v,v_old,reals, integers,local_rr)
+        call play_rr_with_boundary_fluxes(weight,v,v_old,particle_state,local_rr)
     endif
 
 end subroutine play_russian_roulette
 
-subroutine play_rr_with_boundary_fluxes(weight,v,v_old,reals, integers,local_rr)
+subroutine play_rr_with_boundary_fluxes(weight,v,v_old,particle_state,local_rr)
 
     real(dp), intent(in) :: v,v_old
-    real(dp),dimension(n_reals), intent(in) :: reals
-    integer, dimension(n_integers), intent(in) :: integers
+    real(dp),dimension(n_particle_state), intent(in) :: particle_state
     real(dp), intent(inout) :: weight
     type(local_rr_t) :: local_rr
     real(dp) :: roulette_number, xi, splitting_number, passing_probability
@@ -186,28 +165,21 @@ subroutine play_rr_with_boundary_fluxes(weight,v,v_old,reals, integers,local_rr)
         endif
     else
         splitting_number = 1.0_dp/roulette_number
-        call split_particle(weight,v,reals,integers,local_rr,splitting_number)
+        call split_particle(weight,v,particle_state,local_rr,splitting_number)
     endif
 
 end subroutine play_rr_with_boundary_fluxes
 
-subroutine play_rr_with_weight_windows(weight, v, reals, integers,local_rr)
-
-    use gorilla_applets_types_mod, only: time_t
+subroutine play_continuous_rr(weight, v, particle_state,local_rr)
 
     real(dp), intent(in) :: v
-    real(dp),dimension(n_reals), intent(in) :: reals
-    integer, dimension(n_integers), intent(in) :: integers
+    real(dp),dimension(n_particle_state), intent(in) :: particle_state
     real(dp), intent(inout) :: weight
     type(local_rr_t) :: local_rr
     real(dp) :: factor, xi
-    integer :: ind_v, n_domains
+    real(dp) :: pi = 3.141592653589793238462643383_dp
 
-    n_domains = size(rr%velocity_bounds)-1
-    call binsrc(rr%velocity_bounds,1,n_domains+1,v,ind_v)
-    ind_v = ind_v - 1
-
-    factor = weight/rr%roulette_numbers(ind_v)
+    factor = weight/(rr%roulette_numbers(1)*14035.0_dp*2/sqrt(pi)/(1+(v/rr%v0)**7))
 
     if (factor.lt.0.5_dp) then !play roulette and maybe eliminate particle
         call random_number(xi)
@@ -217,16 +189,15 @@ subroutine play_rr_with_weight_windows(weight, v, reals, integers,local_rr)
             local_rr%boole_eliminated = .true.
         endif
     elseif (factor.gt.2.0_dp) then
-        call split_particle(weight,v,reals,integers,local_rr,factor)
+        call split_particle(weight,v,particle_state,local_rr,factor)
     endif
 
-end subroutine play_rr_with_weight_windows
+end subroutine play_continuous_rr
 
-subroutine split_particle(weight,v,reals,integers,local_rr,splitting_number)
+subroutine split_particle(weight,v,particle_state,local_rr,splitting_number)
 
     real(dp), intent(in) :: v,splitting_number
-    real(dp),dimension(n_reals), intent(in) :: reals
-    integer, dimension(n_integers), intent(in) :: integers
+    real(dp),dimension(n_particle_state), intent(in) :: particle_state
     real(dp), intent(inout) :: weight
     type(local_rr_t) :: local_rr
     real(dp) :: xi
@@ -251,10 +222,9 @@ subroutine split_particle(weight,v,reals,integers,local_rr,splitting_number)
 
     if (nearest_ints(j).gt.1) then
         local_rr%v(splitting_id) = v
-        local_rr%weight(splitting_id) = weight/splitting_number
+        local_rr%weight(splitting_id) = weight/nearest_ints(j)
         local_rr%multiplicity(splitting_id) = nearest_ints(j)-1
-        local_rr%particle_state_reals(splitting_id,:) = reals
-        local_rr%particle_state_integers(splitting_id,:) = integers
+        local_rr%particle_state(splitting_id,:) = particle_state
         !$omp critical
         rr%maximum_storage = max(rr%maximum_storage,splitting_id)
         !$omp end critical
@@ -276,10 +246,8 @@ subroutine initiate_local_rr(local_rr, i)
     if (.not.allocated(local_rr%weight))                  allocate(local_rr%weight(i))
     local_rr%multiplicity = 0
     if (.not.allocated(local_rr%v))                       allocate(local_rr%v(i))
-    local_rr%v = 0.0_dp
     
-    if (.not.allocated(local_rr%particle_state_integers)) allocate(local_rr%particle_state_integers(i,n_integers))
-    if (.not.allocated(local_rr%particle_state_reals))    allocate(local_rr%particle_state_reals(i,n_reals))
+    if (.not.allocated(local_rr%particle_state))    allocate(local_rr%particle_state(i,n_particle_state))
 
 end subroutine initiate_local_rr
 
@@ -310,8 +278,7 @@ subroutine copy_local_rr(rr_small,rr_big)
     rr_big%v(1:size_small) = rr_small%v
     rr_big%weight(1:size_small) = rr_small%weight
 
-    rr_big%particle_state_integers(1:size_small,:) = rr_small%particle_state_integers
-    rr_big%particle_state_reals(1:size_small,:) = rr_small%particle_state_reals
+    rr_big%particle_state(1:size_small,:) = rr_small%particle_state
 
     rr_big%multiplicity(size_small+1:size_big) = 0
     rr_big%v(size_small+1:size_big) = 0.0_dp
@@ -325,25 +292,25 @@ subroutine move_allocation(rr_small,rr_big)
     call move_alloc(rr_big%multiplicity, rr_small%multiplicity)
     call move_alloc(rr_big%v, rr_small%v)
     call move_alloc(rr_big%weight, rr_small%weight)
-    call move_alloc(rr_big%particle_state_integers, rr_small%particle_state_integers)
-    call move_alloc(rr_big%particle_state_reals, rr_small%particle_state_reals)
+    call move_alloc(rr_big%particle_state, rr_small%particle_state)
 
 end subroutine move_allocation
 
 subroutine prepare_next_split_particle(local_rr,id)
 
     type(local_rr_t):: local_rr
-    integer, intent(out) :: id 
+    integer, intent(out) :: id
+    integer, allocatable :: nonzero_multiplicities(:)
+    integer :: i
 
-    id = maxloc(local_rr%v,dim=1)
+    nonzero_multiplicities = pack([(i,i=1,size(local_rr%v))],local_rr%multiplicity>0)
 
-    if (local_rr%v(id).eq.0.0_dp) then
+    if (size(nonzero_multiplicities).eq.0) then
         local_rr%boole_eliminated = .true.
     else
+        i = maxloc(local_rr%v(nonzero_multiplicities),dim=1)
+        id = nonzero_multiplicities(i)
         local_rr%multiplicity(id) = local_rr%multiplicity(id) -1
-        if (local_rr%multiplicity(id).eq.0) then
-             local_rr%v(id) = 0.0_dp
-        endif
         local_rr%boole_eliminated = .false.
     endif
 
@@ -421,7 +388,7 @@ function x3_exp_neg_x(x) result(f)
     real(dp), intent(in) :: x
     real(dp) :: f
     
-    f = x**7 * exp(-x**2)
+    f = x**3 * exp(-x**2)
 end function x3_exp_neg_x
 
 function x2_exp_minus_x2(x) result(f)
@@ -432,5 +399,14 @@ function x2_exp_minus_x2(x) result(f)
     
     f = x**2 * exp(-x**2)
 end function x2_exp_minus_x2
+
+function x9_exp_minus_x2(x) result(f)
+
+    implicit none
+    real(dp), intent(in) :: x
+    real(dp) :: f
+    
+    f = x**9 * exp(-x**2)
+end function x9_exp_minus_x2
 
 end module russian_roulette_mod

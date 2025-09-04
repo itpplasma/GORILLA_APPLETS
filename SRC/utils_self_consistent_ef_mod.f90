@@ -94,8 +94,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     complex(dp), dimension(:,:), allocatable          :: local_tetr_moments
     logical                                           :: thread_flag = .true.
     type(local_rr_t)                                  :: local_rr
-    real(dp), dimension(8)                            :: reals
-    integer, dimension(2)                             :: integers
+    real(dp), dimension(10)                           :: particle_state_for_rr
 
     if (present(n_particles_in)) then
         n_particles = n_particles_in
@@ -121,7 +120,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr,t_tot) &
     !$OMP& PRIVATE(p,l,n,i,x,v_save,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
-    !$OMP& vpar_save, vperp_save, reals, integers) &
+    !$OMP& vpar_save, vperp_save, particle_state_for_rr) &
     !$OMP& FIRSTPRIVATE(thread_flag,local_rr)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO SCHEDULE(static)
@@ -164,15 +163,14 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                     t%step = t%step/start%v0(species) !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 
-                if (rr%boole_russian_roulette) then
+                if (rr%boole_russian_roulette.and.(i.gt.1)) then
                     if (local_rr%boole_eliminated) then
-                        call initiate_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,particle_status)
+                        call initiate_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,particle_status,n,species)
                         if (local_rr%boole_eliminated) exit
                     else
                         v = sqrt(vpar**2+vperp**2)
-                        reals = (/vpar,vperp,t%confined,t%remain,t%step,x/)
-                        integers = (/ind_tetr,iface/)
-                        call play_russian_roulette(start%weight(n,species),v,v_save,reals,integers,local_rr)
+                        particle_state_for_rr = (/vpar,vperp,t%confined,t%remain,t%step,x,dble(ind_tetr),dble(iface)/)
+                        call play_russian_roulette(start%weight(n,species),v,v_save,particle_state_for_rr,local_rr)
                     endif
                 endif
 
@@ -191,7 +189,9 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                 t_tot = t_tot + t%step - t%remain
                 !$omp end critical
 
-                if ((ind_tetr.eq.-1).and.(.not.local_rr%boole_eliminated)) then
+
+
+                if ((ind_tetr.eq.-1).and.(.not.rr%boole_russian_roulette)) then
                     call handle_lost_particles(local_counter, particle_status%lost)
                     exit
                 endif
@@ -219,7 +219,6 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !$OMP END PARALLEL
 
     print*, 'Total tracing time of all particles divided by number of particles is: ', t_tot/n_particles, 's'
-    print*, 'Maximum storage = ', rr%maximum_storage
 
 end subroutine parallelised_particle_pushing
 
@@ -257,8 +256,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     type(optional_quantities_type)               :: optional_quantities
     real(dp)                                     :: tau, v, t_pusher, normalisation, v_save
     type(local_rr_t)                             :: local_rr
-    real(dp), dimension(8)                       :: reals
-    integer, dimension(2)                        :: integers
+    real(dp), dimension(10)                      :: particle_state_for_rr
 
     v = sqrt(vpar**2+vperp**2)
     if(.not.particle_status%initialized) then !If orbit_timestep is called for the first time without grid position
@@ -271,6 +269,10 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         z_save = x-tetra_physics(ind_tetr)%x1
         !if (j.eq.1)
         call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species,boole_diffusion_coefficient)
+        if (.not.in%boole_static_ne) then
+            start%x(:,n,2) = start%x(:,n,1)
+            start%weight(n,2) = start%weight(n,1)
+        endif 
         particle_status%initialized = .true.
     endif
           
@@ -343,10 +345,9 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities,species)
         if((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
 
-        if (rr%boole_russian_roulette) then 
-            reals = (/vpar,vperp,t%confined,t%remain,t%step,x/)
-            integers = (/ind_tetr,iface/)
-            call play_russian_roulette(start%weight(n,species),v,v_save,reals,integers,local_rr)
+        if (rr%boole_russian_roulette) then
+            particle_state_for_rr = (/vpar,vperp,t%confined,t%remain,t%step,x,dble(ind_tetr),dble(iface)/)
+            call play_russian_roulette(start%weight(n,species),v,v_save,particle_state_for_rr,local_rr)
         endif
 
         if(boole_t_finished.or.local_rr%boole_eliminated) then !Orbit stops within cell, because "flight"-time t%step has finished
@@ -357,14 +358,14 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
 
 end subroutine orbit_timestep_gorilla_self_consistent_ef
 
-subroutine initiate_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,particle_status)
+subroutine initiate_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,particle_status,n,species)
 
-    use gorilla_applets_types_mod, only : particle_status_t, time_t
+    use gorilla_applets_types_mod, only : particle_status_t, time_t, start
     use russian_roulette_mod, only: local_rr_t, prepare_next_split_particle
 
     type(local_rr_t):: local_rr
     real(dp) :: vpar,vperp
-    integer :: ind_tetr, iface
+    integer :: ind_tetr, iface, n, species
     type(time_t) :: t
     real(dp), dimension(3) :: x
     type(particle_status_t) :: particle_status
@@ -374,14 +375,15 @@ subroutine initiate_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,p
 
     if (local_rr%boole_eliminated.eqv..false.) then
 
-        vpar =       local_rr%particle_state_reals(id,1)
-        vperp =      local_rr%particle_state_reals(id,2)
-        t%confined = local_rr%particle_state_reals(id,3)
-        t%remain =   local_rr%particle_state_reals(id,4)
-        t%step =     local_rr%particle_state_reals(id,5)
-        x =          local_rr%particle_state_reals(id,6:8)
-        ind_tetr =   local_rr%particle_state_integers(id,1)
-        iface =      local_rr%particle_state_integers(id,2)
+        vpar =                    local_rr%particle_state(id,1)
+        vperp =                   local_rr%particle_state(id,2)
+        t%confined =              local_rr%particle_state(id,3)
+        t%remain =                local_rr%particle_state(id,4)
+        t%step =                  local_rr%particle_state(id,5)
+        x =                       local_rr%particle_state(id,6:8)
+        ind_tetr =                int(local_rr%particle_state(id,9))
+        iface =                   int(local_rr%particle_state(id,10))
+        start%weight(n,species) = local_rr%weight(id)
 
         particle_status%lost = .false.
         particle_status%initialized = .true.
@@ -888,9 +890,13 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
 
     x = tetra_physics(ind_tetr)%x1 + z_save
     start%weight(n,species) = start%weight(n,species)*abs((tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save)))
+  !print*, 'weight before = ', start%weight(n,species), n, (start%energy(n,species)/s%temperature)**0.5_dp, start%energy(n,species)
     if (boole_diffusion_coefficient) then
         start%weight(n,species) = start%weight(n,species)/  &
         (sqrt(start%energy(n,species)/s%temperature)*exp(-start%energy(n,species)/s%temperature)/(s%temperature*ev2erg*sqrt(pi)/2))
+        !the last term is the integral of the function from zero to inf over energy in correct units
+        !start%weight(n,species) = start%weight(n,species)/((1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))*  &
+        !sqrt(start%energy(n,species)/s%temperature)*exp(-start%energy(n,species)/s%temperature)/(s%temperature*ev2erg*14035.0_dp))
         !the last term is the integral of the function from zero to inf over energy in correct units
     endif
 
@@ -919,6 +925,9 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
 
     start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
     !-1 because of negative gyrophase
+    
+!print*, 'weight after = ', start%weight(n,species)*(1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))/14035.0_dp/2*sqrt(pi)
+!print*, 'weight after for real = ', start%weight(n,species)
 
 end subroutine calc_particle_weights_and_jperp
 
@@ -933,9 +942,10 @@ subroutine calc_starting_conditions
     call RANDOM_NUMBER(rand_matrix)
 
     call allocate_start_type
+    call set_particle_type_specifications
     call set_starting_positions(rand_matrix,s0=sfc_s_min*1.1_dp)
     call set_rest_of_individual_particle_specifications(rand_matrix)
-    call set_particle_type_specifications
+    
 
 end subroutine calc_starting_conditions
 
@@ -1059,6 +1069,7 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
     if (boole_diffusion_coefficient) then
         allocate(radial_transport_energies(n_particles,size(species)))
         call generate_distribution_sqrt_x_exp_neg_x(start%epsilon_max,radial_transport_energies)
+        !call generate_marker_distribution(start%epsilon_max,radial_transport_energies)
         start%energy(:,species) = radial_transport_energies*s%temperature !boltzmann energy distribution
     endif
     
@@ -1158,7 +1169,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str
 
-    s%n_particles = 100
+    s%n_particles = 1000
 
     allocate(rand_matrix(5,s%n_particles,1))
     allocate(dc%s_vertices(grid_size(1)+1))
@@ -1171,7 +1182,6 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
 
     s%k = 1000
     s%j = 100
-    s%temperature = 2.0_dp*in%energy_eV
 
     allocate(s%delta_s(s%k))
     allocate(s%delta_s_squared(s%k))
@@ -1181,6 +1191,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
 
     call allocate_start_type(s%n_particles)
     call set_particle_type_specifications
+    start%v0(2) = start%v0(2)*sqrt(s%temperature/in%energy_eV)
     call initialize_exit_data(s%n_particles)
 
     tau_c_ei = 5.0_dp*1.0d-5 !rough estimate from nrl formula booklet
@@ -1201,14 +1212,16 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
                                                             species_in=(/2/),n_particles_in=s%n_particles)
         call set_weight
 
+
         call prepare_next_round_of_parallelised_particle_pushing(2)
 
         if (ns.eq.2) then 
             call calc_collision_coefficients_for_all_tetrahedra(2)
+
             v0 = start%v0(2)
             v_max = v0*sqrt(start%epsilon_max)
             weights_before_redistribution = g%total_volume*in%density
-            call prepare_russian_roulette(v0,v_max,weights_before_redistribution,8,2)
+            call prepare_russian_roulette(v0,v_max,weights_before_redistribution,10)
         endif
 
         ! open(23,file = 'energy_before_pushing.dat')
@@ -1251,6 +1264,8 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     !     enddo
     ! close(23)
 
+    !print*, start%weight(:,2)
+
     enddo
 
     !Extrapolate values to the boundaries
@@ -1277,51 +1292,86 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
 
 end subroutine calc_electron_diffusion_coefficients
 
-subroutine calc_electron_density !call this after every ion pushing sequence
+subroutine calc_electron_density_via_random_walk !call this after every ion pushing sequence
 
-    use gorilla_applets_types_mod, only: in, time_t, dc, ep, g, output
-    use tetra_grid_settings_mod, only: grid_size
+    use gorilla_applets_types_mod, only: in, time_t, dc, ep, g, output, start, exit_data
+    use tetra_grid_settings_mod, only: grid_size, sfc_s_min
     use binsrc_mod, only: binsrc
-    use tetra_grid_mod, only: ntetr
+    use tetra_grid_mod, only: ntetr, verts_sthetaphi
 
     real(dp) :: delta_x, delta_t, xi, A, B, cell_size
-    integer :: i, ns, k, num_steps_min, num_electrons
-    real(dp), dimension(:), allocatable :: electron_density, positions, electron_prism_densities
+    integer :: i, ns, k, num_steps_min, j
+    real(dp), dimension(:), allocatable :: electron_density, electron_prism_densities
+    real(dp), dimension(:), allocatable :: position, weight
     type(time_t) :: t
+    logical :: boole_lost
 
     allocate(electron_density(grid_size(1)), electron_prism_densities(ntetr/3))
     electron_density = 0.0_dp
 
-    num_electrons = in%num_particles
+    !>This should later be an input
+    allocate(position(in%num_particles))
+    allocate(weight(in%num_particles))
+    position = start%x(1,:,2)
+    weight = start%weight(:,2)
+    ! call RANDOM_NUMBER(position)
+    ! call generate_distribution_one_minus_x2(position)
+    ! allocate(dc%A(grid_size(1)+1)) !diffusion coefficients will be computed on every flux layer (including inner and outer boundaries)
+    ! allocate(dc%B(grid_size(1)+1)) !diffusion coefficients will be computed on every flux layer (including inner and outer boundaries)
+    ! allocate(dc%grad_A(grid_size(1)))
+    ! allocate(dc%grad_B(grid_size(1)))
+    ! allocate(dc%s_vertices(grid_size(1)+1))
+    ! dc%s_vertices = verts_sthetaphi(1, [(grid_size(3)*(ns-1)+1,ns=1,grid_size(1)+1)])
+    ! dc%A = 0.0_dp
+    ! dc%B = 0.1_dp
+    ! dc%grad_A = 0.0_dp
+    ! dc%grad_B = 0.0_dp
 
-    allocate(positions(num_electrons))
-    call RANDOM_NUMBER(positions)
+
+    call read_diffusion_coefficient_data
 
     t%step = in%time_step
-    t%confined = 0.0_dp
     num_steps_min = 1000
 
-    do i = 1,num_electrons
-        do while (t%confined.lt.t%step)
-
-            !binsrc finds k such that dc%s_vertices(k-1) < positions(i) < dc%s_vertices(k)
-            call binsrc(dc%s_vertices,1,grid_size(1)+1,positions(i),k) 
+j = 0
+    do i = 1,in%num_particles
+        t%confined = 0.0_dp
+        boole_lost = .false.
+        do while ((t%confined.lt.t%step).and.(.not.boole_lost))
+            !binsrc finds k such that dc%s_vertices(k-1) < position(i) < dc%s_vertices(k)
+            call binsrc(dc%s_vertices,1,grid_size(1)+1,position(i),k) 
             k = k-1 
             cell_size = dc%s_vertices(k+1) - dc%s_vertices(k)
-            A = dc%A(k) + dc%grad_A(k)*(positions(i)-dc%s_vertices(k))
-            B = dc%B(k) + dc%grad_B(k)*(positions(i)-dc%s_vertices(k))
+            A = dc%A(k) + dc%grad_A(k)*(position(i)-dc%s_vertices(k))
+            B = dc%B(k) + dc%grad_B(k)*(position(i)-dc%s_vertices(k))
+            delta_t = min(t%step/num_steps_min, cell_size**2/((abs(A)+abs(B))*4), t%step - t%confined) !control maximum possible jump
 
-            delta_t = min(t%step/num_steps_min, cell_size/((A+B)*2), t%step - t%confined) !control maximum possible jump
+            electron_density(k) = electron_density(k) + delta_t*weight(i)
+            t%confined = t%confined + delta_t
+
             call random_number(xi)
+            xi = sqrt(12.0_dp)*(xi-0.5_dp)
             delta_x = sqrt(2*delta_t*B)*xi + A*delta_t
 
-            electron_density(k) = electron_density(k) + delta_t
-            t%confined = t%confined + delta_t
+            position(i) = position(i) + delta_x
+
+            if (position(i).lt.sfc_s_min) then 
+                position(i) = 2.0_dp*sfc_s_min - position(i)
+            endif
+            if (position(i).gt.1.0_dp)    then
+                boole_lost = .true.
+                exit_data%t_confined(i,2) = t%confined
+                j = j+1
+            endif
         enddo
     enddo
 
+    do ns = 1, grid_size(1)
+        write(10,*) sfc_s_min + (1.0_dp - sfc_s_min) * (ns - 0.5_dp) / (grid_size(1)+1), electron_density(ns)
+    enddo
+
     do i = 1,grid_size(1)
-        electron_density(i) = electron_density(i)/(ep%s_shell_volumes(i)*t%step*num_electrons)
+        electron_density(i) = electron_density(i)/(ep%s_shell_volumes(i)*t%step*in%num_particles)
         call fill_vector_parts_with_value(electron_prism_densities, g%vertices_per_flux_surface(i,:), electron_density(i))
     enddo
 
@@ -1332,7 +1382,40 @@ subroutine calc_electron_density !call this after every ion pushing sequence
         output%prism_moments(1,i,2) = complex(electron_prism_densities(i), 0.0_dp)
     enddo
 
-end subroutine calc_electron_density
+    print*, 'Total tracing time of all electrons divided by number of particles is: ', &
+    sum(exit_data%t_confined(:,2))/in%num_particles, 's'
+
+end subroutine calc_electron_density_via_random_walk
+
+subroutine read_diffusion_coefficient_data
+
+    use gorilla_applets_types_mod, only: dc
+    use tetra_grid_settings_mod, only: grid_size
+    use tetra_grid_mod, only: verts_sthetaphi
+
+    character(len=100) :: filename
+    integer :: id, ns
+
+    if (.not.allocated(dc%A)) allocate(dc%A(grid_size(1)+1))
+    if (.not.allocated(dc%B)) allocate(dc%B(grid_size(1)+1))
+    if (.not.allocated(dc%grad_A)) allocate(dc%grad_A(grid_size(1)))
+    if (.not.allocated(dc%grad_B)) allocate(dc%grad_B(grid_size(1)))
+    if (.not.allocated(dc%s_vertices)) allocate(dc%s_vertices(grid_size(1)+1))
+
+    filename = 'A_and_B.dat'
+    open(newunit=id,file = filename,action='read')
+    do ns = 1,grid_size(1)+1
+        read(id,*) dc%A(ns), dc%B(ns)
+    enddo
+
+    dc%s_vertices = verts_sthetaphi(1, [(grid_size(3)*(ns-1)+1,ns=1,grid_size(1)+1)])
+
+    do ns = 1,grid_size(1)
+        dc%grad_A(ns) = (dc%A(ns+1)-dc%A(ns))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
+        dc%grad_B(ns) = (dc%B(ns+1)-dc%B(ns))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
+    enddo
+
+end subroutine read_diffusion_coefficient_data
 
 subroutine generate_distribution_x4_exp_neg_x(b, output_array)
 
@@ -1374,12 +1457,10 @@ subroutine generate_distribution_x4_exp_neg_x(b, output_array)
 
 end subroutine generate_distribution_x4_exp_neg_x
 
-subroutine generate_distribution_sqrt_x_exp_neg_x(b, output_array)
-
-    use gorilla_applets_types_mod, only: s, in
+subroutine generate_distribution_sqrt_x_exp_neg_x(xmax, output_array)
 
     real(dp), dimension(:,:), intent(out) :: output_array
-    real(dp), intent(in) :: b
+    real(dp), intent(in) :: xmax
     
     real(dp), dimension(:), allocatable :: uniform_random
     real(dp) :: x, y, max_value
@@ -1400,7 +1481,7 @@ subroutine generate_distribution_sqrt_x_exp_neg_x(b, output_array)
             do j = 1, num_cols
                 if (accept_count >= num_cols) exit
                 
-                x = b * uniform_random(j)
+                x = xmax * uniform_random(j)
                 y = sqrt(x) * exp(-x)
                 
                 call random_number(uniform_random(j))
@@ -1413,5 +1494,84 @@ subroutine generate_distribution_sqrt_x_exp_neg_x(b, output_array)
     enddo
 
 end subroutine generate_distribution_sqrt_x_exp_neg_x
+
+subroutine generate_marker_distribution(xmax, output_array)
+
+    use binsrc_mod, only: binsrc
+
+!for a velocity distribution according to (1+v^7)*v^2*exp(-v^2),
+!we have an energy distribution according to (1+E^(7/2))*sqrt(E)*exp(-E)
+
+    real(dp), dimension(:,:), intent(out) :: output_array
+    real(dp), intent(in) :: xmax
+    integer, parameter :: nsize=10000
+    logical, save :: firstentry = .true.
+    real(dp), dimension(0:nsize), save :: pdf
+    integer :: i,j, k, num_cols, num_rows
+    real(dp) :: x,xi
+    real(dp), save :: hx
+    
+    if(firstentry) then
+        hx=xmax/dble(nsize)
+        firstentry = .false.
+        pdf(0)=0.d0
+        do i=1,nsize
+            x=(dble(i)-0.5d0)*hx
+            pdf(i)=pdf(i-1)+(1.d0+x**7)*x**2*exp(-x**2)
+        enddo
+        pdf=pdf/pdf(nsize)
+    endif
+
+    num_cols = size(output_array, 1)
+    num_rows = size(output_array, 2)
+    
+    do i = 1,num_cols
+        do j = 1, num_rows
+            call random_number(xi)
+            call binsrc(pdf,0,nsize,xi,k)
+            output_array(i,j) = (dble(k)-0.5d0)*hx
+        enddo
+    enddo
+
+end subroutine generate_marker_distribution
+
+subroutine generate_distribution_one_minus_x2(output_array)
+
+    use binsrc_mod, only: binsrc
+
+    real(dp), dimension(:,:), intent(out) :: output_array
+
+    integer, parameter :: nsize = 10000
+    logical, save :: firstentry = .true.
+    real(dp), dimension(0:nsize), save :: cdf
+    real(dp), save :: hx
+
+    integer :: i, j, k, num_cols, num_rows
+    real(dp) :: xi, x, fx
+
+    if (firstentry) then
+        hx = 1.0_dp / dble(nsize)
+        firstentry = .false.
+        cdf(0) = 0.0_dp
+        do i = 1, nsize
+            x  = (dble(i) - 0.5_dp) * hx
+            fx = 1.0_dp - x*x
+            cdf(i) = cdf(i-1) + fx
+        enddo
+        cdf = cdf / cdf(nsize)
+    endif
+
+    num_cols = size(output_array, 1)
+    num_rows = size(output_array, 2)
+
+    do i = 1, num_cols
+        do j = 1, num_rows
+            call random_number(xi)
+            call binsrc(cdf, 0, nsize, xi, k)
+            output_array(i, j) = (dble(k) - 0.5_dp) * hx
+        enddo
+    enddo
+
+end subroutine generate_distribution_one_minus_x2
 
 end module utils_self_consistent_ef_mod

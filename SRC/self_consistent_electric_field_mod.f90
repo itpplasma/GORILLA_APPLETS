@@ -27,11 +27,12 @@ subroutine calc_self_consistent_electric_field
     use utils_self_consistent_ef_mod, only: allocate_electric_potential_type, perform_electric_potential_update, &
     associate_flux_labels_with_tetrahedra_and_vertices, print_errors_for_bad_inputs, &
     read_self_consistent_electric_field_inp_into_type, calc_starting_conditions, calc_electron_diffusion_coefficients, &
-    parallelised_particle_pushing, calc_s_shell_volumes
-    use gorilla_applets_types_mod, only: output, ep
+    parallelised_particle_pushing, calc_s_shell_volumes, calc_electron_density_via_random_walk
+    use gorilla_applets_types_mod, only: output, ep, s
     use tetra_physics_mod, only: particle_mass
 
     integer :: i, species
+    logical :: boole_honest_electrons = .false.
 
     call set_seed_for_random_numbers
     call read_self_consistent_electric_field_inp_into_type
@@ -41,8 +42,9 @@ subroutine calc_self_consistent_electric_field
     call set_moment_specifications
     call initialise_output
     call calc_volume_integrals_in_flux_coordinates
+    s%temperature = 2.0_dp*in%energy_eV
 
-    if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
+    !if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
 
     call initialize_exit_data
     call associate_flux_labels_with_tetrahedra_and_vertices
@@ -60,9 +62,13 @@ subroutine calc_self_consistent_electric_field
         do species = 1,2 !trace electrons and ions
             if ((species.eq.2).and.(in%boole_static_ne)) cycle
             call prepare_next_round_of_parallelised_particle_pushing(species)
-            if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
-            call parallelised_particle_pushing(species,i,boole_diffusion_coefficient=.false.)
-            call normalise_prism_moments_and_prism_moments_squared(species)
+            if ((species.eq.2).and.(.not.boole_honest_electrons)) then
+                call calc_electron_density_via_random_walk
+            else
+                if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
+                call parallelised_particle_pushing(species,i,boole_diffusion_coefficient=.false.)
+                call normalise_prism_moments_and_prism_moments_squared(species)
+            endif
             ep%rho_prism = ep%rho_prism + real(output%prism_moments(1,:,species))*start%particle_charge(species)
         enddo
         call perform_electric_potential_update(i)
