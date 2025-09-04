@@ -3,7 +3,7 @@
 &self_consistent_ef_nml
 !
   !time for tracing particles
-  time_step = 4.0d-2 ,
+  time_step = 5.0d0 ,
 !
   !Kinetic energy of particles
   energy_eV = 3.5d3 ,
@@ -12,7 +12,7 @@
   n_species = 2
 !
   !Number of particles to be traced
-  n_particles = 1.0d2 ,
+  n_particles = 1.20d1 ,
 !
   !Keep electron density constant
   boole_static_ne = .false. ,
@@ -33,7 +33,7 @@
   boole_preserve_energy_and_momentum_during_collisions = .false.,
 !
   !Number of electric potential updates
-  n_electric_potential_updates = 2,
+  n_electric_potential_updates = 200,
 !
   !type of electric potential update
   !1 ... 1D 

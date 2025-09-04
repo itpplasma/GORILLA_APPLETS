@@ -79,6 +79,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
     initialise_seed_for_random_numbers_for_each_thread
     use russian_roulette_mod, only: play_russian_roulette, rr, local_rr_t, initiate_local_rr
+    use constants, only: ev2erg
     
 
     integer, intent(in)                               :: species, j
@@ -87,7 +88,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     integer                                           :: kpart, iantithetic, ind_tetr, iface, n_particles
     integer                                           :: p, l, n, i, k
     real(dp), dimension(3)                            :: x
-    real(dp)                                          :: vpar,vperp, t_step_s, v, v_save,vpar_save, vperp_save, t_tot
+    real(dp)                                          :: vpar,vperp, t_step_s, v, v_save,vpar_save, vperp_save, t_tot, v_init
     type(time_t)                                      :: t
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
@@ -120,7 +121,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr,t_tot) &
     !$OMP& PRIVATE(p,l,n,i,x,v_save,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
-    !$OMP& vpar_save, vperp_save, particle_state_for_rr) &
+    !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init) &
     !$OMP& FIRSTPRIVATE(thread_flag,local_rr)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO SCHEDULE(static)
@@ -149,6 +150,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     ! if (s%s0.lt.2.0d-2) then
     !      open(1000+n)
     ! endif
+            v_init = sqrt(vpar**2+vperp**2)
 
             do while (t%confined.lt.start%t(species))
 
@@ -163,12 +165,13 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                     t%step = t%step/start%v0(species) !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 
+                v = sqrt(vpar**2+vperp**2)
+
                 if (rr%boole_russian_roulette.and.(i.gt.1)) then
                     if (local_rr%boole_eliminated) then
                         call initiate_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,particle_status,n,species)
                         if (local_rr%boole_eliminated) exit
                     else
-                        v = sqrt(vpar**2+vperp**2)
                         particle_state_for_rr = (/vpar,vperp,t%confined,t%remain,t%step,x,dble(ind_tetr),dble(iface)/)
                         call play_russian_roulette(start%weight(n,species),v,v_save,particle_state_for_rr,local_rr)
                     endif
@@ -197,7 +200,9 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                 endif
             enddo
 
-            print*, 'Confinement time for particle ', n, ' (species ', species, '): ', t%confined
+            !print*, 'Confinement time for particle ', n, ' (species ', species, '): ', t%confined
+            !print*, 'energy change for particle', n, ' (species ', species, '):', &
+            !v**2*start%particle_mass(species)/(ev2erg*2*start%energy(n,species))
 
     ! if (s%s0.lt.2.0d-2) then
     !      close(1000+n)
@@ -254,7 +259,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     logical                                      :: boole_t_finished, boole_lost_inside
     integer                                      :: ind_tetr_save,iper_phi,k,i
     type(optional_quantities_type)               :: optional_quantities
-    real(dp)                                     :: tau, v, t_pusher, normalisation, v_save
+    real(dp)                                     :: tau, v, t_pusher, normalisation, v_save, vpar_init, vperp_init
     type(local_rr_t)                             :: local_rr
     real(dp), dimension(10)                      :: particle_state_for_rr
 
@@ -282,6 +287,8 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     t%remain = t%step
     boole_t_finished = .false.
     local_counter%tetr_pushings = local_counter%tetr_pushings -1 !set tetr_pushings to -1 because when entering the loop it will go back to one without pushing
+    vpar_init = vpar
+    vperp_init = vperp
 
     do !Loop for tetrahedron pushings until t%step is reached
         local_counter%tetr_pushings = local_counter%tetr_pushings +1
@@ -292,7 +299,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
                 if (ind_tetr.eq.-1) exit
             elseif (x(1).lt.0.99_dp) then
                 call treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_tetr_save,z_save,x_save,x,vpar,vperp, &
-                                                                     perpinv,ind_tetr,vpar_save,vperp_save)
+                                                                     perpinv,ind_tetr,vpar_save,vperp_save,vpar_init,vperp_init)
             else
                 exit
             endif
@@ -834,7 +841,7 @@ subroutine fill_vector_parts_with_value(vector,indices,set_value)
 end subroutine fill_vector_parts_with_value
 
 subroutine treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_tetr_save,z_save,x_save,x,vpar,vperp, &
-                                                                                            perpinv,ind_tetr,vpar_save,vperp_save)
+                                                            perpinv,ind_tetr,vpar_save,vperp_save,vpar_init,vperp_init)
 
     use utils_orbit_timestep_mod, only: initialize_constants_of_motion
     use supporting_functions_mod, only: vperp_func
@@ -842,7 +849,7 @@ subroutine treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_
     integer, intent(in)                          :: ind_tetr_save
     real(dp), dimension(3), intent(in)           :: z_save_at_x_save, x_save
     real(dp), dimension(3), intent(inout)        :: x, z_save
-    real(dp), intent(inout)                      :: vpar,vperp, perpinv, vpar_save, vperp_save
+    real(dp), intent(inout)                      :: vpar,vperp, perpinv, vpar_save, vperp_save, vpar_init,vperp_init
     integer, intent(inout)                       :: ind_tetr
     real(dp)                                     :: v
     integer                                      :: problem_unit
@@ -852,6 +859,7 @@ subroutine treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_
 
     print*, 'x_save, vpar_save, vperp_save = ', x_save, vpar_save, vperp_save
     print*, 'x, vpar, vperp = ', x, vpar, vperp
+    print*, 'vpar/vpar_init, vperp/vperp_init = ', vpar/vpar_init, vperp/vperp_init
 
     !$omp critical
     open(newunit = problem_unit, file = 'pushing_problems.dat', position = 'append')
@@ -1067,7 +1075,7 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
     start%pitch(:,species) = 2*rand_matrix(4,:,:)-1 !pitch parameter
     start%energy(:,species) = in%energy_eV
     if (in%boole_boltzmann_energies) then
-        start%energy(:,species) = start%epsilon_max*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
+        !start%energy(:,species) = start%epsilon_max*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
         temperature = in%energy_eV
         if (boole_diffusion_coefficient) temperature = s%temperature
         allocate(radial_transport_energies(n_particles,size(species)))
@@ -1388,8 +1396,7 @@ j = 0
 
     print*, 'Total tracing time of all electrons divided by number of particles is: ', &
     sum(exit_data%t_confined(:,2))/in%num_particles, 's'
-    print*, 'exit times are : ', exit_data%t_confined(:,2)
-    stop
+    !print*, 'exit times are : ', exit_data%t_confined(:,2)
 
 end subroutine calc_electron_density_via_random_walk
 
