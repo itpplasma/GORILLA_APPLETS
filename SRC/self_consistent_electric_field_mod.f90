@@ -53,17 +53,19 @@ subroutine calc_self_consistent_electric_field
     call calc_s_shell_volumes
     call give_file_names
     call unlink_files
-    call print_errors_for_bad_inputs    
+    call print_errors_for_bad_inputs
+    if (in%boole_static_ne) call calc_starting_conditions    
 
     !call perform_electric_potential_update(0)
     do i = 1, max(in%n_electric_potential_updates,1)
-        call calc_starting_conditions
+        if (.not.in%boole_static_ne) call calc_starting_conditions
         ep%rho_prism = 0
         do species = 1,2 !trace electrons and ions
             if ((species.eq.2).and.(in%boole_static_ne)) cycle
             call prepare_next_round_of_parallelised_particle_pushing(species)
             if ((species.eq.2).and.(.not.boole_honest_electrons)) then
-                call calc_electron_density_via_random_walk
+                !if (i.eq.2) call calc_electron_diffusion_coefficients
+                call calc_electron_density_via_random_walk(i)
             else
                 if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
                 call parallelised_particle_pushing(species,i,boole_diffusion_coefficient=.false.)
@@ -72,8 +74,8 @@ subroutine calc_self_consistent_electric_field
             ep%rho_prism = ep%rho_prism + real(output%prism_moments(1,:,species))*start%particle_charge(species)
         enddo
         call perform_electric_potential_update(i)
-        print*, 'average ion weight is ', sum(start%weight(:,1))/in%n_particles
-        print*, 'average electron weight is ', sum(start%weight(:,2))/in%n_particles
+        !print*, 'average ion weight is ', sum(start%weight(:,1))/in%n_particles
+        !print*, 'average electron weight is ', sum(start%weight(:,2))/in%n_particles
     enddo
 
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments

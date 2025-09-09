@@ -206,6 +206,7 @@ module gorilla_applets_types_mod
 
     type diffusion_coefficients 
     real(dp), dimension(:), allocatable :: A
+    real(dp), dimension(:), allocatable :: A_from_first_run
     real(dp), dimension(:), allocatable :: B
     real(dp), dimension(:), allocatable :: grad_A
     real(dp), dimension(:), allocatable :: grad_B

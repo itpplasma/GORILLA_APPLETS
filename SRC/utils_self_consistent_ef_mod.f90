@@ -256,7 +256,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     integer, intent(inout)                       :: ind_tetr,iface
     real(dp), dimension(3)                       :: z_save, x_save, z_save_at_x_save
     real(dp)                                     :: t_pass,perpinv, vpar_save, vperp_save
-    logical                                      :: boole_t_finished, boole_lost_inside
+    logical                                      :: boole_t_finished, boole_lost_inside, mirror_condition
     integer                                      :: ind_tetr_save,iper_phi,k,i
     type(optional_quantities_type)               :: optional_quantities
     real(dp)                                     :: tau, v, t_pusher, normalisation, v_save, vpar_init, vperp_init
@@ -274,7 +274,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         z_save = x-tetra_physics(ind_tetr)%x1
         !if (j.eq.1)
         call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species,boole_diffusion_coefficient)
-        if (.not.in%boole_static_ne) then
+        if ((.not.in%boole_static_ne).and.(species.eq.1)) then
             start%x(:,n,2) = start%x(:,n,1)
             start%weight(n,2) = start%weight(n,1)
         endif 
@@ -294,7 +294,9 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         local_counter%tetr_pushings = local_counter%tetr_pushings +1
 
         if(ind_tetr.eq.-1) then
-            if((.not.(x(1).gt.1.01_dp*sfc_s_min))) then !.or.(.not.(x(1).lt.0.99_dp)) <-- include this if you also want a mirror term at s=1
+            mirror_condition = .not.(x(1).gt.1.01_dp*sfc_s_min)
+            if (in%boole_static_ne) mirror_condition = (.not.(x(1).gt.1.01_dp*sfc_s_min)).or.(.not.(x(1).lt.0.99_dp))
+            if(mirror_condition) then !.or.(.not.(x(1).lt.0.99_dp)) <-- include this if you also want a mirror term at s=1
                 call mirror_particles_on_domain_boundaries(x,vpar,n,ind_tetr,iface,z_save,perpinv,ind_tetr_save)
                 if (ind_tetr.eq.-1) exit
             elseif (x(1).lt.0.99_dp) then
@@ -450,7 +452,7 @@ subroutine calc_phi_elec_from_rho(i)
     use constants, only: ev2erg, eps, echarge
 
     integer, intent(in) :: i
-    real(dp) :: factor
+    real(dp) :: factor, factor_from_tracing_time
 
     ep%rho_prism = 0
     ep%rho_flux_layer = 0
@@ -479,11 +481,17 @@ subroutine calc_phi_elec_from_rho(i)
         factor = in%energy_eV*ev2erg/(echarge**2*in%density)!T/(n_0*e^2)= 4*pi*r_D^2
 
         !decrease factor in case very few particles are simulated
-        if (in%n_particles.lt.100.0_dp) factor = factor*in%n_particles/100.0_dp
+        !if (in%n_particles.lt.100.0_dp) factor = factor*in%n_particles/100.0_dp
 
-        ep%phi_elec_from_rho =  ep%rho_vert*factor
         
-        if (i.gt.0) ep%phi_elec_from_rho = ep%phi_elec_from_rho/sqrt(dble(i))
+        ep%phi_elec_from_rho =  ep%rho_vert*factor
+
+        factor_from_tracing_time = 10.0_dp
+        !tracing time is about 25 transport times, since densities are normalised by tracing time but particles only stay inside the 
+        !computation domain for about the tracing time, this factor is compensated here (with some safety margin)
+        if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho*factor_from_tracing_time
+        
+        !if (i.gt.0) ep%phi_elec_from_rho = ep%phi_elec_from_rho/sqrt(dble(i))
         
     endif
 
@@ -900,22 +908,25 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     start%weight(n,species) = start%weight(n,species)*abs((tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save)))
     !print*, 'weight before = ', start%weight(n,species), n
 
-    temperature = in%energy_eV
-    if (boole_diffusion_coefficient) temperature = s%temperature
-    start%weight(n,species) = start%weight(n,species)/  &
-    (sqrt(start%energy(n,species)/temperature)*exp(-start%energy(n,species)/temperature)/(temperature*ev2erg*sqrt(pi)/2))
-    !the last term is the integral of the function from zero to inf over energy in correct units
-    !start%weight(n,species) = start%weight(n,species)/((1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))*  &
-    !sqrt(start%energy(n,species)/s%temperature)*exp(-start%energy(n,species)/s%temperature)/(s%temperature*ev2erg*14035.0_dp))
-    !the last term is the integral of the function from zero to inf over energy in correct units
-
-
     if (in%boole_linear_density_simulation) then
         start%weight(n,species) = start%weight(n,species)*(1.0_dp-0.9_dp*x(1))
     endif
 
     if (in%boole_boltzmann_energies.or.boole_diffusion_coefficient) then
+
+        temperature = in%energy_eV
+        if (boole_diffusion_coefficient) temperature = s%temperature
+        start%weight(n,species) = start%weight(n,species)/  &
+        (sqrt(start%energy(n,species)/temperature)*exp(-start%energy(n,species)/temperature)/(temperature*ev2erg*sqrt(pi)/2))
+        !the last term is the integral of the function from zero to inf over energy in correct units
+        !start%weight(n,species) = start%weight(n,species)/((1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))*  &
+        !sqrt(start%energy(n,species)/s%temperature)*exp(-start%energy(n,species)/s%temperature)/(s%temperature*ev2erg*14035.0_dp))
+        !the last term is the integral of the function from zero to inf over energy in correct units
+
         phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
+        phi_elec_func = 0.0_dp !when working with fixed sources, electric potentials are not useful since they change the weights
+        !and thus the magnitude o the sources
+
         start%weight(n,species) = start%weight(n,species)*2/sqrt(pi)*sqrt(start%energy(n,species)*ev2erg)
         ! if (.not.boole_diffusion_coefficient) then 
         !     start%weight(n,species) = start%weight(n,species)*start%epsilon_max*in%energy_eV*ev2erg
@@ -929,7 +940,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
             temperature = in%energy_eV*ev2erg*(1.0_dp-0.9*x(1))
             if (boole_diffusion_coefficient) temperature = s%temperature*ev2erg*(1.0_dp-0.9*x(1))
             start%weight(n,species) = start%weight(n,species)/temperature**1.5_dp* &
-            & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
+                        & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
         endif
     endif
 
@@ -938,6 +949,8 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     
 !print*, 'weight after = ', start%weight(n,species)*(1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))/14035.0_dp/2*sqrt(pi)
 !print*, 'weight after for real = ', start%weight(n,species)
+
+
 
 end subroutine calc_particle_weights_and_jperp
 
@@ -1030,7 +1043,7 @@ subroutine set_starting_positions(rand_matrix,species_in,s0)
     endif
 
     start%x(1,:,species) = sfc_s_min + rand_matrix(1,:,:)*(1-sfc_s_min)
-    if (present(s0))  start%x(1,:,species) = s0
+    if (present(s0).and.(.not.in%boole_static_ne))  start%x(1,:,species) = s0
     start%x(2,:,species) = 2*pi*rand_matrix(2,:,:) !theta
     start%x(3,:,species) = 2*pi/n_field_periods*rand_matrix(3,:,:) !phi
 
@@ -1074,7 +1087,7 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
 
     start%pitch(:,species) = 2*rand_matrix(4,:,:)-1 !pitch parameter
     start%energy(:,species) = in%energy_eV
-    if (in%boole_boltzmann_energies) then
+    if (in%boole_boltzmann_energies.or.boole_diffusion_coefficient) then
         !start%energy(:,species) = start%epsilon_max*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
         temperature = in%energy_eV
         if (boole_diffusion_coefficient) temperature = s%temperature
@@ -1180,32 +1193,29 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str
 
-    s%n_particles = 1000
+    s%n_particles = 40000
 
-    allocate(rand_matrix(5,s%n_particles,1))
-    allocate(dc%s_vertices(grid_size(1)+1))
-    allocate(dc%A(grid_size(1)+1)) !diffusion coefficients will be computed on every flux layer (including inner and outer boundaries)
-    allocate(dc%B(grid_size(1)+1)) !diffusion coefficients will be computed on every flux layer (including inner and outer boundaries)
-    allocate(dc%grad_A(grid_size(1)))
-    allocate(dc%grad_B(grid_size(1)))
-
+    if (.not.allocated(rand_matrix)) allocate(rand_matrix(5,s%n_particles,1))
+    if (.not.allocated(dc%s_vertices)) allocate(dc%s_vertices(grid_size(1)+1))
+    if (.not.allocated(dc%A)) allocate(dc%A(grid_size(1)+1)) !diffusion coefficients will be computed on every flux layer (including inner and outer boundaries)
+    if (.not.allocated(dc%B)) allocate(dc%B(grid_size(1)+1)) !diffusion coefficients will be computed on every flux layer (including inner and outer boundaries)
+    if (.not.allocated(dc%grad_A)) allocate(dc%grad_A(grid_size(1)))
+    if (.not.allocated(dc%grad_B)) allocate(dc%grad_B(grid_size(1)))
     dc%s_vertices = verts_sthetaphi(1, [(grid_size(3)*(ns-1)+1,ns=1,grid_size(1)+1)])
-
     s%k = 1000
     s%j = 100
-
-    allocate(s%delta_s(s%k))
-    allocate(s%delta_s_squared(s%k))
-    allocate(s%time(s%k))
-    allocate(s%f_v(s%k,s%j))
-    allocate(s%check(s%k))
+    if (.not.allocated(s%delta_s)) allocate(s%delta_s(s%k))
+    if (.not.allocated(s%delta_s_squared)) allocate(s%delta_s_squared(s%k))
+    if (.not.allocated(s%time)) allocate(s%time(s%k))
+    if (.not.allocated(s%f_v)) allocate(s%f_v(s%k,s%j))
+    if (.not.allocated(s%check)) allocate(s%check(s%k))
 
     call allocate_start_type(s%n_particles)
     call set_particle_type_specifications
     start%v0(2) = start%v0(2)*sqrt(s%temperature/in%energy_eV)
     call initialize_exit_data(s%n_particles)
 
-    tau_c_ei = 5.0_dp*1.0d-5 !rough estimate from nrl formula booklet
+    tau_c_ei = 5.0_dp*1.0d-6 !rough estimate from nrl formula booklet
     start%t(2) = 3*tau_c_ei !check afterwards if this was too little time
 
     s%time = [(start%t(2)/s%k*i,i = 1,s%k)]
@@ -1303,7 +1313,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
 
 end subroutine calc_electron_diffusion_coefficients
 
-subroutine calc_electron_density_via_random_walk !call this after every ion pushing sequence
+subroutine calc_electron_density_via_random_walk(iteration_step) !call this after every ion pushing sequence
 
     use gorilla_applets_types_mod, only: in, time_t, dc, ep, g, output, start, exit_data
     use tetra_grid_settings_mod, only: grid_size, sfc_s_min
@@ -1311,20 +1321,28 @@ subroutine calc_electron_density_via_random_walk !call this after every ion push
     use tetra_grid_mod, only: ntetr, verts_sthetaphi
 
     real(dp) :: delta_x, delta_t, xi, A, B, cell_size
-    integer :: i, ns, k, num_steps_min, j
+    integer :: i, ns, k, num_steps_min, count_lost_particles, num_particles, particle_multiplication, iteration_step
     real(dp), dimension(:), allocatable :: electron_density, electron_prism_densities
-    real(dp), dimension(:), allocatable :: position, weight
+    real(dp), dimension(:), allocatable :: position, weight, exit_time
     type(time_t) :: t
     logical :: boole_lost
+
+    particle_multiplication = max(int(1.0d4/in%num_particles),1)
+    num_particles = in%num_particles*particle_multiplication
 
     allocate(electron_density(grid_size(1)), electron_prism_densities(ntetr/3))
     electron_density = 0.0_dp
 
     !>This should later be an input
-    allocate(position(in%num_particles))
-    allocate(weight(in%num_particles))
-    position = start%x(1,:,2)
-    weight = start%weight(:,2)
+    allocate(position(num_particles))
+    allocate(weight(num_particles))
+    allocate(exit_time(num_particles))
+
+    do i = 1,particle_multiplication
+        position(i:num_particles:particle_multiplication) = start%x(1,:,2)
+        weight(i:num_particles:particle_multiplication) = start%weight(:,2)
+    enddo
+
     ! call RANDOM_NUMBER(position)
     ! call generate_distribution_one_minus_x2(position)
     ! allocate(dc%A(grid_size(1)+1)) !diffusion coefficients will be computed on every flux layer (including inner and outer boundaries)
@@ -1339,13 +1357,17 @@ subroutine calc_electron_density_via_random_walk !call this after every ion push
     ! dc%grad_B = 0.0_dp
 
 
-    call read_diffusion_coefficient_data
+    if (iteration_step.eq.1) then 
+        call read_diffusion_coefficient_data
+    else
+        call calc_convection_coefficient_from_electric_field
+    endif
 
     t%step = in%time_step
     num_steps_min = 1000
 
-j = 0
-    do i = 1,in%num_particles
+count_lost_particles = 0
+    do i = 1,num_particles
         t%confined = 0.0_dp
         boole_lost = .false.
         do while ((t%confined.lt.t%step).and.(.not.boole_lost))
@@ -1355,6 +1377,7 @@ j = 0
             cell_size = dc%s_vertices(k+1) - dc%s_vertices(k)
             A = dc%A(k) + dc%grad_A(k)*(position(i)-dc%s_vertices(k))
             B = dc%B(k) + dc%grad_B(k)*(position(i)-dc%s_vertices(k))
+            
             delta_t = min(t%step/num_steps_min, cell_size**2/((abs(A)+abs(B))*4), t%step - t%confined) !control maximum possible jump
 
             electron_density(k) = electron_density(k) + delta_t*weight(i)
@@ -1371,18 +1394,24 @@ j = 0
             endif
             if (position(i).gt.1.0_dp)    then
                 boole_lost = .true.
-                j = j+1
+                count_lost_particles = count_lost_particles+1
             endif
         enddo
-        exit_data%t_confined(i,2) = t%confined
+        exit_time(i) = t%confined
     enddo
 
+    if (count_lost_particles.lt.num_particles) print*, 'Warning: the tracing time (', t%step,'s) was so short that only ',&
+                                                        count_lost_particles,'out of', num_particles, &
+                                                        'electrons left the computation domain'
+
+    open(10)
     do ns = 1, grid_size(1)
         write(10,*) sfc_s_min + (1.0_dp - sfc_s_min) * (ns - 0.5_dp) / (grid_size(1)+1), electron_density(ns)
     enddo
+    close(10)
 
     do i = 1,grid_size(1)
-        electron_density(i) = electron_density(i)/(ep%s_shell_volumes(i)*t%step*in%num_particles)
+        electron_density(i) = electron_density(i)/(ep%s_shell_volumes(i)*t%step*num_particles)
         call fill_vector_parts_with_value(electron_prism_densities, g%prisms_per_flux_tube(i,:), electron_density(i))
     enddo
 
@@ -1395,7 +1424,7 @@ j = 0
     enddo
 
     print*, 'Total tracing time of all electrons divided by number of particles is: ', &
-    sum(exit_data%t_confined(:,2))/in%num_particles, 's'
+    sum(exit_time)/num_particles, 's'
     !print*, 'exit times are : ', exit_data%t_confined(:,2)
 
 end subroutine calc_electron_density_via_random_walk
@@ -1410,6 +1439,7 @@ subroutine read_diffusion_coefficient_data
     integer :: id, ns
 
     if (.not.allocated(dc%A)) allocate(dc%A(grid_size(1)+1))
+    if (.not.allocated(dc%A_from_first_run)) allocate(dc%A_from_first_run(grid_size(1)+1))
     if (.not.allocated(dc%B)) allocate(dc%B(grid_size(1)+1))
     if (.not.allocated(dc%grad_A)) allocate(dc%grad_A(grid_size(1)))
     if (.not.allocated(dc%grad_B)) allocate(dc%grad_B(grid_size(1)))
@@ -1428,7 +1458,38 @@ subroutine read_diffusion_coefficient_data
         dc%grad_B(ns) = (dc%B(ns+1)-dc%B(ns))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
     enddo
 
+    dc%A_from_first_run = dc%A
+
 end subroutine read_diffusion_coefficient_data
+
+subroutine calc_convection_coefficient_from_electric_field
+
+    use tetra_physics_mod, only: tetra_physics
+    use constants, only: echarge, ev2erg
+    use gorilla_applets_types_mod, only: dc, in, s
+    use tetra_grid_settings_mod, only: grid_size
+
+    integer :: i, ns
+    real(dp) :: electric_field
+
+    do i = 1,grid_size(1)+1  
+        if (i.eq.1) then
+            electric_field = -tetra_physics(1)%gPhi(1)
+        elseif (i.eq.grid_size(1)+1) then
+            electric_field = -tetra_physics((grid_size(1)-1)*6*grid_size(2)+1)%gPhi(1)
+        else
+            electric_field = -0.5_dp*(tetra_physics((i-2)*6*grid_size(2)+1)%gPhi(1) + &
+                                      tetra_physics((i-1)*6*grid_size(2)+1)%gPhi(1))
+        endif
+        dc%A(i) = -dc%B(i)*echarge*electric_field/(s%temperature*ev2erg) + dc%A_from_first_run(i)
+    enddo
+
+    do ns = 1,grid_size(1)
+        dc%grad_A(ns) = (dc%A(ns+1)-dc%A(ns))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
+        dc%grad_B(ns) = (dc%B(ns+1)-dc%B(ns))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
+    enddo
+
+end subroutine calc_convection_coefficient_from_electric_field
 
 subroutine generate_distribution_x4_exp_neg_x(b, output_array)
 
