@@ -124,7 +124,8 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init) &
     !$OMP& FIRSTPRIVATE(thread_flag,local_rr)
     print*, 'get number of threads', omp_get_num_threads()
-    !$OMP DO SCHEDULE(static)
+    !$OMP DO 
+    !SCHEDULE(static)
 
     !Loop over particles
     do p = 1,n_particles/iantithetic
@@ -259,9 +260,10 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     logical                                      :: boole_t_finished, boole_lost_inside, mirror_condition
     integer                                      :: ind_tetr_save,iper_phi,k,i
     type(optional_quantities_type)               :: optional_quantities
-    real(dp)                                     :: tau, v, t_pusher, normalisation, v_save, vpar_init, vperp_init
+    real(dp)                                     :: tau, v, t_pusher, v_save, vpar_init, vperp_init, critical_distance
     type(local_rr_t)                             :: local_rr
     real(dp), dimension(10)                      :: particle_state_for_rr
+
 
     v = sqrt(vpar**2+vperp**2)
     if(.not.particle_status%initialized) then !If orbit_timestep is called for the first time without grid position
@@ -272,8 +274,9 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
             return
         endif
         z_save = x-tetra_physics(ind_tetr)%x1
-        !if (j.eq.1)
-        call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species,boole_diffusion_coefficient)
+        if ((j.eq.1).or.(.not.in%boole_static_ne)) then
+            call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species,boole_diffusion_coefficient)
+        endif
         if ((.not.in%boole_static_ne).and.(species.eq.1)) then
             start%x(:,n,2) = start%x(:,n,1)
             start%weight(n,2) = start%weight(n,1)
@@ -332,10 +335,16 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
                 if (t%remain.gt.t_step_s) boole_t_finished = .false.
                 t_step_s = start%t(species)/s%k + t_pass
                 local_counter%tetr_pushings = local_counter%tetr_pushings -1
-                normalisation = start%weight(n,species)/(s%n_particles*in%density*g%total_volume)
+                critical_distance = 1.0_dp-s%s0
+                if (abs(x(1)-s%s0).gt.critical_distance) s%boole_large_distance(n)=.true.
+                
                 !$omp critical
-                s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)*normalisation
-                s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2*normalisation
+                s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)*start%weight(n,species)
+                s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2*start%weight(n,species)
+                if (s%boole_large_distance(n)) then !delete contribution to delta_s, double contribution to delta_s_squared
+                    s%delta_s(k) = s%delta_s(k) - (x(1) - s%s0)*start%weight(n,species)
+                    s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2*start%weight(n,species)
+                endif
                 s%check(k) = s%check(k) + 1
                 i = min(int(s%j/10*v/start%v0(species))+1, s%j)
                 if (int(10*v/start%v0(species))+1.gt.s%j) print*, 'ATTENTION: particle is faster than 10*v_t'
@@ -912,7 +921,9 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
         start%weight(n,species) = start%weight(n,species)*(1.0_dp-0.9_dp*x(1))
     endif
 
-    if (in%boole_boltzmann_energies.or.boole_diffusion_coefficient) then
+    if (boole_diffusion_coefficient) then
+        start%weight(n,species) = 1.0_dp/s%n_particles
+    elseif (in%boole_boltzmann_energies) then
 
         temperature = in%energy_eV
         if (boole_diffusion_coefficient) temperature = s%temperature
@@ -945,6 +956,8 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     endif
 
     start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
+
+    
     !-1 because of negative gyrophase
     
 !print*, 'weight after = ', start%weight(n,species)*(1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))/14035.0_dp/2*sqrt(pi)
@@ -966,7 +979,7 @@ subroutine calc_starting_conditions
 
     call allocate_start_type
     call set_particle_type_specifications
-    call set_starting_positions(rand_matrix,s0=sfc_s_min*1.1_dp)
+    call set_starting_positions(rand_matrix)!,s0=sfc_s_min*1.1_dp)
     call set_rest_of_individual_particle_specifications(rand_matrix)
     
 
@@ -1192,6 +1205,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     real(dp) :: extrapolation_factor, A, B, offset, tau_c_ei, v0, v_max, weights_before_redistribution
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str
+    real(dp), dimension(:), allocatable :: data_for_diffusion_coefficient
 
     s%n_particles = 40000
 
@@ -1209,13 +1223,16 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     if (.not.allocated(s%time)) allocate(s%time(s%k))
     if (.not.allocated(s%f_v)) allocate(s%f_v(s%k,s%j))
     if (.not.allocated(s%check)) allocate(s%check(s%k))
+    if (.not.allocated(data_for_diffusion_coefficient)) allocate(data_for_diffusion_coefficient(s%k))
+    if (.not.allocated(s%boole_large_distance)) allocate(s%boole_large_distance(s%n_particles))
+    s%boole_large_distance = .false.
 
     call allocate_start_type(s%n_particles)
     call set_particle_type_specifications
     start%v0(2) = start%v0(2)*sqrt(s%temperature/in%energy_eV)
     call initialize_exit_data(s%n_particles)
 
-    tau_c_ei = 5.0_dp*1.0d-6 !rough estimate from nrl formula booklet
+    tau_c_ei = 5.0_dp*1.0d-5 !rough estimate from nrl formula booklet
     start%t(2) = 3*tau_c_ei !check afterwards if this was too little time
 
     s%time = [(start%t(2)/s%k*i,i = 1,s%k)]
@@ -1223,6 +1240,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     do ns = 2,grid_size(1)
 
         print*, 'ns = ', ns, '/', grid_size(1)
+
 
         !Initiate electrons at the different flux surfaces leaving out the boundaries
         s%s0 = (dc%s_vertices(ns) + dc%s_vertices(ns-1))/2
@@ -1261,15 +1279,25 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
 
         ! Starting index (Throw away first 20 percent of values)
         i = ceiling(dble(s%k)*0.2_dp)
+        
 
         call llsq ( int(s%k - i + 1, kind=8), s%time(i:s%k), s%delta_s(i:s%k),         A, offset)
-        A = A/2
-        call llsq ( int(s%k - i + 1, kind=8), s%time(i:s%k), s%delta_s_squared(i:s%k), B, offset)
+
+        data_for_diffusion_coefficient = s%delta_s_squared-2*A*s%time*s%delta_s+A**2*s%time**2
+        call llsq ( int(s%k - i + 1, kind=8), s%time(i:s%k), data_for_diffusion_coefficient, B, offset)
         B = B/2
 
         !compute A and B via delta s and (delta s)^2 (use functions from mono-energetic-diffusion-coefficient)
         dc%A(ns) = A
         dc%B(ns) = B
+
+        open(99,file='particle_positions.dat')
+        do i = 1,s%n_particles
+            write(99,*) start%x(1,i,2)
+        enddo
+        close(99)
+
+        stop
 
     write(ns_str, '(I0)') ns
     filename = 'data' // trim(ns_str) // '.dat'

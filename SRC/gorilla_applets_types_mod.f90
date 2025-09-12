@@ -192,6 +192,7 @@ module gorilla_applets_types_mod
     type delta_s_delta_s_squared_t
     real(dp), dimension(:), allocatable    :: delta_s
     real(dp), dimension(:), allocatable    :: delta_s_squared
+    logical, dimension(:), allocatable     :: boole_large_distance
     real(dp), dimension(:), allocatable    :: time
     real(dp), dimension(:,:), allocatable  :: f_v
     integer                                :: k, j
