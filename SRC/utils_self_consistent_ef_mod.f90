@@ -72,7 +72,8 @@ end subroutine read_self_consistent_electric_field_inp_into_type
 
 subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n_particles_in)
 
-    use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, exit_data, s, g
+    use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, exit_data, s, &
+    g, maximum_s
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
@@ -102,6 +103,8 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     else
         n_particles = in%num_particles
     endif
+
+    maximum_s = 0.0_dp
     
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
@@ -238,7 +241,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, g, start, s, in, time_t
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, g, start, s, in, time_t, maximum_s
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
     use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
                                         initialize_constants_of_motion, compute_radial_fluxes
@@ -371,6 +374,13 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         if(boole_t_finished.or.local_rr%boole_eliminated) then !Orbit stops within cell, because "flight"-time t%step has finished
             exit
         endif
+
+        !$omp critical
+        if (x(1).gt.maximum_s) then
+            !print*, 'maximum s-value increased to ', x(1)
+            maximum_s = x(1)
+        endif
+        !$omp end critical
 
     enddo !Loop for tetrahedron pushings
 
@@ -981,7 +991,6 @@ subroutine calc_starting_conditions
     call set_particle_type_specifications
     call set_starting_positions(rand_matrix)!,s0=sfc_s_min*1.1_dp)
     call set_rest_of_individual_particle_specifications(rand_matrix)
-    
 
 end subroutine calc_starting_conditions
 
@@ -1192,7 +1201,7 @@ end subroutine calc_s_shell_volumes
 
 subroutine calc_electron_diffusion_coefficients !call this before the first ion pushing
 
-    use gorilla_applets_types_mod, only: in, dc, start, s, g
+    use gorilla_applets_types_mod, only: in, dc, start, s, g, exit_data
     use tetra_grid_settings_mod, only: grid_size
     use tetra_grid_mod, only: verts_sthetaphi
     use utils_data_pre_and_post_processing_mod, only: prepare_next_round_of_parallelised_particle_pushing, &
@@ -1200,12 +1209,15 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     use llsq_mod, only: llsq
     use tetra_physics_mod, only: particle_mass,tetra_physics
     use russian_roulette_mod, only: prepare_russian_roulette
+    use tetra_grid_settings_mod, only: sfc_s_min
 
-    integer :: ns, i, n_particles
+    integer :: ns, i, n_particles, file_id, n_ignored
     real(dp) :: extrapolation_factor, A, B, offset, tau_c_ei, v0, v_max, weights_before_redistribution
+    real(dp) :: standard_deviation
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str
-    real(dp), dimension(:), allocatable :: data_for_diffusion_coefficient
+    real(dp), dimension(:), allocatable :: data_for_diffusion_coefficient, data_for_convection_coefficient
+    logical :: ignore_condition
 
     s%n_particles = 40000
 
@@ -1223,7 +1235,8 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     if (.not.allocated(s%time)) allocate(s%time(s%k))
     if (.not.allocated(s%f_v)) allocate(s%f_v(s%k,s%j))
     if (.not.allocated(s%check)) allocate(s%check(s%k))
-    if (.not.allocated(data_for_diffusion_coefficient)) allocate(data_for_diffusion_coefficient(s%k))
+    if (.not.allocated(data_for_diffusion_coefficient)) allocate(data_for_diffusion_coefficient(s%n_particles))
+    if (.not.allocated(data_for_convection_coefficient)) allocate(data_for_convection_coefficient(s%n_particles))
     if (.not.allocated(s%boole_large_distance)) allocate(s%boole_large_distance(s%n_particles))
     s%boole_large_distance = .false.
 
@@ -1232,8 +1245,8 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     start%v0(2) = start%v0(2)*sqrt(s%temperature/in%energy_eV)
     call initialize_exit_data(s%n_particles)
 
-    tau_c_ei = 5.0_dp*1.0d-5 !rough estimate from nrl formula booklet
-    start%t(2) = 3*tau_c_ei !check afterwards if this was too little time
+    tau_c_ei = 1.7_dp*1.0d-4 !rough estimate from nrl formula booklet
+    start%t(2) = tau_c_ei !check afterwards if this was too little time
 
     s%time = [(start%t(2)/s%k*i,i = 1,s%k)]
 
@@ -1243,7 +1256,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
 
 
         !Initiate electrons at the different flux surfaces leaving out the boundaries
-        s%s0 = (dc%s_vertices(ns) + dc%s_vertices(ns-1))/2
+        s%s0 = dc%s_vertices(ns)
 
         call RANDOM_NUMBER(rand_matrix)
         call set_starting_positions(rand_matrix,(/2/), s%s0)
@@ -1277,35 +1290,53 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
         !     enddo
         ! close(23)
 
-        ! Starting index (Throw away first 20 percent of values)
+        !Starting index (Throw away first 20 percent of values)
         i = ceiling(dble(s%k)*0.2_dp)
         
 
-        call llsq ( int(s%k - i + 1, kind=8), s%time(i:s%k), s%delta_s(i:s%k),         A, offset)
+        call llsq ( int(s%k - i + 1, kind=8), s%time(i:s%k), s%delta_s(i:s%k), A, offset)
 
         data_for_diffusion_coefficient = s%delta_s_squared-2*A*s%time*s%delta_s+A**2*s%time**2
         call llsq ( int(s%k - i + 1, kind=8), s%time(i:s%k), data_for_diffusion_coefficient, B, offset)
         B = B/2
 
-        !compute A and B via delta s and (delta s)^2 (use functions from mono-energetic-diffusion-coefficient)
+        ! n_ignored = 0
+        ! data_for_convection_coefficient = exit_data%x(1,:,2)-s%s0
+        ! do i = 1,s%n_particles
+        !     ignore_condition = abs(data_for_convection_coefficient(i)).gt.0.99_dp*min(s%s0-sfc_s_min,1.0_dp-s%s0)
+        !     if (ignore_condition) then
+        !         data_for_convection_coefficient(i) = 0.0_dp
+        !         n_ignored = n_ignored + 1
+        !     endif
+        ! enddo
+
+        ! A = sum(exit_data%x(1,:,2)-s%s0)/(s%n_particles*start%t(2))
+        ! data_for_diffusion_coefficient = abs(exit_data%x(1,:,2)-(s%s0+A*start%t(2)))
+        ! call quicksort(data_for_diffusion_coefficient, 1, s%n_particles)
+        ! standard_deviation = data_for_diffusion_coefficient(int(s%n_particles*0.682689_dp))
+        ! B = standard_deviation**2/(2*start%t(2))
+
+
         dc%A(ns) = A
         dc%B(ns) = B
 
-        open(99,file='particle_positions.dat')
-        do i = 1,s%n_particles
-            write(99,*) start%x(1,i,2)
-        enddo
-        close(99)
-
-        stop
-
+        print*, 'A = ', A 
+        print*, 'B = ', B
     write(ns_str, '(I0)') ns
-    filename = 'data' // trim(ns_str) // '.dat'
-    open(23,file = filename)
-        do i = 1,s%k
-            write(23,*) s%time(i), s%delta_s(i), s%delta_s_squared(i)
+    filename = 'exit_s_values' // trim(ns_str) // '.dat'
+    open(newunit=file_id,file = filename)
+        do i = 1,s%n_particles
+            write(file_id,*) exit_data%x(1,i,2)
         enddo
-    close(23)
+    close(file_id)
+
+
+    ! filename = 'data' // trim(ns_str) // '.dat'
+    ! open(23,file = filename)
+    !     do i = 1,s%k
+    !         write(23,*) s%time(i), s%delta_s(i), s%delta_s_squared(i)
+    !     enddo
+    ! close(23)
 
     ! open(23,file = 'f_v.dat')
     !     do i = 1,s%j
@@ -1353,7 +1384,7 @@ subroutine calc_electron_density_via_random_walk(iteration_step) !call this afte
     real(dp), dimension(:), allocatable :: electron_density, electron_prism_densities
     real(dp), dimension(:), allocatable :: position, weight, exit_time
     type(time_t) :: t
-    logical :: boole_lost
+    logical :: boole_lost, boole_use_fit_function = .false.
 
     particle_multiplication = max(int(1.0d4/in%num_particles),1)
     num_particles = in%num_particles*particle_multiplication
@@ -1386,7 +1417,7 @@ subroutine calc_electron_density_via_random_walk(iteration_step) !call this afte
 
 
     if (iteration_step.eq.1) then 
-        call read_diffusion_coefficient_data
+        call get_diffusion_coefficient_data
     else
         call calc_convection_coefficient_from_electric_field
     endif
@@ -1399,13 +1430,19 @@ count_lost_particles = 0
         t%confined = 0.0_dp
         boole_lost = .false.
         do while ((t%confined.lt.t%step).and.(.not.boole_lost))
+
             !binsrc finds k such that dc%s_vertices(k-1) < position(i) < dc%s_vertices(k)
             call binsrc(dc%s_vertices,1,grid_size(1)+1,position(i),k) 
             k = k-1 
             cell_size = dc%s_vertices(k+1) - dc%s_vertices(k)
             A = dc%A(k) + dc%grad_A(k)*(position(i)-dc%s_vertices(k))
-            B = dc%B(k) + dc%grad_B(k)*(position(i)-dc%s_vertices(k))
-            
+
+            if (boole_use_fit_function) then
+                B = sum(dc%polynomial_coefficients_for_B*(/1.0_dp,position(i),position(i)**2,0.0_dp/))
+            else
+                B = dc%B(k) + dc%grad_B(k)*(position(i)-dc%s_vertices(k))
+            endif
+
             delta_t = min(t%step/num_steps_min, cell_size**2/((abs(A)+abs(B))*4), t%step - t%confined) !control maximum possible jump
 
             electron_density(k) = electron_density(k) + delta_t*weight(i)
@@ -1414,6 +1451,8 @@ count_lost_particles = 0
             call random_number(xi)
             xi = sqrt(12.0_dp)*(xi-0.5_dp)
             delta_x = sqrt(2*delta_t*B)*xi + A*delta_t
+            !print*, 'diffusive part over convective part = ', A,B,abs(sqrt(2*delta_t*B)/(A*delta_t)), &
+            !sqrt(2*delta_t*B)*xi/(A*delta_t)
 
             position(i) = position(i) + delta_x
 
@@ -1454,17 +1493,23 @@ count_lost_particles = 0
     print*, 'Total tracing time of all electrons divided by number of particles is: ', &
     sum(exit_time)/num_particles, 's'
     !print*, 'exit times are : ', exit_data%t_confined(:,2)
+    stop
 
 end subroutine calc_electron_density_via_random_walk
 
-subroutine read_diffusion_coefficient_data
+subroutine get_diffusion_coefficient_data
 
     use gorilla_applets_types_mod, only: dc
     use tetra_grid_settings_mod, only: grid_size
     use tetra_grid_mod, only: verts_sthetaphi
+    use utils_polyfit_mod, only: quadratic_fit
 
     character(len=100) :: filename
-    integer :: id, ns
+    integer :: id, ns, lower_bound, upper_bound
+    real(dp), dimension(:), allocatable :: x,y
+    logical :: success
+    real(dp) :: a0, a1, a2
+
 
     if (.not.allocated(dc%A)) allocate(dc%A(grid_size(1)+1))
     if (.not.allocated(dc%A_from_first_run)) allocate(dc%A_from_first_run(grid_size(1)+1))
@@ -1488,7 +1533,20 @@ subroutine read_diffusion_coefficient_data
 
     dc%A_from_first_run = dc%A
 
-end subroutine read_diffusion_coefficient_data
+    lower_bound = 2
+    upper_bound = grid_size(1) - 4
+
+    if (.not.allocated(x)) allocate(x(upper_bound-lower_bound+1))
+    if (.not.allocated(y)) allocate(y(upper_bound-lower_bound+1))
+
+    x = dc%s_vertices(lower_bound:upper_bound)
+    y = dc%B(lower_bound:upper_bound)
+
+    call quadratic_fit(size(x), x, y, a0, a1, a2, success) ! Least-squares fit of y ≈ a2*x^2 + a1*x + a0
+
+    dc%polynomial_coefficients_for_B = (/a0,a1,a2,0.0_dp/)
+
+end subroutine get_diffusion_coefficient_data
 
 subroutine calc_convection_coefficient_from_electric_field
 
@@ -1675,5 +1733,56 @@ subroutine generate_distribution_one_minus_x2(output_array)
     enddo
 
 end subroutine generate_distribution_one_minus_x2
+
+subroutine sort_array(array)
+  real(dp), dimension(:) :: array
+  integer, parameter :: n = 6
+  real :: a(n) = [3.5, 1.2, -4.0, 7.8, 0.0, 2.1]
+  integer :: i, j
+  real(dp) :: temp
+
+  ! simple bubble sort (ascending)
+  do i = 1, size(array)
+     do j = i+1, size(array)
+        if (array(j) < array(i)) then
+           temp = array(i)
+           array(i) = array(j)
+           array(j) = temp
+        end if
+     end do
+  end do
+
+end subroutine sort_array
+
+recursive subroutine quicksort(arr, left, right)
+real(dp), intent(inout) :: arr(:)
+integer, intent(in) :: left, right
+integer :: i, j
+real(dp) :: pivot, temp
+
+i = left
+j = right
+pivot = arr((left+right)/2)
+
+do
+    do while (arr(i) < pivot)
+        i = i + 1
+    end do
+    do while (arr(j) > pivot)
+        j = j - 1
+    end do
+    if (i <= j) then
+        temp = arr(i)
+        arr(i) = arr(j)
+        arr(j) = temp
+        i = i + 1
+        j = j - 1
+    end if
+    if (i > j) exit
+end do
+
+if (left < j) call quicksort(arr, left, j)
+if (i < right) call quicksort(arr, i, right)
+end subroutine quicksort
 
 end module utils_self_consistent_ef_mod

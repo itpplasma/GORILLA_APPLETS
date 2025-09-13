@@ -212,6 +212,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: grad_A
     real(dp), dimension(:), allocatable :: grad_B
     real(dp), dimension(:), allocatable :: s_vertices
+    real(dp), dimension(4)              :: polynomial_coefficients_for_B
     end type diffusion_coefficients
 
     type(diffusion_coefficients) dc
@@ -234,5 +235,7 @@ module gorilla_applets_types_mod
     real(dp) :: remain
     real(dp) :: confined
     end type time_t
+
+    real(dp) :: maximum_s
 
 end module gorilla_applets_types_mod
