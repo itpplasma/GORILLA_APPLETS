@@ -213,6 +213,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: grad_B
     real(dp), dimension(:), allocatable :: s_vertices
     real(dp), dimension(4)              :: polynomial_coefficients_for_B
+    real(dp), dimension(3)              :: polynomial_coefficients_for_A
     end type diffusion_coefficients
 
     type(diffusion_coefficients) dc

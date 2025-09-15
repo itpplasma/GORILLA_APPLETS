@@ -644,6 +644,8 @@ subroutine calc_rho_on_vertices
     !set rho on last flux surface
     value_to_be_set = rho_per_flux_surface(grid_size(1)) + (delta_s(grid_size(1))/delta_s(grid_size(1)-1))* &
                      (rho_per_flux_surface(grid_size(1))-rho_per_flux_surface(grid_size(1)-1))
+    value_to_be_set = 0.0_dp
+    value_to_be_set = -sum(ep%rho_flux_layer*ep%s_shell_volumes)/sum(ep%s_shell_volumes)
     call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(grid_size(1)+1,:), value_to_be_set)
     rho_per_flux_surface(grid_size(1)+1) = value_to_be_set
 
@@ -1368,7 +1370,6 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
         write(23,*) dc%A(i), dc%B(i)
     enddo
     close(23)
-    stop
 
 end subroutine calc_electron_diffusion_coefficients
 
@@ -1379,12 +1380,12 @@ subroutine calc_electron_density_via_random_walk(iteration_step) !call this afte
     use binsrc_mod, only: binsrc
     use tetra_grid_mod, only: ntetr, verts_sthetaphi
 
-    real(dp) :: delta_x, delta_t, xi, A, B, cell_size
+    real(dp) :: delta_x, delta_t, xi, A, B, cell_size, B_fit, A_fit, p
     integer :: i, ns, k, num_steps_min, count_lost_particles, num_particles, particle_multiplication, iteration_step
     real(dp), dimension(:), allocatable :: electron_density, electron_prism_densities
     real(dp), dimension(:), allocatable :: position, weight, exit_time
     type(time_t) :: t
-    logical :: boole_lost, boole_use_fit_function = .false.
+    logical :: boole_lost, boole_use_fit_function = .true.
 
     particle_multiplication = max(int(1.0d4/in%num_particles),1)
     num_particles = in%num_particles*particle_multiplication
@@ -1417,9 +1418,9 @@ subroutine calc_electron_density_via_random_walk(iteration_step) !call this afte
 
 
     if (iteration_step.eq.1) then 
-        call get_diffusion_coefficient_data
+        call get_diffusion_coefficient_data(boole_use_fit_function)
     else
-        call calc_convection_coefficient_from_electric_field
+        call calc_convection_coefficient_from_electric_field(boole_use_fit_function)
     endif
 
     t%step = in%time_step
@@ -1436,12 +1437,21 @@ count_lost_particles = 0
             k = k-1 
             cell_size = dc%s_vertices(k+1) - dc%s_vertices(k)
             A = dc%A(k) + dc%grad_A(k)*(position(i)-dc%s_vertices(k))
+            B = dc%B(k) + dc%grad_B(k)*(position(i)-dc%s_vertices(k))
 
             if (boole_use_fit_function) then
-                B = sum(dc%polynomial_coefficients_for_B*(/1.0_dp,position(i),position(i)**2,0.0_dp/))
-            else
-                B = dc%B(k) + dc%grad_B(k)*(position(i)-dc%s_vertices(k))
+                B_fit = sum(dc%polynomial_coefficients_for_B*(/1.0_dp,position(i),position(i)**2,0.0_dp/))
+                A_fit = sum(dc%polynomial_coefficients_for_A*(/1.0_dp,position(i),0.0_dp/))
+                if (position(i).lt.dc%s_vertices(4)) then
+                    p = (position(i) - sfc_s_min)/(dc%s_vertices(4) - sfc_s_min)
+                    B = p*B_fit + (1-p)*B
+                    A = p*A_fit + (1-p)*B/position(i) + A
+                else
+                    B = B_fit
+                    A = A + A_fit
+                endif
             endif
+
 
             delta_t = min(t%step/num_steps_min, cell_size**2/((abs(A)+abs(B))*4), t%step - t%confined) !control maximum possible jump
 
@@ -1493,11 +1503,10 @@ count_lost_particles = 0
     print*, 'Total tracing time of all electrons divided by number of particles is: ', &
     sum(exit_time)/num_particles, 's'
     !print*, 'exit times are : ', exit_data%t_confined(:,2)
-    stop
 
 end subroutine calc_electron_density_via_random_walk
 
-subroutine get_diffusion_coefficient_data
+subroutine get_diffusion_coefficient_data(boole_use_fit_function)
 
     use gorilla_applets_types_mod, only: dc
     use tetra_grid_settings_mod, only: grid_size
@@ -1507,7 +1516,7 @@ subroutine get_diffusion_coefficient_data
     character(len=100) :: filename
     integer :: id, ns, lower_bound, upper_bound
     real(dp), dimension(:), allocatable :: x,y
-    logical :: success
+    logical :: success, boole_use_fit_function
     real(dp) :: a0, a1, a2
 
 
@@ -1526,12 +1535,15 @@ subroutine get_diffusion_coefficient_data
 
     dc%s_vertices = verts_sthetaphi(1, [(grid_size(3)*(ns-1)+1,ns=1,grid_size(1)+1)])
 
+    dc%A_from_first_run = dc%A
+    if (boole_use_fit_function) dc%A = 0.0_dp
+
     do ns = 1,grid_size(1)
         dc%grad_A(ns) = (dc%A(ns+1)-dc%A(ns))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
         dc%grad_B(ns) = (dc%B(ns+1)-dc%B(ns))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
     enddo
 
-    dc%A_from_first_run = dc%A
+
 
     lower_bound = 2
     upper_bound = grid_size(1) - 4
@@ -1545,16 +1557,18 @@ subroutine get_diffusion_coefficient_data
     call quadratic_fit(size(x), x, y, a0, a1, a2, success) ! Least-squares fit of y ≈ a2*x^2 + a1*x + a0
 
     dc%polynomial_coefficients_for_B = (/a0,a1,a2,0.0_dp/)
+    dc%polynomial_coefficients_for_A = (/a1,2*a2,0.0_dp/)
 
 end subroutine get_diffusion_coefficient_data
 
-subroutine calc_convection_coefficient_from_electric_field
+subroutine calc_convection_coefficient_from_electric_field(boole_use_fit_function)
 
     use tetra_physics_mod, only: tetra_physics
     use constants, only: echarge, ev2erg
     use gorilla_applets_types_mod, only: dc, in, s
     use tetra_grid_settings_mod, only: grid_size
 
+    logical :: boole_use_fit_function
     integer :: i, ns
     real(dp) :: electric_field
 
@@ -1567,7 +1581,8 @@ subroutine calc_convection_coefficient_from_electric_field
             electric_field = -0.5_dp*(tetra_physics((i-2)*6*grid_size(2)+1)%gPhi(1) + &
                                       tetra_physics((i-1)*6*grid_size(2)+1)%gPhi(1))
         endif
-        dc%A(i) = -dc%B(i)*echarge*electric_field/(s%temperature*ev2erg) + dc%A_from_first_run(i)
+        dc%A(i) = -dc%B(i)*echarge*electric_field/(s%temperature*ev2erg)
+        if (.not.boole_use_fit_function) dc%A(i) = dc%A(i) + dc%A_from_first_run(i)
     enddo
 
     do ns = 1,grid_size(1)

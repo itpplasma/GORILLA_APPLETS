@@ -12,7 +12,7 @@ subroutine print_progress(num_particles,kpart,n)
     logical :: print_progress_for_very_particle = .false.
 
     if ((.not.print_progress_for_very_particle).and.(num_particles.gt.10)) then
-                if (modulo(kpart,int(num_particles/10)).eq.0) then
+        if (modulo(kpart,int(num_particles/10)).eq.0) then
             print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
         endif
     else
