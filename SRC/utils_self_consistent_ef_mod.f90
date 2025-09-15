@@ -122,12 +122,13 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     t_tot = 0.0_dp
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr,t_tot) &
+    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr) &
+    !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p,l,n,i,x,v_save,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
     !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init) &
     !$OMP& FIRSTPRIVATE(thread_flag,local_rr)
-    print*, 'get number of threads', omp_get_num_threads()
-    !$OMP DO 
+    if (omp_get_thread_num().eq.0) print*, 'get number of threads', omp_get_num_threads()
+    !$OMP DO SCHEDULE(dynamic,8)
     !SCHEDULE(static)
 
     !Loop over particles
@@ -140,10 +141,9 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
 
         do l = 1,iantithetic
             n = (p-1)*iantithetic+l
-            !$omp critical
-            kpart = kpart+1 !in general not equal to n becuase of parallelisation
+            !$omp atomic update
+            kpart = kpart + 1 !in general not equal to n because of parallelisation
             call print_progress(n_particles,kpart,n)
-            !$omp end critical
 
             call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp,species)
 
@@ -192,9 +192,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                 &local_tetr_moments, local_counter, species, j, t_step_s, k, boole_diffusion_coefficient,local_rr)
 
                 t%confined = t%confined + t%step - t%remain
-                !$omp critical
                 t_tot = t_tot + t%step - t%remain
-                !$omp end critical
 
 
 
@@ -375,12 +373,12 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
             exit
         endif
 
-        !$omp critical
-        if (x(1).gt.maximum_s) then
-            !print*, 'maximum s-value increased to ', x(1)
-            maximum_s = x(1)
-        endif
-        !$omp end critical
+        ! !$omp critical
+        ! if (x(1).gt.maximum_s) then
+        !     !print*, 'maximum s-value increased to ', x(1)
+        !     maximum_s = x(1)
+        ! endif
+        ! !$omp end critical
 
     enddo !Loop for tetrahedron pushings
 

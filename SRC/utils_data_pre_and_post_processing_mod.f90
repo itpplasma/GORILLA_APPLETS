@@ -318,54 +318,29 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     
     integer, intent(in), optional :: species_in
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
-    integer :: Te_unit, Ti_unit, ne_unit
     integer :: i, j
     integer :: species = 1
     real(dp) :: m0, z0, n0, s_value, v0
+    logical :: boole_T_and_n_from_files = .false., boole_linear_density = .false.
 
     if (present(species_in)) species = species_in
-    
-    c%n = 2 !number of background species
-    if (.not.allocated(c%dens_mat))   allocate(c%dens_mat(c%n,ntetr))
-    if (.not.allocated(c%temp_mat))   allocate(c%temp_mat(c%n,ntetr))
-    if (.not.allocated(c%vpar_mat))   allocate(c%vpar_mat(c%n,ntetr))
-    if (.not.allocated(c%efcolf_mat)) allocate(c%efcolf_mat(c%n,ntetr))
-    if (.not.allocated(c%velrat_mat)) allocate(c%velrat_mat(c%n,ntetr))
-    if (.not.allocated(c%enrat_mat))  allocate(c%enrat_mat(c%n,ntetr))
-    if (.not.allocated(c%mass))       allocate(c%mass(c%n))
-    if (.not.allocated(c%charge_num)) allocate(c%charge_num(c%n))
-    if (.not.allocated(c%dens))       allocate(c%dens(c%n))
-    if (.not.allocated(c%temp))       allocate(c%temp(c%n))
+
+    call set_c
+
     if (.not.allocated(efcolf))       allocate(efcolf(c%n))
     if (.not.allocated(velrat))       allocate(velrat(c%n))
     if (.not.allocated(enrat))        allocate(enrat(c%n))
-    c%mass = 0
-    c%charge_num = 0
-    c%mass(1) = 2*amp
-    c%mass(c%n) = ame
-    !c%mass(2) = 3*amp
-    c%charge_num(1) = 1.0d0
-    !c%charge_num(2) = 2
-    c%charge_num(c%n) = -1.0d0
-    c%vpar_mat = 0 !ask Sergei when this will be needed!!!
+
     m0 = particle_mass
     z0 = particle_charge/echarge
-    
-    open(newunit = Te_unit, file = 'background/Te_d.dat')
-    read(Te_unit,'(e16.9)') (c%temp_mat(2,i),i=1,ntetr/grid_size(2),3)
-    close(Te_unit)
-    
-    open(newunit = Ti_unit, file = 'background/Ti_d.dat')
-    read(Ti_unit,'(e16.9)') (c%temp_mat(1,i),i=1,ntetr/grid_size(2),3)
-    close(Ti_unit)
-    
-    open(newunit = ne_unit, file = 'background/ne_d.dat')
-    read(ne_unit,'(e16.9)') (c%dens_mat(1,i),i=1,ntetr/grid_size(2),3)
-    c%dens_mat(2,:) = c%dens_mat(1,:)
-    close(ne_unit)
 
-    !If working in flux coordinates, use background density linear in s
-    if (coord_system.eq.2) then
+    c%temp_mat(2,:) = s%temperature
+    c%temp_mat(1,:) = in%energy_eV
+    c%dens_mat = in%density
+
+    if (boole_T_and_n_from_files) call get_T_and_n_from_files
+    !Use background density linear in s
+    if (boole_linear_density) then
         n0 = 3.0_dp * 10.0_dp**13
         do i = 1,ntetr/grid_size(2),3
             s_value = tetra_physics(i)%x1(1)
@@ -373,7 +348,6 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
         enddo
         c%dens_mat(2,:) = c%dens_mat(1,:)
     endif
-    
     do i = 1,grid_size(2)-1 !copy data from first phi slice to all other phi slices
         c%temp_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%temp_mat(:,1:ntetr/grid_size(2):3)
         c%dens_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%dens_mat(:,1:ntetr/grid_size(2):3)
@@ -382,16 +356,6 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
         c%temp_mat(:,1+i:ntetr:3) = c%temp_mat(:,1:ntetr:3)
         c%dens_mat(:,1+i:ntetr:3) = c%dens_mat(:,1:ntetr:3)
     enddo
-
-    !for now, use constant background temperature
-    do i = 1, c%n
-        c%temp_mat(i,:) = sum(c%temp_mat(i,:))/ntetr
-        if (coord_system.eq.1) c%dens_mat(i,:) = sum(c%dens_mat(i,:))/ntetr
-    enddo
-    
-    if (coord_system.eq.2) c%temp_mat(2,:) = s%temperature
-    if (coord_system.eq.2) c%temp_mat(1,:) = in%energy_eV
-    if (coord_system.eq.2) c%dens_mat = in%density
 
 
     if (.not.in%boole_preserve_energy_and_momentum_during_collisions) then
@@ -414,7 +378,61 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
         !3.464102_dp = sqrt(12), this creates a random number with zero average and unit variance
         c%randcol(:,:,1:3:2,:) =  3.464102_dp*(c%randcol(:,:,1:3:2,:)-0.5_dp)
     endif
+
 end subroutine calc_collision_coefficients_for_all_tetrahedra
+
+subroutine set_c
+
+    use gorilla_applets_types_mod, only: c
+    use tetra_grid_mod, only: ntetr
+    use constants, only: amp, ame
+
+    c%n = 2 !number of background species
+    if (.not.allocated(c%dens_mat))   allocate(c%dens_mat(c%n,ntetr))
+    if (.not.allocated(c%temp_mat))   allocate(c%temp_mat(c%n,ntetr))
+    if (.not.allocated(c%vpar_mat))   allocate(c%vpar_mat(c%n,ntetr))
+    if (.not.allocated(c%efcolf_mat)) allocate(c%efcolf_mat(c%n,ntetr))
+    if (.not.allocated(c%velrat_mat)) allocate(c%velrat_mat(c%n,ntetr))
+    if (.not.allocated(c%enrat_mat))  allocate(c%enrat_mat(c%n,ntetr))
+    if (.not.allocated(c%mass))       allocate(c%mass(c%n))
+    if (.not.allocated(c%charge_num)) allocate(c%charge_num(c%n))
+    if (.not.allocated(c%dens))       allocate(c%dens(c%n))
+    if (.not.allocated(c%temp))       allocate(c%temp(c%n))
+
+    c%mass = 0
+    c%charge_num = 0
+    c%mass(1) = 2*amp
+    c%mass(c%n) = ame
+    !c%mass(2) = 3*amp
+    c%charge_num(1) = 1.0d0
+    !c%charge_num(2) = 2
+    c%charge_num(c%n) = -1.0d0
+    c%vpar_mat = 0 !ask Sergei when this will be needed!!!
+
+end subroutine set_c
+
+subroutine get_T_and_n_from_files
+
+    use gorilla_applets_types_mod, only: c
+    use tetra_grid_settings_mod, only: grid_size
+    use tetra_grid_mod, only: ntetr
+
+    integer :: Te_unit, Ti_unit, ne_unit, i
+    
+    open(newunit = Te_unit, file = 'background/Te_d.dat')
+    read(Te_unit,'(e16.9)') (c%temp_mat(2,i),i=1,ntetr/grid_size(2),3)
+    close(Te_unit)
+    
+    open(newunit = Ti_unit, file = 'background/Ti_d.dat')
+    read(Ti_unit,'(e16.9)') (c%temp_mat(1,i),i=1,ntetr/grid_size(2),3)
+    close(Ti_unit)
+    
+    open(newunit = ne_unit, file = 'background/ne_d.dat')
+    read(ne_unit,'(e16.9)') (c%dens_mat(1,i),i=1,ntetr/grid_size(2),3)
+    c%dens_mat(2,:) = c%dens_mat(1,:)
+    close(ne_unit)
+
+end subroutine get_T_and_n_from_files
 
 subroutine perform_background_density_update(i)
 
