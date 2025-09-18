@@ -128,7 +128,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init) &
     !$OMP& FIRSTPRIVATE(thread_flag,local_rr)
     if (omp_get_thread_num().eq.0) print*, 'get number of threads', omp_get_num_threads()
-    !$OMP DO SCHEDULE(dynamic,8)
+    !$OMP DO SCHEDULE(dynamic,1)
     !SCHEDULE(static)
 
     !Loop over particles
@@ -588,7 +588,7 @@ subroutine calc_rho_on_vertices
 
     use tetra_grid_mod, only: nvert, verts_rphiz, verts_sthetaphi
     use tetra_grid_settings_mod, only: grid_size
-    use gorilla_applets_types_mod, only: g, ep
+    use gorilla_applets_types_mod, only: g, ep, in
     use tetra_physics_mod, only: tetra_physics, coord_system, mag_axis_R0, mag_axis_Z0
     use constants, only: pi
 
@@ -642,8 +642,7 @@ subroutine calc_rho_on_vertices
     !set rho on last flux surface
     value_to_be_set = rho_per_flux_surface(grid_size(1)) + (delta_s(grid_size(1))/delta_s(grid_size(1)-1))* &
                      (rho_per_flux_surface(grid_size(1))-rho_per_flux_surface(grid_size(1)-1))
-    value_to_be_set = 0.0_dp
-    value_to_be_set = -sum(ep%rho_flux_layer*ep%s_shell_volumes)/sum(ep%s_shell_volumes)
+    if (.not.in%boole_static_ne) value_to_be_set = -sum(ep%rho_flux_layer*ep%s_shell_volumes)/sum(ep%s_shell_volumes)
     call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(grid_size(1)+1,:), value_to_be_set)
     rho_per_flux_surface(grid_size(1)+1) = value_to_be_set
 
@@ -1219,7 +1218,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     real(dp), dimension(:), allocatable :: data_for_diffusion_coefficient, data_for_convection_coefficient
     logical :: ignore_condition
 
-    s%n_particles = 40000
+    s%n_particles = 1000
 
     if (.not.allocated(rand_matrix)) allocate(rand_matrix(5,s%n_particles,1))
     if (.not.allocated(dc%s_vertices)) allocate(dc%s_vertices(grid_size(1)+1))
