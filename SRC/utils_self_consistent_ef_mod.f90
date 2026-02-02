@@ -1341,16 +1341,14 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
             write(file_id,*) exit_data%x(1,i,2)
         enddo
     close(file_id)
-            
 
 
-    filename = 'data' // trim(ns_str) // '.dat'
-    open(23,file = filename)
-        do i = 1,s%k
-            write(23,*) s%time(i), s%delta_s(i), s%delta_s_squared(i)
-        enddo
-    close(23)
-    stop
+    ! filename = 'data' // trim(ns_str) // '.dat'
+    ! open(23,file = filename)
+    !     do i = 1,s%k
+    !         write(23,*) s%time(i), s%delta_s(i), s%delta_s_squared(i)
+    !     enddo
+    ! close(23)
 
     ! open(23,file = 'f_v.dat')
     !     do i = 1,s%j
