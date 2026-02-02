@@ -8,7 +8,7 @@ contains
 
 subroutine read_boltzmann_inp_into_type
 
-    use boltzmann_types_mod, only: in
+    use gorilla_applets_types_mod, only: in
 
     real(dp) :: time_step,energy_eV,n_particles, density
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
@@ -78,14 +78,14 @@ subroutine calc_boltzmann
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use boltzmann_types_mod, only: moment_specs, counter, c, in
+    use gorilla_applets_types_mod, only: moment_specs, counter, c, in
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
     get_ipert, set_moment_specifications, initialise_output, calc_starting_conditions, initialize_exit_data, calc_poloidal_flux, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
     find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution, &
     perform_background_density_update, set_weights, prepare_next_round_of_parallelised_particle_pushing
-    use boltzmann_types_mod, only: output
+    use gorilla_applets_types_mod, only: output
 
     real(dp) :: v0
     real(dp), dimension(:,:), allocatable :: verts
@@ -110,7 +110,7 @@ subroutine calc_boltzmann
     call initialize_exit_data
     call calc_starting_conditions(verts)
     call calc_poloidal_flux(verts)
-    if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(v0)
+    if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
     call give_file_names
     call unlink_files
 
@@ -151,7 +151,7 @@ end subroutine calc_boltzmann
 
 subroutine parallelised_particle_pushing(v0)
 
-    use boltzmann_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t
+    use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
@@ -196,14 +196,14 @@ subroutine parallelised_particle_pushing(v0)
             call print_progress(in%num_particles,kpart,n)
             !$omp end critical
 
-            call initialise_loop_variables(l, n, v0, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
+            call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
 
             i = 0
             do while (t%confined.lt.in%time_step)
                 i = i+1
 
                 if (in%boole_collisions) then
-                    call carry_out_collisions(i, n, v0, t, x, vpar,vperp,ind_tetr, iface)
+                    call carry_out_collisions(i, n, t, x, vpar,vperp,ind_tetr, iface)
                     t%step = t%step/v0 !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 
@@ -244,7 +244,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use boltzmann_types_mod, only: counter_t, particle_status_t, g
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, g
     use tetra_grid_settings_mod, only: grid_kind
     use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
                                         initialize_constants_of_motion, calc_particle_weights_and_jperp, compute_radial_fluxes
@@ -292,12 +292,14 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
                 call identify_particles_entering_annulus(x,local_counter,boole_lost_inside)
                 if (boole_lost_inside) then
                     x_new = 3*(/g%raxis,x(2),g%zaxis/) - 2*x
+                    vperp = vperp_func(z_save,perpinv,ind_tetr_save)
                     call find_tetra(x_new,vpar,vperp,ind_tetr,iface)
                     x = x_new
-                    print*, "particle pushing across the hole surrounding the magnetic axis was successful"
                     if (ind_tetr.eq.-1) then
                         print*, "ATTENTION: particle pushing across the hole surrounding the magnetic axis was unsuccessful"
                         exit
+                    else
+                        print*, "particle pushing across the hole surrounding the magnetic axis was successful"
                     endif
                 else
                     exit

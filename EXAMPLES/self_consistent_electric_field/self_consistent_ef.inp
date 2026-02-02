@@ -1,0 +1,84 @@
+! INPUT FILE FOR SELF CONSISTENT ELECTRIC FIELD
+!
+&self_consistent_ef_nml
+!
+  !time for tracing particles
+  time_step = 5.0d0 ,
+!
+  !Kinetic energy of particles
+  energy_eV = 3.5d3 ,
+!
+  !Number of species is usually 2, namely the ion species specified in gorilla.inp and electrons
+  n_species = 2
+!
+  !Number of particles to be traced
+  n_particles = 1.20d1 ,
+!
+  !Keep electron density constant
+  boole_static_ne = .false. ,
+!
+  !Compute squares of moments 
+  boole_squared_moments = .false.,
+!
+  !Start all particles from the same physical position
+  boole_point_source = .false.,
+!
+  !include a collision operator
+  boole_collisions = .true.,
+!
+  !precalcualte random numbers for collisions
+  boole_precalc_collisions = .false.,
+!
+  !make collisions energy and momentum conserving
+  boole_preserve_energy_and_momentum_during_collisions = .false.,
+!
+  !Number of electric potential updates
+  n_electric_potential_updates = 200,
+!
+  !type of electric potential update
+  !1 ... 1D 
+  !3 ... 3D 
+  update_dimension = 1
+!
+  !Simulated density of particles
+  density = 1.0d13,
+!
+  !refined jacobian determinant, must be set to .false. since this can only be made use of in cylindrical coordinates
+  boole_refined_sqrt_g = .false.,
+!
+  !work with boltzmann energies instead of with monoenergetic articles
+  boole_boltzmann_energies = .true.,
+!
+  !make density a linear function of poloidal flux
+  boole_linear_density_simulation = .false.,
+!
+  !always initiate pairs of particles where both particles start at the same position but move
+  !in opposite direction, this helps to reduce statistical noise
+  boole_antithetic_variate = .false.,
+!
+  !make temperature a linear function of poloidal flux
+  boole_linear_temperature_simulation = .false.,
+!
+  !Set integrator type
+  !(must be 1, otherwise it currently does not work)
+  ! 1 ... GORILLA
+  ! 2 ... DIRECT
+  i_integrator_type = 1 ,
+!
+  !Option for precomputation of above random numbers
+  ! 1 ... compute seed with a random number
+  ! 2 ... load seed from file 'seed.inp'
+  seed_option = 2
+
+  !write data to files
+  boole_write_vertex_indices = .true. ,
+  boole_write_vertex_coordinates = .true. ,
+  boole_write_prism_volumes = .true. ,
+  boole_write_refined_prism_volumes = .false. , !Must be set to .false., since boole_refined_sqrt_g is also set to .false.
+  boole_write_boltzmann_density = .false. ,
+  boole_write_electric_potential = .false. ,
+  boole_write_moments = .true. ,
+  boole_write_fourier_moments = .true. ,
+  boole_write_exit_data = .true. ,
+  boole_write_grid_data = .true.
+/

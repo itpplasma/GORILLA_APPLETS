@@ -15,7 +15,7 @@ contains
 
 subroutine read_divertor_heat_loads_inp_into_type
 
-    use boltzmann_types_mod, only: in
+    use gorilla_applets_types_mod, only: in
 
     real(dp) :: time_step,energy_eV,n_particles, density, lambda
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
@@ -87,7 +87,7 @@ subroutine calc_divertor_heat_loads
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use boltzmann_types_mod, only: moment_specs, counter_t, counter, c, in, time_t, particle_status_t
+    use gorilla_applets_types_mod, only: moment_specs, counter_t, counter, c, in, time_t, particle_status_t
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, get_ipert, &
     set_moment_specifications, initialise_output, initialize_exit_data, &
@@ -127,7 +127,7 @@ subroutine calc_divertor_heat_loads
     call calc_starting_conditions
     call initialize_exit_data
     call calc_poloidal_flux(verts_rphiz)
-    if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(v0)
+    if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
     call give_file_names
     call unlink_files
     call open_files
@@ -156,7 +156,7 @@ subroutine calc_divertor_heat_loads
                 call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num())
             endif
 
-            call initialise_loop_variables(l, n, v0, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
+            call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
 
             i = 0
             do while (t%confined.lt.in%time_step)
@@ -166,7 +166,7 @@ subroutine calc_divertor_heat_loads
                 ! endif
 
                 if (in%boole_collisions) then
-                    call carry_out_collisions(i, n, v0, t, x, vpar,vperp,ind_tetr, iface)
+                    call carry_out_collisions(i, n, t, x, vpar,vperp,ind_tetr, iface)
                     t%step = t%step/v0 !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 
@@ -225,7 +225,7 @@ subroutine orbit_timestep_dhl(x,vpar,vperp,t_step,particle_status,ind_tetr,iface
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func, bmod_func
     use find_tetra_mod, only: find_tetra
-    use boltzmann_types_mod, only: counter_t, particle_status_t, in
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, in
     use tetra_grid_settings_mod, only: grid_kind
     use utils_orbit_timestep_mod, only: update_local_tetr_moments, initialize_constants_of_motion, &
                                                        calc_particle_weights_and_jperp
@@ -305,7 +305,7 @@ end subroutine orbit_timestep_dhl
 
 subroutine calc_and_write_poincare_mappings(x,iper_phi,local_counter,particle_status)
 
-    use boltzmann_types_mod, only: counter_t, particle_status_t, in
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, in
 
     real(dp), dimension(3), intent(inout)  :: x
     integer, intent(in)                    :: iper_phi
@@ -326,7 +326,7 @@ end subroutine calc_and_write_poincare_mappings
 
 subroutine calc_and_write_divertor_intersections(x_save,x,n,local_counter,particle_status)
 
-    use boltzmann_types_mod, only: counter_t, particle_status_t, in
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, in
 
     real(dp), dimension(3), intent(in)     :: x_save
     real(dp), dimension(3), intent(inout)  :: x
@@ -387,7 +387,7 @@ end subroutine close_files
 
 subroutine calc_starting_conditions
 
-    use boltzmann_types_mod, only: in
+    use gorilla_applets_types_mod, only: in
     
     real(dp), dimension(:,:), allocatable  :: rand_matrix
 
@@ -403,22 +403,22 @@ end subroutine calc_starting_conditions
 
 subroutine set_start_type(rand_matrix)
 
-    use boltzmann_types_mod, only: in, start, g
+    use gorilla_applets_types_mod, only: in, start, g
     use constants, only: pi, ev2erg
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
     integer                              :: i
     real(dp)                             :: constant
 
-    if (in%num_particles.gt.1) start%x(1,:) = (/(214 + (i-1)*(216-214)/(in%n_particles-1), i=1,in%num_particles)/)!r
-    if (in%num_particles.eq.1) start%x(1,:) = 214
-    start%x(2,:) = 0.0_dp  !phi
-    start%x(3,:) = 12.0_dp !z
-    !start%pitch(:) = 2*rand_matrix(4,:)-1
+    if (in%num_particles.gt.1) start%x(1,:,1) = (/(214 + (i-1)*(216-214)/(in%n_particles-1), i=1,in%num_particles)/)!r
+    if (in%num_particles.eq.1) start%x(1,:,1) = 214
+    start%x(2,:,1) = 0.0_dp  !phi
+    start%x(3,:,1) = 12.0_dp !z
+    !start%pitch(:,1) = 2*rand_matrix(4,:)-1
 
-    constant = (1-in%lambda**2)*start%x(1,1)
+    constant = (1-in%lambda**2)*start%x(1,1,1)
     do i = 1,in%num_particles
-        start%pitch(i) = sqrt(1-constant/start%x(1,i))
+        start%pitch(i,1) = sqrt(1-constant/start%x(1,i,1))
     enddo
 
     start%weight = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
@@ -426,13 +426,13 @@ subroutine set_start_type(rand_matrix)
 
     if (in%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
         start%weight =  start%weight*10/sqrt(pi)
-        start%energy = 5*in%energy_eV*rand_matrix(5,:)
+        start%energy(:,1) = 5*in%energy_eV*rand_matrix(5,:)
     endif
     
     if (in%boole_antithetic_variate) then
-        start%x(:,1:in%num_particles:2) = start%x(:,2:in%num_particles:2)
-        start%pitch(1:in%num_particles:2) = -start%pitch(2:in%num_particles:2)
-        start%energy(1:in%num_particles:2) = start%energy(2:in%num_particles:2)
+        start%x(:,1:in%num_particles:2,1) = start%x(:,2:in%num_particles:2,1)
+        start%pitch(1:in%num_particles:2,1) = -start%pitch(2:in%num_particles:2,1)
+        start%energy(1:in%num_particles:2,1) = start%energy(2:in%num_particles:2,1)
     endif
 
 end subroutine set_start_type
@@ -440,7 +440,7 @@ end subroutine set_start_type
 subroutine set_coordinate_limits
 
     use tetra_grid_mod, only: verts_rphiz
-    use boltzmann_types_mod, only: g
+    use gorilla_applets_types_mod, only: g
 
     g%amin = minval(verts_rphiz(1,:)) !r coordinate
     g%amax = maxval(verts_rphiz(1,:))
@@ -451,19 +451,19 @@ end subroutine set_coordinate_limits
 
 subroutine allocate_start_type
 
-    use boltzmann_types_mod, only: start, in
+    use gorilla_applets_types_mod, only: start, in
 
-    allocate(start%x(3,in%num_particles))
-    allocate(start%pitch(in%num_particles))
-    allocate(start%energy(in%num_particles))
-    allocate(start%weight(in%num_particles))
-    allocate(start%jperp(in%num_particles))
+    allocate(start%x(3,in%num_particles,1))
+    allocate(start%pitch(in%num_particles,1))
+    allocate(start%energy(in%num_particles,1))
+    allocate(start%weight(in%num_particles,1))
+    allocate(start%jperp(in%num_particles,1))
 
 end subroutine allocate_start_type
 
 subroutine create_magnetic_field_file
     use tetra_grid_settings_mod, only: n1,n2,n3
-    use boltzmann_types_mod, only: g
+    use gorilla_applets_types_mod, only: g
     use constants, only: pi
     use tetra_physics_mod, only: vector_potential_rphiz
     use field_mod, only: ipert

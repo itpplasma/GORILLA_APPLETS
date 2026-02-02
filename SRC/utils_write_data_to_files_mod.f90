@@ -10,7 +10,7 @@ contains
 
 subroutine write_data_to_files
 
-    use boltzmann_types_mod, only: filenames, in, output, moment_specs
+    use gorilla_applets_types_mod, only: filenames, in, output, moment_specs
 
     if (in%boole_write_vertex_indices) call write_vertex_indices
 
@@ -52,7 +52,7 @@ end subroutine write_data_to_files
 subroutine write_vertex_indices
 
     use tetra_grid_mod, only: ntetr, tetra_grid
-    use boltzmann_types_mod, only: filenames
+    use gorilla_applets_types_mod, only: filenames
 
     integer :: vi_unit
     integer :: i
@@ -69,7 +69,7 @@ subroutine write_vertex_coordinates
 
     use tetra_physics_mod, only: coord_system
     use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
-    use boltzmann_types_mod, only: filenames
+    use gorilla_applets_types_mod, only: filenames
 
     integer :: vc_unit
     integer :: i
@@ -93,7 +93,7 @@ end subroutine write_vertex_coordinates
 
 subroutine write_prism_volumes
 
-    use boltzmann_types_mod, only: filenames, output
+    use gorilla_applets_types_mod, only: filenames, output
 
     integer :: pv_unit
 
@@ -105,7 +105,7 @@ end subroutine write_prism_volumes
 
 subroutine write_refined_prism_volumes
 
-    use boltzmann_types_mod, only: filenames, output
+    use gorilla_applets_types_mod, only: filenames, output
 
     integer :: rpv_unit
 
@@ -117,7 +117,7 @@ end subroutine write_refined_prism_volumes
 
 subroutine write_boltzmann_densities
 
-    use boltzmann_types_mod, only: filenames, output
+    use gorilla_applets_types_mod, only: filenames, output
 
     integer :: bd_unit
 
@@ -129,7 +129,7 @@ end subroutine write_boltzmann_densities
 
 subroutine write_electric_potential
 
-    use boltzmann_types_mod, only: filenames, output
+    use gorilla_applets_types_mod, only: filenames, output
 
     integer :: epv_unit
 
@@ -142,55 +142,76 @@ end subroutine write_electric_potential
 subroutine write_moments
 
     use tetra_grid_mod, only: ntetr
-    use boltzmann_types_mod, only: moment_specs, filenames, output
+    use gorilla_applets_types_mod, only: moment_specs, filenames, output, in
 
     integer :: p_moments_unit, pmss_unit, t_moments_unit
-    integer :: l, i
+    integer :: l, i,j
     integer :: n_prisms
-
-    open(newunit = p_moments_unit, file = filenames%prism_moments)
-    open(newunit = pmss_unit, file = filenames%prism_moments_summed_squares)
-    open(newunit = t_moments_unit, file = filenames%tetr_moments)
+    character(len=100) :: filename_prism_moments, filename_prism_moments_summed_squares, filename_tetr_moments
+    character(len=5) :: j_str
 
     n_prisms = ntetr/3
 
-    if (moment_specs%n_moments.gt.0) then
-        do l = 1,n_prisms
-            do i = 1,moment_specs%n_moments - 1
-                write(p_moments_unit,'(2ES20.10E4)',advance="no") real(output%prism_moments(i,l)), aimag(output%prism_moments(i,l))
-            enddo
-                write(p_moments_unit,'(2ES20.10E4)') real(output%prism_moments(moment_specs%n_moments,l)), &
-                                                     aimag(output%prism_moments(moment_specs%n_moments,l))
-        enddo
-        if (moment_specs%boole_squared_moments) then
+    filename_prism_moments = filenames%prism_moments
+    filename_prism_moments_summed_squares = filenames%prism_moments_summed_squares
+    filename_tetr_moments = filenames%tetr_moments
+
+    do j = 1,in%n_species
+
+        if (in%n_species.gt.1) then
+
+            write(j_str, '(I0)') j
+            filename_prism_moments = trim(j_str) // '_' // filenames%prism_moments
+            filename_prism_moments_summed_squares = trim(j_str) // '_' //  filenames%prism_moments_summed_squares
+            filename_tetr_moments = trim(j_str) // '_' //  filenames%tetr_moments
+
+        endif
+
+        open(newunit = p_moments_unit, file = filename_prism_moments)
+        open(newunit = pmss_unit, file = filename_prism_moments_summed_squares)
+        open(newunit = t_moments_unit, file = filename_tetr_moments)
+
+        if (moment_specs%n_moments.gt.0) then
             do l = 1,n_prisms
                 do i = 1,moment_specs%n_moments - 1
-                    write(pmss_unit,'(2ES20.10E4)',advance="no") real(output%prism_moments_squared(i,l)), &
-                                                                    & aimag(output%prism_moments_squared(i,l))
+                    write(p_moments_unit,'(2ES20.10E4)',advance="no") real(output%prism_moments(i,l,j)), &
+                                                                     aimag(output%prism_moments(i,l,j))
                 enddo
-                    write(pmss_unit,'(2ES20.10E4)') real(output%prism_moments_squared(moment_specs%n_moments,l)), &
-                                                    aimag(output%prism_moments_squared(moment_specs%n_moments,l))
+                    write(p_moments_unit,'(2ES20.10E4)') real(output%prism_moments(moment_specs%n_moments,l,j)), &
+                                                        aimag(output%prism_moments(moment_specs%n_moments,l,j))
+            enddo
+            if (moment_specs%boole_squared_moments) then
+                do l = 1,n_prisms
+                    do i = 1,moment_specs%n_moments - 1
+                        write(pmss_unit,'(2ES20.10E4)',advance="no") real(output%prism_moments_squared(i,l,j)), &
+                                                                    aimag(output%prism_moments_squared(i,l,j))
+                    enddo
+                        write(pmss_unit,'(2ES20.10E4)') real(output%prism_moments_squared(moment_specs%n_moments,l,j)), &
+                                                       aimag(output%prism_moments_squared(moment_specs%n_moments,l,j))
+                enddo
+            endif
+            do l = 1,ntetr
+                do i = 1,moment_specs%n_moments - 1
+                    write(t_moments_unit,'(2ES20.10E4)',advance="no") real(output%tetr_moments(i,l,j)), &
+                                                                     aimag(output%tetr_moments(i,l,j))
+                enddo
+                    write(t_moments_unit,'(2ES20.10E4)') real(output%tetr_moments(moment_specs%n_moments,l,j)), &
+                                                        aimag(output%tetr_moments(moment_specs%n_moments,l,j))
             enddo
         endif
-        do l = 1,ntetr
-            do i = 1,moment_specs%n_moments - 1
-                write(t_moments_unit,'(2ES20.10E4)',advance="no") real(output%tetr_moments(i,l)), aimag(output%tetr_moments(i,l))
-            enddo
-                write(t_moments_unit,'(2ES20.10E4)') real(output%tetr_moments(moment_specs%n_moments,l)), &
-                                                     aimag(output%tetr_moments(moment_specs%n_moments,l))
-        enddo
-    endif
 
-    close(p_moments_unit)
-    close(pmss_unit)
-    close(t_moments_unit)
+        close(p_moments_unit)
+        close(pmss_unit)
+        close(t_moments_unit)
+
+    enddo
 
 end subroutine write_moments
 
 subroutine write_fourier_moments
 
     use tetra_grid_settings_mod, only: grid_size
-    use boltzmann_types_mod, only: moment_specs, output, filenames
+    use gorilla_applets_types_mod, only: moment_specs, output, filenames
 
     integer :: fm_unit, l, i
 
@@ -209,23 +230,38 @@ end subroutine write_fourier_moments
 
 subroutine write_exit_data
 
-    use boltzmann_types_mod, only: exit_data, filenames, in
+    use gorilla_applets_types_mod, only: exit_data, filenames, in
 
-    integer :: ed_unit, i
+    integer :: ed_unit, i, j
+    character(len=100) :: filename_exit_data
+    character(len=5) :: j_str
 
-    open(newunit = ed_unit, file = filenames%exit_data)
-    do i = 1,in%num_particles
-        write(ed_unit,*) i, exit_data%lost(i), exit_data%t_confined(i), exit_data%x(:,i), exit_data%vpar(i), &
-                        exit_data%vperp(i), exit_data%integration_step(i), exit_data%phi_0_mappings(i)
+    filename_exit_data = filenames%exit_data
+
+    do j = 1, in%n_species
+
+        if (in%n_species.gt.1) then
+            write(j_str, '(I0)') j
+            filename_exit_data = trim(j_str) // '_' // filenames%exit_data
+        endif
+
+        open(newunit = ed_unit, file = filename_exit_data)
+
+        do i = 1,in%num_particles
+            write(ed_unit,*) i, exit_data%lost(i,j), exit_data%t_confined(i,j), exit_data%x(:,i,j), exit_data%vpar(i,j), &
+                            exit_data%vperp(i,j), exit_data%integration_step(i,j), exit_data%phi_0_mappings(i,j)
+        enddo
+
+        close (ed_unit)
+
     enddo
-    close (ed_unit)
 
 end subroutine write_exit_data
 
 subroutine write_grid_data
 
     use tetra_grid_settings_mod, only: grid_size, n_extra_rings
-    use boltzmann_types_mod, only: filenames, g
+    use gorilla_applets_types_mod, only: filenames, g
     use netcdf
 
     integer :: status, ncid
@@ -286,7 +322,7 @@ end subroutine nc_check
 
 subroutine give_file_names
 
-    use boltzmann_types_mod, only: filenames
+    use gorilla_applets_types_mod, only: filenames
 
     filenames%poincare_maps = 'poincare_maps.dat'
     filenames%prism_moments = 'prism_moments.dat'
@@ -307,11 +343,35 @@ end subroutine give_file_names
 
 subroutine unlink_files
 
-    use boltzmann_types_mod, only: filenames
+    use gorilla_applets_types_mod, only: filenames, in
+
+    integer :: j
+    character(len=100) :: filename_tetr_moments, filename_prism_moments, filename_prism_moments_summed_squared, filename_exit_data
+    character(len=5) :: j_str
+
+    do j = 1, in%n_species
+
+        filename_tetr_moments = filenames%tetr_moments
+        filename_prism_moments = filenames%prism_moments
+        filename_prism_moments_summed_squared = filenames%prism_moments_summed_squares
+        filename_exit_data = filenames%exit_data
+
+        if (in%n_species.gt.1) then
+            write(j_str, '(I0)') j
+            filename_tetr_moments = trim(j_str) // '_' // filenames%tetr_moments
+            filename_prism_moments = trim(j_str) // '_' // filenames%prism_moments
+            filename_prism_moments_summed_squared = trim(j_str) // '_' // filenames%prism_moments_summed_squares
+            filename_exit_data = trim(j_str) // '_' // filenames%exit_data
+        endif
+
+        call unlink(filename_tetr_moments)
+        call unlink(filename_prism_moments)
+        call unlink(filename_prism_moments_summed_squared)
+        call unlink(filename_exit_data)
+
+    enddo
 
     call unlink(filenames%poincare_maps)
-    call unlink(filenames%prism_moments)
-    call unlink(filenames%prism_moments_summed_squares)
     call unlink(filenames%vertex_coordinates)
     call unlink(filenames%vertex_indices)
     call unlink(filenames%prism_volumes)
@@ -320,8 +380,7 @@ subroutine unlink_files
     call unlink(filenames%electric_potential)
     call unlink(filenames%boltzmann_density)
     call unlink(filenames%divertor_intersections)
-    call unlink(filenames%tetr_moments)
-    call unlink(filenames%exit_data)
+
 
 end subroutine unlink_files
 

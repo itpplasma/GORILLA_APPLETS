@@ -1,7 +1,7 @@
 add_library(GORILLA_APPLETS STATIC
   alpha_lifetime_gorilla_mod.f90
   boltzmann_mod.f90
-  boltzmann_types_mod.f90
+  gorilla_applets_types_mod.f90
   collis_ions_mod.f90
   direct_vmec_integrator_mod.f90
   divertor_heat_loads_mod.f90
@@ -12,17 +12,21 @@ add_library(GORILLA_APPLETS STATIC
   gorilla_applets_settings_mod.f90
   gorilla_applets_sub_mod.f90
   llsq.f90
+  utils_polyfit_mod.f90
   mono_energetic_transp_coef_settings_mod.f90
   poincare_invariances_mod.f90
   pusher_tetra_field_lines_mod.f90
   reversibility_test_mod.f90
-  sub_alpha_lifetime_can.f90
+  russian_roulette_mod.f90
   utils_data_pre_and_post_processing_mod.f90
+  sub_alpha_lifetime_can.f90
   utils_orbit_timestep_mod.f90
   utils_parallelised_particle_pushing_mod.f90
   utils_write_data_to_files_mod.f90
+  utils_self_consistent_ef_mod.f90
   volume_integrals_and_sqrt_g_mod.f90
   zzg.f90
+  self_consistent_electric_field_mod.f90
   )
 target_link_libraries(GORILLA_APPLETS 
   GORILLA

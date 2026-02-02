@@ -1,13 +1,15 @@
 module collis_ions
 
+      use, intrinsic :: iso_fortran_env, only: dp => real64
+
 implicit none
-!
+
 contains
 !
 !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
 subroutine coleff(efcolf,velrat,enrat,p,dpp_vec,dhh_vec,fpeff_vec)
-!
+
 !  Computes local values of dimensionless contravariant components
 !  of collisional diffusion tensor and friction force for nonrelativistic
 !  plasma. Backgound temperature is the same for all sorts.
@@ -23,44 +25,43 @@ subroutine coleff(efcolf,velrat,enrat,p,dpp_vec,dhh_vec,fpeff_vec)
 !                dhh    - dimensionless pitch angle diffusion coeff.
 !                fpeff  - effective dimensionless drag force (prop. to linear
 !                         deviation in Fokker-Planck eq.)
-!
+
   integer :: i, n
-  double precision, dimension(:), intent(in) :: efcolf,velrat,enrat
-  double precision, dimension(3) :: dpp_vec,dhh_vec,fpeff_vec
-  double precision :: p,plim,xbeta,dpd
-!
+  real(dp), dimension(:), intent(in) :: efcolf,velrat,enrat
+  real(dp), dimension(:), intent(out) :: dpp_vec,dhh_vec,fpeff_vec
+  real(dp) :: p,plim,xbeta,dpd
+
   plim=max(p,1.d-8)
   n = size(efcolf)
-!
+
   do i=1,n
     xbeta=p*velrat(i)
-!
+
     call onseff(xbeta,dpp_vec(i),dhh_vec(i),dpd)
-!
+
     fpeff_vec(i) = (dpd/plim-2.0*dpp_vec(i)*p*enrat(i))*efcolf(i)
     dpp_vec(i) = dpp_vec(i)*efcolf(i)
     dhh_vec(i) = dhh_vec(i)*efcolf(i)
   enddo
-!
+
   dhh_vec = dhh_vec/plim**2
-!
-  return
+
 end subroutine coleff
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
 subroutine onseff(v,dp,dh,dpd)
-!
+
 !  dp - dimensionless dpp
 !  dh - dhh*p^2     (p - dmls)
 !  dpd - (1/p)(d/dp)p^2*dp   (p - dmls)
-!
+
 ! square root of pi
   double precision, parameter :: sqp=1.7724538d0
 ! cons=4./(3.*sqrt(pi))
   double precision, parameter :: cons=.75225278d0
   double precision :: v,dp,dh,dpd,v2,v3,ex,er
-!
+
   v2=v**2
   v3=v2*v
   if(v.lt.0.01d0) then
@@ -78,11 +79,10 @@ subroutine onseff(v,dp,dh,dpd)
     dh=er*(1.d0-0.5d0/v2)/v+ex/v2
     dpd=4.d0*ex-dp
   endif
-!
-  return
+
 end subroutine onseff
 
-subroutine collis_init(am0,Z0,m,Z,dens,temp,eion,v0,efcolf,velrat,enrat,boole_no_electrons)
+subroutine collis_init(m1,Z1,m,Z,dens,temp,e0,v0,efcolf,velrat,enrat)
 
 !   Performs precomputation of the constants for Coulomb collision
 !   operator for test particles colliding with n-1 sorts of ions and with electrons
@@ -93,77 +93,85 @@ subroutine collis_init(am0,Z0,m,Z,dens,temp,eion,v0,efcolf,velrat,enrat,boole_no
 !   mean free paths.
 !
 !   Input variables:
-!        formal: am0,Z0        - mass number and charge number of the colliding particle
-!                m             - mass numbers of the ion species (n-1 entries) (where n is the number of particle species 
-!                                with which the test particle collides (n-1 ion species and electrons))
-!                Z             - charge numbers of these species (n-1 entries)
+!        formal: m1,Z1         - mass and charge number of the colliding particle
+!                m             - mass of the ion species (n entries) (where n is the number of particle species 
+!                                with which the test particle collides)
+!                Z             - charge numbers of these species (n entries)
 !                dens          - densities of ion species and electrons (n entries), 1/cm**3
 !                temp          - temperatures of ion species and electrons (n entries), eV
-!                eion          - test particle energy used for normalisation, eV
+!                e0            - test particle energy used for normalisation, eV
 !   Output variables:
-!        formal: v0            - test particle velocity corresponding to eion, cm/s
+!        formal: v0            - test particle velocity corresponding to e0, cm/s
 !                efcolf        - normalized collision frequencies (n entries)
 !                velrat        - ratio of v0 to the background particle thermal velocity $v_{t}=\sqrt(2T/m)$ (n entries)
-!                enrat         - ratio of eion to the background species energy (n entries)
+!                enrat         - ratio of e0 to the background species energy (n entries)
+
+  use constants, only: ev2erg, pi, echarge
 
   integer :: n,i, i_end
-  double precision, dimension(:) :: m,Z,dens,temp,efcolf,velrat,enrat
-  double precision, dimension(:), allocatable :: lambda
-  double precision :: am0,Z0,eion
-  double precision :: v0
-  double precision :: pi,pmass,emass,e,ev,frecol_base
-  double precision :: k
-  logical, intent(in), optional :: boole_no_electrons
-
-  pi=3.14159265358979d0
-  pmass=1.6726d-24
-  emass=9.1094d-28
-  e=4.8032d-10
-  ev=1.6022d-12
-  k=1.60d-12 !ev/erg
+  real(dp), dimension(:) :: m,Z,dens,temp,efcolf,velrat,enrat
+  real(dp), dimension(:), allocatable :: lambda
+  real(dp) :: m1,Z1,e0, v0, frecol_base
 
   n = size(temp)
   allocate(lambda(n))
 
-  v0=sqrt(2.d0*eion*ev/(pmass*am0))
+  v0=sqrt(2.d0*e0*ev2erg/m1)
+  frecol_base = 2.d0*pi*echarge**4*Z1**2/(m1**2*v0**3)
 
-  i_end = n-1
-  if (present(boole_no_electrons)) then
-    if (boole_no_electrons) i_end = n
-  endif
-
-  do i = 1,i_end !go through all ion species in the loop and treat electrons afterwards
-    enrat(i)=eion/temp(i)
-    velrat(i)=v0/sqrt(2.d0*temp(i)*ev/(pmass*m(i)))
-    lambda(i)=23.d0-log(max(epsilon(1.d0), &
-          sqrt(dens(i)*Z(i)**2/temp(i))*Z0*Z(i)*(am0+m(i))/(am0*temp(i)+m(i)*eion)))
+  do i = 1,n
+    call lambda_alpha_beta(Z1, Z(i), m1, m(i), temp(i), temp(i), dens(i), dens(i), lambda(i))
+    enrat(i)=e0/temp(i)
+    velrat(i)=v0/sqrt(2.d0*temp(i)*ev2erg/m(i))
+    efcolf(i)=frecol_base*Z(i)**2*lambda(i)*dens(i)*velrat(i)/v0
   enddo
-
-  frecol_base=2.d0*pi*dens(i_end)*e**4*Z0**2/((am0*pmass)**2*v0**3) !usual
-  frecol_base=frecol_base/v0                                  !normalized
-
-  do i=1,i_end
-    efcolf(i)=frecol_base*Z(i)**2*lambda(i)*dens(i)/dens(i_end)
-  enddo
-
-  if (i_end.eq.n-1) then
-    enrat(n)=eion/temp(n)
-    velrat(n)=v0/sqrt(2.d0*temp(n)*ev/emass)
-    dens(n)=sum(dens(1:n-1)*Z)
-    if (temp(n).lt.eion*emass/(am0*pmass)) then
-      lambda(n)=16.d0-log(sqrt(dens(n))*eion**(-1.5)*Z0**2*am0)
-    elseif (temp(n).lt.10*Z0**2) then
-      lambda(n)=23.d0-log(sqrt(dens(n))*Z0*temp(n)**(-1.5))
-    else
-      lambda(n)=24.d0-log(sqrt(dens(n))/temp(n))
-    endif
-
-    efcolf(n)=frecol_base*lambda(n)
-  endif
-
-  efcolf=efcolf*velrat
 
 end subroutine collis_init
+!
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
+subroutine lambda_alpha_beta(z1, z2, m1, m2, T1, T2, n1, n2, lambda_ab)
+
+  use constants, only: ame,amp
+
+  real(dp), intent(in) :: z1, z2, m1, m2, T1, T2, n1, n2
+  real(dp), intent(out) :: lambda_ab
+  real(dp) :: ne, ni, zi, Te, Ti, mi
+  integer :: species1, species2
+
+  species1 = sign(1,int(z1))
+  species2 = sign(1,int(z2))
+
+  if ((species1.eq.1).and.(species2.eq.1)) then
+    lambda_ab = 23.d0-log(max(epsilon(1.d0), z1*z2*(m1+m2)  /  (m1*T2+m2*T1) * sqrt(n1*z1**2/T1 + n2*z2**2/T2)))
+  elseif ((species1.eq.2).and.(species2.eq.2)) then
+    lambda_ab = 23.5d0 - log(max(epsilon(1.d0), sqrt(n2)*T2**(-5.d0/4.d0))) - sqrt(1.d-5 + (log(T2)-2.d0)**2/16.d0)
+  else
+    if (species1.eq.1) then
+      ne = n2
+      ni = n1
+      zi = z1
+      Te = T2
+      Ti = T1
+      mi = m1
+    else
+      ne = n1
+      ni = n2
+      zi = z2
+      Te = T1
+      Ti = T2
+      mi = m2
+    endif
+    if (Te.lt.Ti*ame/(mi)) then
+      lambda_ab = 16.d0-log(max(epsilon(1.d0), sqrt(ni)*Ti**(-1.5d0)*zi**2*mi/amp))
+    elseif (Te.lt.10*zi**2) then
+      lambda_ab = 23.d0-log(max(epsilon(1.d0), sqrt(ne)*zi*Te**(-1.5d0)))
+    else
+      lambda_ab = 24.d0-log(max(epsilon(1.d0), sqrt(ne)/Te))
+    endif
+  endif
+
+end subroutine lambda_alpha_beta
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
@@ -189,15 +197,16 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
 !                   prescribed minimum, reflection was performed.
 !
   integer :: iswmode,ierr,n
-  double precision, parameter :: pmin=1.e-8
-  double precision :: dtau,p,dpp,dhh,fpeff,alam,dalam,coala, upper_limit
-  double precision, dimension(5) :: z
-  double precision :: ur, epsilon, q
-  double precision, dimension(:), intent(in) :: efcolf,velrat,enrat
-  double precision, dimension(:), allocatable :: dpp_vec,dhh_vec,fpeff_vec
-  double precision, optional :: tau
-  double precision, dimension(3), intent(in), optional :: randnum
-!
+  real(dp), parameter :: pmin=5.e-2
+  real(dp) :: dtau,p,dpp,dhh,fpeff,alam,dalam,coala, upper_limit
+  real(dp), dimension(5) :: z
+  real(dp) :: ur, epsilon, q
+  real(dp), dimension(:), intent(in) :: efcolf,velrat,enrat
+  real(dp), dimension(:), allocatable :: dpp_vec,dhh_vec,fpeff_vec
+  real(dp), optional :: tau
+  real(dp), dimension(3), intent(in), optional :: randnum
+  real(dp) :: z4_save
+
   epsilon = 0.1
   q = 0.3
   upper_limit = 30
@@ -205,42 +214,43 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
   allocate(dpp_vec(n))
   allocate(dhh_vec(n))
   allocate(fpeff_vec(n))
-!
+
   p=z(4)
   call coleff(efcolf,velrat,enrat,p,dpp_vec,dhh_vec,fpeff_vec)
 
   dpp = sum(dpp_vec)
   dhh = sum(dhh_vec)
   fpeff = sum(fpeff_vec)
-!
+
   ierr=0
-!
+
   if (present(tau)) then
     dtau = min(epsilon**2/(2*dhh),tau,upper_limit)
     if (z(4).lt.q) then
-      dtau = min(dtau*(q/z(4))**2,tau)
+      !dtau = min(dtau*(q/z(4))**2,tau),upper_limit)
+      dtau = min(1.0d-2/(2*dhh),tau,upper_limit)
     endif
   endif
-!
+
   if(iswmode.eq.1.or.iswmode.eq.4) then
     alam=z(5)
     coala=1.d0-alam**2
-!
+
     if(coala.lt.0.d0) then
       ierr=1
       return
     endif
-!  
+
     if (present(randnum)) ur = randnum(1)
     if (.not.present(randnum)) call getran(1,ur)
-!
+
     dalam=sqrt(2.d0*dhh*coala*dtau)*dble(ur)-2.d0*alam*dhh*dtau
-!
+
     if(abs(dalam).gt.1.d0) then
       ierr=2
       if (present(randnum)) ur = randnum(2)
       if (.not.present(randnum)) call random_number(ur)
-!
+
       alam=2.d0*(dble(ur)-0.5d0)
     else
       alam=alam+dalam
@@ -252,26 +262,30 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
         alam=-2.d0-alam
       endif
     endif
-!
+
     z(5)=alam
     if(iswmode.eq.4) return
   endif
-!
+
   if(iswmode.lt.3) then
-!
-  if (present(randnum)) ur = randnum(3)
-  if (.not.present(randnum)) call getran(0,ur)
-!
+
+    if (present(randnum)) ur = randnum(3)
+    if (.not.present(randnum)) call getran(0,ur)
+
+    z4_save = z(4)
     z(4)=z(4)+sqrt(abs(2.d0*dpp*dtau))*dble(ur)+fpeff*dtau
+    if (z(4)/z4_save.gt.10) then
+        print*, 'v_old/v0 = ', z4_save, 'v_new/v0 = ', z(4), 'ratio =', z(4)/z4_save  !, 'v_old = ', z4_save*3.508831372d9
+    endif
   else
     z(4)=z(4)+fpeff*dtau
   endif
-!
+
   if(z(4).lt.pmin) then
     ierr=ierr+10
     z(4)=pmin+abs(pmin-z(4))
   endif
-!
+
   return
 end subroutine stost
 !
@@ -285,7 +299,7 @@ subroutine getran(irand,ur)
   ! Output parameters: ur   - random number
 
     integer :: irand
-    double precision :: ur
+    real(dp) :: ur
 
     call random_number(ur)
 
@@ -298,7 +312,7 @@ subroutine getran(irand,ur)
         ur=-1.
       endif
     endif
-    return
+
 end subroutine getran
 !
 !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc

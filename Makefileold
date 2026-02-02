@@ -87,7 +87,7 @@ SOURCES = SetWorkingPrecision.f90\
 	poincare_invariances_mod.f90 \
 	reversibility_test_mod.f90 \
 	collis_ions_mod.f90 \
-	boltzmann_types_mod.f90 \
+	gorilla_applets_types_mod.f90 \
 	volume_integrals_and_sqrt_g_mod.f90 \
 	utils_parallelised_particle_pushing_mod.f90 \
 	utils_data_pre_and_post_processing_mod.f90 \

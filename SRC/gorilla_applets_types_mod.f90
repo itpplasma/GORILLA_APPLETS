@@ -1,4 +1,4 @@
-module boltzmann_types_mod
+module gorilla_applets_types_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
@@ -20,20 +20,29 @@ module boltzmann_types_mod
     real(dp), dimension(:), allocatable :: electric_potential
     real(dp), dimension(:), allocatable :: boltzmann_density
     real(dp), dimension(:), allocatable :: radial_flux
-    complex(dp), dimension(:,:), allocatable :: tetr_moments
-    complex(dp), dimension(:,:), allocatable :: prism_moments
-    complex(dp), dimension(:,:), allocatable :: prism_moments_squared
+    complex(dp), dimension(:,:,:), allocatable :: tetr_moments
+    complex(dp), dimension(:,:,:), allocatable :: prism_moments
+    complex(dp), dimension(:,:,:), allocatable :: prism_moments_squared
     complex(dp), dimension(:,:,:), allocatable :: moments_in_frequency_space
+    !In moments_in_frequency_space, third dimension is not particle species but fourier mode
     end type output_t
 
     type(output_t) :: output
 
     type start_t
-    real(dp), dimension(:,:), allocatable :: x
-    real(dp), dimension(:), allocatable :: pitch
-    real(dp), dimension(:), allocatable :: energy
-    real(dp), dimension(:), allocatable :: weight
-    real(dp), dimension(:), allocatable :: jperp
+    real(dp), dimension(:,:,:), allocatable :: x
+    real(dp), dimension(:,:),   allocatable :: pitch
+    real(dp), dimension(:,:),   allocatable :: energy
+    real(dp), dimension(:,:),   allocatable :: weight
+    real(dp), dimension(:,:),   allocatable :: jperp
+    real(dp), dimension(:),     allocatable :: particle_charge !used in self consistent electric field computation 
+    real(dp), dimension(:),     allocatable :: particle_mass !used in self consistent electric field computation
+    real(dp), dimension(:),     allocatable :: cm_over_e !used in self consistent electric field computation
+    real(dp), dimension(:),     allocatable :: v0 !This is the thermal velocity, not the particle velocity; 
+                                                  !used in self consistent electric field computation
+    real(dp), dimension(:),     allocatable :: t !tracing time, used in self consistent electric field computation
+    real(dp)                                :: epsilon_max
+    logical, dimension(:,:),    allocatable :: lost
     end type start_t
 
     type(start_t) :: start
@@ -56,14 +65,14 @@ module boltzmann_types_mod
     type(flux_t) :: flux
 
     type collisions_t
-    real(dp), dimension(:,:,:), allocatable :: randcol
+    real(dp), dimension(:,:,:,:), allocatable :: randcol
     real(dp), dimension(:,:), allocatable :: dens_mat
     real(dp), dimension(:,:), allocatable :: temp_mat
     real(dp), dimension(:,:), allocatable :: vpar_mat
     real(dp), dimension(:,:), allocatable :: efcolf_mat
     real(dp), dimension(:,:), allocatable :: velrat_mat
     real(dp), dimension(:,:), allocatable :: enrat_mat
-    real(dp), dimension(:), allocatable :: mass_num
+    real(dp), dimension(:), allocatable :: mass
     real(dp), dimension(:), allocatable :: charge_num
     real(dp), dimension(:), allocatable :: dens
     real(dp), dimension(:), allocatable :: temp
@@ -104,6 +113,10 @@ module boltzmann_types_mod
     logical  :: boole_write_grid_data
     logical  :: boole_preserve_energy_and_momentum_during_collisions = .false.
     integer  :: n_background_density_updates = 0
+    logical  :: boole_static_ne !used in self consistent electric field computation
+    integer  :: n_species = 1 !used in self consistent electric field computation
+    integer  :: n_electric_potential_updates !used in self consistent electric field computation
+    integer  :: update_dimension = 1 !used in self consistent electric field computation
     logical  :: boole_divertor_intersection !Used in divertor_heat_loads
     logical  :: boole_poincare_plot !Used in divertor_heat_loads
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
@@ -134,13 +147,13 @@ module boltzmann_types_mod
     type(filenames_t) :: filenames
 
     type exit_data_t
-    integer, dimension(:), allocatable :: lost
-    real(dp), dimension(:), allocatable :: t_confined
-    real(dp), dimension(:,:), allocatable :: x
-    real(dp), dimension(:), allocatable :: vpar
-    real(dp), dimension(:), allocatable :: vperp
-    integer, dimension(:), allocatable :: integration_step
-    integer, dimension(:), allocatable :: phi_0_mappings
+    integer, dimension(:,:), allocatable :: lost
+    real(dp), dimension(:,:), allocatable :: t_confined
+    real(dp), dimension(:,:,:), allocatable :: x
+    real(dp), dimension(:,:), allocatable :: vpar
+    real(dp), dimension(:,:), allocatable :: vperp
+    integer, dimension(:,:), allocatable :: integration_step
+    integer, dimension(:,:), allocatable :: phi_0_mappings
     end type exit_data_t
 
     type(exit_data_t) :: exit_data
@@ -153,12 +166,64 @@ module boltzmann_types_mod
     real(dp) :: raxis
     real(dp) :: zaxis
     real(dp) :: dist_from_o_point_within_grid !minimum radius of circle centered at magnetic axis completely contained in the grid
+    real(dp) :: total_volume
     integer  :: ind_a
     integer  :: ind_b
     integer  :: ind_c
+    integer, dimension(:,:), allocatable :: vertices_per_flux_surface !used in self_consistent_electric_field_mod
+    integer, dimension(:,:), allocatable :: prisms_per_flux_tube !used in self_consistent_electric_field_mod
     end type grid_t
 
     type(grid_t) :: g
+
+    type electric_potential_t
+    real(dp), dimension(:), allocatable :: rho_prism
+    real(dp), dimension(:), allocatable :: rho_flux_layer
+    real(dp), dimension(:), allocatable :: rho_vert
+    real(dp), dimension(:), allocatable :: phi_elec_from_rho
+    real(dp), dimension(:), allocatable :: average_abs_phi_elec_from_rho
+    real(dp), dimension(:), allocatable :: total_tracing_time
+    real(dp), dimension(:), allocatable :: s_shell_volumes
+    real(dp) :: mean_abs_rho_at_first_update
+    end type electric_potential_t
+
+    type(electric_potential_t) :: ep
+
+    type delta_s_delta_s_squared_t
+    real(dp), dimension(:), allocatable    :: delta_s
+    real(dp), dimension(:), allocatable    :: delta_s_squared
+    logical, dimension(:), allocatable     :: boole_large_distance
+    real(dp), dimension(:), allocatable    :: time
+    real(dp), dimension(:,:), allocatable  :: f_v
+    integer                                :: k, j
+    real(dp)                               :: s0
+    integer, dimension(:), allocatable     :: check
+    integer                                :: n_particles
+    real(dp)                               :: temperature
+    real(dp)                               :: integral_for_weight_normalisation
+    end type delta_s_delta_s_squared_t
+
+    type(delta_s_delta_s_squared_t) :: s
+
+    type diffusion_coefficients 
+    real(dp), dimension(:), allocatable :: A
+    real(dp), dimension(:), allocatable :: A_from_first_run
+    real(dp), dimension(:), allocatable :: B
+    real(dp), dimension(:), allocatable :: grad_A
+    real(dp), dimension(:), allocatable :: grad_B
+    real(dp), dimension(:), allocatable :: s_vertices
+    real(dp), dimension(4)              :: polynomial_coefficients_for_B
+    real(dp), dimension(3)              :: polynomial_coefficients_for_A
+    end type diffusion_coefficients
+
+    type(diffusion_coefficients) dc
+
+    type one_d_t
+    real(dp), dimension(:,:), allocatable :: densities
+    logical                               :: boole_print_densities
+    end type one_d_t
+
+    type(one_d_t) one_d
 
     type particle_status_t
     logical :: initialized
@@ -172,4 +237,6 @@ module boltzmann_types_mod
     real(dp) :: confined
     end type time_t
 
-end module boltzmann_types_mod
+    real(dp) :: maximum_s
+
+end module gorilla_applets_types_mod

@@ -46,7 +46,7 @@ subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, 
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_grid_settings_mod, only: grid_size, n_field_periods
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
-    use boltzmann_types_mod, only: output
+    use gorilla_applets_types_mod, only: output
     
     real(dp), dimension(:), allocatable              :: prism_volumes, refined_prism_volumes, elec_pot_vec, n_b
     logical, intent(in)                              :: boole_boltzmann_energies, boole_refined_sqrt_g
@@ -265,5 +265,82 @@ subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, 
     output%boltzmann_density = n_b
     print*, 'calc_volume_integrals finished'
 end subroutine calc_volume_integrals
+
+subroutine calc_volume_integrals_in_flux_coordinates
+
+    use constants, only: pi, ev2erg
+    use tetra_grid_mod, only: ntetr, verts_sthetaphi, tetra_grid
+    use tetra_grid_settings_mod, only: grid_size, n_field_periods
+    use tetra_physics_mod, only: tetra_physics
+    use gorilla_applets_types_mod, only: output, in, g
+
+    integer                   :: n_prisms, i, k, ind_tetr, even, odd
+    real(dp), dimension(2)    :: verts_s, verts_phi, verts_theta
+    real(dp)                  :: basic_volume, sqrtg
+    real(dp), dimension(3)    :: vertex2, vertex3, vertex4
+
+    print*, 'calc_volume_integrals started'
+
+    n_prisms = ntetr/3
+
+    !Compute prism values
+    do i = 1,n_prisms
+
+        !Get the tetrahedron index of the first of the three tetrahedra contained in the current triangular prism
+        ind_tetr = (i-1)*3+1
+
+        !Get minimum and maximum values of s, theta and phi of the hexahedron the current triangular prism is part of
+        verts_s(1) =     verts_sthetaphi(1,tetra_grid(ind_tetr)%ind_knot(1))
+        verts_s(2) =     verts_sthetaphi(1,tetra_grid(ind_tetr)%ind_knot(4))
+        verts_theta(1) = verts_sthetaphi(2,tetra_grid(ind_tetr)%ind_knot(1))
+        verts_theta(2) = verts_sthetaphi(2,tetra_grid(ind_tetr)%ind_knot(4))
+        verts_phi(1) =   verts_sthetaphi(3,tetra_grid(ind_tetr)%ind_knot(1))
+        verts_phi(2) =   verts_sthetaphi(3,tetra_grid(ind_tetr)%ind_knot(4))
+
+        !In case the maximum value of theta (phi) is 2*pi (2*pi/n_field_periods), 
+        !it is actually given as 0, so 2*pi (2*pi/n_field_periods) has to be added
+        if ((verts_theta(2)-verts_theta(1)).lt.0) verts_theta(2) = verts_theta(2) + 2*pi
+        if ((verts_phi(2)-verts_phi(1)).lt.0) verts_phi(2) = verts_phi(2) + 2*pi/n_field_periods
+
+        !In the s-theta-phi coordinate space, the volume of the triangular prism is given as half of the hexahedron volume
+        basic_volume = (verts_s(2)-verts_s(1))*(verts_theta(2)-verts_theta(1))*(verts_phi(2)-verts_phi(1))/2      
+
+        !To get the prism volume in real physical space, we need to multiply basic_volume with an appropriately averaged value of 
+        !sqrt(g) across the prism. This is done by adding together 1/6 of the value at all the prism vertices
+        !Start by getting the position of vertex 2 and vertex 3 of tetrahedron in_tetr relative to vertex 1
+        !(vertex 1, vertex 2 and vertex 3 of tetrahedron ind_tetr constitute the first three prism vertices)
+        !The position of vertex 2 depends on whether the prism index is even or odd
+        odd = mod(i,2)
+        even = abs(odd-1)
+        vertex2 = (/(verts_s(2)-verts_s(1))*odd, (verts_theta(2)-verts_theta(1))*even, 0.0_dp/)
+        vertex3 = (/ verts_s(2)-verts_s(1)     ,  verts_theta(2)-verts_theta(1)      , 0.0_dp/)
+
+        !Add the contributions of the first three prism vertices to sqrt(g)
+        sqrtg   = 0.0_dp
+        sqrtg = sqrtg + 1.0_dp/6.0_dp* tetra_physics(ind_tetr)%sqg1
+        sqrtg = sqrtg + 1.0_dp/6.0_dp*(tetra_physics(ind_tetr)%sqg1 + sum(vertex2*tetra_physics(ind_tetr)%gsqg))
+        sqrtg = sqrtg + 1.0_dp/6.0_dp*(tetra_physics(ind_tetr)%sqg1 + sum(vertex3*tetra_physics(ind_tetr)%gsqg))
+
+        !For the remaining three prism vertices (which are equal to the first three shifted to the next phi-plane),
+        !get vertices 2, 3 and 4 of tetrahedron ind_tetr+2
+        vertex2 = (/ 0.0_dp                    ,  0.0_dp                             , verts_phi(2)-verts_phi(1)/)
+        vertex3 = (/(verts_s(2)-verts_s(1))*odd, (verts_theta(2)-verts_theta(1))*even, verts_phi(2)-verts_phi(1)/)
+        vertex4 = (/ verts_s(2)-verts_s(1)     ,  verts_theta(2)-verts_theta(1)      , verts_phi(2)-verts_phi(1)/)
+
+        !Add the contributions of the remaining three prism vertices to sqrt(g)
+        sqrtg = sqrtg + 1.0_dp/6.0_dp*(tetra_physics(ind_tetr+2)%sqg1 + sum(vertex2*tetra_physics(ind_tetr+2)%gsqg))
+        sqrtg = sqrtg + 1.0_dp/6.0_dp*(tetra_physics(ind_tetr+2)%sqg1 + sum(vertex3*tetra_physics(ind_tetr+2)%gsqg))
+        sqrtg = sqrtg + 1.0_dp/6.0_dp*(tetra_physics(ind_tetr+2)%sqg1 + sum(vertex4*tetra_physics(ind_tetr+2)%gsqg))
+
+        !Write the resulting prism volum into the output type
+        output%prism_volumes(i) = basic_volume*abs(sqrtg)
+
+    enddo
+
+    g%total_volume = sum(output%prism_volumes(:))
+
+    print*, 'calc_volume_integrals finished'
+
+end subroutine calc_volume_integrals_in_flux_coordinates
 
 end module volume_integrals_and_sqrt_g_mod

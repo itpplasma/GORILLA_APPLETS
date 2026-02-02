@@ -9,7 +9,7 @@ contains
 subroutine identify_particles_entering_annulus(x,local_counter,boole_lost_inside)
 
     use tetra_physics_mod, only: tetra_physics
-    use boltzmann_types_mod, only: counter_t, g
+    use gorilla_applets_types_mod, only: counter_t, g
 
     real(dp), dimension(3), intent(in) :: x
     type(counter_t), intent(inout) :: local_counter
@@ -25,30 +25,34 @@ subroutine identify_particles_entering_annulus(x,local_counter,boole_lost_inside
 
 end subroutine identify_particles_entering_annulus
 
-subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quantities)
+subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quantities,species_in)
 
-    use boltzmann_types_mod, only: moment_specs, start
+    use gorilla_applets_types_mod, only: moment_specs, start, in
     use gorilla_settings_mod, only: optional_quantities_type
 
     type(optional_quantities_type), intent(in)   :: optional_quantities
     integer, intent(in)                          :: ind_tetr, n
+    integer, intent(in), optional                :: species_in
     complex(dp), dimension(:,:), intent (inout)  :: local_tetr_moments
     integer                                      :: m
+    integer                                      :: species = 1
+
+    if (present(species_in)) species = species_in
 
     do m = 1,moment_specs%n_moments
         select case(moment_specs%moments_selector(m))
             case(1)
                 local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
-                                                                & start%weight(n)*optional_quantities%t_hamiltonian
+                                                    & start%weight(n,species)*optional_quantities%t_hamiltonian
             case(2)
                 local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
-                                                                & start%weight(n)*optional_quantities%gyrophase*start%jperp(n)
+                                                    & start%weight(n,species)*optional_quantities%gyrophase
             case(3)
                 local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
-                                                                & start%weight(n)*optional_quantities%vpar_int
+                                                    & start%weight(n,species)*optional_quantities%vpar_int
             case(4)
                 local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
-                                                                & start%weight(n)*optional_quantities%vpar2_int
+                                                    & start%weight(n,species)*optional_quantities%vpar2_int
         end select
     enddo
 
@@ -78,10 +82,10 @@ subroutine initialize_constants_of_motion(vperp,z_save,ind_tetr,perpinv)
 
 end subroutine initialize_constants_of_motion
 
-subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
+subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species_in)
 
-    use boltzmann_types_mod, only: in, flux, start
-    use tetra_physics_mod, only: tetra_physics,particle_mass,particle_charge,cm_over_e
+    use gorilla_applets_types_mod, only: in, flux, start
+    use tetra_physics_mod, only: tetra_physics
     use constants, only: ev2erg
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
@@ -89,20 +93,24 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
     integer, intent(in) :: n,ind_tetr
+    integer, intent(in), optional :: species_in
+    integer :: species = 1
     real(dp) :: local_poloidal_flux, phi_elec_func, temperature
     real(dp) :: r, phi, z
+
+    if (present(species_in)) species = species_in
 
     !This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by 
     !only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine 
     !(this is necessary for the energy and momentum conserving collision operator)
-    start%weight(n) =  start%weight(n)*in%energy_eV*ev2erg 
+    if (in%boole_boltzmann_energies) start%weight(n,species) =  start%weight(n,species)*in%energy_eV*ev2erg 
 
     r = z_save(1)
     phi = z_save(2)
     z = z_save(3)
 
     if (in%boole_refined_sqrt_g) then
-        start%weight(n) = start%weight(n)* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
+        start%weight(n,species) = start%weight(n,species)* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
                                         &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
     else
         start%weight = start%weight*(r + tetra_physics(ind_tetr)%x1(1))
@@ -112,29 +120,30 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
         local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
     endif
     if (in%boole_linear_density_simulation) then
-        start%weight(n) = start%weight(n)*(flux%poloidal_max*1.1_dp-local_poloidal_flux)/(flux%poloidal_max*1.1_dp)
+        start%weight(n,species) = start%weight(n,species)*(flux%poloidal_max*1.1_dp-local_poloidal_flux)/(flux%poloidal_max*1.1_dp)
     endif
 
     if (in%boole_boltzmann_energies) then
         !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
         phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
         if (.not. in%boole_linear_temperature_simulation) then
-            start%weight(n) =start%weight(n)*sqrt(start%energy(n)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
-                        & exp(-(start%energy(n)*ev2erg+particle_charge*phi_elec_func)/(in%energy_eV*ev2erg))
+            start%weight(n,species) =start%weight(n,species)*sqrt(start%energy(n,species)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
+                        & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/(in%energy_eV*ev2erg))
         else
             temperature = in%energy_eV*ev2erg*(flux%poloidal_max*1.1_dp-local_poloidal_flux)/(flux%poloidal_max*1.1_dp)
-            start%weight(n) = start%weight(n)*sqrt(start%energy(n)*ev2erg)/temperature**1.5_dp* &
-            & exp(-(start%energy(n)*ev2erg+particle_charge*phi_elec_func)/temperature)
+            start%weight(n,species) = start%weight(n,species)*sqrt(start%energy(n,species)*ev2erg)/temperature**1.5_dp* &
+            & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
         endif
     endif
 
-    start%jperp(n) = particle_mass*vperp**2*cm_over_e/(2*bmod_func(z_save,ind_tetr))*(-1) !-1 because of negative gyrophase
+    start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
+    !-1 because of negative gyrophase
 
 end subroutine calc_particle_weights_and_jperp
 
 subroutine compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
 
-    use boltzmann_types_mod, only: output
+    use gorilla_applets_types_mod, only: output
     use tetra_grid_settings_mod, only: grid_size
 
     integer, intent(in) :: ind_tetr_save,ind_tetr
