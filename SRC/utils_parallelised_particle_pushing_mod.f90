@@ -172,8 +172,14 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     real(dp), dimension(1) :: m, z, dens, temp, efcolf,velrat,enrat
     real(dp) :: vpar_background
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar, vpar_mat_save, vpar_mat
-    integer :: err, j, p
+    integer :: err, j, p, iswmode
     real(dp) ::  w_v, w_t, particle_to_background_coupling_strength
+
+    iswmode = 1
+    !1 - full operator (pitch-angle and energy scattering and drag)
+    !2 - energy scattering and drag only
+    !3 - drag only
+    !4 - pitch-angle scattering only
 
     w_v = 1.0_dp
     w_t = 1.0_dp
@@ -200,9 +206,9 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         
         if (in%boole_precalc_collisions) then
             randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species) 
-            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(start%t(species)-t%confined)*start%v0(species),randnum)
+            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,(start%t(species)-t%confined)*start%v0(species),randnum)
         else
-            call stost(efcolf,velrat,enrat,zet,t%step,1,err,(start%t(species)-t%confined)*start%v0(species))
+            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,(start%t(species)-t%confined)*start%v0(species))
         endif
         
         vpar = zet(5)*zet(4)*start%v0(species)+vpar_background
@@ -244,7 +250,13 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     real(dp), dimension(5) :: zet
     real(dp), dimension(3) :: randnum
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
-    integer :: err
+    integer :: err, iswmode
+
+    iswmode = 4
+    !1 - full operator (pitch-angle and energy scattering and drag)
+    !2 - energy scattering and drag only
+    !3 - drag only
+    !4 - pitch-angle scattering only
 
     allocate(efcolf(c%n))
     allocate(velrat(c%n))
@@ -266,9 +278,9 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
 
     if (in%boole_precalc_collisions) then
         randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species) 
-        call stost(efcolf,velrat,enrat,zet,t%step,1,err,(start%t(species)-t%confined)*start%v0(species),randnum)
+        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,(start%t(species)-t%confined)*start%v0(species),randnum)
     else
-        call stost(efcolf,velrat,enrat,zet,t%step,1,err,(start%t(species)-t%confined)*start%v0(species))
+        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,(start%t(species)-t%confined)*start%v0(species))
     endif
 
     vpar = zet(5)*zet(4)*start%v0(species)+vpar_background(1)

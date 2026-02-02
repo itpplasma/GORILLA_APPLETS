@@ -128,7 +128,8 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init) &
     !$OMP& FIRSTPRIVATE(thread_flag,local_rr)
     if (omp_get_thread_num().eq.0) print*, 'get number of threads', omp_get_num_threads()
-    !$OMP DO SCHEDULE(dynamic,1)
+    !$OMP DO SCHEDULE(static)
+    !SCHEDULE(dynamic,1)
     !SCHEDULE(static)
 
     !Loop over particles
@@ -350,6 +351,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
                 i = min(int(s%j/10*v/start%v0(species))+1, s%j)
                 if (int(10*v/start%v0(species))+1.gt.s%j) print*, 'ATTENTION: particle is faster than 10*v_t'
                 s%f_v(k,i) = s%f_v(k,i) + (x(1) - s%s0)**2/s%n_particles 
+                !if (n.eq.1520) write(71,*) s%time(k), x, vpar, vperp
                 !$omp end critical
                 ! if (s%s0.lt.2.0d-2) then
                 !      write(1000+n,*) s%time(k), x, vpar, v
@@ -505,10 +507,14 @@ subroutine calc_phi_elec_from_rho(i)
 
         factor_from_tracing_time = 10.0_dp
         !tracing time is about 25 transport times, since densities are normalised by tracing time but particles only stay inside the 
-        !computation domain for about the tracing time, this factor is compensated here (with some safety margin)
+        !computation domain for about the transport time, this factor is compensated here (with some safety margin)
         if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho*factor_from_tracing_time
         
         !if (i.gt.0) ep%phi_elec_from_rho = ep%phi_elec_from_rho/sqrt(dble(i))
+
+        ! ep%phi_elec_from_rho = ep%phi_elec_from_rho*(3.5d3*1.6022d-12/4.8032d-10)/maxval(abs(ep%phi_elec_from_rho))
+        ! if (i.gt.1) ep%phi_elec_from_rho=0
+        ! print*, 'maximum phi is', maxval(ep%phi_elec_from_rho), 'minimum phi is', minval(ep%phi_elec_from_rho)
         
     endif
 
@@ -536,7 +542,7 @@ subroutine calc_average_charge_density_per_flux_layer(i)
 
     do j = 1,in%num_particles
         do species = 1,2
-            ep%total_tracing_time(i) = ep%total_tracing_time(i) + exit_data%t_confined(j,species)
+            if (i.gt.0) ep%total_tracing_time(i) = ep%total_tracing_time(i) + exit_data%t_confined(j,species)
         enddo
     enddo
 
@@ -613,7 +619,7 @@ subroutine calc_rho_on_vertices
     do ns = 2,grid_size(1),2
         value_to_be_set = 0.5_dp*(ep%rho_flux_layer(ns-1)+ep%rho_flux_layer(ns))
         !remove this line in the future >
-        !value_to_be_set = sin(dble(ns-1)/dble(grid_size(1)-1)*pi)
+        !value_to_be_set = -sin(dble(ns-1)/dble(grid_size(1))*pi)
         !value_to_be_set = dble(ns)/dble(grid_size(1))
         call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(ns,:), value_to_be_set)
         rho_per_flux_surface(ns) = value_to_be_set
@@ -1115,7 +1121,7 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
         allocate(radial_transport_energies(n_particles,size(species)))
         call generate_distribution_sqrt_x_exp_neg_x(start%epsilon_max,radial_transport_energies)
         !call generate_marker_distribution(start%epsilon_max,radial_transport_energies)
-        start%energy(:,species) = radial_transport_energies*temperature !boltzmann energy distribution
+        start%energy(:,species) = temperature*radial_transport_energies !boltzmann energy distribution
     endif
     
     if (in%boole_antithetic_variate) then
@@ -1210,15 +1216,16 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     use russian_roulette_mod, only: prepare_russian_roulette
     use tetra_grid_settings_mod, only: sfc_s_min
 
-    integer :: ns, i, n_particles, file_id, n_ignored
+    integer :: ns, i, n_particles, file_id, n_ignored, ns_start
     real(dp) :: extrapolation_factor, A, B, offset, tau_c_ei, v0, v_max, weights_before_redistribution
-    real(dp) :: standard_deviation
+    real(dp) :: standard_deviation, dummy
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str
     real(dp), dimension(:), allocatable :: data_for_diffusion_coefficient, data_for_convection_coefficient
     logical :: ignore_condition
 
-    s%n_particles = 1000
+    s%n_particles = 40000
+    call random_number(dummy)
 
     if (.not.allocated(rand_matrix)) allocate(rand_matrix(5,s%n_particles,1))
     if (.not.allocated(dc%s_vertices)) allocate(dc%s_vertices(grid_size(1)+1))
@@ -1245,17 +1252,20 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     call initialize_exit_data(s%n_particles)
 
     tau_c_ei = 1.7_dp*1.0d-4 !rough estimate from nrl formula booklet
-    start%t(2) = tau_c_ei !check afterwards if this was too little time
+    start%t(2) = 2.0d0*tau_c_ei !check afterwards if this was too little time
 
     s%time = [(start%t(2)/s%k*i,i = 1,s%k)]
 
-    do ns = 2,grid_size(1)
+    ns_start = 15
+
+    do ns = ns_start,grid_size(1)
 
         print*, 'ns = ', ns, '/', grid_size(1)
 
 
         !Initiate electrons at the different flux surfaces leaving out the boundaries
         s%s0 = dc%s_vertices(ns)
+        s%s0 = 0.5d0
 
         call RANDOM_NUMBER(rand_matrix)
         call set_starting_positions(rand_matrix,(/2/), s%s0)
@@ -1266,7 +1276,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
 
         call prepare_next_round_of_parallelised_particle_pushing(2)
 
-        if (ns.eq.2) then 
+        if (ns.eq.ns_start) then 
             call calc_collision_coefficients_for_all_tetrahedra(2)
 
             v0 = start%v0(2)
@@ -1280,8 +1290,11 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
         !         write(23,*) start%energy(i,2)
         !     enddo
         ! close(23)
-
+        open(71)
         call parallelised_particle_pushing(species = 2,j = 1,boole_diffusion_coefficient = .true.,n_particles_in=s%n_particles)
+        close(71)
+
+
 
         ! open(23,file = 'energy_after_pushing.dat')
         !     do i = 1,s%n_particles
@@ -1328,14 +1341,16 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
             write(file_id,*) exit_data%x(1,i,2)
         enddo
     close(file_id)
+            
 
 
-    ! filename = 'data' // trim(ns_str) // '.dat'
-    ! open(23,file = filename)
-    !     do i = 1,s%k
-    !         write(23,*) s%time(i), s%delta_s(i), s%delta_s_squared(i)
-    !     enddo
-    ! close(23)
+    filename = 'data' // trim(ns_str) // '.dat'
+    open(23,file = filename)
+        do i = 1,s%k
+            write(23,*) s%time(i), s%delta_s(i), s%delta_s_squared(i)
+        enddo
+    close(23)
+    stop
 
     ! open(23,file = 'f_v.dat')
     !     do i = 1,s%j
