@@ -17,7 +17,7 @@
   !Keep electron density constant
   boole_static_ne = .false. ,
 !
-  !Compute squares of moments 
+  !Compute squares of moments
   boole_squared_moments = .false.,
 !
   !Start all particles from the same physical position
@@ -33,11 +33,11 @@
   boole_preserve_energy_and_momentum_during_collisions = .false.,
 !
   !Number of electric potential updates
-  n_electric_potential_updates = 10,
+  n_electric_potential_updates = 3,
 !
   !type of electric potential update
-  !1 ... 1D 
-  !3 ... 3D 
+  !1 ... 1D
+  !3 ... 3D
   update_dimension = 1
 !
   !Simulated density of particles

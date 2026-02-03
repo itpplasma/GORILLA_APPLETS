@@ -18,6 +18,7 @@
  !10 .. Do field line tracing
  !11 .. Compute divertor heat loads
  !12 .. Compute self consistent electric field
+ !13 .. Compute anomalous transport
  i_option = 9 ,
 !
 !------------------------------------------------------------------------------------------------------------!

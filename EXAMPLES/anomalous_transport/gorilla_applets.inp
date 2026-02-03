@@ -1,6 +1,6 @@
 ! INPUT FILE FOR COMPUTATION OF MONO-ENERGETIC TRANSPORT COEFFICIENT AND NUMERICAL DIFFUSION COEFFICIENT
 !
-! TRANSPORT COEFFICIENT NAMELIST 
+! TRANSPORT COEFFICIENT NAMELIST
 &GORILLA_APPLETS_NML
 !
 !------------------------------------------------------------------------------------------------------------!
@@ -19,7 +19,7 @@
  !11 .. Compute divertor heat loads
  !12 .. Compute self consistent electric field
  !13 .. Compute anomalous transport
- i_option = 11 ,
+ i_option = 13 ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !

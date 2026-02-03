@@ -16,6 +16,7 @@
   use field_line_tracing_mod, only: calc_field_lines
   use divertor_heat_loads_mod, only: calc_divertor_heat_loads
   use self_consistent_electric_field_mod, only: calc_self_consistent_electric_field
+  use anomalous_transport_mod, only: calc_anomalous_transport
 !
   implicit none
 !
@@ -139,7 +140,13 @@
 !
 !-------------------------------------------------------------------------------------------!
 !
-            
+        case(13) !Calculate anomalous transport
+!
+            call calc_anomalous_transport
+!
+!-------------------------------------------------------------------------------------------!
+!
+
     end select
 !
   end program gorilla_applets_main
