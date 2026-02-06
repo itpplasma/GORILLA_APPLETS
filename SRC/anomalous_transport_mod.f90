@@ -22,7 +22,7 @@ subroutine calc_anomalous_transport
         calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
         fourier_transform_moments
     use utils_self_consistent_ef_mod, only: print_errors_for_bad_inputs, calc_starting_conditions
-    use utils_anomalous_transport_mod, only: read_anomalous_transport_inp_into_type, parallelised_particle_pushing_anomalous
+    use utils_anomalous_transport_mod, only: read_anomalous_transport_inp_into_type, parallelised_particle_pushing_anomalous_transport
 
     call set_seed_for_random_numbers
     call read_anomalous_transport_inp_into_type
@@ -35,17 +35,14 @@ subroutine calc_anomalous_transport
     s%temperature = in%energy_eV
 
     call initialize_exit_data
-            ! call associate_flux_labels_with_tetrahedra_and_vertices
     call calc_poloidal_flux(verts_sthetaphi)
-    !         call allocate_electric_potential_type
-    !         call calc_s_shell_volumes
     call give_file_names
     call unlink_files
     call print_errors_for_bad_inputs
     call calc_starting_conditions
 
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
-    call parallelised_particle_pushing_anomalous(species=1)
+    call parallelised_particle_pushing_anomalous_transport(species=1)
     call normalise_prism_moments_and_prism_moments_squared
 
 
