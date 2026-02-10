@@ -24,6 +24,7 @@ add_library(GORILLA_APPLETS STATIC
   utils_parallelised_particle_pushing_mod.f90
   utils_write_data_to_files_mod.f90
   utils_self_consistent_ef_mod.f90
+  anomalous_transport_displacement_mod.f90
   utils_anomalous_transport_mod.f90
   volume_integrals_and_sqrt_g_mod.f90
   zzg.f90

@@ -12,7 +12,7 @@
  !Coordinate system
  !1 ... (R,phi,Z) cylindrical coordinate system
  !2 ... (s,theta,phi) symmetry flux coordinate system
- coord_system = 2 ,
+ coord_system = 1 ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !

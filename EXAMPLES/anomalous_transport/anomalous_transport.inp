@@ -1,6 +1,6 @@
-! INPUT FILE FOR SELF CONSISTENT ELECTRIC FIELD
+! INPUT FILE FOR ANOMALOUS TRANSPORT
 !
-&self_consistent_ef_nml
+&anomalous_transport_nml
 !
   !time for tracing particles
   time_step = 1.0d-4 ,
@@ -8,14 +8,11 @@
   !Kinetic energy of particles
   energy_eV = 3.5d3 ,
 !
-  !Number of species is usually 2, namely the ion species specified in gorilla.inp and electrons
-  n_species = 2
+  !Number of species (usually 1 for anomalous transport)
+  n_species = 1
 !
   !Number of particles to be traced
-  n_particles = 10d0 ,
-!
-  !Keep electron density constant
-  boole_static_ne = .false. ,
+  n_particles = 1.0d2 ,
 !
   !Compute squares of moments
   boole_squared_moments = .false.,
@@ -32,21 +29,13 @@
   !make collisions energy and momentum conserving
   boole_preserve_energy_and_momentum_during_collisions = .false.,
 !
-  !Number of electric potential updates
-  n_electric_potential_updates = 3,
-!
-  !type of electric potential update
-  !1 ... 1D
-  !3 ... 3D
-  update_dimension = 1
-!
   !Simulated density of particles
   density = 3.0d13,
 !
   !refined jacobian determinant, must be set to .false. since this can only be made use of in cylindrical coordinates
   boole_refined_sqrt_g = .false.,
 !
-  !work with boltzmann energies instead of with monoenergetic articles
+  !work with boltzmann energies instead of with monoenergetic particles
   boole_boltzmann_energies = .true.,
 !
   !make density a linear function of poloidal flux
@@ -75,8 +64,6 @@
   boole_write_vertex_coordinates = .true. ,
   boole_write_prism_volumes = .true. ,
   boole_write_refined_prism_volumes = .false. , !Must be set to .false., since boole_refined_sqrt_g is also set to .false.
-  boole_write_boltzmann_density = .false. ,
-  boole_write_electric_potential = .false. ,
   boole_write_moments = .true. ,
   boole_write_fourier_moments = .true. ,
   boole_write_exit_data = .true. ,

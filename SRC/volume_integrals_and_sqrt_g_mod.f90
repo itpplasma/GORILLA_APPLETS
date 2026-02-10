@@ -40,17 +40,15 @@ subroutine calc_square_root_g
 
 end subroutine calc_square_root_g
 
-subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, density, energy_ev)
+subroutine calc_volume_integrals
 
     use constants, only: pi, ev2erg
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_grid_settings_mod, only: grid_size, n_field_periods
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
-    use gorilla_applets_types_mod, only: output
-    
+    use gorilla_applets_types_mod, only: output, in
+
     real(dp), dimension(:), allocatable              :: prism_volumes, refined_prism_volumes, elec_pot_vec, n_b
-    logical, intent(in)                              :: boole_boltzmann_energies, boole_refined_sqrt_g
-    real(dp), intent(in)                             :: density, energy_ev
     integer                                          :: i,k
     integer                                          :: n_prisms
     integer, dimension(2)                            :: triangle_indices
@@ -78,9 +76,9 @@ subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, 
     enddo
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(n_prisms,verts_rphiz,tetra_grid,grid_size,tetra_indices_per_prism,prism_volumes, particle_charge,energy_ev, &
-    !$OMP& refined_prism_volumes,sqrt_g,r_integrand_constants, elec_pot_vec,n_b,tetra_physics,boole_boltzmann_energies,density, &
-    !$OMP& boole_refined_sqrt_g,n_field_periods) &
+    !$OMP& SHARED(n_prisms,verts_rphiz,tetra_grid,grid_size,tetra_indices_per_prism,prism_volumes, particle_charge, in, &
+    !$OMP& refined_prism_volumes,sqrt_g,r_integrand_constants, elec_pot_vec,n_b,tetra_physics, &
+    !$OMP& n_field_periods) &
     !$OMP& PRIVATE(r_values,z_values,rmin,triangle_indices,r_values_intermediate,z_values_intermediate, delta_r, delta_z, eta, &
     !$OMP& r,z,gradient,z_star,alpha,beta,gamma,delta,epsilon,capital_gamma,capital_delta, limits,a,a_dash,b,b_dash,c,c_dash,phi_0)
     !$OMP DO
@@ -139,7 +137,7 @@ subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, 
         delta_z = verts_rphiz(3,tetra_grid(tetra_indices_per_prism(i,1))%ind_knot(1)) - &
                 & verts_rphiz(3,tetra_grid(tetra_indices_per_prism(i,1))%ind_knot(int(r_integrand_constants(i,20))))
 
-        if (boole_refined_sqrt_g) then
+        if (in%boole_refined_sqrt_g) then
             !Calculate prism volumes using the refined approach
             !(compare with appendix B (introductory pages + B1) of master thesis from Jonatan Schatzlmayr)
             a = sqrt_g(3*i-2,1) - sqrt_g(3*i-2,2)*delta_r - sqrt_g(3*i-2,3)*delta_z
@@ -190,7 +188,7 @@ subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, 
                     & log((capital_delta+beta*r(2))/(capital_delta+beta*r(1)))*epsilon*capital_delta**2/(2*beta**2)
         endif
 
-        if (boole_boltzmann_energies) then
+        if (in%boole_boltzmann_energies) then
 
             !calculate electric potential using the refined approach
             !(compare with appendix B (introductory pages + B2) of master thesis from Jonatan Schatzlmayr)
@@ -220,33 +218,33 @@ subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, 
             !(compare with appendix B (introductory pages + B3) of master thesis from Jonatan Schatzlmayr)
 
             !calculate contribution from 0 to r(1) to the boltzmann density    
-            alpha = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))*rmin*(gradient(2)-gradient(1))
+            alpha = in%density*exp(-particle_charge*phi_0/(in%energy_eV*ev2erg))*rmin*(gradient(2)-gradient(1))
 
-            beta = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))*((gradient(2)-gradient(1))* &
-                    & (1-rmin*particle_charge*a/(energy_ev*ev2erg))- &
-                    & rmin*particle_charge*b/(2*energy_ev*ev2erg)*(gradient(2)**2-gradient(1)**2))
+            beta = in%density*exp(-particle_charge*phi_0/(in%energy_eV*ev2erg))*((gradient(2)-gradient(1))* &
+                    & (1-rmin*particle_charge*a/(in%energy_eV*ev2erg))- &
+                    & rmin*particle_charge*b/(2*in%energy_eV*ev2erg)*(gradient(2)**2-gradient(1)**2))
 
-            gamma = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))* &
-                    & (-particle_charge*a/(energy_ev*ev2erg)*(gradient(2)-gradient(1))- &
-                    & particle_charge*b/(2*energy_ev*ev2erg)*(gradient(2)**2-gradient(1)**2))
+            gamma = in%density*exp(-particle_charge*phi_0/(in%energy_eV*ev2erg))* &
+                    & (-particle_charge*a/(in%energy_eV*ev2erg)*(gradient(2)-gradient(1))- &
+                    & particle_charge*b/(2*in%energy_eV*ev2erg)*(gradient(2)**2-gradient(1)**2))
 
             n_b(i) = n_b(i) + alpha/2*r(1)**2+beta/3*r(1)**3+gamma/4*r(1)**4
 
             !calculate contribution from r(1) to r(2) to the boltzmann density
-            alpha = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))*rmin*&
-                    & (z_star-particle_charge*b/(2*energy_ev*ev2erg)*z_star**2)
+            alpha = in%density*exp(-particle_charge*phi_0/(in%energy_eV*ev2erg))*rmin*&
+                    & (z_star-particle_charge*b/(2*in%energy_eV*ev2erg)*z_star**2)
 
-            beta = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))*(z_star- & 
-                    & rmin*particle_charge*a/(energy_ev*ev2erg)*z_star+rmin*(gradient(3)-gradient(1))- &
-                    & particle_charge*b/(2*energy_ev*ev2erg)*z_star**2-rmin*particle_charge*b/(energy_ev*ev2erg)*z_star*gradient(3))
+            beta = in%density*exp(-particle_charge*phi_0/(in%energy_eV*ev2erg))*(z_star- & 
+                    & rmin*particle_charge*a/(in%energy_eV*ev2erg)*z_star+rmin*(gradient(3)-gradient(1))- &
+                    & particle_charge*b/(2*in%energy_eV*ev2erg)*z_star**2-rmin*particle_charge*b/(in%energy_eV*ev2erg)*z_star*gradient(3))
 
-            gamma = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))*((-rmin*particle_charge*a/(energy_eV*ev2erg)+1)* &
-                    & (gradient(3)-gradient(1))-particle_charge*a/(energy_ev*ev2erg)*z_star- &
-                    & rmin*particle_charge*b/(2*energy_ev*ev2erg)*(gradient(3)**2-gradient(1)**2)- &
-                    & particle_charge*b/(energy_eV*ev2erg)*z_star*gradient(3))
+            gamma = in%density*exp(-particle_charge*phi_0/(in%energy_eV*ev2erg))*((-rmin*particle_charge*a/(in%energy_eV*ev2erg)+1)* &
+                    & (gradient(3)-gradient(1))-particle_charge*a/(in%energy_eV*ev2erg)*z_star- &
+                    & rmin*particle_charge*b/(2*in%energy_eV*ev2erg)*(gradient(3)**2-gradient(1)**2)- &
+                    & particle_charge*b/(in%energy_eV*ev2erg)*z_star*gradient(3))
 
-            delta = density*exp(-particle_charge*phi_0/(energy_ev*ev2erg))*(-particle_charge*a/(energy_eV*ev2erg)* &
-                    & (gradient(3)-gradient(1))-particle_charge*b/(2*energy_eV*ev2erg)*(gradient(3)**2-gradient(1)**2))
+            delta = in%density*exp(-particle_charge*phi_0/(in%energy_eV*ev2erg))*(-particle_charge*a/(in%energy_eV*ev2erg)* &
+                    & (gradient(3)-gradient(1))-particle_charge*b/(2*in%energy_eV*ev2erg)*(gradient(3)**2-gradient(1)**2))
 
             n_b(i) = n_b(i) + alpha*(r(2)-r(1)) + beta/2*(r(2)**2-r(1)**2) + gamma/3*(r(2)**3-r(1)**3) + delta/4*(r(2)**4-r(1)**4)
 
@@ -260,7 +258,7 @@ subroutine calc_volume_integrals(boole_boltzmann_energies,boole_refined_sqrt_g, 
     n_b = abs(n_b)*2*pi/(grid_size(2)**n_field_periods*prism_volumes)
 
     output%prism_volumes = prism_volumes
-    if(boole_refined_sqrt_g) output%refined_prism_volumes = refined_prism_volumes
+    if(in%boole_refined_sqrt_g) output%refined_prism_volumes = refined_prism_volumes
     output%electric_potential = elec_pot_vec
     output%boltzmann_density = n_b
     print*, 'calc_volume_integrals finished'

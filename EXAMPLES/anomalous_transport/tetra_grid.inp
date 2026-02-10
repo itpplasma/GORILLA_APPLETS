@@ -16,7 +16,7 @@
  !2 ... field-aligned grid for axisymmetric EFIT data (g-file) (z.b. ASDEX)
  !3 ... field-aligned grid for non-axisymmetric VMEC (netcdf)
  !4 ... SOLEDGE3X_EIRENE grid (WEST)
- grid_kind = 3 ,
+ grid_kind = 2 ,
 !
  !MHD equilibrium filename
  g_file_filename = 'MHD_EQUILIBRIA/g_file_for_test' ,
