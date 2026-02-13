@@ -40,6 +40,7 @@ subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quan
     if (present(species_in)) species = species_in
 
     do m = 1,moment_specs%n_moments
+
         select case(moment_specs%moments_selector(m))
             case(1)
                 local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
@@ -113,7 +114,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
         start%weight(n,species) = start%weight(n,species)* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
                                         &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
     else
-        start%weight = start%weight*(r + tetra_physics(ind_tetr)%x1(1))
+        start%weight(n,species) = start%weight(n,species)*(r + tetra_physics(ind_tetr)%x1(1))
     endif
 
     if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then

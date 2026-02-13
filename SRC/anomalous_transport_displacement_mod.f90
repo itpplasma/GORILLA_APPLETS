@@ -38,18 +38,25 @@ subroutine carry_out_anomalous_transport_displacement(x, ind_tetr, iface, dt)
 !
     use tetra_physics_mod, only: tetra_physics
     use collis_ions, only: getran
+    use gorilla_applets_types_mod, only: g, counter_t
+    use tetra_grid_settings_mod, only: grid_kind
+    use utils_orbit_timestep_mod, only: identify_particles_entering_annulus
+    use find_tetra_mod, only: find_tetra
 
     real(dp), dimension(3), intent(inout) :: x
     integer, intent(inout)                :: ind_tetr, iface
     real(dp), intent(in)                  :: dt
 
-    real(dp), dimension(3) :: displacement, xi, V_c
+    real(dp), dimension(3) :: displacement, xi, V_c, x_new
     real(dp), parameter :: diffusion_coefficient = 1.0d-4  ! TODO: make this an input parameter
 
     ! Cholesky decomposition of the perpendicular diffusion tensor
     real(dp), dimension(3,3) :: alpha_perp_mat
     real(dp), dimension(3) :: h_contra, x_local
     real(dp) :: R_local, sqrt_2dt
+    logical :: boole_lost_inside
+    type(counter_t) :: dummy_counter
+    real(dp) :: vpar_dummy, vperp_dummy
 
     ! Compute position relative to first vertex
     x_local = x - tetra_physics(ind_tetr)%x1
@@ -87,6 +94,27 @@ subroutine carry_out_anomalous_transport_displacement(x, ind_tetr, iface, dt)
 
     call displace_by_straight_line(x, ind_tetr, iface, displacement)
 
+    ! Check if particle was lost and attempt to push across the annulus if applicable
+    if (ind_tetr.eq.-1) then
+        if ((grid_kind.eq.2).or.(grid_kind.eq.3)) then
+            ! Initialize dummy counter (not used in this context)
+            dummy_counter%lost_inside = 0
+            call identify_particles_entering_annulus(x, dummy_counter, boole_lost_inside)
+            if (boole_lost_inside) then
+                ! Reflect particle across the magnetic axis
+                x_new = 3*(/g%raxis, x(2), g%zaxis/) - 2*x
+                vpar_dummy = 0.0_dp
+                vperp_dummy = 0.0_dp
+                call find_tetra(x_new, vpar_dummy, vperp_dummy, ind_tetr, iface)
+                if (ind_tetr.ne.-1) then
+                    x = x_new
+                    print*, "particle pushing across the hole during anomalous transport displacement was successful"
+                endif
+                ! If ind_tetr is still -1, particle remains lost
+            endif
+        endif
+    endif
+
 end subroutine carry_out_anomalous_transport_displacement
 
 ! ====================================================================
@@ -117,6 +145,10 @@ subroutine compute_diffusion_cholesky(h_contra, R_local, D_perp, alpha_perp_mat)
     real(dp), dimension(3,3), intent(out) :: alpha_perp_mat
 
     real(dp), dimension(3,3) :: D_perp_mat, g_mat
+    real(dp) :: arg_sqrt, eps_cholesky
+
+    ! Small regularization parameter for Cholesky decomposition
+    eps_cholesky = 1.0d-20
 
     ! Contravariant metric tensor for cylindrical coordinates (R, phi, Z)
     ! g^{11} = 1, g^{22} = 1/R^2, g^{33} = 1, off-diagonal = 0
@@ -138,17 +170,20 @@ subroutine compute_diffusion_cholesky(h_contra, R_local, D_perp, alpha_perp_mat)
 
     ! Cholesky decomposition: alpha_perp such that D_perp = alpha_perp * alpha_perp^T
     ! Row 1
-    alpha_perp_mat(1,1) = sqrt(D_perp_mat(1,1))
+    arg_sqrt = max(D_perp_mat(1,1), eps_cholesky)
+    alpha_perp_mat(1,1) = sqrt(arg_sqrt)
     alpha_perp_mat(1,2) = 0.0_dp
     alpha_perp_mat(1,3) = 0.0_dp
     ! Row 2
     alpha_perp_mat(2,1) = D_perp_mat(1,2) / alpha_perp_mat(1,1)
-    alpha_perp_mat(2,2) = sqrt(D_perp_mat(2,2) - alpha_perp_mat(2,1)**2)
+    arg_sqrt = max(D_perp_mat(2,2) - alpha_perp_mat(2,1)**2, eps_cholesky)
+    alpha_perp_mat(2,2) = sqrt(arg_sqrt)
     alpha_perp_mat(2,3) = 0.0_dp
     ! Row 3
     alpha_perp_mat(3,1) = D_perp_mat(1,3) / alpha_perp_mat(1,1)
     alpha_perp_mat(3,2) = (D_perp_mat(2,3) - alpha_perp_mat(2,1) * alpha_perp_mat(3,1)) / alpha_perp_mat(2,2)
-    alpha_perp_mat(3,3) = sqrt(D_perp_mat(3,3) - alpha_perp_mat(3,1)**2 - alpha_perp_mat(3,2)**2)
+    arg_sqrt = max(D_perp_mat(3,3) - alpha_perp_mat(3,1)**2 - alpha_perp_mat(3,2)**2, eps_cholesky)
+    alpha_perp_mat(3,3) = sqrt(arg_sqrt)
 
 end subroutine compute_diffusion_cholesky
 
@@ -243,16 +278,14 @@ subroutine displace_by_straight_line(x, ind_tetr, iface, displacement)
 ! searching through all tetrahedra.
 !
 ! Input/Output:
-!   x(3)        - Particle position in (s, theta, phi) coordinates
+!   x(3)        - Particle position in cylindrical (R, phi, Z) coordinates
 !   ind_tetr    - Current tetrahedron index (updated after displacement)
 !   iface       - Current face index (updated after displacement)
-!   displacement(3) - Displacement vector in (s, theta, phi) coordinates
+!   displacement(3) - Displacement vector in cylindrical (R, phi, Z) coordinates
 !
     use tetra_physics_mod, only: tetra_physics
     use tetra_grid_mod, only: tetra_grid
     use pusher_tetra_func_mod, only: pusher_handover2neighbour
-    use tetra_grid_settings_mod, only: sfc_s_min
-    use find_tetra_mod, only: find_tetra
     use constants, only: eps
 
     real(dp), dimension(3), intent(inout) :: x
@@ -263,7 +296,6 @@ subroutine displace_by_straight_line(x, ind_tetr, iface, displacement)
     real(dp), dimension(3) :: direction, z_rel
     integer :: hit_face, iper_phi, ind_tetr_old
     integer :: max_crossings, crossing_count
-    real(dp) :: vpar_dummy, vperp_dummy
 
     ! Compute total displacement distance and direction
     total_distance = sqrt(displacement(1)**2 + displacement(2)**2 + displacement(3)**2)
@@ -313,34 +345,13 @@ subroutine displace_by_straight_line(x, ind_tetr, iface, displacement)
 
             ! Check if we've left the domain
             if (ind_tetr == -1) then
-                ! Handle boundary: reflect at inner boundary, mark lost at outer
-                if (x(1) < 1.01_dp * sfc_s_min) then
-                    ! Reflect at inner boundary
-                    x(1) = 2.0_dp * sfc_s_min - x(1)
-                    direction(1) = -direction(1)  ! Reverse radial direction
-                    ! Need to find tetrahedron again after reflection
-                    vpar_dummy = 0.0_dp
-                    vperp_dummy = 0.0_dp
-                    call find_tetra(x, vpar_dummy, vperp_dummy, ind_tetr, iface)
-                    if (ind_tetr == -1) exit  ! Lost particle
-                else
-                    ! Lost at outer boundary
-                    exit
-                endif
+                ! Particle has left the tetrahedral mesh
+                exit
             endif
 
             remaining_distance = remaining_distance - distance_to_face
         endif
     enddo
-
-    ! Final boundary checks
-    if (x(1) < sfc_s_min) then
-        x(1) = 2.0_dp * sfc_s_min - x(1)
-    endif
-    if (x(1) > 1.0_dp) then
-        x(1) = 1.0_dp
-        ind_tetr = -1  ! Mark as lost
-    endif
 
 end subroutine displace_by_straight_line
 

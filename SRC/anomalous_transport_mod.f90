@@ -14,7 +14,7 @@ subroutine calc_anomalous_transport
     use tetra_grid_mod, only: verts_rphiz
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
-    use volume_integrals_and_sqrt_g_mod, only: calc_volume_integrals
+    use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
     use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, output
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
@@ -30,6 +30,7 @@ subroutine calc_anomalous_transport
 
     call set_moment_specifications
     call initialise_output
+    call calc_square_root_g
     call calc_volume_integrals
 
     call initialize_exit_data

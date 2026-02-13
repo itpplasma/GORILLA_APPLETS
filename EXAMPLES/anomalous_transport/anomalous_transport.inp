@@ -12,7 +12,7 @@
   n_species = 1
 !
   !Number of particles to be traced
-  n_particles = 1.0d2 ,
+  n_particles = 1.0d3 ,
 !
   !Compute squares of moments
   boole_squared_moments = .false.,
@@ -32,8 +32,8 @@
   !Simulated density of particles
   density = 3.0d13,
 !
-  !refined jacobian determinant, must be set to .false. since this can only be made use of in cylindrical coordinates
-  boole_refined_sqrt_g = .false.,
+  !refined jacobian determinant
+  boole_refined_sqrt_g = .true.,
 !
   !work with boltzmann energies instead of with monoenergetic particles
   boole_boltzmann_energies = .true.,

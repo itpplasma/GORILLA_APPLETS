@@ -141,8 +141,6 @@ subroutine parallelised_particle_pushing_anomalous_transport(species)
                 if (in%boole_collisions) then
                     call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species)
                     t%step = t%step / start%v0(species)
-
-                    !if (ind_tetr.ne.-1) call anomalous_transport_displacement(x, ind_tetr, iface, t%step)
                 endif
 
                 ! Perform guiding-center orbit integration
@@ -152,6 +150,7 @@ subroutine parallelised_particle_pushing_anomalous_transport(species)
                 t%confined = t%confined + t%step - t%remain
                 t_tot = t_tot + t%step - t%remain
 
+                if (ind_tetr.ne.-1) call anomalous_transport_displacement(x, ind_tetr, iface, t%step)
                 if (ind_tetr.eq.-1) then
                     call handle_lost_particles(local_counter, particle_status%lost)
                     exit
@@ -193,10 +192,10 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
     use utils_orbit_timestep_mod, only: update_local_tetr_moments, initialize_constants_of_motion, compute_radial_fluxes, &
-        calc_particle_weights_and_jperp
+        calc_particle_weights_and_jperp, identify_particles_entering_annulus
 
     real(dp), dimension(3), intent(inout)        :: x
     real(dp), intent(inout)                      :: vpar, vperp
@@ -207,9 +206,9 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
     complex(dp), dimension(:,:), intent(inout)   :: local_tetr_moments
     type(counter_t), intent(inout)               :: local_counter
 
-    real(dp), dimension(3)                       :: z_save
+    real(dp), dimension(3)                       :: z_save, x_new
     real(dp)                                     :: t_pass, perpinv
-    logical                                      :: boole_t_finished
+    logical                                      :: boole_t_finished, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
     type(optional_quantities_type)               :: optional_quantities
 
@@ -237,15 +236,24 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
         local_counter%tetr_pushings = local_counter%tetr_pushings + 1
 
         if (ind_tetr.eq.-1) then
-            ! Simple boundary handling: reflect at inner boundary, exit at outer
-            if (x(1).lt.1.01_dp*sfc_s_min) then
-                ! Reflect at inner boundary
-                x(1) = 2.0_dp*sfc_s_min - x(1)
-                vpar = -vpar
-                call find_tetra(x, vpar, vperp, ind_tetr, iface)
-                if (ind_tetr.eq.-1) exit
+            if ((grid_kind.eq.2).or.(grid_kind.eq.3)) then
+                call identify_particles_entering_annulus(x, local_counter, boole_lost_inside)
+                if (boole_lost_inside) then
+                    x_new = 3*(/g%raxis, x(2), g%zaxis/) - 2*x
+                    vperp = vperp_func(z_save, perpinv, ind_tetr_save)
+                    call find_tetra(x_new, vpar, vperp, ind_tetr, iface)
+                    x = x_new
+                    if (ind_tetr.eq.-1) then
+                        print*, "ATTENTION: particle pushing across the hole surrounding the magnetic axis was unsuccessful"
+                        exit
+                    else
+                        print*, "particle pushing across the hole surrounding the magnetic axis was successful"
+                    endif
+                else
+                    exit
+                endif
             else
-                exit ! Lost at outer boundary
+                exit
             endif
         endif
 
