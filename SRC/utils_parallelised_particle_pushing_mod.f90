@@ -293,16 +293,19 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
 
 end subroutine collisions_without_background_updates
 
-subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_0_mappings,species_in)
+subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_0_mappings,species_in,ind_tetr)
 
-    use gorilla_applets_types_mod, only: exit_data, in
+    use gorilla_applets_types_mod, only: exit_data, in, flux
+    use tetra_physics_mod, only: tetra_physics
 
     integer, intent(in)                 :: i, n
-    integer, intent(in), optional       :: phi_0_mappings, species_in
+    integer, intent(in), optional       :: phi_0_mappings, species_in, ind_tetr
     real(dp), dimension(3), intent(in)  :: x
     real(dp), intent(in)                :: t_confined, vpar, vperp
     logical, intent(in)                 :: boole_particle_lost
     integer                             :: species = 1
+    real(dp), dimension(3)              :: z_local
+    real(dp)                            :: local_poloidal_flux
 
     if (present(species_in)) species = species_in
 
@@ -311,9 +314,19 @@ subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_
     exit_data%t_confined(n,species) = t_confined
     exit_data%x(:,n,species) = x
     exit_data%vpar(n,species) = vpar
-    exit_data%vperp(n,species) = vperp 
+    exit_data%vperp(n,species) = vperp
     exit_data%integration_step(n,species) = i
     if(present(phi_0_mappings)) exit_data%phi_0_mappings(n,species) = phi_0_mappings
+
+    ! Compute flux surface label from poloidal flux (normalized, no square root)
+    if (present(ind_tetr) .and. ind_tetr /= -1) then
+        z_local = x - tetra_physics(ind_tetr)%x1
+        local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi * z_local)
+        exit_data%flux_surface(n,species) = (local_poloidal_flux - flux%poloidal_min) / &
+                                             (flux%poloidal_max - flux%poloidal_min)
+    else
+        exit_data%flux_surface(n,species) = -1.0_dp  ! Mark as invalid if outside domain
+    endif
 
 end subroutine update_exit_data
 

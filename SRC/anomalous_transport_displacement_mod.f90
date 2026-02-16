@@ -15,7 +15,7 @@ module anomalous_transport_displacement_mod
 
 contains
 
-subroutine carry_out_anomalous_transport_displacement(x, ind_tetr, iface, dt)
+subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt)
 !
 ! Computes the displacement vector for anomalous transport and applies it.
 !
@@ -115,7 +115,7 @@ subroutine carry_out_anomalous_transport_displacement(x, ind_tetr, iface, dt)
         endif
     endif
 
-end subroutine carry_out_anomalous_transport_displacement
+end subroutine anomalous_transport_displacement
 
 ! ====================================================================
 subroutine compute_diffusion_cholesky(h_contra, R_local, D_perp, alpha_perp_mat)

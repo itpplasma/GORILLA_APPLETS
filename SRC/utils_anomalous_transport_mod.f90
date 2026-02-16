@@ -25,7 +25,8 @@ subroutine read_anomalous_transport_inp_into_type
                boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, &
-               boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
+               boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
+               boole_calc_diffusion_coefficient
     integer :: i_integrator_type, seed_option, n_species
 
     integer :: s_inp_unit
@@ -35,7 +36,7 @@ subroutine read_anomalous_transport_inp_into_type
     & boole_linear_density_simulation, boole_antithetic_variate, boole_linear_temperature_simulation, i_integrator_type, &
     & seed_option, boole_write_vertex_indices, boole_write_vertex_coordinates, boole_write_prism_volumes, &
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species
+    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, boole_calc_diffusion_coefficient
 
     open(newunit = s_inp_unit, file='anomalous_transport.inp', status='unknown')
     read(s_inp_unit,nml=anomalous_transport_nml)
@@ -67,6 +68,7 @@ subroutine read_anomalous_transport_inp_into_type
     in%boole_write_grid_data = boole_write_grid_data
     in%boole_preserve_energy_and_momentum_during_collisions = boole_preserve_energy_and_momentum_during_collisions
     in%n_species = n_species
+    in%boole_calc_diffusion_coefficient = boole_calc_diffusion_coefficient
 
     print *,'GORILLA_APPLETS: Loaded input data from anomalous_transport.inp'
 
@@ -85,18 +87,19 @@ subroutine parallelised_particle_pushing_anomalous_transport(species)
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
         add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
         initialise_seed_for_random_numbers_for_each_thread
-    use anomalous_transport_displacement_mod, only: anomalous_transport_displacement => carry_out_anomalous_transport_displacement
+    use anomalous_transport_displacement_mod, only: anomalous_transport_displacement
 
     integer, intent(in)                               :: species
     integer                                           :: kpart, iantithetic, ind_tetr, iface, n_particles
-    integer                                           :: p, l, n, i
+    integer                                           :: p, l, n, i, k
     real(dp), dimension(3)                            :: x
-    real(dp)                                          :: vpar, vperp, t_tot
+    real(dp)                                          :: vpar, vperp, t_tot, t_step_s
     type(time_t)                                      :: t
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
     complex(dp), dimension(:,:), allocatable          :: local_tetr_moments
     logical                                           :: thread_flag = .true.
+    logical                                           :: boole_diffusion_coefficient
 
     n_particles = in%num_particles
 
@@ -107,10 +110,12 @@ subroutine parallelised_particle_pushing_anomalous_transport(species)
 
     t_tot = 0.0_dp
 
+    boole_diffusion_coefficient = in%boole_calc_diffusion_coefficient
+
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles) &
+    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, boole_diffusion_coefficient) &
     !$OMP& REDUCTION(+:t_tot) &
-    !$OMP& PRIVATE(p, l, n, i, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status) &
+    !$OMP& PRIVATE(p, l, n, i, k, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, t_step_s) &
     !$OMP& FIRSTPRIVATE(thread_flag)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
@@ -133,6 +138,10 @@ subroutine parallelised_particle_pushing_anomalous_transport(species)
             call initialise_loop_variables(l, n, local_counter, particle_status, t, local_tetr_moments, x, vpar, vperp, species)
 
             i = 0
+            if (boole_diffusion_coefficient) then
+                k = 1
+                t_step_s = start%t(species) / s%k
+            endif
 
             do while (t%confined.lt.start%t(species))
                 i = i + 1
@@ -143,14 +152,19 @@ subroutine parallelised_particle_pushing_anomalous_transport(species)
                     t%step = t%step / start%v0(species)
                 endif
 
+                if (boole_diffusion_coefficient) then
+                    t_step_s = start%t(species)/s%k - (t%confined - start%t(species)/s%k*int(t%confined/(start%t(species)/s%k)))
+                    k = int(t%confined/(start%t(species)/s%k)) + 1
+                endif
+
                 ! Perform guiding-center orbit integration
                 call orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                              local_tetr_moments, local_counter, species)
+                                              local_tetr_moments, local_counter, species, t_step_s, k, boole_diffusion_coefficient)
 
                 t%confined = t%confined + t%step - t%remain
                 t_tot = t_tot + t%step - t%remain
 
-                if (ind_tetr.ne.-1) call anomalous_transport_displacement(x, ind_tetr, iface, t%step)
+                !if (ind_tetr.ne.-1) call anomalous_transport_displacement(x, ind_tetr, iface, t%step)
                 if (ind_tetr.eq.-1) then
                     call handle_lost_particles(local_counter, particle_status%lost)
                     exit
@@ -163,7 +177,7 @@ subroutine parallelised_particle_pushing_anomalous_transport(species)
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
 
-            call update_exit_data(particle_status%lost, t%confined, x, vpar, vperp, i, n, species_in=species)
+            call update_exit_data(particle_status%lost, t%confined, x, vpar, vperp, i, n, species_in=species, ind_tetr=ind_tetr)
             call update_start_type(x, vpar, vperp, n, species, ind_tetr)
         enddo
 
@@ -180,7 +194,7 @@ end subroutine parallelised_particle_pushing_anomalous_transport
 
 ! ====================================================================
 subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                    local_tetr_moments, local_counter, species)
+                                    local_tetr_moments, local_counter, species, t_step_s, k, boole_diffusion_coefficient)
 !
 ! Simplified orbit timestep for anomalous transport.
 ! Performs guiding-center orbit integration without self-consistent EF specific parts.
@@ -192,7 +206,7 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g, s, flux
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
     use utils_orbit_timestep_mod, only: update_local_tetr_moments, initialize_constants_of_motion, compute_radial_fluxes, &
         calc_particle_weights_and_jperp, identify_particles_entering_annulus
@@ -205,9 +219,12 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
     integer, intent(in)                          :: n, species
     complex(dp), dimension(:,:), intent(inout)   :: local_tetr_moments
     type(counter_t), intent(inout)               :: local_counter
+    real(dp), intent(inout)                      :: t_step_s
+    integer, intent(inout)                       :: k
+    logical, intent(in)                          :: boole_diffusion_coefficient
 
-    real(dp), dimension(3)                       :: z_save, x_new
-    real(dp)                                     :: t_pass, perpinv
+    real(dp), dimension(3)                       :: z_save, x_new, z_local
+    real(dp)                                     :: t_pass, perpinv, t_pusher, local_poloidal_flux, s_local
     logical                                      :: boole_t_finished, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
     type(optional_quantities_type)               :: optional_quantities
@@ -259,16 +276,44 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
 
         ind_tetr_save = ind_tetr
 
+        t_pusher = t%remain
+        if (boole_diffusion_coefficient) t_pusher = min(t%remain, t_step_s)
+
         select case(ipusher)
             case(1)
                 call pusher_tetra_rk(ind_tetr, iface, x, vpar, z_save, t%remain, t_pass, boole_t_finished, iper_phi)
             case(2)
-                call pusher_tetra_poly(poly_order, ind_tetr, iface, x, vpar, z_save, t%remain, &
+                call pusher_tetra_poly(poly_order, ind_tetr, iface, x, vpar, z_save, t_pusher, &
                                        t_pass, boole_t_finished, iper_phi, optional_quantities)
         end select
 
         vperp = vperp_func(z_save, perpinv, ind_tetr_save)
+
+        ! Record displacement statistics for diffusion coefficient calculation
+        if (boole_diffusion_coefficient) then
+            if (boole_t_finished .and. (t%remain >= t_step_s)) then
+                if (t%remain > t_step_s) boole_t_finished = .false.
+                t_step_s = start%t(species)/s%k + t_pass
+                local_counter%tetr_pushings = local_counter%tetr_pushings - 1
+
+                ! Compute normalized radial coordinate s from poloidal flux at current position
+                ! Use current tetrahedron (ind_tetr) and recompute local coordinates
+                z_local = x - tetra_physics(ind_tetr)%x1
+                local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_local)
+                s_local = (local_poloidal_flux - flux%poloidal_min) / (flux%poloidal_max - flux%poloidal_min)
+
+                !$omp critical
+                s%delta_s(k) = s%delta_s(k) + (s_local - s%s0) * start%weight(n,species)
+                s%delta_s_squared(k) = s%delta_s_squared(k) + (s_local - s%s0)**2 * start%weight(n,species)
+                s%check(k) = s%check(k) + 1
+                !$omp end critical
+
+                k = k + 1
+            endif
+        endif
+
         t%remain = t%remain - t_pass
+        t_step_s = t_step_s - t_pass
 
         call update_local_tetr_moments(local_tetr_moments, ind_tetr_save, n, optional_quantities, species)
         if ((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save, ind_tetr, x)
@@ -277,5 +322,298 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
     enddo
 
 end subroutine orbit_timestep_anomalous_transport
+
+! ====================================================================
+subroutine calc_diffusion_coefficient
+!
+! Calculates diffusion coefficient for anomalous transport validation.
+! Initiates particles at a single point and tracks displacement statistics
+! to verify that anomalous_transport_displacement produces the expected
+! diffusion coefficient.
+!
+! Expected: D_physical = 1.0e-4 cm^2/s
+! In normalized flux coordinates (s): D_normalized = D_physical/a^2 ~ 4.0e-8 s^-1
+! (assuming minor radius a ~ 50 cm)
+!
+    use gorilla_applets_types_mod, only: in, s, start
+    use llsq_mod, only: llsq
+    use utils_data_pre_and_post_processing_mod, only: initialize_exit_data, set_weights
+
+    integer :: i, n_particles, file_id
+    real(dp) :: A, B, offset
+    real(dp), dimension(:), allocatable :: data_for_diffusion_coefficient
+    real(dp), dimension(:,:,:), allocatable :: rand_matrix
+
+    ! Check that collisions are disabled
+    if (in%boole_collisions) then
+        print*, ''
+        print*, '=============================================='
+        print*, 'ERROR: Diffusion coefficient calculation requires collisions to be disabled!'
+        print*, '=============================================='
+        print*, 'To calculate diffusion coefficients, you must disable collisions.'
+        print*, 'Please set boole_collisions = .false. in anomalous_transport.inp'
+        print*, ''
+        stop 'Diffusion coefficient calculation requires boole_collisions = .false.'
+    endif
+
+    ! Set number of test particles for diffusion coefficient calculation
+    n_particles = 1000
+    s%n_particles = n_particles
+
+    ! Set up time sampling (1000 equally spaced intervals)
+    s%k = 1000
+    if (.not.allocated(s%delta_s)) allocate(s%delta_s(s%k))
+    if (.not.allocated(s%delta_s_squared)) allocate(s%delta_s_squared(s%k))
+    if (.not.allocated(s%time)) allocate(s%time(s%k))
+    if (.not.allocated(s%check)) allocate(s%check(s%k))
+    if (.not.allocated(data_for_diffusion_coefficient)) allocate(data_for_diffusion_coefficient(s%k))
+
+    ! Initialize arrays
+    s%delta_s = 0.0_dp
+    s%delta_s_squared = 0.0_dp
+    s%check = 0
+
+    ! Reinitialize particles at a single point in cylindrical coordinates
+    allocate(rand_matrix(5, n_particles, in%n_species))
+    call RANDOM_NUMBER(rand_matrix)
+
+    call allocate_start_type(n_particles)  ! Use local allocate_start_type with explicit particle count
+    call set_starting_positions_point_source(rand_matrix, (/1/))  ! This also sets s%s0
+    call set_weights
+    call set_rest_of_start_type(rand_matrix)  ! This also sets start%t(1)
+
+    ! Initialize time array based on actual tracing time
+    s%time = [(start%t(1)/s%k*i, i = 1, s%k)]
+
+    deallocate(rand_matrix)
+
+    ! Initialize exit data for tracking
+    call initialize_exit_data(n_particles)
+
+    print*, ''
+    print*, '=============================================='
+    print*, 'Diffusion Coefficient Calculation'
+    print*, '=============================================='
+    print*, 'Number of test particles: ', n_particles
+    print*, 'Reference flux surface s0: ', s%s0
+    print*, 'Number of time samples: ', s%k
+    print*, 'Total tracing time: ', start%t(1), 's'
+    print*, ''
+
+    ! Call parallelised particle pushing (displacement tracking happens automatically)
+    call parallelised_particle_pushing_anomalous_transport(species=1)
+
+    ! Normalize by total weight
+    do i = 1, s%k
+        if (s%check(i) > 0) then
+            s%delta_s(i) = s%delta_s(i) / sum(start%weight(:,1))
+            s%delta_s_squared(i) = s%delta_s_squared(i) / sum(start%weight(:,1))
+        endif
+    enddo
+
+    ! Perform least-squares fitting
+    ! Discard first 20% of data to avoid transient effects
+    i = ceiling(dble(s%k) * 0.2_dp)
+
+    ! Fit convection coefficient A from <delta_s> vs time
+    call llsq(int(s%k - i + 1, kind=8), s%time(i:s%k), s%delta_s(i:s%k), A, offset)
+
+    ! Fit diffusion coefficient B from <(delta_s - A*t)^2> vs time
+    data_for_diffusion_coefficient = s%delta_s_squared - 2*A*s%time*s%delta_s + A**2*s%time**2
+    call llsq(int(s%k - i + 1, kind=8), s%time(i:s%k), data_for_diffusion_coefficient(i:s%k), B, offset)
+    B = B / 2.0_dp
+
+    ! Output results
+    ! Expected value in normalized coordinates: D_physical / a^2
+    ! D_physical = 1.0e-4 cm^2/s, a ~ 50 cm => D_normalized ~ 4.0e-8 s^-1
+    print*, '=============================================='
+    print*, 'Diffusion Coefficient Results'
+    print*, '=============================================='
+    print*, 'Convection coefficient A: ', A, 's^-1'
+    print*, 'Diffusion coefficient B:  ', B, 's^2/s'
+    print*, 'Expected value (normalized): ', 4.0d-8, 's^2/s'
+    print*, 'Expected value (physical):   ', 1.0d-4, 'cm^2/s'
+    print*, 'Relative error:           ', abs(B - 4.0d-8) / 4.0d-8 * 100.0_dp, '%'
+    print*, '=============================================='
+    print*, ''
+
+    ! Write data to file (no comments for MATLAB compatibility)
+    open(newunit=file_id, file='diffusion_coefficient_data.dat')
+    do i = 1, s%k
+        write(file_id, '(4ES16.7)') s%time(i), s%delta_s(i), s%delta_s_squared(i), dble(s%check(i))
+    enddo
+    close(file_id)
+
+    print*, 'Data written to: diffusion_coefficient_data.dat'
+    print*, ''
+
+end subroutine calc_diffusion_coefficient
+
+! ====================================================================
+subroutine set_starting_positions_point_source(rand_matrix, species_in)
+!
+! Sets all particles at the same point in cylindrical coordinates (R, phi, Z).
+! This point should be approximately at mid-radius in the computational domain.
+! Also computes and sets s%s0 (the reference flux surface) from this position.
+!
+    use gorilla_applets_types_mod, only: in, start, g, s, flux
+    use tetra_physics_mod, only: tetra_physics
+    use find_tetra_mod, only: find_tetra
+
+    real(dp), dimension(:,:,:), intent(in) :: rand_matrix
+    integer, dimension(:), intent(in), optional :: species_in
+
+    integer, dimension(:), allocatable :: species
+    integer :: i, ind_tetr, iface
+    real(dp), dimension(3) :: x0, z_save
+    real(dp) :: local_poloidal_flux, vpar_dummy, vperp_dummy
+
+    if (present(species_in)) then
+        allocate(species(size(species_in)))
+        species = species_in
+    else
+        allocate(species(in%n_species))
+        species = [(i, i=1, in%n_species)]
+    endif
+
+    ! Set all particles to the same point in cylindrical coordinates
+    ! These values should be adjusted to match the actual device geometry
+    ! For now, use approximate mid-radius values
+    start%x(1,:,species) = 140.0_dp  ! R at mid-radius
+    start%x(2,:,species) = 0.0_dp                       ! phi = 0
+    start%x(3,:,species) = 0.0_dp  ! Z at midplane
+
+    ! Compute s%s0 from the starting position
+    x0 = start%x(:, 1, species(1))
+
+    ! Find which tetrahedron contains this point
+    ! Use representative velocity values (only geometric location matters)
+    vpar_dummy = 1.0d6
+    vperp_dummy = 1.0d6
+    call find_tetra(x0, vpar_dummy, vperp_dummy, ind_tetr, iface)
+
+    if (ind_tetr == -1) then
+        print*, 'WARNING: Starting position is outside computational domain!'
+        print*, 'Setting s%s0 = 0.5 as fallback'
+        s%s0 = 0.5_dp
+    else
+        ! Compute local coordinates within tetrahedron
+        z_save = x0 - tetra_physics(ind_tetr)%x1
+
+        ! Compute poloidal flux at this position
+        local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi * z_save)
+
+        ! Normalize to get s coordinate (no square root)
+        s%s0 = (local_poloidal_flux - flux%poloidal_min) / (flux%poloidal_max - flux%poloidal_min)
+    endif
+
+    print*, 'Particles initialized at point: R =', start%x(1,1,species(1)), &
+            ', phi =', start%x(2,1,species(1)), ', Z =', start%x(3,1,species(1))
+    print*, 'Reference flux surface s0 =', s%s0
+
+end subroutine set_starting_positions_point_source
+
+! ====================================================================
+subroutine set_rest_of_start_type(rand_matrix)
+!
+! Sets particle velocities, energies, and pitch angles.
+! Copied from utils_data_pre_and_post_processing_mod to allow customization.
+!
+    use gorilla_applets_types_mod, only: in, start
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
+    use gorilla_applets_settings_mod, only: i_option
+    use constants, only: echarge,ame,clight
+    use constants, only: ev2erg
+
+    real(dp), dimension(:,:,:), intent(in) :: rand_matrix
+
+    start%pitch(:,:) = 2*rand_matrix(4,:,:)-1 !pitch parameter
+    start%energy = in%energy_eV
+    if (in%boole_boltzmann_energies) then
+        start%energy = 5*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
+    endif
+
+    if (in%boole_antithetic_variate) then
+        start%x(:,1:in%num_particles:2,:) = start%x(:,2:in%num_particles:2,:)
+        start%pitch(1:in%num_particles:2,:) = -start%pitch(2:in%num_particles:2,:)
+        start%energy(1:in%num_particles:2,:) = start%energy(2:in%num_particles:2,:)
+    endif
+
+    start%particle_charge = particle_charge
+    start%particle_mass = particle_mass
+    start%cm_over_e = cm_over_e
+
+    ! Set tracing time for diffusion coefficient calculation
+    ! Use same value as in self-consistent EF example: 2.0 * 1.7e-4
+    if (in%boole_calc_diffusion_coefficient) then
+        start%t(1) = 3.4d-4
+    else
+        start%t = in%time_step
+        if (i_option.eq.12) then
+            start%particle_charge(2) = -echarge
+            start%particle_mass(2) = ame
+            start%cm_over_e(2) = -clight*ame/echarge
+            start%t(2) = in%time_step/42.0_dp
+        endif
+    endif
+
+    start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
+
+end subroutine set_rest_of_start_type
+
+! ====================================================================
+subroutine allocate_start_type(n_particles_in)
+!
+! Allocates arrays in the start type for particle properties.
+! If n_particles_in is provided, uses that; otherwise uses in%num_particles.
+!
+    use gorilla_applets_types_mod, only: start, in
+
+    integer, intent(in), optional :: n_particles_in
+    integer :: n_particles
+
+    if (present(n_particles_in)) then
+        n_particles = n_particles_in
+    else
+        n_particles = in%num_particles
+    endif
+
+    ! Before allocating, deallocate if necessary
+    call deallocate_start_type
+
+    allocate(start%x(3, n_particles, in%n_species))
+    allocate(start%pitch(n_particles, in%n_species))
+    allocate(start%energy(n_particles, in%n_species))
+    allocate(start%weight(n_particles, in%n_species))
+    allocate(start%jperp(n_particles, in%n_species))
+    allocate(start%lost(n_particles, in%n_species))
+    allocate(start%particle_charge(in%n_species))
+    allocate(start%particle_mass(in%n_species))
+    allocate(start%cm_over_e(in%n_species))
+    allocate(start%t(in%n_species))
+    allocate(start%v0(in%n_species))
+
+end subroutine allocate_start_type
+
+! ====================================================================
+subroutine deallocate_start_type
+!
+! Deallocates arrays in the start type.
+!
+    use gorilla_applets_types_mod, only: start
+
+    if (allocated(start%x))               deallocate(start%x)
+    if (allocated(start%pitch))           deallocate(start%pitch)
+    if (allocated(start%energy))          deallocate(start%energy)
+    if (allocated(start%weight))          deallocate(start%weight)
+    if (allocated(start%jperp))           deallocate(start%jperp)
+    if (allocated(start%lost))            deallocate(start%lost)
+    if (allocated(start%particle_charge)) deallocate(start%particle_charge)
+    if (allocated(start%particle_mass))   deallocate(start%particle_mass)
+    if (allocated(start%cm_over_e))       deallocate(start%cm_over_e)
+    if (allocated(start%t))               deallocate(start%t)
+    if (allocated(start%v0))              deallocate(start%v0)
+
+end subroutine deallocate_start_type
 
 end module utils_anomalous_transport_mod

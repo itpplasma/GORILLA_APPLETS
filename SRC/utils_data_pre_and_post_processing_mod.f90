@@ -266,6 +266,7 @@ subroutine initialize_exit_data(n_particles_in)
     if (allocated(exit_data%vperp))             deallocate(exit_data%vperp)
     if (allocated(exit_data%phi_0_mappings))    deallocate(exit_data%phi_0_mappings)
     if (allocated(exit_data%integration_step))  deallocate(exit_data%integration_step)
+    if (allocated(exit_data%flux_surface))      deallocate(exit_data%flux_surface)
 
     if(present(n_particles_in)) then
         n_particles = n_particles_in
@@ -280,14 +281,16 @@ subroutine initialize_exit_data(n_particles_in)
     allocate(exit_data%vperp(n_particles,in%n_species))
     allocate(exit_data%phi_0_mappings(n_particles,in%n_species))
     allocate(exit_data%integration_step(n_particles,in%n_species))
+    allocate(exit_data%flux_surface(n_particles,in%n_species))
 
     exit_data%lost = 0
     exit_data%t_confined = 0.0_dp
     exit_data%x = 0.0_dp
-    exit_data%vpar = 0.0_dp 
-    exit_data%vperp = 0.0_dp 
+    exit_data%vpar = 0.0_dp
+    exit_data%vperp = 0.0_dp
     exit_data%integration_step = 0
     exit_data%phi_0_mappings = 0
+    exit_data%flux_surface = 0.0_dp
 
 end subroutine initialize_exit_data
 

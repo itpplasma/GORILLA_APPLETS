@@ -21,7 +21,7 @@
   boole_point_source = .false.,
 !
   !include a collision operator
-  boole_collisions = .true.,
+  boole_collisions = .false.,
 !
   !precalcualte random numbers for collisions
   boole_precalc_collisions = .false.,
@@ -48,6 +48,9 @@
   !make temperature a linear function of poloidal flux
   boole_linear_temperature_simulation = .false.,
 !
+  !calculate diffusion coefficient to verify anomalous transport implementation
+  boole_calc_diffusion_coefficient = .true.,
+!
   !Set integrator type
   !(must be 1, otherwise it currently does not work)
   ! 1 ... GORILLA
@@ -63,7 +66,7 @@
   boole_write_vertex_indices = .true. ,
   boole_write_vertex_coordinates = .true. ,
   boole_write_prism_volumes = .true. ,
-  boole_write_refined_prism_volumes = .false. , !Must be set to .false., since boole_refined_sqrt_g is also set to .false.
+  boole_write_refined_prism_volumes = .false. ,
   boole_write_moments = .true. ,
   boole_write_fourier_moments = .true. ,
   boole_write_exit_data = .true. ,

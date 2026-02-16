@@ -249,7 +249,8 @@ subroutine write_exit_data
 
         do i = 1,in%num_particles
             write(ed_unit,*) i, exit_data%lost(i,j), exit_data%t_confined(i,j), exit_data%x(:,i,j), exit_data%vpar(i,j), &
-                            exit_data%vperp(i,j), exit_data%integration_step(i,j), exit_data%phi_0_mappings(i,j)
+                            exit_data%vperp(i,j), exit_data%integration_step(i,j), exit_data%phi_0_mappings(i,j), &
+                            exit_data%flux_surface(i,j)
         enddo
 
         close (ed_unit)

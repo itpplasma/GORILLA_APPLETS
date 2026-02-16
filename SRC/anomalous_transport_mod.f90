@@ -21,7 +21,8 @@ subroutine calc_anomalous_transport
         get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &
         calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
         fourier_transform_moments, calc_starting_conditions
-    use utils_anomalous_transport_mod, only: read_anomalous_transport_inp_into_type, parallelised_particle_pushing_anomalous_transport
+    use utils_anomalous_transport_mod, only: read_anomalous_transport_inp_into_type, &
+        parallelised_particle_pushing_anomalous_transport, calc_diffusion_coefficient
 
     call set_seed_for_random_numbers
     call read_anomalous_transport_inp_into_type
@@ -37,10 +38,18 @@ subroutine calc_anomalous_transport
     call calc_poloidal_flux(verts_rphiz)
     call give_file_names
     call unlink_files
-    call calc_starting_conditions
 
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
-    call parallelised_particle_pushing_anomalous_transport(species=1)
+
+    call calc_starting_conditions
+
+    ! Calculate diffusion coefficient if requested
+    if (in%boole_calc_diffusion_coefficient) then
+        call calc_diffusion_coefficient
+    else
+        call parallelised_particle_pushing_anomalous_transport(species=1)
+    endif
+
     call normalise_prism_moments_and_prism_moments_squared
 
 
