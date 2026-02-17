@@ -15,7 +15,7 @@ module anomalous_transport_displacement_mod
 
 contains
 
-subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt)
+subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp)
 !
 ! Computes the displacement vector for anomalous transport and applies it.
 !
@@ -35,20 +35,21 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt)
 !   ind_tetr  - Current tetrahedron index (updated after displacement)
 !   iface     - Current face index (updated after displacement)
 !   dt        - Time step
+!   vpar      - Parallel velocity (for edge disambiguation after displacement)
+!   vperp     - Perpendicular velocity (for edge disambiguation after displacement)
 !
-    use tetra_physics_mod, only: tetra_physics
+    use tetra_physics_mod, only: tetra_physics,isinside
     use collis_ions, only: getran
-    use gorilla_applets_types_mod, only: g, counter_t
+    use gorilla_applets_types_mod, only: g, counter_t, in
     use tetra_grid_settings_mod, only: grid_kind
     use utils_orbit_timestep_mod, only: identify_particles_entering_annulus
     use find_tetra_mod, only: find_tetra
 
     real(dp), dimension(3), intent(inout) :: x
     integer, intent(inout)                :: ind_tetr, iface
-    real(dp), intent(in)                  :: dt
+    real(dp), intent(in)                  :: dt, vpar, vperp
 
     real(dp), dimension(3) :: displacement, xi, V_c, x_new
-    real(dp), parameter :: diffusion_coefficient = 1.0d-4  ! TODO: make this an input parameter
 
     ! Cholesky decomposition of the perpendicular diffusion tensor
     real(dp), dimension(3,3) :: alpha_perp_mat
@@ -71,10 +72,10 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt)
     h_contra(3) =  tetra_physics(ind_tetr)%h3_1 + dot_product(tetra_physics(ind_tetr)%gh3, x_local)
 
     ! Compute Cholesky decomposition of the diffusion tensor
-    call compute_diffusion_cholesky(h_contra, R_local, diffusion_coefficient, alpha_perp_mat)
+    call compute_diffusion_cholesky(h_contra, R_local, in%anomalous_diffusion_coefficient, alpha_perp_mat)
 
     ! Compute correction velocity
-    call compute_correction_velocity(ind_tetr, h_contra, R_local, diffusion_coefficient, V_c)
+    call compute_correction_velocity(ind_tetr, h_contra, R_local, in%anomalous_diffusion_coefficient, V_c)
 
     ! Generate random numbers with zero mean and unit variance
     call getran(0, xi(1))
@@ -92,7 +93,7 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt)
     displacement(3) = sqrt_2dt * (alpha_perp_mat(3,1) * xi(1) + alpha_perp_mat(3,2) * xi(2) &
                                 + alpha_perp_mat(3,3) * xi(3)) + V_c(3) * dt
 
-    call displace_by_straight_line(x, ind_tetr, iface, displacement)
+    call displace_by_straight_line(x, ind_tetr, iface, displacement, vpar, vperp)
 
     ! Check if particle was lost and attempt to push across the annulus if applicable
     if (ind_tetr.eq.-1) then
@@ -268,7 +269,7 @@ subroutine compute_correction_velocity(ind_tetr, h_contra, R_local, D_perp, V_c)
 end subroutine compute_correction_velocity
 
 ! ====================================================================
-subroutine displace_by_straight_line(x, ind_tetr, iface, displacement)
+subroutine displace_by_straight_line(x, ind_tetr, iface, displacement, vpar, vperp)
 !
 ! Displaces a particle along a straight line through the tetrahedral mesh.
 !
@@ -277,25 +278,44 @@ subroutine displace_by_straight_line(x, ind_tetr, iface, displacement)
 ! it only needs to check faces of the current tetrahedron rather than
 ! searching through all tetrahedra.
 !
+! After displacement, if the particle is close to a tetrahedron face,
+! uses velocity-based disambiguation (like find_tetra) to determine
+! the correct tetrahedron assignment.
+!
 ! Input/Output:
 !   x(3)        - Particle position in cylindrical (R, phi, Z) coordinates
 !   ind_tetr    - Current tetrahedron index (updated after displacement)
 !   iface       - Current face index (updated after displacement)
 !   displacement(3) - Displacement vector in cylindrical (R, phi, Z) coordinates
+!   vpar        - Parallel velocity (for edge disambiguation)
+!   vperp       - Perpendicular velocity (for edge disambiguation)
 !
     use tetra_physics_mod, only: tetra_physics
     use tetra_grid_mod, only: tetra_grid
     use pusher_tetra_func_mod, only: pusher_handover2neighbour
     use constants, only: eps
+    use supporting_functions_mod, only: logical2integer
+    use pusher_tetra_rk_mod, only: normal_velocity_func, normal_distances_func, &
+                                   initialize_pusher_tetra_rk_mod, rk4_step, initialize_const_motion_rk
+    use supporting_functions_mod, only: logical2integer, bmod_func
 
     real(dp), dimension(3), intent(inout) :: x
     integer, intent(inout)                :: ind_tetr, iface
     real(dp), dimension(3), intent(in)    :: displacement
+    real(dp), intent(in)                  :: vpar, vperp
 
     real(dp) :: remaining_distance, distance_to_face, dist_min, total_distance
     real(dp), dimension(3) :: direction, z_rel
     integer :: hit_face, iper_phi, ind_tetr_old
     integer :: max_crossings, crossing_count
+    ! Variables for edge/face disambiguation (like in find_tetra)
+    real(dp), dimension(4) :: cur_dist_value, z, dzdtau
+    logical, dimension(4) :: boole_plane_conv, boole_plane_conv_temp
+    integer :: n_plane_conv, ind_normdist, l, ind_tetr_save, iface_handover, iface_new, iface_new_save
+    integer :: counter_vnorm_pos, i_tetra_try
+    integer, dimension(:), allocatable :: ind_tetr_tried
+    real(dp) :: vnorm, vperp2, perpinv, bmod
+    real(dp), dimension(3) :: x_save
 
     ! Compute total displacement distance and direction
     total_distance = sqrt(displacement(1)**2 + displacement(2)**2 + displacement(3)**2)
@@ -332,6 +352,9 @@ subroutine displace_by_straight_line(x, ind_tetr, iface, displacement)
             ! Displacement ends within this tetrahedron
             x = x + remaining_distance * direction
             remaining_distance = 0.0_dp
+            ! Set iface = 0 since particle is in the interior, not on a face
+            ! This is consistent with find_tetra behavior
+            iface = 0
         else
             ! Move to the face and continue to next tetrahedron
             x = x + distance_to_face * direction
@@ -352,6 +375,109 @@ subroutine displace_by_straight_line(x, ind_tetr, iface, displacement)
             remaining_distance = remaining_distance - distance_to_face
         endif
     enddo
+
+    ! Edge/face disambiguation: check if particle is close to any tetrahedron face
+    ! and use velocity-based disambiguation (like find_tetra) to determine
+    ! the correct tetrahedron assignment
+    if (ind_tetr /= -1) then
+        z_rel = x - tetra_physics(ind_tetr)%x1
+
+        ! Calculate distances to all 4 faces
+        do ind_normdist = 1, 4
+            if (ind_normdist /= 1) then
+                cur_dist_value(ind_normdist) = &
+                    sum(tetra_physics(ind_tetr)%anorm(:,ind_normdist) * z_rel)
+            else
+                cur_dist_value(ind_normdist) = &
+                    sum(tetra_physics(ind_tetr)%anorm(:,ind_normdist) * z_rel) + &
+                    tetra_physics(ind_tetr)%dist_ref
+            endif
+        enddo
+
+        ! Check if particle is close to any face (converged on plane)
+        boole_plane_conv = abs(cur_dist_value) <= (eps * abs(tetra_physics(ind_tetr)%dist_ref))
+        n_plane_conv = sum(logical2integer(boole_plane_conv), 1)
+
+        ! If close to one or more faces, use velocity to disambiguate (like find_tetra)
+        if (n_plane_conv > 0) then
+            ! Set up z vector: position relative to x1 and parallel velocity
+            z(1:3) = x - tetra_physics(ind_tetr)%x1
+            z(4) = vpar
+
+            ! Temporary iface
+            iface_new = minloc(abs(cur_dist_value), 1)
+
+            ! Allocate and initialize vector with tried indices
+            allocate(ind_tetr_tried(2*n_plane_conv))
+            ind_tetr_tried = 0
+
+            ! Compute perpendicular invariant at the new position (needed by initialize_pusher_tetra_rk_mod)
+            vperp2 = vperp**2
+            bmod = bmod_func(z(1:3), ind_tetr)
+            perpinv = -0.5_dp * vperp2 / bmod
+            call initialize_const_motion_rk(perpinv, perpinv**2)
+
+            ! Loop over all possible tetrahedra options
+            try_loop: do i_tetra_try = 1, (2*n_plane_conv)
+                if (ind_tetr == -1) exit
+
+                ! Write 'tried' tetrahedron in 'memory'-vector
+                ind_tetr_tried(i_tetra_try) = ind_tetr
+
+                z(1:3) = x - tetra_physics(ind_tetr)%x1
+
+                call initialize_pusher_tetra_rk_mod(ind_tetr, x, iface_new, vpar, 1.0_dp)
+
+                cur_dist_value = normal_distances_func(z(1:3))
+
+                boole_plane_conv_temp = abs(cur_dist_value) <= (eps * abs(tetra_physics(ind_tetr)%dist_ref))
+
+                ! Call rk4 at z with dtau = 0 to get the velocity
+                call rk4_step(z, 0.0_dp, dzdtau)
+
+                ! Now, ALL normal velocities, where particle is converged on plane, must be positive
+                counter_vnorm_pos = 0
+                do l = 1, 4
+                    if (.not. boole_plane_conv_temp(l)) cycle
+                    vnorm = normal_velocity_func(l, dzdtau, z)
+                    if (vnorm > 0.0_dp) then
+                        counter_vnorm_pos = counter_vnorm_pos + 1
+                    endif
+                enddo
+
+                if (counter_vnorm_pos == n_plane_conv) then
+                    iface = iface_new
+                    exit try_loop  ! Tetrahedron was found
+                else
+                    ind_tetr_save = ind_tetr
+                    x_save = x
+                    iface_new_save = iface_new
+
+                    do l = 1, 4
+                        if (.not. boole_plane_conv_temp(l)) cycle
+                        vnorm = normal_velocity_func(l, dzdtau, z)
+                        if (vnorm > 0.0_dp) cycle
+                        iface_new = l
+                        call pusher_handover2neighbour(ind_tetr_save, ind_tetr, iface_new, x, iper_phi)
+
+                        if (any(ind_tetr == ind_tetr_tried) .or. (ind_tetr == -1)) then
+                            x = x_save
+                            iface_new = iface_new_save
+                        else
+                            exit  ! New try
+                        endif
+                    enddo
+                endif
+
+            enddo try_loop
+
+            deallocate(ind_tetr_tried)
+
+            if (ind_tetr == -1) then
+                iface = -1
+            endif
+        endif
+    endif
 
 end subroutine displace_by_straight_line
 

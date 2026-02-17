@@ -20,7 +20,7 @@ subroutine read_anomalous_transport_inp_into_type
 
     use gorilla_applets_types_mod, only: in
 
-    real(dp) :: time_step, energy_eV, n_particles, density
+    real(dp) :: time_step, energy_eV, n_particles, density, anomalous_diffusion_coefficient
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
                boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
@@ -36,7 +36,8 @@ subroutine read_anomalous_transport_inp_into_type
     & boole_linear_density_simulation, boole_antithetic_variate, boole_linear_temperature_simulation, i_integrator_type, &
     & seed_option, boole_write_vertex_indices, boole_write_vertex_coordinates, boole_write_prism_volumes, &
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, boole_calc_diffusion_coefficient
+    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, boole_calc_diffusion_coefficient, &
+    & anomalous_diffusion_coefficient
 
     open(newunit = s_inp_unit, file='anomalous_transport.inp', status='unknown')
     read(s_inp_unit,nml=anomalous_transport_nml)
@@ -69,13 +70,14 @@ subroutine read_anomalous_transport_inp_into_type
     in%boole_preserve_energy_and_momentum_during_collisions = boole_preserve_energy_and_momentum_during_collisions
     in%n_species = n_species
     in%boole_calc_diffusion_coefficient = boole_calc_diffusion_coefficient
+    in%anomalous_diffusion_coefficient = anomalous_diffusion_coefficient
 
     print *,'GORILLA_APPLETS: Loaded input data from anomalous_transport.inp'
 
 end subroutine read_anomalous_transport_inp_into_type
 
 ! ====================================================================
-subroutine parallelised_particle_pushing_anomalous_transport(species)
+subroutine parallelised_particle_pushing_anomalous_transport(species, n_particles_in)
 !
 ! Simplified parallelised particle pushing for anomalous transport.
 ! Removes self-consistent electric field specific parts.
@@ -90,6 +92,7 @@ subroutine parallelised_particle_pushing_anomalous_transport(species)
     use anomalous_transport_displacement_mod, only: anomalous_transport_displacement
 
     integer, intent(in)                               :: species
+    integer, intent(in), optional                     :: n_particles_in
     integer                                           :: kpart, iantithetic, ind_tetr, iface, n_particles
     integer                                           :: p, l, n, i, k
     real(dp), dimension(3)                            :: x
@@ -99,9 +102,12 @@ subroutine parallelised_particle_pushing_anomalous_transport(species)
     type(particle_status_t)                           :: particle_status
     complex(dp), dimension(:,:), allocatable          :: local_tetr_moments
     logical                                           :: thread_flag = .true.
-    logical                                           :: boole_diffusion_coefficient
 
-    n_particles = in%num_particles
+    if (present(n_particles_in)) then
+        n_particles = n_particles_in
+    else
+        n_particles = in%num_particles
+    endif
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
     kpart = 0
@@ -110,10 +116,8 @@ subroutine parallelised_particle_pushing_anomalous_transport(species)
 
     t_tot = 0.0_dp
 
-    boole_diffusion_coefficient = in%boole_calc_diffusion_coefficient
-
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, boole_diffusion_coefficient) &
+    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles) &
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p, l, n, i, k, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, t_step_s) &
     !$OMP& FIRSTPRIVATE(thread_flag)
@@ -138,7 +142,7 @@ subroutine parallelised_particle_pushing_anomalous_transport(species)
             call initialise_loop_variables(l, n, local_counter, particle_status, t, local_tetr_moments, x, vpar, vperp, species)
 
             i = 0
-            if (boole_diffusion_coefficient) then
+            if (in%boole_calc_diffusion_coefficient) then
                 k = 1
                 t_step_s = start%t(species) / s%k
             endif
@@ -150,21 +154,23 @@ subroutine parallelised_particle_pushing_anomalous_transport(species)
                 if (in%boole_collisions) then
                     call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species)
                     t%step = t%step / start%v0(species)
+                else
+                    t%step = t%step_anomalous_transport
                 endif
 
-                if (boole_diffusion_coefficient) then
+                if (in%boole_calc_diffusion_coefficient) then
                     t_step_s = start%t(species)/s%k - (t%confined - start%t(species)/s%k*int(t%confined/(start%t(species)/s%k)))
-                    k = int(t%confined/(start%t(species)/s%k)) + 1
+                    k = min(int(t%confined/(start%t(species)/s%k)) + 1, s%k)
                 endif
 
                 ! Perform guiding-center orbit integration
                 call orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                              local_tetr_moments, local_counter, species, t_step_s, k, boole_diffusion_coefficient)
+                                              local_tetr_moments, local_counter, species, t_step_s, k)
 
                 t%confined = t%confined + t%step - t%remain
                 t_tot = t_tot + t%step - t%remain
 
-                !if (ind_tetr.ne.-1) call anomalous_transport_displacement(x, ind_tetr, iface, t%step)
+                if (ind_tetr.ne.-1) call anomalous_transport_displacement(x, ind_tetr, iface, t%step, vpar, vperp)
                 if (ind_tetr.eq.-1) then
                     call handle_lost_particles(local_counter, particle_status%lost)
                     exit
@@ -194,7 +200,7 @@ end subroutine parallelised_particle_pushing_anomalous_transport
 
 ! ====================================================================
 subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                    local_tetr_moments, local_counter, species, t_step_s, k, boole_diffusion_coefficient)
+                                    local_tetr_moments, local_counter, species, t_step_s, k)
 !
 ! Simplified orbit timestep for anomalous transport.
 ! Performs guiding-center orbit integration without self-consistent EF specific parts.
@@ -221,7 +227,6 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
     type(counter_t), intent(inout)               :: local_counter
     real(dp), intent(inout)                      :: t_step_s
     integer, intent(inout)                       :: k
-    logical, intent(in)                          :: boole_diffusion_coefficient
 
     real(dp), dimension(3)                       :: z_save, x_new, z_local
     real(dp)                                     :: t_pass, perpinv, t_pusher, local_poloidal_flux, s_local
@@ -277,7 +282,7 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
         ind_tetr_save = ind_tetr
 
         t_pusher = t%remain
-        if (boole_diffusion_coefficient) t_pusher = min(t%remain, t_step_s)
+        if (in%boole_calc_diffusion_coefficient) t_pusher = min(t%remain, t_step_s)
 
         select case(ipusher)
             case(1)
@@ -290,7 +295,7 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
         vperp = vperp_func(z_save, perpinv, ind_tetr_save)
 
         ! Record displacement statistics for diffusion coefficient calculation
-        if (boole_diffusion_coefficient) then
+        if (in%boole_calc_diffusion_coefficient) then
             if (boole_t_finished .and. (t%remain >= t_step_s)) then
                 if (t%remain > t_step_s) boole_t_finished = .false.
                 t_step_s = start%t(species)/s%k + t_pass
@@ -308,7 +313,7 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
                 s%check(k) = s%check(k) + 1
                 !$omp end critical
 
-                k = k + 1
+                k = min(k + 1, s%k)
             endif
         endif
 
@@ -331,16 +336,14 @@ subroutine calc_diffusion_coefficient
 ! to verify that anomalous_transport_displacement produces the expected
 ! diffusion coefficient.
 !
-! Expected: D_physical = 1.0e-4 cm^2/s
-! In normalized flux coordinates (s): D_normalized = D_physical/a^2 ~ 4.0e-8 s^-1
-! (assuming minor radius a ~ 50 cm)
+! In normalized flux coordinates (s): D_normalized = D_physical/r_minor^2
 !
     use gorilla_applets_types_mod, only: in, s, start
     use llsq_mod, only: llsq
     use utils_data_pre_and_post_processing_mod, only: initialize_exit_data, set_weights
 
     integer :: i, n_particles, file_id
-    real(dp) :: A, B, offset
+    real(dp) :: A, B, offset, r_minor, D_physical, D_normalized
     real(dp), dimension(:), allocatable :: data_for_diffusion_coefficient
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
 
@@ -401,7 +404,7 @@ subroutine calc_diffusion_coefficient
     print*, ''
 
     ! Call parallelised particle pushing (displacement tracking happens automatically)
-    call parallelised_particle_pushing_anomalous_transport(species=1)
+    call parallelised_particle_pushing_anomalous_transport(species=1, n_particles_in=n_particles)
 
     ! Normalize by total weight
     do i = 1, s%k
@@ -424,16 +427,18 @@ subroutine calc_diffusion_coefficient
     B = B / 2.0_dp
 
     ! Output results
-    ! Expected value in normalized coordinates: D_physical / a^2
-    ! D_physical = 1.0e-4 cm^2/s, a ~ 50 cm => D_normalized ~ 4.0e-8 s^-1
+    ! Expected value in normalized coordinates: D_normalized ~ D_physical / r_minor^2 s^-1
+    r_minor = 50.0d0
+    D_physical = in%anomalous_diffusion_coefficient
+    D_normalized = D_physical/r_minor**2
     print*, '=============================================='
     print*, 'Diffusion Coefficient Results'
     print*, '=============================================='
     print*, 'Convection coefficient A: ', A, 's^-1'
-    print*, 'Diffusion coefficient B:  ', B, 's^2/s'
-    print*, 'Expected value (normalized): ', 4.0d-8, 's^2/s'
-    print*, 'Expected value (physical):   ', 1.0d-4, 'cm^2/s'
-    print*, 'Relative error:           ', abs(B - 4.0d-8) / 4.0d-8 * 100.0_dp, '%'
+    print*, 'Diffusion coefficient B:  ', B, 's^-1'
+    print*, 'Expected value (normalized): ', D_normalized, '1/s'
+    print*, 'Expected value (physical):   ', D_physical, 'cm^2/s'
+    print*, 'Relative error:           ', abs(B - D_normalized) / D_normalized * 100.0_dp, '%'
     print*, '=============================================='
     print*, ''
 
@@ -545,17 +550,7 @@ subroutine set_rest_of_start_type(rand_matrix)
 
     ! Set tracing time for diffusion coefficient calculation
     ! Use same value as in self-consistent EF example: 2.0 * 1.7e-4
-    if (in%boole_calc_diffusion_coefficient) then
-        start%t(1) = 3.4d-4
-    else
-        start%t = in%time_step
-        if (i_option.eq.12) then
-            start%particle_charge(2) = -echarge
-            start%particle_mass(2) = ame
-            start%cm_over_e(2) = -clight*ame/echarge
-            start%t(2) = in%time_step/42.0_dp
-        endif
-    endif
+    start%t(1) = 1.0d-4!3.4d-4
 
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
 

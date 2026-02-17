@@ -43,13 +43,14 @@ subroutine initialise_loop_variables(l, n, local_counter,particle_status,t,local
 
 use gorilla_applets_types_mod, only: in, counter_t, start, time_t, particle_status_t
 use constants, only: ev2erg
+use gorilla_applets_settings_mod, only: i_option
 
 integer, intent(in) :: l, n
 integer, intent(in), optional :: species_in
 type(counter_t) :: local_counter
 type(particle_status_t) :: particle_status
 type(time_t) :: t
-real(dp) :: t_step, t_confined, pitchpar, v, vpar, vperp
+real(dp) :: t_step, t_confined, pitchpar, v, vpar, vperp, epsilon
 real(dp), dimension(3) :: x
 complex(dp), dimension(:,:) :: local_tetr_moments
 integer :: species = 1
@@ -69,6 +70,9 @@ x = start%x(:,n,species)
 v = sqrt(start%energy(n,species)*ev2erg*2/start%particle_mass(species))
 vpar = pitchpar * v
 vperp = sqrt(v**2-vpar**2)
+
+epsilon = 1.0d-2 !ensures that in one step, a maximum displacement of epsilon cm occurs 
+if (i_option.eq.13) t%step_anomalous_transport = min(epsilon**2/(2.0d0*in%anomalous_diffusion_coefficient),t%step/300.0d0)
 
 end subroutine initialise_loop_variables
 
@@ -160,6 +164,7 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     use collis_ions, only: collis_init
     use tetra_physics_mod, only: particle_mass,particle_charge
     use constants, only: echarge,amp
+    use gorilla_applets_settings_mod, only: i_option
     
     integer, intent(in) :: i, n, species
     real(dp), dimension(3), intent(inout) :: x
@@ -173,7 +178,7 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     real(dp) :: vpar_background
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar, vpar_mat_save, vpar_mat
     integer :: err, j, p, iswmode
-    real(dp) ::  w_v, w_t, particle_to_background_coupling_strength
+    real(dp) ::  w_v, w_t, particle_to_background_coupling_strength, t_max
 
     iswmode = 1
     !1 - full operator (pitch-angle and energy scattering and drag)
@@ -203,12 +208,15 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         zet(1:3) = x !spatial position
         zet(4) = sqrt(vpar**2+vperp**2)/start%v0(species) !normalized velocity module 
         zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
+
+        t_max = (start%t(species)-t%confined)*start%v0(species)
+        if (i_option.eq.13) t_max = min(t_max, t%step_anomalous_transport*start%v0(species))
         
         if (in%boole_precalc_collisions) then
             randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species) 
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,(start%t(species)-t%confined)*start%v0(species),randnum)
+            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum)
         else
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,(start%t(species)-t%confined)*start%v0(species))
+            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max)
         endif
         
         vpar = zet(5)*zet(4)*start%v0(species)+vpar_background
@@ -240,6 +248,7 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
 
     use gorilla_applets_types_mod, only: in, c, time_t, start
     use collis_ions, only: stost
+    use gorilla_applets_settings_mod, only: i_option
     
     integer, intent(in) :: i, n, species
     real(dp), dimension(3), intent(inout) :: x
@@ -251,6 +260,7 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     real(dp), dimension(3) :: randnum
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
     integer :: err, iswmode
+    real(dp) :: t_max
 
     iswmode = 4
     !1 - full operator (pitch-angle and energy scattering and drag)
@@ -276,11 +286,14 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     zet(4) = sqrt(vpar**2+vperp**2)/start%v0(species) !normalized velocity module 
     zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
 
+    t_max = (start%t(species)-t%confined)*start%v0(species)
+    if (i_option.eq.13) t_max = min(t_max, t%step_anomalous_transport*start%v0(species))
+
     if (in%boole_precalc_collisions) then
         randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species) 
-        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,(start%t(species)-t%confined)*start%v0(species),randnum)
+        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum)
     else
-        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,(start%t(species)-t%confined)*start%v0(species))
+        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max)
     endif
 
     vpar = zet(5)*zet(4)*start%v0(species)+vpar_background(1)
