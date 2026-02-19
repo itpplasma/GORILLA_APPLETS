@@ -167,4 +167,15 @@ mean_s = mean(valid_flux);
 std_s = std(valid_flux);
 text(0.6, 0.9, sprintf('Mean: %.3f\nStd: %.3f', mean_s, std_s), ...
      'Units', 'normalized', 'FontSize', 11, 'BackgroundColor', 'w')
+%% Compute magnitude of electric potential perturbation such that |delta Phi|/delta r < T/(e*a)
 
+echarge = 4.8032d-10;
+ev = 3.5d3;
+ev2erg = 1.6022d-12;
+a = 50;
+
+T = ev*ev2erg;
+e = echarge;
+delta_r = 0.5;
+
+delta_Phi = delta_r*T/(e*a)

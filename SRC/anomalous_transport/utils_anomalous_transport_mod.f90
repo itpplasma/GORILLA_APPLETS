@@ -441,7 +441,7 @@ subroutine calc_diffusion_coefficient
     print*, 'Diffusion coefficient B:  ', B, '1/s'
     print*, 'Expected value (normalized): ', D_normalized, '1/s'
     print*, 'Expected value (physical):   ', D_physical, 'cm^2/s'
-    print*, 'Relative error:           ', abs(B - D_normalized) / D_normalized * 100.0_dp, '%'
+    if (D_physical.gt.1.0d-20) print*, 'Relative error:           ', abs(B - D_normalized) / D_normalized * 100.0_dp, '%'
     print*, '=============================================='
     print*, ''
 
@@ -553,7 +553,7 @@ subroutine set_rest_of_start_type(rand_matrix)
 
     ! Set tracing time for diffusion coefficient calculation
     ! Use same value as in self-consistent EF example: 2.0 * 1.7e-4
-    start%t(1) = 1.0d-4!3.4d-4
+    start%t(1) = 1.0d-3!3.4d-4
 
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
 
