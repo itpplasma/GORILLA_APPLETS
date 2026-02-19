@@ -68,14 +68,48 @@ volume_inner_ring = sum(volumes_plot(1:n_prisms_inner_ring));
 density_inner_ring = volume_times_density_inner_ring / volume_inner_ring;
 moment_plot(1:n_prisms_inner_ring) = density_inner_ring;
 
+exit_data = load('exit_data.dat');
+
 figure
 fill(mesh_x,mesh_y,moment_plot,'LineWidth',mesh_thickness)
+% hold on
+% plot(exit_data(:,4),exit_data(:,6), 'rx')
+% hold off
 xlabel('$R$ / cm','interpreter','latex')
 ylabel('$Z$ / cm','interpreter','latex')
 title('density')
 grid on
 colorbar
 clim([0,5e13])
+
+%% 1D radial density profile (volume-averaged over flux surfaces)
+% Number of triangles per radial shell (2 triangles per quadrilateral cell in Z)
+n_triangles_per_radial = nz * 2;
+
+% Compute volume-weighted average density for each radial shell
+density_radial = zeros(nr, 1);
+volume_radial = zeros(nr, 1);
+
+for ir = 1:nr
+    % Triangle indices for this radial shell
+    t_start = (ir - 1) * n_triangles_per_radial + 1;
+    t_end = ir * n_triangles_per_radial;
+
+    % Accumulate volume-weighted density and total volume
+    density_radial(ir) = sum(moment_plot(t_start:t_end) .* volumes_plot(t_start:t_end));
+    volume_radial(ir) = sum(volumes_plot(t_start:t_end));
+end
+
+% Normalize by volume to get average density in each shell
+density_radial_avg = density_radial ./ volume_radial;
+
+figure
+plot(1:nr, density_radial_avg, 'b-', 'LineWidth', 2)
+xlabel('Radial index', 'interpreter', 'latex')
+ylabel('Volume-averaged density', 'interpreter', 'latex')
+title('1D Radial Density Profile (flux surface averaged)')
+grid on
+ylim([0,5]*1e13)
 
 %% Diffusion coefficient analysis
 % Load diffusion coefficient data

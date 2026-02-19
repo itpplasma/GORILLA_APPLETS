@@ -49,15 +49,16 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp)
     integer, intent(inout)                :: ind_tetr, iface
     real(dp), intent(in)                  :: dt, vpar, vperp
 
-    real(dp), dimension(3) :: displacement, xi, V_c, x_new
+    real(dp), dimension(3) :: displacement, xi, V_c, x_new, x_save, displacement_towards_axis
 
     ! Cholesky decomposition of the perpendicular diffusion tensor
     real(dp), dimension(3,3) :: alpha_perp_mat
     real(dp), dimension(3) :: h_contra, x_local
-    real(dp) :: R_local, sqrt_2dt
+    real(dp) :: R_local, sqrt_2dt, dist_to_axis, displacement_magnitude
     logical :: boole_lost_inside
     type(counter_t) :: dummy_counter
     real(dp) :: vpar_dummy, vperp_dummy
+    integer :: ind_tetr_save, iface_save
 
     ! Compute position relative to first vertex
     x_local = x - tetra_physics(ind_tetr)%x1
@@ -93,12 +94,17 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp)
     displacement(3) = sqrt_2dt * (alpha_perp_mat(3,1) * xi(1) + alpha_perp_mat(3,2) * xi(2) &
                                 + alpha_perp_mat(3,3) * xi(3)) + V_c(3) * dt
 
+    ! Save original state before displacement
+    x_save = x
+    ind_tetr_save = ind_tetr
+    iface_save = iface
+
     call displace_by_straight_line(x, ind_tetr, iface, displacement, vpar, vperp)
 
-    ! Check if particle was lost and attempt to push across the annulus if applicable
+    ! Check if particle was lost and attempt recovery
     if (ind_tetr.eq.-1) then
+        ! Push across the annulus if applicable
         if ((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-            ! Initialize dummy counter (not used in this context)
             dummy_counter%lost_inside = 0
             call identify_particles_entering_annulus(x, dummy_counter, boole_lost_inside)
             if (boole_lost_inside) then
@@ -109,10 +115,27 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp)
                 call find_tetra(x_new, vpar_dummy, vperp_dummy, ind_tetr, iface)
                 if (ind_tetr.ne.-1) then
                     x = x_new
-                    print*, "particle pushing across the hole during anomalous transport displacement was successful"
                 endif
-                ! If ind_tetr is still -1, particle remains lost
             endif
+        endif
+
+        ! If lost at outer boundary,
+        ! displace toward the magnetic axis with the same distance magnitude
+        if (ind_tetr.eq.-1) then
+            x = x_save
+            ind_tetr = ind_tetr_save
+            iface = iface_save
+            ! Keep phi unchanged, displace R and Z toward axis by the displacement magnitude
+            displacement_towards_axis(1) = g%raxis - x(1)
+            displacement_towards_axis(2) = 0.0_dp
+            displacement_towards_axis(3) = g%zaxis - x(3)
+            dist_to_axis = sqrt(displacement_towards_axis(1)**2 + displacement_towards_axis(3)**2)
+            displacement_magnitude = sqrt(displacement(1)**2 + displacement(2)**2 + displacement(3)**2)
+            if (dist_to_axis > 0.0_dp) then
+                displacement_towards_axis(1) = displacement_towards_axis(1) * displacement_magnitude / dist_to_axis
+                displacement_towards_axis(3) = displacement_towards_axis(3) * displacement_magnitude / dist_to_axis
+            endif
+            call displace_by_straight_line(x, ind_tetr, iface, displacement_towards_axis, vpar, vperp)
         endif
     endif
 

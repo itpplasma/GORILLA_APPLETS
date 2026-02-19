@@ -71,8 +71,14 @@ v = sqrt(start%energy(n,species)*ev2erg*2/start%particle_mass(species))
 vpar = pitchpar * v
 vperp = sqrt(v**2-vpar**2)
 
-epsilon = 1.0d-2 !ensures that in one step, a maximum displacement of epsilon cm occurs 
-if (i_option.eq.13) t%step_anomalous_transport = min(epsilon**2/(2.0d0*in%anomalous_diffusion_coefficient),t%step/300.0d0)
+epsilon = 1.0d-1 !ensures that in one step, a maximum displacement of epsilon cm occurs
+if (i_option.eq.13) then
+    if (in%anomalous_diffusion_coefficient > 0.0d0) then
+        t%step_anomalous_transport = min(epsilon**2/(2.0d0*in%anomalous_diffusion_coefficient),t%step/300.0d0)
+    else
+        t%step_anomalous_transport = t%step  ! No anomalous transport, use full time step
+    endif
+endif
 
 end subroutine initialise_loop_variables
 
