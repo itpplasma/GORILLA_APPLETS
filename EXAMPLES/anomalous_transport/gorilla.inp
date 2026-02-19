@@ -108,13 +108,6 @@
  !Relative Magnitude of non-axisymmetric random noise $\epsilon_A$ of vector potential
  non_axi_noise_eps_A = 1.d-4 ,
 !
- !Add non-axisymmetric random noise to the electrostatic potential $\Phi$
- !$\Phi = \Phi + \epsilon_\Phi \xi$,
- boole_non_axi_noise_elec_pot = .true. ,
-!
- !Absolute Magnitude of non-axisymmetric random noise $\epsilon_\Phi$ of electrostatic potential
- non_axi_noise_eps_Phi = 1.d-1 ,
-!
 !------------------------------------------------------------------------------------------------------------!
 !
  !Manipulation of the axisymmetric electromagnetic field (Tokamak) with helical harmonic perturbation

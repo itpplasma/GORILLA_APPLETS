@@ -22,7 +22,8 @@ subroutine calc_anomalous_transport
         calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
         fourier_transform_moments, calc_starting_conditions
     use utils_anomalous_transport_mod, only: read_anomalous_transport_inp_into_type, &
-        parallelised_particle_pushing_anomalous_transport, calc_diffusion_coefficient
+        parallelised_particle_pushing_anomalous_transport, calc_diffusion_coefficient, &
+        scan_anomalous_transport_over_Phi_perturbation
 
     call set_seed_for_random_numbers
     call read_anomalous_transport_inp_into_type
@@ -43,8 +44,10 @@ subroutine calc_anomalous_transport
 
     call calc_starting_conditions
 
-    ! Calculate diffusion coefficient if requested
-    if (in%boole_calc_diffusion_coefficient) then
+    ! Scan over Phi perturbation, calculate diffusion coefficient, or run standard transport
+    if (in%boole_scan_anomalous_transport_over_Phi_perturbation) then
+        call scan_anomalous_transport_over_Phi_perturbation
+    elseif (in%boole_calc_diffusion_coefficient) then
         call calc_diffusion_coefficient
     else
         call parallelised_particle_pushing_anomalous_transport(species=1)

@@ -3,7 +3,7 @@
 &anomalous_transport_nml
 !
   !time for tracing particles
-  time_step = 1.0d0 ,
+  time_step = 1.0d-1 ,
 !
   !Kinetic energy of particles
   energy_eV = 3.5d3 ,
@@ -49,10 +49,13 @@
   boole_linear_temperature_simulation = .false.,
 !
   !calculate diffusion coefficient to verify anomalous transport implementation
-  boole_calc_diffusion_coefficient = .false.,
+  boole_calc_diffusion_coefficient = .true.,
+!
+  !scan anomalous transport over electrostatic potential perturbation magnitude
+  boole_scan_anomalous_transport_over_Phi_perturbation = .true.,
 !
   !anomalous diffusion coefficient in cm^2/s
-  anomalous_diffusion_coefficient = 1.0d4 ,
+  anomalous_diffusion_coefficient = 0.0d4 ,
 !
   !Set integrator type
   !(must be 1, otherwise it currently does not work)

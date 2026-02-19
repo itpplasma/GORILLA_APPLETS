@@ -179,3 +179,25 @@ e = echarge;
 delta_r = 0.5;
 
 delta_Phi = delta_r*T/(e*a)
+
+%% Diffusion coefficient vs electrostatic potential perturbation
+% Load scan results
+scan_data = load('diffusion_vs_eps_Phi.dat');
+
+eps_Phi = scan_data(:,1);
+D_coeff = scan_data(:,2);
+
+figure
+plot(eps_Phi, D_coeff, 'bo-', 'LineWidth', 2, 'MarkerSize', 8, 'MarkerFaceColor', 'b')
+xlabel('Perturbation magnitude $\epsilon_\Phi$', 'interpreter', 'latex')
+ylabel('Diffusion coefficient $D$ (1/s)', 'interpreter', 'latex')
+title('Diffusion Coefficient vs Electrostatic Potential Perturbation')
+grid on
+
+% Add linear fit if relationship appears linear
+p_scan = polyfit(eps_Phi, D_coeff, 1);
+hold on
+% plot(eps_Phi, polyval(p_scan, eps_Phi), 'r--', 'LineWidth', 1.5)
+% legend('Data', sprintf('Linear fit: D = %.2e $\\epsilon_\\Phi$ + %.2e', p_scan(1), p_scan(2)), ...
+%        'interpreter', 'latex', 'Location', 'northwest')
+hold off
