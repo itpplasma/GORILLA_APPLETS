@@ -51,8 +51,12 @@
   !calculate diffusion coefficient to verify anomalous transport implementation
   boole_calc_diffusion_coefficient = .true.,
 !
-  !scan anomalous transport over electrostatic potential perturbation magnitude
-  boole_scan_anomalous_transport_over_Phi_perturbation = .true.,
+  !Scan option for anomalous transport parameter studies
+  ! 0 ... no scan (standard computation)
+  ! 1 ... scan over eps_Phi (electric potential perturbation magnitude)
+  ! 2 ... scan over n2 (grid resolution in phi), with fixed eps_Phi = 0.1
+  ! 3 ... scan over n3 (grid resolution in theta/Z), with fixed eps_Phi = 0.1
+  i_scan_option = 3,
 !
   !anomalous diffusion coefficient in cm^2/s
   anomalous_diffusion_coefficient = 0.0d4 ,

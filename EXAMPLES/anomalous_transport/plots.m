@@ -113,7 +113,7 @@ ylim([0,5]*1e13)
 
 %% Diffusion coefficient analysis
 % Load diffusion coefficient data
-diffusion_data = load('diffusion_coefficient_data.dat');
+diffusion_data = load('diffusion_coefficient_data_n3_003.dat');
 
 % Extract columns: time, <delta_s>, <delta_s^2>, n_samples
 time = diffusion_data(:,1);
@@ -180,24 +180,80 @@ delta_r = 0.5;
 
 delta_Phi = delta_r*T/(e*a)
 
-%% Diffusion coefficient vs electrostatic potential perturbation
-% Load scan results
-scan_data = load('diffusion_vs_eps_Phi.dat');
+%% Diffusion coefficient vs scan parameter
+% Select scan option:
+%   1 = scan over eps_Phi (electric potential perturbation magnitude)
+%   2 = scan over n2 (grid resolution in phi direction)
+%   3 = scan over n3 (grid resolution in theta/Z direction)
+i_scan_option = 2;
 
-eps_Phi = scan_data(:,1);
-D_coeff = scan_data(:,2);
+% Load appropriate data file based on scan option
+switch i_scan_option
+    case 1
+        scan_data = load('diffusion_vs_eps_Phi.dat');
+        scan_var = scan_data(:,1);
+        D_coeff = scan_data(:,2);
+        xlabel_str = 'Perturbation magnitude $\epsilon_\Phi$';
+        title_str = 'Diffusion Coefficient vs Electrostatic Potential Perturbation';
+        plot_theory = true;
+    case 2
+        scan_data = load('diffusion_vs_n2.dat');
+        scan_var = scan_data(:,1);
+        D_coeff = scan_data(:,2);
+        xlabel_str = 'Grid resolution $n_2$ (phi direction)';
+        title_str = 'Diffusion Coefficient vs Grid Resolution n2';
+        plot_theory = false;
+    case 3
+        scan_data = load('diffusion_vs_n3.dat');
+        scan_var = scan_data(:,1);
+        D_coeff = scan_data(:,2);
+        xlabel_str = 'Grid resolution $n_3$ (theta/Z direction)';
+        title_str = 'Diffusion Coefficient vs Grid Resolution n3';
+        plot_theory = false;
+    otherwise
+        error('Invalid scan option. Choose 1, 2, or 3.')
+end
+
+% Physical constants for theoretical comparison
+m = 9.1094d-28;
 
 figure
-plot(eps_Phi, D_coeff, 'bo-', 'LineWidth', 2, 'MarkerSize', 8, 'MarkerFaceColor', 'b')
-xlabel('Perturbation magnitude $\epsilon_\Phi$', 'interpreter', 'latex')
+plot(scan_var, D_coeff, 'bo-', 'LineWidth', 2, 'MarkerSize', 8, 'MarkerFaceColor', 'b')
+%hold on
+%scan_data = load('diffusion_vs_n3_1000_particles.dat');
+%scan_var = scan_data(:,1);
+%D_coeff = scan_data(:,2);
+%plot(scan_var, D_coeff, 'ro-', 'LineWidth', 2, 'MarkerSize', 8, 'MarkerFaceColor', 'r')
+%hold off
+xlabel(xlabel_str, 'interpreter', 'latex')
 ylabel('Diffusion coefficient $D$ (1/s)', 'interpreter', 'latex')
-title('Diffusion Coefficient vs Electrostatic Potential Perturbation')
+title(title_str, 'interpreter', 'latex')
 grid on
 
-% Add linear fit if relationship appears linear
-p_scan = polyfit(eps_Phi, D_coeff, 1);
-hold on
-% plot(eps_Phi, polyval(p_scan, eps_Phi), 'r--', 'LineWidth', 1.5)
-% legend('Data', sprintf('Linear fit: D = %.2e $\\epsilon_\\Phi$ + %.2e', p_scan(1), p_scan(2)), ...
-%        'interpreter', 'latex', 'Location', 'northwest')
-hold off
+% Add theoretical curve for eps_Phi scan
+if plot_theory && i_scan_option == 1
+    %Compute theoretical relationship
+    K = 30;
+    L = 30;
+    ev = 3.5d3;
+    ev2erg = 1.6022d-12;
+    T = ev*ev2erg;
+    r = 50;
+    R = 165;
+    c = 2.9979d10;
+    B = 17000;
+
+    phi_linear = linspace(0, max(scan_var)*1.1, 100);
+    D11 = 1/(2^2.5*pi^1.5)^0.5*(m/T)^0.5*c^2*R*K^2/(r^2*B^2*L)*phi_linear.^2;
+
+    hold on
+    plot(phi_linear, D11*1e-3, 'r--', 'LineWidth', 1.5)
+    legend('Data', 'Theoretical result', 'interpreter', 'latex', 'Location', 'northwest')
+    hold off
+end
+
+%%
+val_min = 20;
+val_max = 200;
+n_scan_points = 10;
+scan_values = val_min : (val_max - val_min) / (n_scan_points - 1) : val_max

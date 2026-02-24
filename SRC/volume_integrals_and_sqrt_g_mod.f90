@@ -1,12 +1,23 @@
 module volume_integrals_and_sqrt_g_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    
+
     implicit none
 
     real(dp), dimension(:,:), allocatable :: sqrt_g
-   
+
+    public :: calc_square_root_g, calc_volume_integrals, calc_volume_integrals_in_flux_coordinates
+    public :: deallocate_sqrt_g
+
 contains
+
+subroutine deallocate_sqrt_g
+!
+! Deallocates sqrt_g array to allow reallocation when grid parameters change.
+!
+    if (allocated(sqrt_g)) deallocate(sqrt_g)
+
+end subroutine deallocate_sqrt_g
 
 subroutine calc_square_root_g
 

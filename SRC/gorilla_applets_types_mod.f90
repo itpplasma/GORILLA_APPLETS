@@ -118,7 +118,7 @@ module gorilla_applets_types_mod
     integer  :: n_electric_potential_updates !used in self consistent electric field computation
     integer  :: update_dimension = 1 !used in self consistent electric field computation
     logical  :: boole_calc_diffusion_coefficient !used in anomalous transport
-    logical  :: boole_scan_anomalous_transport_over_Phi_perturbation !used in anomalous transport
+    integer  :: i_scan_option = 0 !used in anomalous transport: 0=no scan, 1=scan over eps_Phi, 2=scan over n2, 3=scan over n3
     real(dp) :: anomalous_diffusion_coefficient   !anomalous diffusion coefficient in cm^2/s
     logical  :: boole_divertor_intersection !Used in divertor_heat_loads
     logical  :: boole_poincare_plot !Used in divertor_heat_loads

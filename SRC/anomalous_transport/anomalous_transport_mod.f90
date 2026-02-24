@@ -23,7 +23,7 @@ subroutine calc_anomalous_transport
         fourier_transform_moments, calc_starting_conditions
     use utils_anomalous_transport_mod, only: read_anomalous_transport_inp_into_type, &
         parallelised_particle_pushing_anomalous_transport, calc_diffusion_coefficient, &
-        scan_anomalous_transport_over_Phi_perturbation
+        scan_anomalous_transport
 
     call set_seed_for_random_numbers
     call read_anomalous_transport_inp_into_type
@@ -44,9 +44,10 @@ subroutine calc_anomalous_transport
 
     call calc_starting_conditions
 
-    ! Scan over Phi perturbation, calculate diffusion coefficient, or run standard transport
-    if (in%boole_scan_anomalous_transport_over_Phi_perturbation) then
-        call scan_anomalous_transport_over_Phi_perturbation
+    ! Scan over parameter, calculate diffusion coefficient, or run standard transport
+    ! i_scan_option: 0=no scan, 1=scan over eps_Phi, 2=scan over n3, 3=scan over n2
+    if (in%i_scan_option > 0) then
+        call scan_anomalous_transport
     elseif (in%boole_calc_diffusion_coefficient) then
         call calc_diffusion_coefficient
     else

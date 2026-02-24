@@ -26,8 +26,8 @@ subroutine read_anomalous_transport_inp_into_type
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, &
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
-               boole_calc_diffusion_coefficient, boole_scan_anomalous_transport_over_Phi_perturbation
-    integer :: i_integrator_type, seed_option, n_species
+               boole_calc_diffusion_coefficient
+    integer :: i_integrator_type, seed_option, n_species, i_scan_option
 
     integer :: s_inp_unit
 
@@ -37,7 +37,7 @@ subroutine read_anomalous_transport_inp_into_type
     & seed_option, boole_write_vertex_indices, boole_write_vertex_coordinates, boole_write_prism_volumes, &
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, boole_calc_diffusion_coefficient, &
-    & boole_scan_anomalous_transport_over_Phi_perturbation, anomalous_diffusion_coefficient
+    & i_scan_option, anomalous_diffusion_coefficient
 
     open(newunit = s_inp_unit, file='anomalous_transport.inp', status='unknown')
     read(s_inp_unit,nml=anomalous_transport_nml)
@@ -70,7 +70,7 @@ subroutine read_anomalous_transport_inp_into_type
     in%boole_preserve_energy_and_momentum_during_collisions = boole_preserve_energy_and_momentum_during_collisions
     in%n_species = n_species
     in%boole_calc_diffusion_coefficient = boole_calc_diffusion_coefficient
-    in%boole_scan_anomalous_transport_over_Phi_perturbation = boole_scan_anomalous_transport_over_Phi_perturbation
+    in%i_scan_option = i_scan_option
     in%anomalous_diffusion_coefficient = anomalous_diffusion_coefficient
 
     print *,'GORILLA_APPLETS: Loaded input data from anomalous_transport.inp'
@@ -160,8 +160,9 @@ subroutine parallelised_particle_pushing_anomalous_transport(species, n_particle
                 endif
 
                 if (in%boole_calc_diffusion_coefficient) then
-                    t_step_s = start%t(species)/s%k - (t%confined - start%t(species)/s%k*int(t%confined/(start%t(species)/s%k)))
-                    k = min(int(t%confined/(start%t(species)/s%k)) + 1, s%k)
+                    t_step_s = start%t(species)/s%k 
+                    k = int(t%confined/t_step_s) + 1
+                    t_step_s = t_step_s*k - t%confined
                 endif
 
                 ! Perform guiding-center orbit integration
@@ -312,7 +313,7 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
 
         ! Record displacement statistics for diffusion coefficient calculation
         if (in%boole_calc_diffusion_coefficient) then
-            if (boole_t_finished .and. (t%remain >= t_step_s)) then
+            if (boole_t_finished .and. (t%remain >= t_step_s-1.0d-20)) then
                 if (t%remain > t_step_s) boole_t_finished = .false.
                 t_step_s = start%t(species)/s%k + t_pass
                 local_counter%tetr_pushings = local_counter%tetr_pushings - 1
@@ -329,7 +330,7 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
                 s%check(k) = s%check(k) + 1
                 !$omp end critical
 
-                k = min(k + 1, s%k)
+                k = k + 1
             endif
         endif
 
@@ -379,7 +380,7 @@ subroutine calc_diffusion_coefficient(filename_in, D_out)
     endif
 
     ! Set number of test particles for diffusion coefficient calculation
-    n_particles = 1000
+    n_particles = 2000
     s%n_particles = n_particles
 
     ! Set up time sampling (1000 equally spaced intervals)
@@ -477,17 +478,15 @@ subroutine calc_diffusion_coefficient(filename_in, D_out)
 end subroutine calc_diffusion_coefficient
 
 ! ====================================================================
-subroutine scan_anomalous_transport_over_Phi_perturbation
+subroutine scan_anomalous_transport
 !
-! Scans anomalous transport over electrostatic potential perturbation.
-! Performs multiple runs with different perturbation amplitudes and
-! records the resulting transport coefficients.
+! Unified scan subroutine for anomalous transport.
+! Scans over different parameters based on i_scan_option:
+!   1 = scan over eps_Phi (electric potential perturbation magnitude)
+!   2 = scan over n3 (grid resolution in theta/Z direction)
+!   3 = scan over n2 (grid resolution in phi direction)
 !
-! The perturbation is applied as:
-!   phi_elec(iv) = phi_elec(iv) + eps_Phi * random_number
-! where random_number is uniform in [0,1) and different for each vertex.
-!
-! For field-aligned grids, vertices in extra rings near the O-point are excluded.
+! For grid scans (n2, n3), a fixed eps_Phi = 0.1 is used.
 !
     use gorilla_applets_types_mod, only: in
     use tetra_grid_mod, only: nvert
@@ -496,94 +495,79 @@ subroutine scan_anomalous_transport_over_Phi_perturbation
     use gorilla_settings_mod, only: coord_system
     use field_mod, only: ipert
 
-    integer, parameter :: n_scan_points = 13
-    real(dp) :: eps_Phi_min, eps_Phi_max, eps_Phi, D_coeff
-    real(dp), dimension(n_scan_points) :: eps_Phi_array, D_array
-    real(dp), dimension(:), allocatable :: phi_elec_original, rnd_perturbation
-    character(len=256) :: filename
-    integer :: i_scan, iv, iv_in_slice, n_verts_in_extra_rings, file_id
+    integer, parameter :: n_scan_points = 19
+    real(dp), dimension(n_scan_points) :: scan_values, D_array
+    real(dp), dimension(:), allocatable :: phi_elec_original
+    real(dp) :: eps_Phi, D_coeff
+    character(len=256) :: filename, summary_filename, scan_name, scan_var_name
+    integer :: i_scan, file_id
+    logical :: boole_grid_scan
 
-    ! Check that boole_calc_diffusion_coefficient is false
+    ! Check that anomalous_diffusion_coefficient is zero
     if (in%anomalous_diffusion_coefficient.gt.1.0d-10) then
         print*, ''
         print*, 'ERROR: anomalous_diffusion_coefficient must be set to zero'
-        print*, '       when using boole_scan_anomalous_transport_over_Phi_perturbation'
+        print*, '       when using i_scan_option > 0'
         print*, ''
         stop
     endif
 
+    ! Setup scan parameters based on i_scan_option
+    call setup_scan_parameters(in%i_scan_option, n_scan_points, scan_values, eps_Phi, &
+                               summary_filename, scan_name, scan_var_name, boole_grid_scan)
+
     print*, ''
     print*, '=============================================='
-    print*, 'Scanning Anomalous Transport over Phi Perturbation'
+    print*, 'Scanning Anomalous Transport over ', trim(scan_name)
     print*, '=============================================='
     print*, ''
-
-    ! Define scan range (linear scale)
-    eps_Phi_min = 5d-2
-    eps_Phi_max = 2d-1
-
-    ! Generate linearly spaced perturbation values
-    do i_scan = 1, n_scan_points
-        eps_Phi_array(i_scan) = eps_Phi_min + (eps_Phi_max - eps_Phi_min) * (i_scan - 1.0_dp) / (n_scan_points - 1.0_dp)
-    enddo
-
-    ! Store original phi_elec
-    allocate(phi_elec_original(nvert))
-    phi_elec_original = phi_elec
-
-    ! Allocate random perturbation array
-    allocate(rnd_perturbation(nvert))
-
-    ! Compute number of vertices in extra rings (for field-aligned grids)
-    if (grid_kind.eq.2 .or. grid_kind.eq.3) then
-        n_verts_in_extra_rings = (1 + n_extra_rings) * grid_size(3)
-    else
-        n_verts_in_extra_rings = 0
-    endif
-
     print*, 'Number of scan points: ', n_scan_points
-    print*, 'eps_Phi range: [', eps_Phi_min, ', ', eps_Phi_max, ']'
+    if (in%i_scan_option == 1) then
+        print*, 'eps_Phi range: [', scan_values(1), ', ', scan_values(n_scan_points), ']'
+    else
+        print*, trim(scan_var_name), ' range: [', int(scan_values(1)), ', ', int(scan_values(n_scan_points)), ']'
+        print*, 'Fixed eps_Phi: ', eps_Phi
+    endif
     print*, 'Grid kind: ', grid_kind
     print*, ''
 
-    ! Loop over perturbation magnitudes
-    do i_scan = 1, n_scan_points
-        eps_Phi = eps_Phi_array(i_scan)
+    ! Store original phi_elec (only needed for eps_Phi scan)
+    if (.not.boole_grid_scan) then
+        allocate(phi_elec_original(nvert))
+        phi_elec_original = phi_elec
+    endif
 
+    ! Main scan loop
+    do i_scan = 1, n_scan_points
         print*, '----------------------------------------------'
         print*, 'Scan point ', i_scan, ' of ', n_scan_points
-        print*, 'eps_Phi = ', eps_Phi
+        if (in%i_scan_option == 1) then
+            print*, 'eps_Phi = ', scan_values(i_scan)
+        else
+            print*, trim(scan_var_name), ' = ', int(scan_values(i_scan))
+        endif
         print*, '----------------------------------------------'
 
-        ! Reset phi_elec to original values
-        phi_elec = phi_elec_original
+        ! Update scan variable and rebuild grid if needed
+        call update_scan_variable(in%i_scan_option, scan_values(i_scan), eps_Phi, phi_elec_original)
 
-        ! Generate random perturbation for each vertex
-        call random_number(rnd_perturbation)
-
-        ! Apply non-axisymmetric perturbation to electrostatic potential
-        do iv = 1, nvert
-            if (grid_kind.eq.2 .or. grid_kind.eq.3) then
-                ! Field-aligned grid: exclude center + extra rings region
-                iv_in_slice = modulo(iv-1, nvert/grid_size(2)) + 1
-                ! Only add perturbation if vertex is outside the extra rings region
-                if (iv_in_slice > n_verts_in_extra_rings) then
-                    phi_elec(iv) = phi_elec(iv) + eps_Phi * rnd_perturbation(iv)
-                endif
-            else
-                ! Non-field-aligned grid: apply perturbation to all vertices
-                phi_elec(iv) = phi_elec(iv) + eps_Phi * rnd_perturbation(iv)
-            endif
-        enddo
+        ! Apply electric potential perturbation
+        call apply_phi_perturbation(eps_Phi)
 
         ! Recompute tetrahedron physics with updated phi_elec
-        ! boole_keep_phi_elec = .true.prevents make_tetra_physics from overwriting phi_elec
         call make_tetra_physics(coord_system, ipert, boole_keep_phi_elec=.true.)
 
         ! Generate filename for this scan point
-        write(filename, '(A,I3.3,A)') 'diffusion_coefficient_data_scan_', i_scan, '.dat'
+        select case(in%i_scan_option)
+            case(1)
+                write(filename, '(A,I3.3,A)') 'diffusion_coefficient_data_eps_Phi_', i_scan, '.dat'
+            case(2)
+                write(filename, '(A,I3.3,A)') 'diffusion_coefficient_data_n2_', i_scan, '.dat'
+            case(3)
+                write(filename, '(A,I3.3,A)') 'diffusion_coefficient_data_n3_', i_scan, '.dat'
+        end select
 
-        ! Calculate diffusion coefficient for this perturbation
+        ! Calculate diffusion coefficient
         call calc_diffusion_coefficient(filename_in=trim(filename), D_out=D_coeff)
 
         D_array(i_scan) = D_coeff
@@ -592,30 +576,233 @@ subroutine scan_anomalous_transport_over_Phi_perturbation
         print*, ''
     enddo
 
-    ! Write summary file: eps_Phi vs diffusion coefficient
-    open(newunit=file_id, file='diffusion_vs_eps_Phi.dat')
+    ! Write summary file
+    open(newunit=file_id, file=trim(summary_filename))
     do i_scan = 1, n_scan_points
-        write(file_id, '(2ES16.7)') eps_Phi_array(i_scan), D_array(i_scan)
+        if (in%i_scan_option == 1) then
+            write(file_id, '(2ES16.7)') scan_values(i_scan), D_array(i_scan)
+        else
+            write(file_id, '(I6, ES16.7)') int(scan_values(i_scan)), D_array(i_scan)
+        endif
     enddo
     close(file_id)
 
     print*, '=============================================='
     print*, 'Scan Complete'
     print*, '=============================================='
-    print*, 'Summary written to: diffusion_vs_eps_Phi.dat'
+    print*, 'Summary written to: ', trim(summary_filename)
     print*, ''
     print*, 'Results:'
-    print*, '  eps_Phi                  D_coeff'
+    if (in%i_scan_option == 1) then
+        print*, '  eps_Phi                  D_coeff'
+    else
+        print*, '  ', trim(scan_var_name), '       D_coeff'
+    endif
     do i_scan = 1, n_scan_points
-        print*, '  ', eps_Phi_array(i_scan), '    ', D_array(i_scan)
+        if (in%i_scan_option == 1) then
+            print*, '  ', scan_values(i_scan), '    ', D_array(i_scan)
+        else
+            print*, '  ', int(scan_values(i_scan)), '    ', D_array(i_scan)
+        endif
     enddo
     print*, '=============================================='
     print*, ''
 
-    deallocate(phi_elec_original)
+    if (allocated(phi_elec_original)) deallocate(phi_elec_original)
+
+end subroutine scan_anomalous_transport
+
+! ====================================================================
+subroutine setup_scan_parameters(i_scan_option, n_scan_points, scan_values, eps_Phi, &
+                                  summary_filename, scan_name, scan_var_name, boole_grid_scan)
+!
+! Sets up scan parameters based on i_scan_option.
+!
+    integer, intent(in) :: i_scan_option, n_scan_points
+    real(dp), dimension(n_scan_points), intent(out) :: scan_values
+    real(dp), intent(out) :: eps_Phi
+    character(len=*), intent(out) :: summary_filename, scan_name, scan_var_name
+    logical, intent(out) :: boole_grid_scan
+
+    real(dp) :: val_min, val_max
+    integer :: i
+
+    select case(i_scan_option)
+        case(1)
+            ! Scan over eps_Phi
+            scan_name = 'Phi Perturbation'
+            scan_var_name = 'eps_Phi'
+            summary_filename = 'diffusion_vs_eps_Phi.dat'
+            boole_grid_scan = .false.
+            val_min = 3.0d-2
+            val_max = 3.0d-1
+            eps_Phi = 0.0_dp  ! Will be set from scan_values in the loop
+        case(2)
+            ! Scan over n2
+            scan_name = 'n2 (grid resolution)'
+            scan_var_name = 'n2'
+            summary_filename = 'diffusion_vs_n2.dat'
+            boole_grid_scan = .true.
+            val_min = 20.0_dp
+            val_max = 200.0_dp
+            eps_Phi = 0.1_dp
+        case(3)
+            ! Scan over n3
+            scan_name = 'n3 (grid resolution)'
+            scan_var_name = 'n3'
+            summary_filename = 'diffusion_vs_n3.dat'
+            boole_grid_scan = .true.
+            val_min = 20.0_dp
+            val_max = 200.0_dp
+            eps_Phi = 0.1_dp
+        case default
+            print*, 'ERROR: Invalid i_scan_option = ', i_scan_option
+            stop
+    end select
+
+    ! Generate linearly spaced scan values
+    do i = 1, n_scan_points
+        scan_values(i) = val_min + (val_max - val_min) * (i - 1.0_dp) / (n_scan_points - 1.0_dp)
+    enddo
+
+end subroutine setup_scan_parameters
+
+! ====================================================================
+subroutine update_scan_variable(i_scan_option, scan_value, eps_Phi, phi_elec_original)
+!
+! Updates the scan variable and rebuilds grid if needed.
+! For eps_Phi scan: resets phi_elec to original values and updates eps_Phi
+! For grid scans: sets n2 or n3 and rebuilds the entire grid
+!
+    use tetra_grid_mod, only: nvert, make_tetra_grid
+    use tetra_grid_settings_mod, only: set_n2, set_n3
+    use tetra_physics_mod, only: phi_elec, make_tetra_physics
+    use tetra_physics_poly_precomp_mod, only: make_precomp_poly
+    use gorilla_settings_mod, only: coord_system, boole_grid_for_find_tetra
+    use field_mod, only: ipert
+    use find_tetra_mod, only: grid_for_find_tetra
+    use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
+    use utils_data_pre_and_post_processing_mod, only: calc_poloidal_flux
+
+    integer, intent(in) :: i_scan_option
+    real(dp), intent(in) :: scan_value
+    real(dp), intent(inout) :: eps_Phi
+    real(dp), dimension(:), allocatable, intent(in) :: phi_elec_original
+
+    select case(i_scan_option)
+        case(1)
+            ! Scan over eps_Phi: reset phi_elec and update eps_Phi
+            eps_Phi = scan_value
+            phi_elec = phi_elec_original
+
+        case(2)
+            ! Scan over n2: rebuild grid
+            call set_n2(nint(scan_value))
+            call rebuild_grid_and_physics()
+
+        case(3)
+            ! Scan over n3: rebuild grid
+            call set_n3(nint(scan_value))
+            call rebuild_grid_and_physics()
+    end select
+
+end subroutine update_scan_variable
+
+! ====================================================================
+subroutine rebuild_grid_and_physics()
+!
+! Rebuilds the tetrahedral grid and associated physics after changing grid parameters.
+! First deallocates existing arrays, then rebuilds everything.
+!
+    use tetra_grid_mod, only: make_tetra_grid, verts_rphiz, deallocate_tetra_grid
+    use tetra_physics_mod, only: make_tetra_physics, deallocate_tetra_physics
+    use tetra_physics_poly_precomp_mod, only: make_precomp_poly, deallocate_precomp_poly
+    use gorilla_settings_mod, only: coord_system, boole_grid_for_find_tetra
+    use field_mod, only: ipert
+    use find_tetra_mod, only: grid_for_find_tetra, deallocate_find_tetra_arrays
+    use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals, deallocate_sqrt_g
+    use utils_data_pre_and_post_processing_mod, only: calc_poloidal_flux, deallocate_output, &
+        set_moment_specifications, initialise_output, deallocate_collision_arrays, &
+        calc_collision_coefficients_for_all_tetrahedra
+    use magdata_in_symfluxcoordinates_mod, only: deallocate_magdata_in_symfluxcoord
+    use gorilla_applets_types_mod, only: in
+
+    print*, 'Deallocating existing grid arrays...'
+
+    ! Deallocate collision arrays if collisions are enabled
+    if (in%boole_collisions) call deallocate_collision_arrays()
+
+    ! Deallocate in reverse order of allocation
+    call deallocate_sqrt_g()
+    call deallocate_output()
+    call deallocate_find_tetra_arrays()
+    call deallocate_precomp_poly()
+    call deallocate_tetra_physics()
+    call deallocate_tetra_grid()
+    call deallocate_magdata_in_symfluxcoord()
+
+    print*, 'Rebuilding tetrahedral grid...'
+    call make_tetra_grid()
+
+    call make_tetra_physics(coord_system, ipert)
+    print*, 'Physics calculation of mesh is finished'
+
+    call make_precomp_poly()
+
+    if (boole_grid_for_find_tetra) call grid_for_find_tetra
+
+    ! Reinitialize output arrays and volume integrals with new grid dimensions
+    call set_moment_specifications()
+    call initialise_output()
+    call calc_square_root_g()
+    call calc_volume_integrals()
+    call calc_poloidal_flux(verts_rphiz)
+
+    ! Recalculate collision coefficients if collisions are enabled
+    if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra()
+
+end subroutine rebuild_grid_and_physics
+
+! ====================================================================
+subroutine apply_phi_perturbation(eps_Phi)
+!
+! Applies non-axisymmetric perturbation to electrostatic potential.
+! For field-aligned grids, vertices in extra rings near the O-point are excluded.
+!
+    use tetra_grid_mod, only: nvert
+    use tetra_grid_settings_mod, only: grid_kind, grid_size, n_extra_rings
+    use tetra_physics_mod, only: phi_elec
+
+    real(dp), intent(in) :: eps_Phi
+
+    real(dp), dimension(:), allocatable :: rnd_perturbation
+    integer :: iv, iv_in_slice, n_verts_in_extra_rings
+
+    allocate(rnd_perturbation(nvert))
+    call random_number(rnd_perturbation)
+
+    ! Compute number of vertices in extra rings (for field-aligned grids)
+    if (grid_kind.eq.2 .or. grid_kind.eq.3) then
+        n_verts_in_extra_rings = (1 + n_extra_rings) * grid_size(3)
+    else
+        n_verts_in_extra_rings = 0
+    endif
+
+    ! Apply perturbation
+    do iv = 1, nvert
+        if (grid_kind.eq.2 .or. grid_kind.eq.3) then
+            iv_in_slice = modulo(iv-1, nvert/grid_size(2)) + 1
+            if (iv_in_slice > n_verts_in_extra_rings) then
+                phi_elec(iv) = phi_elec(iv) + eps_Phi * rnd_perturbation(iv)
+            endif
+        else
+            phi_elec(iv) = phi_elec(iv) + eps_Phi * rnd_perturbation(iv)
+        endif
+    enddo
+
     deallocate(rnd_perturbation)
 
-end subroutine scan_anomalous_transport_over_Phi_perturbation
+end subroutine apply_phi_perturbation
 
 ! ====================================================================
 subroutine set_starting_positions_point_source(rand_matrix, species_in)
@@ -713,7 +900,7 @@ subroutine set_rest_of_start_type(rand_matrix)
 
     ! Set tracing time for diffusion coefficient calculation
     ! Use same value as in self-consistent EF example: 2.0 * 1.7e-4
-    start%t(1) = 1.0d-3!3.4d-4
+    start%t(1) = 3.4d-4!1.0d-3
 
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
 

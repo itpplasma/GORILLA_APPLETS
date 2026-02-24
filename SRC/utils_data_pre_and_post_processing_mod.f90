@@ -91,6 +91,24 @@ subroutine initialise_output
     
 end subroutine initialise_output
 
+subroutine deallocate_output
+!
+! Deallocates arrays in the output type to allow reallocation when grid parameters change.
+!
+    use gorilla_applets_types_mod, only: output
+
+    if (allocated(output%prism_volumes)) deallocate(output%prism_volumes)
+    if (allocated(output%refined_prism_volumes)) deallocate(output%refined_prism_volumes)
+    if (allocated(output%electric_potential)) deallocate(output%electric_potential)
+    if (allocated(output%boltzmann_density)) deallocate(output%boltzmann_density)
+    if (allocated(output%radial_flux)) deallocate(output%radial_flux)
+    if (allocated(output%tetr_moments)) deallocate(output%tetr_moments)
+    if (allocated(output%prism_moments)) deallocate(output%prism_moments)
+    if (allocated(output%prism_moments_squared)) deallocate(output%prism_moments_squared)
+    if (allocated(output%moments_in_frequency_space)) deallocate(output%moments_in_frequency_space)
+
+end subroutine deallocate_output
+
 subroutine calc_starting_conditions(verts)
 
     use gorilla_applets_types_mod, only: in
@@ -389,6 +407,26 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     endif
 
 end subroutine calc_collision_coefficients_for_all_tetrahedra
+
+subroutine deallocate_collision_arrays
+!
+! Deallocates collision coefficient arrays to allow reallocation when grid parameters change.
+!
+    use gorilla_applets_types_mod, only: c
+
+    if (allocated(c%dens_mat))   deallocate(c%dens_mat)
+    if (allocated(c%temp_mat))   deallocate(c%temp_mat)
+    if (allocated(c%vpar_mat))   deallocate(c%vpar_mat)
+    if (allocated(c%efcolf_mat)) deallocate(c%efcolf_mat)
+    if (allocated(c%velrat_mat)) deallocate(c%velrat_mat)
+    if (allocated(c%enrat_mat))  deallocate(c%enrat_mat)
+    if (allocated(c%mass))       deallocate(c%mass)
+    if (allocated(c%charge_num)) deallocate(c%charge_num)
+    if (allocated(c%dens))       deallocate(c%dens)
+    if (allocated(c%temp))       deallocate(c%temp)
+    if (allocated(c%randcol))    deallocate(c%randcol)
+
+end subroutine deallocate_collision_arrays
 
 subroutine set_c
 

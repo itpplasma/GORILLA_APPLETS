@@ -1,0 +1,529 @@
+\documentclass[preprint,prb,aps,prb]{revtex4}
+%\documentclass{revtex4}
+%\documentclass[twocolumn,prb,aps,prb]{revtex4}
+%\documentstyle[aps,pre,preprint]{revtex}
+\usepackage{graphicx}
+\usepackage{psfrag}
+\usepackage{epsfig}
+\usepackage{colordvi}
+\usepackage{subfigure}
+\usepackage{amsbsy}
+\renewcommand{\topfraction}{1}
+\renewcommand{\bottomfraction}{1}
+\renewcommand{\dbltopfraction}{1}
+\renewcommand{\floatpagefraction}{1}
+\renewcommand{\textfraction}{0}
+\renewcommand{\floatsep}{0pt}
+\renewcommand{\dblfloatsep}{0pt}
+
+
+%\documentclass{article}
+
+%\usepackage[utf8]{inputenc}
+%\usepackage[T1]{fontenc}
+%\usepackage{lmodern}
+%\usepackage{geometry}
+%\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=3cm,rmargin=3cm}
+%\setcounter{secnumdepth}{3}
+%\setcounter{tocdepth}{2}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+%\usepackage{xcolor}
+%\usepackage{parskip}
+%\usepackage[bottom]{footmisc}
+%\usepackage{graphicx}
+%\usepackage{float}
+%\usepackage{subcaption}
+\usepackage{ulem}
+%\usepackage{hyperref}
+
+
+
+%\usepackage[sorting=none, backend=biber]{biblatex}
+%\addbibresource{paper_balance.bib}
+
+% This is for authors and affiliation for now
+%\usepackage{authblk}
+
+\newcommand{\rd}{{\rm d}}
+\newcommand{\bm}{{\mathbf m}}
+\newcommand{\bE}{{\mathbf E}}
+\newcommand{\bj}{{\mathbf j}}
+\newcommand{\br}{{\mathbf r}}
+\newcommand{\bB}{{\mathbf B}}
+\newcommand{\bh}{{\mathbf h}}
+\newcommand{\bk}{{\mathbf k}}
+\newcommand{\bV}{{\mathbf V}}
+\newcommand{\bv}{{\mathbf v}}
+\newcommand{\bR}{{\mathbf R}}
+\newcommand{\bA}{{\mathbf A}}
+\newcommand{\bJ}{{\mathbf J}}
+\newcommand{\bp}{{\mathbf p}}
+\newcommand{\ved}{V_{ed}}
+\newcommand{\vExB}{V_{E \times B}}
+\newcommand{\veperp}{V_{e\perp}}
+\newcommand{\pdr}{\partial_r}
+\newcommand{\Dqle}{D_{e,22}^{\mathrm{ql}}}
+%\newcommand{\Dae}{D_{e22}^{\mathrm{a}}}
+\newcommand{\Dae}{D^{\mathrm{a}}}
+\newcommand{\Da}{D^{\mathrm{a}}}
+\newcommand{\Brplas}{\widetilde B_r^{\mathrm{plas}}}
+\newcommand{\Brvac}{\widetilde B_r^{\mathrm{vac}}}
+\newcommand{\Irmp}{I_{\mathrm{RMP}}}
+\newcommand{\Iexpt}{I_{\mathrm{expt}}}
+\newcommand{\qlpartflux}{\Gamma^{\mathrm{(EM)}}}
+\newcommand{\qlheatflux}{Q^{\mathrm{(EM)}}}
+\newcommand{\Brpert}{\widetilde{B}_r}
+
+\newcommand{\balpha}{{\boldsymbol\alpha}}
+\newcommand{\bbeta}{{\boldsymbol\beta}}
+\newcommand{\bgamma}{{\boldsymbol\gamma}}
+\newcommand{\bdelta}{{\boldsymbol\delta}}
+\newcommand{\bepsilon}{{\boldsymbol\epsilon}}
+\newcommand{\bvarepsilon}{{\boldsymbol\varepsilon}}
+\newcommand{\bzeta}{{\boldsymbol\zeta}}
+\newcommand{\boldeta}{{\boldsymbol\eta}}
+\newcommand{\btheta}{{\boldsymbol\theta}}
+\newcommand{\bvartheta}{{\boldsymbol\vartheta}}
+\newcommand{\biota}{{\boldsymbol\iota}}
+\newcommand{\bkappa}{{\boldsymbol\kappa}}
+\newcommand{\blambda}{{\boldsymbol\lambda}}
+\newcommand{\bmu}{{\boldsymbol\mu}}
+
+\newcommand{\bnu}{{\boldsymbol\nu}}
+\newcommand{\bxi}{{\boldsymbol\xi}}
+\newcommand{\bpi}{{\boldsymbol\pi}}
+\newcommand{\bvarpi}{{\boldsymbol\varpi}}
+\newcommand{\brho}{{\boldsymbol\rho}}
+\newcommand{\bsigma}{{\boldsymbol\sigma}}
+\newcommand{\bvarsigma}{{\boldsymbol\varsigma}}
+ \newcommand{\btau}{{\boldsymbol\tau}}
+ \newcommand{\bupsilon}{{\boldsymbol\upsilon}}
+ \newcommand{\bphi}{{\boldsymbol\phi}}
+ \newcommand{\bvarphi}{{\boldsymbol\varphi}}
+ \newcommand{\bchi}{{\boldsymbol\chi}}
+ \newcommand{\bpsi}{{\boldsymbol\psi}}
+ \newcommand{\bomega}{{\boldsymbol\omega}}
+\newcommand{\bGamma}{{\boldsymbol\Gamma}}
+\newcommand{\bDelta}{{\boldsymbol\Delta}}
+\newcommand{\bTheta}{{\boldsymbol\Theta}}
+\newcommand{\bLambda}{{\boldsymbol\Lambda}}
+\newcommand{\bXi}{{\boldsymbol\Xi}}
+\newcommand{\bPi}{{\boldsymbol\Pi}}
+\newcommand{\bSigma}{{\boldsymbol\Sigma}}
+\newcommand{\bUpsilon}{{\boldsymbol\Upsilon}}
+\newcommand{\bPhi}{{\boldsymbol\Phi}}
+\newcommand{\bPsi}{{\boldsymbol\Psi}}
+\newcommand{\bOmega}{{\boldsymbol\Omega}}
+
+\newcommand{\cA}{{\mathcal A}}
+\newcommand{\cB}{{\mathcal B}}
+\newcommand{\cC}{{\mathcal C}}
+\newcommand{\cD}{{\mathcal D}}
+\newcommand{\cE}{{\mathcal E}}
+\newcommand{\cF}{{\mathcal F}}
+\newcommand{\cG}{{\mathcal G}}
+\newcommand{\cH}{{\mathcal H}}
+\newcommand{\cI}{{\mathcal I}}
+\newcommand{\cJ}{{\mathcal{J}}}
+\newcommand{\cK}{{\mathcal K}}
+\newcommand{\cL}{{\mathcal L}}
+\newcommand{\cM}{{\mathcal M}}
+\newcommand{\cN}{{\mathcal N}}
+\newcommand{\cO}{{\mathcal O}}
+\newcommand{\cP}{{\mathcal P}}
+\newcommand{\cQ}{{\mathcal Q}}
+\newcommand{\cR}{{\mathcal R}}
+\newcommand{\cS}{{\mathcal S}}
+\newcommand{\cT}{{\mathcal T}}
+\newcommand{\cU}{{\mathcal U}}
+\newcommand{\cV}{{\mathcal{V}}}
+\newcommand{\cW}{{\mathcal W}}
+\newcommand{\cX}{{\mathcal X}}
+\newcommand{\cY}{{\mathcal Y}}
+\newcommand{\cZ}{{\mathcal Z}}
+
+
+\newcommand{\be}[1]{\begin{equation} \label{#1}}
+\newcommand{\ee}{\end{equation}}
+\newcommand{\bea}[1]{\begin{eqnarray} \label{#1}}
+\newcommand{\eea}{\end{eqnarray}}
+\newcommand{\bean}{\begin{eqnarray*}}
+\newcommand{\eean}{\end{eqnarray*}}
+
+\newcommand{\non}{\nonumber\\}
+\newcommand{\eq}[1]{(\ref{#1})}
+\newcommand{\difp}[2]{\frac{\partial #1}{\partial #2}}
+
+% For editing
+\usepackage{hyphenat}
+\usepackage{ifthen}
+\usepackage{comment}
+
+%\ifthenelse{1=1} %change to 1=2 for final version without comments
+%{
+%    \specialcomment{todo}{\begingroup\ttfamily\footnotesize\color{red}TODO: }{\par\endgroup}
+%    \specialcomment{remark}{\begingroup\ttfamily\footnotesize\color{blue}REMARK: }{\endgroup}
+%}
+%{
+%    \excludecomment{todo}
+%    \excludecomment{remark}
+%}
+
+\begin{document}
+
+\section{Transport due to electrostatic perturbations}
+
+For the treatment of electron component, its is sufficient to use the drift-kinetic approximation.
+Drit kinetic equation using for velocity space variables besides the gyrophase $\phi$ also
+the magnetic moment $\mu$ and parallel velocity $v_\parallel$ where
+$$
+\mu = \frac{m_\alpha v_\perp^2}{2 B}=\frac{e_\alpha  J_\perp}{m_\alpha  c}
+$$
+and $J_\perp$ is the perpendicular adiabatic invariant,
+is of the form
+\be{drikineq}
+\difp{f}{t}+\bv_g\cdot\nabla f + \dot v_\parallel \difp{f}{v_\parallel}= \hat L_C f.
+\ee
+Here, the guiding center velocity is
+\be{gvcvelpp}
+\bv_g = \frac{v_\parallel \bB}{B_\parallel^\ast} 
++ \frac{\bB\times\nabla \left(\mu B + e_\alpha \Phi\right)}
+{m_\alpha \omega_c B_\parallel^\ast}
++\frac{v_\parallel^2}{B_\parallel^\ast}\nabla\times \frac{\bB}{\omega_c},
+\qquad
+B_\parallel^\ast = B + v_\parallel \bh\cdot \nabla\times\frac{\bB}{\omega_c},
+\ee
+$\bh = \bB/B$ and $\omega_c=e_\alpha  B/(m_\alpha c)$ are unit vector along the magnetic field and the cyclotron frequency, respectively,
+\be{vpardot}
+\dot v_\parallel = - \frac{1}{m_\alpha  B_\parallel^\ast}\left(\bB+ v_\parallel\nabla\times \frac{\bB}{\omega_c}\right)
+\cdot\nabla \left(\mu B + e_\alpha \Phi\right),
+\ee
+and $\hat L_C$ is the collision opertor.
+We ignore the magnetic drift in favour of electric drift so that $B_\parallel^\ast \rightarrow B$ and
+\be{nomagdrift}
+\bv_g \rightarrow v_\parallel \bh + \frac{c \bh\times\nabla\Phi}{B},
+\qquad
+\dot v_\parallel \rightarrow - \frac{1}{m_\alpha } \bh\cdot\nabla\left(\mu B + e_\alpha \Phi\right). 
+\ee
+
+\subsection{Quasilinear theory}
+
+We assume purely electrostatic perturbations such that magnetic field $\bB$ 
+is axisymmetric and electrostatic potential $\Phi=\Phi_0 + \delta \Phi$ contains
+the unperturbed, axisymmetric potential $\Phi_0=\Phi_0(r)$ and the perturbation 
+$\delta \Phi$.
+We stay in a straight cylinder geometry where the unperturbed motion is simple,
+\be{phsp_vel_0}
+\bv_{g0} = v_\parallel \bh+\bV_E,
+\qquad
+\bV_E = \frac{c \Phi_0^\prime(r)}{B}\bh\times\nabla r,
+\qquad
+\dot v_{\parallel 0} = 0.
+\ee
+Respectively, the perturbation of the phase space velocity $\delta \bv_{g} = \bv_{g}-\bv_{g0}$ is driven by $\delta \Phi$,
+\be{phsp_vel_1}
+\delta \bv_{g} = \frac{c \bh\times\nabla\delta\Phi}{B},
+\qquad
+\delta\dot v_{\parallel} = - \frac{e_\alpha}{m_\alpha } \bh\cdot\nabla\Phi.
+\ee
+
+We use the normalized coordinates $(r,\vartheta,\varphi)$ where $\varphi=z/R_0$ is the normalized cylinder length
+and $R_0 = const$ is the major radius, so that $\sqrt{g} = r R_0$.
+In zero order over the perturbation  amplitude, we take a local Maxwellian,
+\be{boltz}
+f_0(r,\mu,v_\parallel)=
+\frac{n_\alpha(r)}{(2\pi m_\alpha  T_\alpha(r))^{3/2}}
+\exp\left(-\frac{2\mu B(r) + m_\alpha v_\parallel^2}{2 T_\alpha(r)}\right),
+\ee
+which obviously satisfies the unperturbed steady state equation
+$$
+\bv_{g0} \cdot \nabla f_0 + \dot v_{\parallel 0} \difp{f_0}{v_\parallel} = \hat L_C f_0.
+$$
+We assume the perturbation of the form
+\be{pertPhi_form}
+\delta \Phi(t,r,\vartheta,\varphi) = {\rm Re}\sum_\bm \Phi_\bm(r) {\rm e}^{im\vartheta+i n \varphi -i \omega_\bm t},
+\ee
+where $\bm=(m,n)$. We similarly expand the perturbation of the distribution function, $\delta f = f-f_0$, which we treat in the linear order (omitting the terms quadratic in $\delta\Phi$),
+\be{pertf_form}
+\delta f(t,r,\vartheta,\varphi,\mu,v_\parallel) = {\rm Re} \sum_\bm f_\bm(r,\mu,v_\parallel) 
+{\rm e}^{im\vartheta+i n \varphi -i \omega_\bm t},
+\ee
+and obtain equations for Fourier amplitudes,
+\be{eqforamps}
+\left(\bk\cdot \bv_{g0}- \omega_\bm\right) f_\bm + i \hat L_C f_\bm 
+= 
+\left(
+\left(\frac{n_\alpha^\prime}{n_\alpha}-\frac{3 T_\alpha^\prime}{2 T_\alpha}
++\frac{T_\alpha^\prime}{T_\alpha}\frac{m_\alpha v^2}{2 T_\alpha}\right)
+\frac{ck_\perp}{B}
+-\frac{e_\alpha k_\parallel v_\parallel}{T_\alpha}
+\right)
+f_0  \Phi_\bm,
+\ee
+where we denoted
+\be{kvecs}
+\bk = m\nabla\vartheta+n\nabla\varphi,
+\qquad
+k_\perp = \bk\cdot\bh\times\nabla r,
+\qquad
+k_\parallel = \bk\cdot\bh,
+\ee
+and ignored in the r.h.s. term with $B^\prime$ which enters $n_\alpha^\prime / n_\alpha - \mu B^\prime/T_\alpha + \dots$
+for the same reason as the magnetic drift. We have also denoted the kinetic energy as
+$$
+\frac{m_\alpha v^2}{2} = \mu B +\frac{m_\alpha v_\parallel^2}{2}.
+$$
+We consider high frequency short scale perturbations such that 
+${\rm max}(\omega_\bm, k_\perp V_E) \gg \nu$ where $\nu$ is the collision frequency.
+For these perturbations, transport is determined by the ``collisionless'' (Landau damping) mechanism such that it
+is sufficient to use Krook collision model, $\hat L_C = - \nu$, because small $\nu$ does not enter the result.
+Thus, Eq.~\eq{eqforamps} becomes algebraic,
+\be{eqforamps_alg}
+\left(k_\parallel v_\parallel + k_\perp V_E-\omega_\bm-i\nu\right) f_\bm 
+=
+\left(
+\left(\frac{n_\alpha^\prime}{n_\alpha}-\frac{3 T_\alpha^\prime}{2 T_\alpha}
++\frac{T_\alpha^\prime}{T_\alpha}\frac{m_\alpha v^2}{2 T_\alpha}\right)
+\frac{ck_\perp}{B}
+-\frac{e_\alpha k_\parallel v_\parallel}{T_\alpha}
+\right)
+f_0  \Phi_\bm,
+\ee
+where
+\be{VE}
+V_E = \frac{c \Phi_0^\prime}{B}.
+\ee
+Multiplying the perturbation of the distribution function~\eq{pertf_form}
+with radial guding center velocity $\delta \bv_g\cdot\nabla r$ where $\delta \bv_g$ is
+given by Eq.~\eq{phsp_vel_1}, averaging the result over the angles and integrating over the momentum 
+space, we obtain particle flux density as
+\bea{Gamma}
+\Gamma_\alpha
+&=& 
+\int\rd^3 p f_0 \frac{1}{2}
+{\rm Re}
+\sum_\bm 
+\frac{i c^2 k_\perp^2 \left|\Phi_\bm\right|^2}{B^2\left(k_\parallel v_\parallel + k_\perp V_E-\omega_\bm-i\nu\right)}
+\left(
+\frac{n_\alpha^\prime}{n_\alpha}-\frac{3 T_\alpha^\prime}{2 T_\alpha}
++\frac{T_\alpha^\prime}{T_\alpha}\frac{m_\alpha v^2}{2 T_\alpha}
+-\frac{e_\alpha k_\parallel v_\parallel B}{T_\alpha ck_\perp}
+\right)
+\nonumber \\
+&\rightarrow &
+-\frac{\pi}{2}\int\rd^3 p f_0 
+\sum_\bm
+\frac{c^2 k_\perp^2 \left|\Phi_\bm\right|^2}{B^2}
+\delta\left(k_\parallel v_\parallel + k_\perp V_E-\omega_\bm\right)
+\left(
+\frac{n_\alpha^\prime}{n_\alpha}-\frac{3 T_\alpha^\prime}{2 T_\alpha}
++\frac{T_\alpha^\prime}{T_\alpha}\frac{m_\alpha v^2}{2 T_\alpha}
+-\frac{e_\alpha k_\parallel v_\parallel B}{T_\alpha ck_\perp}
+\right)
+\nonumber \\
+&=&
+-\frac{\pi}{2}\int\rd^3 p f_0
+\sum_\bm
+\frac{c^2 k_\perp^2 \left|\Phi_\bm\right|^2}{B^2}
+\delta\left(k_\parallel v_\parallel + k_\perp V_E-\omega_\bm\right)
+\left(A_1
++\frac{m_\alpha v^2}{2 T_\alpha} A_2
+-\frac{\omega_\bm}{k_\perp D_B}
+\right),
+\eea
+where we introduced the following notation for the thermodynamic forces and Bohm diffusion coefficient,
+\be{A_1_A_2_D_B}
+A_1 = \frac{n_\alpha^\prime}{n_\alpha}+\frac{e_\alpha \Phi_0^\prime}{T_\alpha}-\frac{3 T_\alpha^\prime}{2 T_\alpha},
+\qquad
+A_2 = \frac{T_\alpha^\prime}{T_\alpha},
+\qquad
+D_B = \frac{c T_\alpha}{e_\alpha B}.
+\ee
+Integration over the momentum space,
+$$
+\int \rd^3 p = 2\pi m_\alpha^2 B\int\limits_0^\infty \rd \mu\int\limits_{-\infty}^\infty \rd v_\parallel,
+$$
+is trivial over $\mu$ and easy over $v_\parallel$ where the $\delta$-function should be used to give
+\bea{Gamma_triv}
+\Gamma_\alpha
+&=&
+- n_\alpha \left(\frac{\pi m_\alpha}{8 T_\alpha}\right)^{1/2}
+\int\limits_{-\infty}^\infty \rd v_\parallel
+\exp\left(- \frac{m_\alpha v_\parallel^2}{2 T_\alpha}\right)
+\sum_\bm
+\frac{c^2 k_\perp^2 \left|\Phi_\bm\right|^2}{B^2}
+\delta\left(k_\parallel v_\parallel + k_\perp V_E-\omega_\bm\right)
+\nonumber \\
+&\times&
+\left(A_1+A_2
++\frac{m_\alpha v_\parallel^2}{2 T_\alpha} A_2
+-\frac{\omega_\bm}{k_\perp D_B}
+\right)
+\nonumber \\
+&=&
+- n_\alpha \left(\frac{\pi m_\alpha}{8 T_\alpha}\right)^{1/2}
+\sum_\bm
+\frac{c^2 k_\perp^2 \left|\Phi_\bm\right|^2}{|k_\parallel| B^2}
+\exp\left(- \frac{m_\alpha \left(\omega_\bm-k_\perp V_E\right)^2}{2 k_\parallel^2 T_\alpha}\right)
+\nonumber \\
+&\times&
+\left(A_1+A_2
++
+\frac{m_\alpha \left(\omega_\bm-k_\perp V_E\right)^2}{2 k_\parallel^2 T_\alpha}
+A_2
+-\frac{\omega_\bm}{k_\perp D_B}
+\right)
+\nonumber \\
+&\equiv&
+- n_\alpha (D_{11}^\alpha A_1 + D_{12}^\alpha A_2 - V^\alpha_1),
+\eea
+where the last expression defines diffusion coefficients and convection velocity.
+In particular, particle diffusion coeficient follows from this expression as
+\be{D11}
+D_{11}^\alpha = \left(\frac{\pi m_\alpha}{8 T_\alpha}\right)^{1/2}
+\sum_\bm
+\frac{c^2 k_\perp^2 \left|\Phi_\bm\right|^2}{|k_\parallel| B^2}
+\exp\left(- \frac{m_\alpha \left(\omega_\bm-k_\perp V_E\right)^2}{2 k_\parallel^2 T_\alpha}\right).
+\ee
+
+\subsection{Static noise on the GORILLA grid}
+
+For numerical experiments in GORILLA, we generate the potential perturbation by adding in each grid node $k$
+a random potential value using the standard random numbers $\xi$,
+\be{delphik}
+\delta \Phi_k = \Phi_A \xi_k, 
+\qquad
+\overline{\xi_k}=0,
+\qquad
+\overline{\xi_k \xi_{k^\prime}}=\delta_{k,k^\prime}.
+\ee
+In a 1D exapmple, potential perturbation is then given by the continuous piecewise-linear periodic function 
+of an angle $\delta \Phi(\vartheta)$. Let us compute its Fourier amplitude,
+\be{fourampnoise}
+\Phi_m 
+= 
+\frac{1}{2\pi}\int\limits_0^{2\pi}\rd \vartheta {\rm e}^{-im\vartheta}\delta \Phi(\vartheta)
+= 
+-\frac{1}{2\pi m^2}\int\limits_0^{2\pi}\rd \vartheta {\rm e}^{-im\vartheta}\delta \Phi^{\prime\prime}(\vartheta).
+\ee
+Second derivative $\delta \Phi^{\prime\prime}(\vartheta)$ 
+of the continuous piecewise-linear function $\delta \Phi(\vartheta)$ 
+equals to the sum of $\delta$-functions at the grid
+nodes $\vartheta = 2\pi k/K$ where $K$ is grid size and $1\le k \le K$,
+\be{deltafuns}
+\delta \Phi^{\prime\prime}(\vartheta) = \frac{K\Phi_A}{2\pi}\sum\limits_{k=1}^K
+\left(\xi_{k+1}+\xi_{-1}-2\xi_{k}\right)
+\delta\left(\vartheta - \frac{2\pi k}{K}\right).
+\ee
+Respectively, Fourier amplitude~\eq{fourampnoise} is
+\be{deltafuns_four}
+\Phi_m
+= 
+-\frac{K\Phi_A}{(2\pi m)^2}\sum\limits_{k=1}^K
+\left(\xi_{k+1}+\xi_{k-1}-2\xi_{k}\right)
+\ee
+Obviously, its expectation value is zero, $\overline{\Phi_m}=0$. We are interested, however, in the expectation values
+of its module square,
+\be{modsqexpect}
+\overline{|\Phi_m|^2} = \frac{K^2\Phi_A^2}{(2\pi m)^4} \sum\limits_{k,k^\prime=1}^K
+\overline{\left(\xi_{k+1}+\xi_{k-1}-2\xi_{k}\right)\left(\xi_{k^\prime+1}+\xi_{k^\prime-1}-2\xi_{k^\prime}\right)}
+\exp\left(\frac{2\pi i m (k-k^\prime)}{K}\right).
+\ee
+Using the properties~\eq{delphik} of random numbers we get
+$$
+\overline{\left(\xi_{k+1}+\xi_{k-1}-2\xi_{k}\right)\left(\xi_{k^\prime+1}+\xi_{k^\prime-1}-2\xi_{k^\prime}\right)}
+=
+6 \delta_{k,k^\prime}-4 \delta_{k-1,k^\prime}-4 \delta_{k+1,k^\prime}+\delta_{k-2,k^\prime}+\delta_{k+2,k^\prime},
+$$
+so that~\eq{modsqexpect} becomes
+\be{modsqexpect_fin}
+\overline{|\Phi_m|^2} = \frac{K^3\Phi_A^2}{(2\pi m)^4} 
+\left(6-8\cos\left(\frac{2\pi m}{K}\right)+2\cos\left(\frac{4\pi m}{K}\right)\right).
+\ee
+I am lazy to compute this for a 2D grid in $(\vartheta,\varphi)$ variables with the size $K\times L$. Therefore
+I write the respectve fomula without a proof,
+\bea{modsqexpect_fin2D}
+\overline{|\Phi_\bm|^2} &=& \frac{K^3L^3\Phi_A^2}{(2\pi m)^4 (2\pi n)^4} 
+\left(6-8\cos\left(\frac{2\pi m}{K}\right)+2\cos\left(\frac{4\pi m}{K}\right)\right)
+\nonumber \\
+&\times& \qquad\qquad\qquad \left(6-8\cos\left(\frac{2\pi n}{L}\right)+2\cos\left(\frac{4\pi n}{L}\right)\right).
+\eea
+Let us estimate a diffusion coefficient~\eq{D11} using expectation value~\eq{modsqexpect_fin2D} 
+for the amplitude $|\Phi_\bm|^2$ setting $\omega_\bm=0$ becuse of static perturbations and
+setting also $V_E=0$. The latter setting corresponds to zero equilibrium electric field, however even
+for the finite but reasonable electric field this term is of the order of 
+$V_E^2 k_\perp^2/(v_{T\alpha}^2 k_\parallel^2) \sim (k_\perp^2 \rho_{L\alpha^2})/(k_\parallel^2 r^2) \ll 1$
+for $k_\parallel \sim k_\perp$. Thus we set the exponent in~\eq{D11} to one. Approximating roughly
+$k_\parallel \approx n/R_0$ and $k_\perp \approx m/r$ we get
+\bea{D11_grid}
+D_{11}^\alpha 
+&\approx& 
+\left(\frac{\pi m_\alpha}{8 T_\alpha}\right)^{1/2}
+\frac{c^2 R_0 \Phi_A^2}{r^2 B^2}\frac{1}{KL}
+\sum_\bm
+\frac{m^2}{|n|}\left(\frac{2\pi m}{K}\right)^{-4} \left(\frac{2\pi n}{L}\right)^{-4}
+\\
+&\times&
+\left(6-8\cos\left(\frac{2\pi m}{K}\right)+2\cos\left(\frac{4\pi m}{K}\right)\right)
+\left(6-8\cos\left(\frac{2\pi n}{L}\right)+2\cos\left(\frac{4\pi n}{L}\right)\right).
+\nonumber
+\eea
+since $2\pi/K \ll 1$ and $2\pi/L \ll 1$, we replace summation by the integration introducing
+the variables $x = 2\pi m/K$ and $y=2\pi n/L$ so that
+$$
+\frac{1}{KL}\sum_\bm \approx \frac{1}{4\pi^2}
+\int\limits_{-\infty}^\infty \rd x
+\int\limits_{-\infty}^\infty \rd y,
+$$
+and
+\bea{D11_grid_cont}
+D_{11}^\alpha
+&\approx&
+\left(\frac{\pi m_\alpha}{8 T_\alpha}\right)^{1/2}
+\frac{c^2 R_0 \Phi_A^2}{r^2 B^2}
+\frac{K^2}{8\pi^3 L}
+\int\limits_{-\infty}^\infty \rd x
+\int\limits_{-\infty}^\infty \rd y
+\frac{1}{x^2 |y|^5}
+\\
+&\times&
+\left(6-8\cos\left(x\right)+2\cos\left(2x\right)\right)
+\left(6-8\cos\left(y\right)+2\cos\left(2y\right)\right).
+\nonumber
+\eea
+We note that second line of Eq.~\eq{D11_grid_cont} scales at small $x$ and $y$ as $x^4 y^4$.
+Thus, integral over $x$ strictly converges giving
+$$
+\int\limits_{-\infty}^\infty \rd x \frac{6-8\cos\left(x\right)+2\cos\left(2x\right)}{x^2}  
+=
+\int\limits_{-\infty}^\infty \rd x \frac{8\sin\left(x\right)-4\sin\left(2x\right)}{x}
+=
+4 \int\limits_{-\infty}^\infty \rd x \frac{\sin x}{x}
+= 4 \pi
+$$
+but integral over $y$ logarithmically diverges.
+This divergence however is unphysical because it is the result of using collisionless limit for
+low $k_\parallel$ within the assumption $k_\parallel v_\parallel \gg \nu$. We can introduce some minimum
+value of $y$
+$$
+\int\limits_{-\infty}^\infty \rd y \frac{6-8\cos\left(y\right)+2\cos\left(2y\right)}{|y|^5}
+\rightarrow
+\int\limits_{y_\text{min}}^\infty \rd y \frac{6-8\cos\left(y\right)+2\cos\left(2y\right)}{y^5}
+\sim
+\int\limits_{y_\text{min}}^1 \rd y \frac{1}{y} = \left|\log(y_\text{min})\right|.
+$$
+Thus we get an estimate
+\be{D11_grid_cont_est}
+D_{11}^\alpha
+\sim
+\frac{\left|\log(y_\text{min})\right|}{2^{5/2}\pi^{3/2}}
+\left(\frac{m_\alpha}{T_\alpha}\right)^{1/2}
+\frac{c^2 R_0 \Phi_A^2}{r^2 B^2}
+\frac{K^2}{L}.
+\ee
+
+
+\end{document}
