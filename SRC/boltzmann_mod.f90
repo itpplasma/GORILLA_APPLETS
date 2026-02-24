@@ -106,7 +106,7 @@ subroutine calc_boltzmann
     call set_moment_specifications
     call initialise_output
     call calc_square_root_g
-    call calc_volume_integrals(in%boole_boltzmann_energies,in%boole_refined_sqrt_g, in%density, in%energy_eV)
+    call calc_volume_integrals
     call initialize_exit_data
     call calc_starting_conditions(verts)
     call calc_poloidal_flux(verts)

@@ -91,11 +91,29 @@ subroutine initialise_output
     
 end subroutine initialise_output
 
+subroutine deallocate_output
+!
+! Deallocates arrays in the output type to allow reallocation when grid parameters change.
+!
+    use gorilla_applets_types_mod, only: output
+
+    if (allocated(output%prism_volumes)) deallocate(output%prism_volumes)
+    if (allocated(output%refined_prism_volumes)) deallocate(output%refined_prism_volumes)
+    if (allocated(output%electric_potential)) deallocate(output%electric_potential)
+    if (allocated(output%boltzmann_density)) deallocate(output%boltzmann_density)
+    if (allocated(output%radial_flux)) deallocate(output%radial_flux)
+    if (allocated(output%tetr_moments)) deallocate(output%tetr_moments)
+    if (allocated(output%prism_moments)) deallocate(output%prism_moments)
+    if (allocated(output%prism_moments_squared)) deallocate(output%prism_moments_squared)
+    if (allocated(output%moments_in_frequency_space)) deallocate(output%moments_in_frequency_space)
+
+end subroutine deallocate_output
+
 subroutine calc_starting_conditions(verts)
 
     use gorilla_applets_types_mod, only: in
-    
-    real(dp), dimension(:,:), allocatable, intent(out)     :: verts
+
+    real(dp), dimension(:,:), allocatable, intent(out), optional :: verts
     real(dp), dimension(:,:,:), allocatable                :: rand_matrix
 
     call set_verts_and_coordinate_limits(verts)
@@ -118,7 +136,8 @@ subroutine set_verts_and_coordinate_limits(verts)
     use magdata_in_symfluxcoor_mod, only : raxis,zaxis
     use gorilla_applets_types_mod, only: g
 
-    real(dp), dimension(:,:), allocatable, intent(out)     :: verts
+    real(dp), dimension(:,:), allocatable, intent(out), optional :: verts
+    real(dp), dimension(:,:), allocatable :: verts_local
     integer :: i
 
     g%ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
@@ -129,14 +148,14 @@ subroutine set_verts_and_coordinate_limits(verts)
         g%ind_c = 2
     endif
 
-    allocate(verts(3,nvert))
-    if (coord_system.eq.1) verts = verts_rphiz
-    if (coord_system.eq.2) verts = verts_sthetaphi
+    allocate(verts_local(3,nvert))
+    if (coord_system.eq.1) verts_local = verts_rphiz
+    if (coord_system.eq.2) verts_local = verts_sthetaphi
 
-    g%amin = minval(verts(g%ind_a,:))
-    g%amax = maxval(verts(g%ind_a,:))
-    g%cmin = minval(verts(g%ind_c,:))
-    g%cmax = maxval(verts(g%ind_c,:))
+    g%amin = minval(verts_local(g%ind_a,:))
+    g%amax = maxval(verts_local(g%ind_a,:))
+    g%cmin = minval(verts_local(g%ind_c,:))
+    g%cmax = maxval(verts_local(g%ind_c,:))
 
     g%raxis = raxis
     g%zaxis = zaxis
@@ -146,6 +165,8 @@ subroutine set_verts_and_coordinate_limits(verts)
         g%dist_from_o_point_within_grid = max(g%dist_from_o_point_within_grid, &
                                               1.1_dp*sqrt((tetra_physics(i)%x1(1)-raxis)**2 + (tetra_physics(i)%x1(3)-zaxis)**2))
     enddo
+
+    if (present(verts)) call move_alloc(verts_local, verts)
 
 end subroutine set_verts_and_coordinate_limits
 
@@ -164,6 +185,7 @@ subroutine allocate_start_type
     allocate(start%particle_mass(in%n_species))
     allocate(start%cm_over_e(in%n_species))
     allocate(start%t(in%n_species))
+    allocate(start%v0(in%n_species))
 
 end subroutine allocate_start_type
 
@@ -262,6 +284,7 @@ subroutine initialize_exit_data(n_particles_in)
     if (allocated(exit_data%vperp))             deallocate(exit_data%vperp)
     if (allocated(exit_data%phi_0_mappings))    deallocate(exit_data%phi_0_mappings)
     if (allocated(exit_data%integration_step))  deallocate(exit_data%integration_step)
+    if (allocated(exit_data%flux_surface))      deallocate(exit_data%flux_surface)
 
     if(present(n_particles_in)) then
         n_particles = n_particles_in
@@ -276,14 +299,16 @@ subroutine initialize_exit_data(n_particles_in)
     allocate(exit_data%vperp(n_particles,in%n_species))
     allocate(exit_data%phi_0_mappings(n_particles,in%n_species))
     allocate(exit_data%integration_step(n_particles,in%n_species))
+    allocate(exit_data%flux_surface(n_particles,in%n_species))
 
     exit_data%lost = 0
     exit_data%t_confined = 0.0_dp
     exit_data%x = 0.0_dp
-    exit_data%vpar = 0.0_dp 
-    exit_data%vperp = 0.0_dp 
+    exit_data%vpar = 0.0_dp
+    exit_data%vperp = 0.0_dp
     exit_data%integration_step = 0
     exit_data%phi_0_mappings = 0
+    exit_data%flux_surface = 0.0_dp
 
 end subroutine initialize_exit_data
 
@@ -315,6 +340,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     use tetra_grid_settings_mod, only: grid_size
     use collis_ions, only: collis_init
     use gorilla_settings_mod, only: coord_system
+    use gorilla_applets_settings_mod, only: i_option
     
     integer, intent(in), optional :: species_in
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
@@ -334,8 +360,9 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     m0 = particle_mass
     z0 = particle_charge/echarge
 
-    c%temp_mat(2,:) = s%temperature
-    c%temp_mat(1,:) = in%energy_eV
+    
+    c%temp_mat = in%energy_eV
+    if (i_option.eq.12) c%temp_mat(2,:) = s%temperature
     c%dens_mat = in%density
 
     if (boole_T_and_n_from_files) call get_T_and_n_from_files
@@ -380,6 +407,26 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     endif
 
 end subroutine calc_collision_coefficients_for_all_tetrahedra
+
+subroutine deallocate_collision_arrays
+!
+! Deallocates collision coefficient arrays to allow reallocation when grid parameters change.
+!
+    use gorilla_applets_types_mod, only: c
+
+    if (allocated(c%dens_mat))   deallocate(c%dens_mat)
+    if (allocated(c%temp_mat))   deallocate(c%temp_mat)
+    if (allocated(c%vpar_mat))   deallocate(c%vpar_mat)
+    if (allocated(c%efcolf_mat)) deallocate(c%efcolf_mat)
+    if (allocated(c%velrat_mat)) deallocate(c%velrat_mat)
+    if (allocated(c%enrat_mat))  deallocate(c%enrat_mat)
+    if (allocated(c%mass))       deallocate(c%mass)
+    if (allocated(c%charge_num)) deallocate(c%charge_num)
+    if (allocated(c%dens))       deallocate(c%dens)
+    if (allocated(c%temp))       deallocate(c%temp)
+    if (allocated(c%randcol))    deallocate(c%randcol)
+
+end subroutine deallocate_collision_arrays
 
 subroutine set_c
 
@@ -529,14 +576,14 @@ subroutine fourier_transform_moments
     use tetra_grid_mod, only: ntetr
     
     integer                                     :: n,m,j,k,p,q,l
-    complex                                     :: i
-    complex, dimension(:,:,:), allocatable      :: prism_moments_ordered_for_ft
+    complex(dp)                                 :: i
+    complex(dp), dimension(:,:,:), allocatable  :: prism_moments_ordered_for_ft
     integer :: n_prisms
     
     n_prisms = ntetr/3
-    
+
     print*, 'fourier transform started'
-    
+
     moment_specs%n_triangles = n_prisms/grid_size(2)
     allocate(prism_moments_ordered_for_ft(moment_specs%n_moments,moment_specs%n_triangles,grid_size(2)))
     do q = 1,grid_size(2)

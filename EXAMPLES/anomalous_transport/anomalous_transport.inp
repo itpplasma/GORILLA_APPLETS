@@ -1,23 +1,20 @@
-! INPUT FILE FOR SELF CONSISTENT ELECTRIC FIELD
+! INPUT FILE FOR ANOMALOUS TRANSPORT
 !
-&self_consistent_ef_nml
+&anomalous_transport_nml
 !
   !time for tracing particles
-  time_step = 1.0d-4 ,
+  time_step = 1.0d-1 ,
 !
   !Kinetic energy of particles
   energy_eV = 3.5d3 ,
 !
-  !Number of species is usually 2, namely the ion species specified in gorilla.inp and electrons
-  n_species = 2
+  !Number of species (usually 1 for anomalous transport)
+  n_species = 1
 !
   !Number of particles to be traced
-  n_particles = 10d0 ,
+  n_particles = 1.0d3 ,
 !
-  !Keep electron density constant
-  boole_static_ne = .false. ,
-!
-  !Compute squares of moments 
+  !Compute squares of moments
   boole_squared_moments = .false.,
 !
   !Start all particles from the same physical position
@@ -32,21 +29,13 @@
   !make collisions energy and momentum conserving
   boole_preserve_energy_and_momentum_during_collisions = .false.,
 !
-  !Number of electric potential updates
-  n_electric_potential_updates = 10,
-!
-  !type of electric potential update
-  !1 ... 1D 
-  !3 ... 3D 
-  update_dimension = 1
-!
   !Simulated density of particles
   density = 3.0d13,
 !
-  !refined jacobian determinant, must be set to .false. since this can only be made use of in cylindrical coordinates
-  boole_refined_sqrt_g = .false.,
+  !refined jacobian determinant
+  boole_refined_sqrt_g = .true.,
 !
-  !work with boltzmann energies instead of with monoenergetic articles
+  !work with boltzmann energies instead of with monoenergetic particles
   boole_boltzmann_energies = .true.,
 !
   !make density a linear function of poloidal flux
@@ -58,6 +47,19 @@
 !
   !make temperature a linear function of poloidal flux
   boole_linear_temperature_simulation = .false.,
+!
+  !calculate diffusion coefficient to verify anomalous transport implementation
+  boole_calc_diffusion_coefficient = .true.,
+!
+  !Scan option for anomalous transport parameter studies
+  ! 0 ... no scan (standard computation)
+  ! 1 ... scan over eps_Phi (electric potential perturbation magnitude)
+  ! 2 ... scan over n2 (grid resolution in phi), with fixed eps_Phi = 0.1
+  ! 3 ... scan over n3 (grid resolution in theta/Z), with fixed eps_Phi = 0.1
+  i_scan_option = 3,
+!
+  !anomalous diffusion coefficient in cm^2/s
+  anomalous_diffusion_coefficient = 0.0d4 ,
 !
   !Set integrator type
   !(must be 1, otherwise it currently does not work)
@@ -74,9 +76,7 @@
   boole_write_vertex_indices = .true. ,
   boole_write_vertex_coordinates = .true. ,
   boole_write_prism_volumes = .true. ,
-  boole_write_refined_prism_volumes = .false. , !Must be set to .false., since boole_refined_sqrt_g is also set to .false.
-  boole_write_boltzmann_density = .false. ,
-  boole_write_electric_potential = .false. ,
+  boole_write_refined_prism_volumes = .false. ,
   boole_write_moments = .true. ,
   boole_write_fourier_moments = .true. ,
   boole_write_exit_data = .true. ,

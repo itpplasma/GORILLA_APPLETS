@@ -117,6 +117,9 @@ module gorilla_applets_types_mod
     integer  :: n_species = 1 !used in self consistent electric field computation
     integer  :: n_electric_potential_updates !used in self consistent electric field computation
     integer  :: update_dimension = 1 !used in self consistent electric field computation
+    logical  :: boole_calc_diffusion_coefficient !used in anomalous transport
+    integer  :: i_scan_option = 0 !used in anomalous transport: 0=no scan, 1=scan over eps_Phi, 2=scan over n2, 3=scan over n3
+    real(dp) :: anomalous_diffusion_coefficient   !anomalous diffusion coefficient in cm^2/s
     logical  :: boole_divertor_intersection !Used in divertor_heat_loads
     logical  :: boole_poincare_plot !Used in divertor_heat_loads
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
@@ -154,6 +157,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:,:), allocatable :: vperp
     integer, dimension(:,:), allocatable :: integration_step
     integer, dimension(:,:), allocatable :: phi_0_mappings
+    real(dp), dimension(:,:), allocatable :: flux_surface
     end type exit_data_t
 
     type(exit_data_t) :: exit_data
@@ -235,6 +239,7 @@ module gorilla_applets_types_mod
     real(dp) :: step
     real(dp) :: remain
     real(dp) :: confined
+    real(dp) :: step_anomalous_transport
     end type time_t
 
     real(dp) :: maximum_s
