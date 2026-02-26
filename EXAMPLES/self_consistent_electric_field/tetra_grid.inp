@@ -38,6 +38,11 @@
  !Symmetry Flux Coordinates Annulus (Minimal value for flux coordinates s)
  sfc_s_min = 1.d-4 ,
 !
+ !Radial grid spacing option
+ !1 ... equidistant in s (normalized toroidal flux)
+ !2 ... equidistant in sqrt(s) (approximately equidistant in minor radius)
+ i_radial_spacing = 1 ,
+!
  !Option for $\theta$-variable being used in grid
  ! 1 ... theta scaling in symmetry flux coordinates
  ! 2 ... theta scaling in geometrical theta angle

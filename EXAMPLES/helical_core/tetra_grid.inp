@@ -5,11 +5,11 @@
 !
  !Grid Size
  !Rectangular: nR, Field-aligned: ns
- n1 = 30 ,
+ n1 = 20 ,
  !Rectangular: nphi, Field-aligned: nphi
  n2 = 30,
  !Rectangular: nZ, Field-aligned: ntheta
- n3 = 30 ,
+ n3 = 50 ,
 !
  !Grid kind
  !1 ... rectangular grid for axisymmetric EFIT data (g-file)
@@ -36,7 +36,14 @@
  n_field_periods_manual =  1 ,
 !
  !Symmetry Flux Coordinates Annulus (Minimal value for flux coordinates s)
+ !Note: with i_radial_spacing=2, a larger sfc_s_min can be used since sqrt spacing
+ !provides better resolution near the core
  sfc_s_min = 1.d-7 ,
+!
+ !Radial grid spacing option
+ !1 ... equidistant in s (normalized toroidal flux)
+ !2 ... equidistant in sqrt(s) (approximately equidistant in minor radius)
+ i_radial_spacing = 2 ,
 !
  !Option for $\theta$-variable being used in grid
  ! 1 ... theta scaling in symmetry flux coordinates

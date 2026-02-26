@@ -147,7 +147,7 @@
 !
 !-------------------------------------------------------------------------------------------!
 !
-        case(14) !Calculate helical core (particle tracing without anomalous displacement)
+        case(14) !Calculate helical core
 !
             call calc_helical_core
 !

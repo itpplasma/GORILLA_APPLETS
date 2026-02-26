@@ -5,7 +5,14 @@
 
 clear all
 
-%% 2D color plot of density
+%% User settings
+% Select which quantity to plot in the 2D color plot:
+%   'density'  - Particle density (t_hamiltonian, moment 1)
+%   'vpar'     - Parallel velocity (vpar_int, moment 3)
+%   'vpar2'    - Parallel velocity squared (vpar2_int, moment 4)
+plot_quantity = 'vpar';
+
+%% 2D color plot of selected quantity
 %Load metadata about grid
 netcdf_file = 'grid_data.nc';
 grid_size = ncread(netcdf_file,"grid_size");
@@ -48,40 +55,69 @@ end
 mesh_color = [204,204,204]/256;
 mesh_thickness = 0.01;
 
-%Load prism moments (density distribution)
+%Load prism moments
+% Column structure (with all 4 optional quantities enabled in gorilla.inp):
+%   Columns 1-2: t_hamiltonian (real, imag) - proportional to density
+%   Columns 3-4: gyrophase (real, imag)
+%   Columns 5-6: vpar_int (real, imag) - parallel velocity integral
+%   Columns 7-8: vpar2_int (real, imag) - parallel velocity squared integral
 prism_moments = load('prism_moments.dat');
-%Column 1 contains real density data (column 2 is imaginary, should be zero)
-n=1;
-moment = prism_moments(:,n);
+
+% Select moment column based on plot_quantity setting
+switch plot_quantity
+    case 'density'
+        moment_col = 1;  % t_hamiltonian (real part)
+        plot_title = 'Particle Density - Helical Core';
+        colorbar_label = 'Density';
+        clim_values = [0, 5e13];
+    case 'vpar'
+        moment_col = 5;  % vpar_int (real part)
+        plot_title = 'Parallel Velocity Distribution - Helical Core';
+        colorbar_label = '$\langle v_\parallel \rangle$';
+        clim_values = 'auto';
+    case 'vpar2'
+        moment_col = 7;  % vpar2_int (real part)
+        plot_title = 'Parallel Velocity Squared - Helical Core';
+        colorbar_label = '$\langle v_\parallel^2 \rangle$';
+        clim_values = 'auto';
+    otherwise
+        error('Unknown plot_quantity: %s. Use ''density'', ''vpar'', or ''vpar2''.', plot_quantity);
+end
+
+moment = prism_moments(:, moment_col);
 moment_plot = zeros(n_triangles,1);
 for i = 1:nphi
     moment_plot = moment_plot + moment(1+(i-1)*n_triangles:i*n_triangles)/nphi;
 end
 %For inner rings with very small volumes, perform an average
 n_prisms_inner_ring = n_extra_rings*nz*2;
-volume_times_density_inner_ring = sum(moment_plot(1:n_prisms_inner_ring).*...
+volume_times_moment_inner_ring = sum(moment_plot(1:n_prisms_inner_ring).*...
                                       volumes_plot(1:n_prisms_inner_ring));
 volume_inner_ring = sum(volumes_plot(1:n_prisms_inner_ring));
-density_inner_ring = volume_times_density_inner_ring / volume_inner_ring;
-moment_plot(1:n_prisms_inner_ring) = density_inner_ring;
+moment_inner_ring = volume_times_moment_inner_ring / volume_inner_ring;
+moment_plot(1:n_prisms_inner_ring) = moment_inner_ring;
 
 exit_data = load('exit_data.dat');
 
 figure
-fill(mesh_x,mesh_y,moment_plot,'LineWidth',mesh_thickness)
+fill(mesh_x,mesh_y,moment_plot)%,'EdgeColor','none')
 xlabel('$R$ / cm','interpreter','latex')
 ylabel('$Z$ / cm','interpreter','latex')
-title('Particle Density - Helical Core')
+title(plot_title)
 grid on
-colorbar
-clim([0,5e13])
+cb = colorbar;
+cb.Label.String = colorbar_label;
+cb.Label.Interpreter = 'latex';
+if ~strcmp(clim_values, 'auto')
+    clim(clim_values);
+end
 
-%% 1D radial density profile (volume-averaged over flux surfaces)
+%% 1D radial profile (volume-averaged over flux surfaces)
 % Number of triangles per radial shell (2 triangles per quadrilateral cell in Z)
 n_triangles_per_radial = nz * 2;
 
-% Compute volume-weighted average density for each radial shell
-density_radial = zeros(nr, 1);
+% Compute volume-weighted average for each radial shell
+moment_radial = zeros(nr, 1);
 volume_radial = zeros(nr, 1);
 
 for ir = 1:nr
@@ -89,21 +125,39 @@ for ir = 1:nr
     t_start = (ir - 1) * n_triangles_per_radial + 1;
     t_end = ir * n_triangles_per_radial;
 
-    % Accumulate volume-weighted density and total volume
-    density_radial(ir) = sum(moment_plot(t_start:t_end) .* volumes_plot(t_start:t_end));
+    % Accumulate volume-weighted moment and total volume
+    moment_radial(ir) = sum(moment_plot(t_start:t_end) .* volumes_plot(t_start:t_end));
     volume_radial(ir) = sum(volumes_plot(t_start:t_end));
 end
 
-% Normalize by volume to get average density in each shell
-density_radial_avg = density_radial ./ volume_radial;
+% Normalize by volume to get average in each shell
+moment_radial_avg = moment_radial ./ volume_radial;
+
+% Set axis labels based on plot_quantity
+switch plot_quantity
+    case 'density'
+        radial_ylabel = 'Volume-averaged density';
+        radial_title = '1D Radial Density Profile - Helical Core';
+        radial_ylim = [0, 5]*1e13;
+    case 'vpar'
+        radial_ylabel = 'Volume-averaged $\langle v_\parallel \rangle$';
+        radial_title = '1D Radial Parallel Velocity Profile - Helical Core';
+        radial_ylim = 'auto';
+    case 'vpar2'
+        radial_ylabel = 'Volume-averaged $\langle v_\parallel^2 \rangle$';
+        radial_title = '1D Radial $v_\parallel^2$ Profile - Helical Core';
+        radial_ylim = 'auto';
+end
 
 figure
-plot(1:nr, density_radial_avg, 'b-', 'LineWidth', 2)
+plot(1:nr, moment_radial_avg, 'b-', 'LineWidth', 2)
 xlabel('Radial index', 'interpreter', 'latex')
-ylabel('Volume-averaged density', 'interpreter', 'latex')
-title('1D Radial Density Profile - Helical Core')
+ylabel(radial_ylabel, 'interpreter', 'latex')
+title(radial_title)
 grid on
-ylim([0,5]*1e13)
+if ~strcmp(radial_ylim, 'auto')
+    ylim(radial_ylim);
+end
 
 %% Flux surface distribution at exit
 % Load exit data

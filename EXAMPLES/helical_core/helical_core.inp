@@ -1,24 +1,18 @@
 ! INPUT FILE FOR HELICAL CORE PARTICLE TRACING
 !
-! This example traces particles in a helical core geometry.
-! It is a simplified version of anomalous_transport that does NOT include:
-!   - Anomalous transport displacement (straight-line displacements in real space)
-!   - Electric potential perturbation scans
-!   - Diffusion coefficient calculation
-!
 &helical_core_nml
 !
   !time for tracing particles (in seconds)
-  time_step = 1.0d-1 ,
+  time_step = 1.0d-2 ,
 !
   !Kinetic energy of particles (in eV)
-  energy_eV = 3.5d3 ,
+  energy_eV = 1.5d4 ,
 !
   !Number of species (usually 1)
   n_species = 1
 !
   !Number of particles to be traced
-  n_particles = 1.0d3 ,
+  n_particles = 1.0d5 ,
 !
   !Compute squares of moments
   boole_squared_moments = .false.,
@@ -45,7 +39,7 @@
   boole_boltzmann_energies = .true.,
 !
   !make density a linear function of poloidal flux
-  boole_linear_density_simulation = .false.,
+  boole_linear_density_simulation = .true.,
 !
   !always initiate pairs of particles where both particles start at the same position but move
   !in opposite direction, this helps to reduce statistical noise

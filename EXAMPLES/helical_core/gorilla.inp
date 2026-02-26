@@ -19,7 +19,7 @@
 !
  !particle species
  !1 ... electron, 2 ... deuterium ion, 3 ... alpha particle, 4 ... ionised tungsten
- ispecies = 1 ,
+ ispecies = 2 ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
