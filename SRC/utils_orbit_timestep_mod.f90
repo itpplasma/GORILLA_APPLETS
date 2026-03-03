@@ -90,6 +90,8 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     use constants, only: ev2erg
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
+    use gorilla_settings_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
 
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
@@ -98,13 +100,14 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     integer :: species = 1
     real(dp) :: local_poloidal_flux, phi_elec_func, temperature
     real(dp) :: r, phi, z
+    real(dp) :: s_value
 
     if (present(species_in)) species = species_in
 
-    !This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by 
-    !only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine 
+    !This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by
+    !only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine
     !(this is necessary for the energy and momentum conserving collision operator)
-    if (in%boole_boltzmann_energies) start%weight(n,species) =  start%weight(n,species)*in%energy_eV*ev2erg 
+    if (in%boole_boltzmann_energies) start%weight(n,species) =  start%weight(n,species)*in%energy_eV*ev2erg
 
     r = z_save(1)
     phi = z_save(2)
@@ -118,10 +121,23 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     endif
 
     if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then
-        local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
+        if (coord_system == 2) then
+            ! Flux coordinates: use s-coordinate directly (s ranges from sfc_s_min to 1)
+            s_value = tetra_physics(ind_tetr)%x1(1) + z_save(1)
+        else if (grid_kind /= 3) then
+            ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
+            local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
+            s_value = (local_poloidal_flux - flux%poloidal_min) / (flux%poloidal_max - flux%poloidal_min)
+        else
+            ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
+            print*, 'Error in calc_particle_weights_and_jperp: Computing radial coordinate from A_phi is only valid for &
+                    &axisymmetric devices. For stellarators (grid_kind=3), use flux coordinates (coord_system=2).'
+            stop
+        endif
     endif
     if (in%boole_linear_density_simulation) then
-        start%weight(n,species) = start%weight(n,species)*(flux%poloidal_max*1.1_dp-local_poloidal_flux)/(flux%poloidal_max*1.1_dp)
+        ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
+        start%weight(n,species) = start%weight(n,species)*(1.1_dp - s_value)/1.1_dp
     endif
 
     if (in%boole_boltzmann_energies) then
@@ -131,7 +147,8 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
             start%weight(n,species) =start%weight(n,species)*sqrt(start%energy(n,species)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
                         & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/(in%energy_eV*ev2erg))
         else
-            temperature = in%energy_eV*ev2erg*(flux%poloidal_max*1.1_dp-local_poloidal_flux)/(flux%poloidal_max*1.1_dp)
+            ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
+            temperature = in%energy_eV*ev2erg*(1.1_dp - s_value)/1.1_dp
             start%weight(n,species) = start%weight(n,species)*sqrt(start%energy(n,species)*ev2erg)/temperature**1.5_dp* &
             & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
         endif

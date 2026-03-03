@@ -316,6 +316,8 @@ subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_
 
     use gorilla_applets_types_mod, only: exit_data, in, flux
     use tetra_physics_mod, only: tetra_physics
+    use gorilla_settings_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
 
     integer, intent(in)                 :: i, n
     integer, intent(in), optional       :: phi_0_mappings, species_in, ind_tetr
@@ -337,12 +339,23 @@ subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_
     exit_data%integration_step(n,species) = i
     if(present(phi_0_mappings)) exit_data%phi_0_mappings(n,species) = phi_0_mappings
 
-    ! Compute flux surface label from poloidal flux (normalized, no square root)
+    ! Compute flux surface label (s-coordinate, ranging from sfc_s_min to 1 in flux coordinates)
     if (present(ind_tetr) .and. ind_tetr /= -1) then
         z_local = x - tetra_physics(ind_tetr)%x1
-        local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi * z_local)
-        exit_data%flux_surface(n,species) = (local_poloidal_flux - flux%poloidal_min) / &
-                                             (flux%poloidal_max - flux%poloidal_min)
+        if (coord_system == 2) then
+            ! Flux coordinates: use s-coordinate directly (x(1) is s)
+            exit_data%flux_surface(n,species) = tetra_physics(ind_tetr)%x1(1) + z_local(1)
+        else if (grid_kind /= 3) then
+            ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
+            local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi * z_local)
+            exit_data%flux_surface(n,species) = (local_poloidal_flux - flux%poloidal_min) / &
+                                                 (flux%poloidal_max - flux%poloidal_min)
+        else
+            ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
+            print*, 'Error in update_exit_data: Computing flux surface label from A_phi is only valid for &
+                    &axisymmetric devices. For stellarators (grid_kind=3), use flux coordinates (coord_system=2).'
+            stop
+        endif
     else
         exit_data%flux_surface(n,species) = -1.0_dp  ! Mark as invalid if outside domain
     endif

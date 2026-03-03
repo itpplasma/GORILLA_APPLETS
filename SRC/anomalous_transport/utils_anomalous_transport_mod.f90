@@ -272,8 +272,8 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
                     if (ind_tetr.eq.-1) then
                         print*, "ATTENTION: particle pushing across the hole surrounding the magnetic axis was unsuccessful"
                         exit
-                    else
-                        print*, "particle pushing across the hole surrounding the magnetic axis was successful"
+                    !else
+                        !print*, "particle pushing across the hole surrounding the magnetic axis was successful"
                     endif
                 else
                     ! Particle left at the outer boundary - displace toward the magnetic axis

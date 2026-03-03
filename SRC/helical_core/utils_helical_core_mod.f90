@@ -29,8 +29,10 @@ subroutine read_helical_core_inp_into_type
                boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, &
-               boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
+               boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
+               boole_eliminate_particles_outside_flux
     integer :: i_integrator_type, seed_option, n_species
+    real(dp) :: flux_threshold_for_elimination
 
     integer :: s_inp_unit
 
@@ -39,7 +41,8 @@ subroutine read_helical_core_inp_into_type
     & boole_linear_density_simulation, boole_antithetic_variate, boole_linear_temperature_simulation, i_integrator_type, &
     & seed_option, boole_write_vertex_indices, boole_write_vertex_coordinates, boole_write_prism_volumes, &
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species
+    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, &
+    & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination
 
     open(newunit = s_inp_unit, file='helical_core.inp', status='unknown')
     read(s_inp_unit,nml=helical_core_nml)
@@ -71,6 +74,8 @@ subroutine read_helical_core_inp_into_type
     in%boole_write_grid_data = boole_write_grid_data
     in%boole_preserve_energy_and_momentum_during_collisions = boole_preserve_energy_and_momentum_during_collisions
     in%n_species = n_species
+    in%boole_eliminate_particles_outside_flux = boole_eliminate_particles_outside_flux
+    in%flux_threshold_for_elimination = flux_threshold_for_elimination
 
     ! Set defaults for anomalous transport-specific parameters (disabled)
     in%boole_calc_diffusion_coefficient = .false.
@@ -141,6 +146,12 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
             !$omp atomic update
             kpart = kpart + 1
             call print_progress(n_particles, kpart, n)
+
+            ! Skip particles that were eliminated at initialization
+            if (start%lost(n, species)) then
+                call update_exit_data(.true., 0.0_dp, start%x(:,n,species), 0.0_dp, 0.0_dp, 0, n, species_in=species, ind_tetr=-1)
+                cycle
+            endif
 
             call initialise_loop_variables(l, n, local_counter, particle_status, t, local_tetr_moments, x, vpar, vperp, species)
 
@@ -306,5 +317,65 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
     enddo
 
 end subroutine orbit_timestep_helical_core
+
+! ====================================================================
+subroutine eliminate_particles_outside_flux_threshold
+!
+! Eliminates particles whose starting position has normalized poloidal flux
+! greater than flux_threshold_for_elimination. Particles are marked as lost
+! by setting start%lost to .true.
+!
+! The normalized poloidal flux is computed as:
+!   s = (local_flux - flux_min) / (flux_max - flux_min)
+! where s=0 at the magnetic axis and s=1 at the boundary.
+!
+    use gorilla_applets_types_mod, only: in, start, flux
+    use tetra_physics_mod, only: tetra_physics
+    use find_tetra_mod, only: find_tetra
+
+    integer  :: n, species, ind_tetr, iface, n_eliminated
+    real(dp) :: vpar, vperp, local_flux, normalized_flux
+    real(dp), dimension(3) :: x, z_local
+
+    if (.not. in%boole_eliminate_particles_outside_flux) return
+
+    n_eliminated = 0
+
+    do species = 1, in%n_species
+        do n = 1, in%num_particles
+            if (start%lost(n, species)) cycle  ! Already marked as lost
+
+            x = start%x(:, n, species)
+            vpar = 0.0_dp
+            vperp = 0.0_dp
+
+            ! Find which tetrahedron this particle is in
+            call find_tetra(x, vpar, vperp, ind_tetr, iface)
+
+            if (ind_tetr == -1) then
+                ! Particle is outside the grid - mark as lost
+                start%lost(n, species) = .true.
+                n_eliminated = n_eliminated + 1
+                cycle
+            endif
+
+            ! Compute local poloidal flux
+            z_local = x - tetra_physics(ind_tetr)%x1
+            local_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi * z_local)
+
+            ! Compute normalized flux (0 at axis, 1 at boundary)
+            normalized_flux = (local_flux - flux%poloidal_min) / (flux%poloidal_max - flux%poloidal_min)
+
+            ! Eliminate particle if flux exceeds threshold
+            if (normalized_flux > in%flux_threshold_for_elimination) then
+                start%lost(n, species) = .true.
+                n_eliminated = n_eliminated + 1
+            endif
+        enddo
+    enddo
+
+    print *, 'Eliminated ', n_eliminated, ' particles with normalized flux > ', in%flux_threshold_for_elimination
+
+end subroutine eliminate_particles_outside_flux_threshold
 
 end module utils_helical_core_mod

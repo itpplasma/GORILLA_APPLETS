@@ -44,7 +44,7 @@ subroutine calc_self_consistent_electric_field
     call calc_volume_integrals_in_flux_coordinates
     s%temperature = in%energy_eV
 
-    if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
+    !if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
 
     call initialize_exit_data
     call associate_flux_labels_with_tetrahedra_and_vertices

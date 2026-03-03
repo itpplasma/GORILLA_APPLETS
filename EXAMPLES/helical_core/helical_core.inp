@@ -41,6 +41,13 @@
   !make density a linear function of poloidal flux
   boole_linear_density_simulation = .true.,
 !
+  !Eliminate particles starting outside a flux surface threshold
+  !boole_eliminate_particles_outside_flux = .true. enables elimination
+  !flux_threshold_for_elimination = normalized flux value (0=axis, 1=boundary)
+  !Particles with normalized poloidal flux > threshold are eliminated at start
+  boole_eliminate_particles_outside_flux = .true.,
+  flux_threshold_for_elimination = 0.5d0,
+!
   !always initiate pairs of particles where both particles start at the same position but move
   !in opposite direction, this helps to reduce statistical noise
   boole_antithetic_variate = .false.,
