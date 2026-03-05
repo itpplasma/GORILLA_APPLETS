@@ -267,6 +267,7 @@ subroutine set_rest_of_start_type(rand_matrix)
     endif
 
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
+    start%lost = .false.
 
 end subroutine set_rest_of_start_type
 

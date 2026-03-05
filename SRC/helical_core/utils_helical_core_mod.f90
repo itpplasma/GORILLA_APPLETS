@@ -30,7 +30,7 @@ subroutine read_helical_core_inp_into_type
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, &
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
-               boole_eliminate_particles_outside_flux
+               boole_eliminate_particles_outside_flux, boole_delta_f
     integer :: i_integrator_type, seed_option, n_species
     real(dp) :: flux_threshold_for_elimination
 
@@ -42,7 +42,7 @@ subroutine read_helical_core_inp_into_type
     & seed_option, boole_write_vertex_indices, boole_write_vertex_coordinates, boole_write_prism_volumes, &
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, &
-    & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination
+    & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f
 
     open(newunit = s_inp_unit, file='helical_core.inp', status='unknown')
     read(s_inp_unit,nml=helical_core_nml)
@@ -76,6 +76,7 @@ subroutine read_helical_core_inp_into_type
     in%n_species = n_species
     in%boole_eliminate_particles_outside_flux = boole_eliminate_particles_outside_flux
     in%flux_threshold_for_elimination = flux_threshold_for_elimination
+    in%boole_delta_f = boole_delta_f
 
     ! Set defaults for anomalous transport-specific parameters (disabled)
     in%boole_calc_diffusion_coefficient = .false.
@@ -246,6 +247,7 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
         endif
         z_save = x - tetra_physics(ind_tetr)%x1
         call calc_particle_weights_and_jperp(n, z_save, vpar, vperp, ind_tetr, species)
+        if (in%boole_delta_f) call adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
         particle_status%initialized = .true.
     endif
 
@@ -272,8 +274,8 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
                     if (ind_tetr.eq.-1) then
                         print*, "ATTENTION: particle pushing across the hole surrounding the magnetic axis was unsuccessful"
                         exit
-                    else
-                        print*, "particle pushing across the hole surrounding the magnetic axis was successful"
+                    !else
+                        !print*, "particle pushing across the hole surrounding the magnetic axis was successful"
                     endif
                 else
                     ! Particle left at the outer boundary - displace toward the magnetic axis
@@ -377,5 +379,129 @@ subroutine eliminate_particles_outside_flux_threshold
     print *, 'Eliminated ', n_eliminated, ' particles with normalized flux > ', in%flux_threshold_for_elimination
 
 end subroutine eliminate_particles_outside_flux_threshold
+
+! ====================================================================
+subroutine calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
+!
+! Computes the contravariant velocity component in the radial direction (v^r).
+!
+! The guiding-center velocity is computed from the polynomial pusher's
+! first-order coefficient (dz/dtau = b + A*z), then converted to physical
+! time and projected onto the gradient of s.
+!
+! Input:
+!   z_save   - local position within tetrahedron (x - x1)
+!   vpar     - parallel velocity
+!   vperp    - perpendicular velocity
+!   ind_tetr - tetrahedron index
+!
+! Output:
+!   v_r      - contravariant velocity component in radial direction
+!
+    use gorilla_applets_types_mod, only: flux
+    use tetra_physics_mod, only: tetra_physics, cm_over_e
+    use constants, only: clight
+
+    real(dp), dimension(3), intent(in) :: z_save
+    real(dp), intent(in) :: vpar, vperp
+    integer, intent(in) :: ind_tetr
+    real(dp), intent(out) :: v_r
+
+    real(dp) :: perpinv, k1, k3, bmod, phi_elec, vperp2, vpar2
+    real(dp), dimension(4) :: z4, b, amat_in_z
+    real(dp), dimension(4,4) :: amat
+    real(dp), dimension(3) :: v_gc_tau, grad_r
+    real(dp) :: dt_dtau
+
+    ! Compute B-field magnitude at particle position
+    bmod = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gb * z_save)
+
+    ! Compute electric potential at particle position
+    phi_elec = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi * z_save)
+
+    ! Compute perpendicular invariant (negative by GORILLA convention)
+    perpinv = -0.5_dp * vperp**2 / bmod
+
+    ! Compute auxiliary quantities (matching pusher_tetra_poly convention)
+    vperp2 = vperp**2
+    vpar2 = vpar**2
+    k1 = vperp2 + vpar2 + 2.0_dp * perpinv * tetra_physics(ind_tetr)%bmod1
+    k3 = tetra_physics(ind_tetr)%Phi1 - phi_elec
+
+    ! Build the 4-vector z = (z_save, vpar)
+    z4(1:3) = z_save
+    z4(4) = vpar
+
+    ! Compute ODE coefficients b (inhomogeneous term)
+    b(1:3) = (tetra_physics(ind_tetr)%curlh * k1 &
+            + perpinv * tetra_physics(ind_tetr)%gBxh1) * cm_over_e &
+            - clight * (2.0_dp * k3 * tetra_physics(ind_tetr)%curlh &
+            + tetra_physics(ind_tetr)%gPhixh1)
+    b(4) = perpinv * tetra_physics(ind_tetr)%gBxcurlA - clight / cm_over_e * tetra_physics(ind_tetr)%gPhixcurlA
+
+    ! Compute ODE matrix A
+    amat = 0.0_dp
+    amat(1:3,1:3) = perpinv * cm_over_e * tetra_physics(ind_tetr)%alpmat &
+                  - clight * tetra_physics(ind_tetr)%betmat
+    amat(4,4) = perpinv * cm_over_e * tetra_physics(ind_tetr)%spalpmat &
+              - clight * tetra_physics(ind_tetr)%spbetmat
+    amat(1:3,4) = tetra_physics(ind_tetr)%curlA
+
+    ! Compute A*z
+    amat_in_z = matmul(amat, z4)
+
+    ! Guiding-center velocity in tau: dz/dtau = b + A*z (first-order coefficient)
+    v_gc_tau = b(1:3) + amat_in_z(1:3)
+
+    ! Convert from tau to Hamiltonian time: v_gc = v_gc_tau / dt_dtau
+    dt_dtau = tetra_physics(ind_tetr)%dt_dtau_const
+
+    ! Compute gradient of r from gradient of A_phi normalized by poloidal flux at boundary
+    grad_r = tetra_physics(ind_tetr)%gAphi / flux%poloidal_max
+
+    ! Compute contravariant velocity component v^r = v_gc . grad_r
+    v_r = sum(v_gc_tau * grad_r) / dt_dtau
+
+end subroutine calc_v_r
+
+! ====================================================================
+subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
+!
+! Sets particle weights for the delta-f method.
+!
+    use gorilla_applets_types_mod, only: start, in, g
+    use tetra_physics_mod, only: tetra_physics
+    use volume_integrals_and_sqrt_g_mod, only: sqrt_g
+    use supporting_functions_mod, only: bmod_func
+    use constants, only: pi
+
+    integer, intent(in) :: n, ind_tetr, species
+    real(dp), dimension(3), intent(in) :: z_save
+    real(dp), intent(in) :: vpar, vperp
+
+    real(dp) :: v_r, base_weight, r, z
+
+    ! r = z_save(1)
+    ! z = z_save(3)
+
+    ! base_weight = in%density * (g%amax - g%amin) * (g%cmax - g%cmin) * 2 * pi
+
+    ! if (in%boole_refined_sqrt_g) then
+    !     base_weight = base_weight * (sqrt_g(ind_tetr,1) + r*sqrt_g(ind_tetr,2) + z*sqrt_g(ind_tetr,3)) / &
+    !                                 (sqrt_g(ind_tetr,4) + r*sqrt_g(ind_tetr,5) + z*sqrt_g(ind_tetr,6))
+    ! else
+    !     base_weight = base_weight * (r + tetra_physics(ind_tetr)%x1(1))
+    ! endif
+
+    call calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
+    ! start%jperp(n,species) = start%particle_mass(species) * vperp**2 * start%cm_over_e(species) &
+    !                       / (2 * bmod_func(z_save, ind_tetr)) * (-1)
+
+    start%weight(n,species) = start%weight(n,species) * (-1)*v_r
+    !>the factor (-1) represents partial f_M / partial s (f_M is already accounted for previously, 
+    !later on I will clean up the weight calculation and make everything easier to read and follow)
+    start%weight(n,species) = start%weight(n,species) * (-1) 
+
+end subroutine adapt_weights_delta_f
 
 end module utils_helical_core_mod

@@ -3,7 +3,7 @@
 &helical_core_nml
 !
   !time for tracing particles (in seconds)
-  time_step = 1.0d-2 ,
+  time_step = 1.0d-20,!1.0d-1 ,
 !
   !Kinetic energy of particles (in eV)
   energy_eV = 1.5d4 ,
@@ -12,7 +12,7 @@
   n_species = 1
 !
   !Number of particles to be traced
-  n_particles = 1.0d5 ,
+  n_particles = 1.0d5,!1.0d5 ,
 !
   !Compute squares of moments
   boole_squared_moments = .false.,
@@ -45,8 +45,11 @@
   !boole_eliminate_particles_outside_flux = .true. enables elimination
   !flux_threshold_for_elimination = normalized flux value (0=axis, 1=boundary)
   !Particles with normalized poloidal flux > threshold are eliminated at start
-  boole_eliminate_particles_outside_flux = .true.,
+  boole_eliminate_particles_outside_flux = .false.,
   flux_threshold_for_elimination = 0.5d0,
+!
+  !Use delta-f method for particle weights
+  boole_delta_f = .true.,
 !
   !always initiate pairs of particles where both particles start at the same position but move
   !in opposite direction, this helps to reduce statistical noise

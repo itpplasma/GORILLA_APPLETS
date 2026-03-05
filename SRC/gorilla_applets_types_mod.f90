@@ -124,6 +124,7 @@ module gorilla_applets_types_mod
     logical  :: boole_poincare_plot !Used in divertor_heat_loads
     logical  :: boole_eliminate_particles_outside_flux !Used in helical_core
     real(dp) :: flux_threshold_for_elimination !Used in helical_core (0=axis, 1=boundary)
+    logical  :: boole_delta_f !Used in helical_core: use delta-f method for weights
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
     integer  :: n_mappings_ignored !Used in divertor_heat_loads
     real(dp) :: lambda !Used in divertor_heat_loads

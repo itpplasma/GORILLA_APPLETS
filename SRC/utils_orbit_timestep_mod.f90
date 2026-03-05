@@ -127,7 +127,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
         else if (grid_kind /= 3) then
             ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
             local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
-            s_value = (local_poloidal_flux - flux%poloidal_min) / (flux%poloidal_max - flux%poloidal_min)
+            s_value = local_poloidal_flux / flux%poloidal_max
         else
             ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
             print*, 'Error in calc_particle_weights_and_jperp: Computing radial coordinate from A_phi is only valid for &
