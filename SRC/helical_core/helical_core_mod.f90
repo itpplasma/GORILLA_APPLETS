@@ -26,12 +26,12 @@ subroutine calc_helical_core
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, output
+    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, output, weights
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
         get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &
         calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
-        fourier_transform_moments, calc_starting_conditions
+        fourier_transform_moments, calc_starting_conditions, set_weights
     use utils_helical_core_mod, only: read_helical_core_inp_into_type, &
         parallelised_particle_pushing_helical_core, eliminate_particles_outside_flux_threshold
 
@@ -53,6 +53,7 @@ subroutine calc_helical_core
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
 
     call calc_starting_conditions
+    call set_weights
     call eliminate_particles_outside_flux_threshold
 
     ! Standard particle tracing (no scan, no diffusion coefficient calculation)

@@ -20,7 +20,7 @@ subroutine calc_anomalous_transport
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
         get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &
         calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
-        fourier_transform_moments, calc_starting_conditions
+        fourier_transform_moments, calc_starting_conditions, set_weights
     use utils_anomalous_transport_mod, only: read_anomalous_transport_inp_into_type, &
         parallelised_particle_pushing_anomalous_transport, calc_diffusion_coefficient, &
         scan_anomalous_transport
@@ -43,6 +43,7 @@ subroutine calc_anomalous_transport
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
 
     call calc_starting_conditions
+    call set_weights
 
     ! Scan over parameter, calculate diffusion coefficient, or run standard transport
     ! i_scan_option: 0=no scan, 1=scan over eps_Phi, 2=scan over n3, 3=scan over n2

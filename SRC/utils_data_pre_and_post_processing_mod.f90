@@ -111,7 +111,7 @@ end subroutine deallocate_output
 
 subroutine calc_starting_conditions(verts)
 
-    use gorilla_applets_types_mod, only: in
+    use gorilla_applets_types_mod, only: in, start
 
     real(dp), dimension(:,:), allocatable, intent(out), optional :: verts
     real(dp), dimension(:,:,:), allocatable                :: rand_matrix
@@ -122,8 +122,8 @@ subroutine calc_starting_conditions(verts)
     call RANDOM_NUMBER(rand_matrix)
 
     call allocate_start_type
+    call allocate_weights
     call set_starting_positions(rand_matrix)
-    call set_weights
     call set_rest_of_start_type(rand_matrix)
 
 end subroutine calc_starting_conditions
@@ -178,7 +178,6 @@ subroutine allocate_start_type
     allocate(start%x(3,in%num_particles,in%n_species))
     allocate(start%pitch(in%num_particles,in%n_species))
     allocate(start%energy(in%num_particles,in%n_species))
-    allocate(start%weight(in%num_particles,in%n_species))
     allocate(start%jperp(in%num_particles,in%n_species))
     allocate(start%lost(in%num_particles,in%n_species))
     allocate(start%particle_charge(in%n_species))
@@ -188,6 +187,15 @@ subroutine allocate_start_type
     allocate(start%v0(in%n_species))
 
 end subroutine allocate_start_type
+
+subroutine allocate_weights
+
+    use gorilla_applets_types_mod, only: in, weights
+
+    allocate(weights%w(in%num_particles,in%n_species))
+    if (in%boole_delta_f) allocate(weights%original(in%num_particles,in%n_species))
+
+end subroutine allocate_weights
 
 subroutine set_starting_positions(rand_matrix)
 
@@ -220,16 +228,16 @@ end subroutine set_starting_positions
 
 subroutine set_weights
 
-    use gorilla_applets_types_mod, only: in, start, g, c
+    use gorilla_applets_types_mod, only: in, weights, g, c
     use constants, only: pi
 
-    start%weight = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+    weights%w = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
 
     if (in%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        start%weight =  start%weight*10/sqrt(pi)
+        weights%w =  weights%w*10/sqrt(pi)
     endif
 
-    c%weight_factor = 1/(start%weight(1,1)*g%amax)
+    c%weight_factor = 1/(weights%w(1,1)*g%amax)
 
 end subroutine set_weights
 
@@ -665,19 +673,19 @@ end subroutine find_minimal_angle_between_curlA_and_tetrahedron_faces
 
 subroutine analyse_particle_weight_distribution
 
-    use gorilla_applets_types_mod, only: in, start
+    use gorilla_applets_types_mod, only: in, weights
 
     integer  :: i
     real(dp) :: maximum_weight, minimum_weight, average_weight
 
-    maximum_weight = start%weight(1,1)
-    minimum_weight = start%weight(1,1)
+    maximum_weight = weights%w(1,1)
+    minimum_weight = weights%w(1,1)
     average_weight = 0
 
     do i = 1,int(in%n_particles)
-        average_weight = average_weight + start%weight(i,1)
-        maximum_weight = max(maximum_weight,start%weight(i,1))
-        minimum_weight = min(minimum_weight,start%weight(i,1))
+        average_weight = average_weight + weights%w(i,1)
+        maximum_weight = max(maximum_weight,weights%w(i,1))
+        minimum_weight = min(minimum_weight,weights%w(i,1))
     enddo
 
     average_weight = average_weight/in%n_particles

@@ -69,7 +69,7 @@ switch plot_quantity
         moment_col = 1;  % t_hamiltonian (real part)
         plot_title = 'Particle Density - Helical Core';
         colorbar_label = 'Density';
-        clim_values = [0, 5e13];
+        clim_values = 'auto';%[0, 5e13];
     case 'vpar'
         moment_col = 5;  % vpar_int (real part)
         plot_title = 'Parallel Velocity Distribution - Helical Core';
@@ -100,7 +100,7 @@ moment_plot(1:n_prisms_inner_ring) = moment_inner_ring;
 exit_data = load('exit_data.dat');
 
 figure
-fill(mesh_x,mesh_y,moment_plot)%,'EdgeColor','none')
+fill(mesh_x,mesh_y,moment_plot,'EdgeColor','none')
 xlabel('$R$ / cm','interpreter','latex')
 ylabel('$Z$ / cm','interpreter','latex')
 title(plot_title)
@@ -111,6 +111,11 @@ cb.Label.Interpreter = 'latex';
 if ~strcmp(clim_values, 'auto')
     clim(clim_values);
 end
+
+%%
+figure
+plot(moment_plot)
+grid on
 
 %% 1D radial profile (volume-averaged over flux surfaces)
 % Number of triangles per radial shell (2 triangles per quadrilateral cell in Z)
@@ -149,8 +154,24 @@ switch plot_quantity
         radial_ylim = 'auto';
 end
 
+midplane_outboard_indices = (1:nz:(nr+1)*nz)+9;
+r_values = (coordinates(midplane_outboard_indices(2:end),1)+coordinates(midplane_outboard_indices(1:end-1),1))/2;
+n = 3.0e13;
+ev2erg=1.6022d-12;
+ev = 1.0e3;
+T = ev*ev2erg;
+m = 2*1.6726d-24;
+tau_c = 6.6254e-04;
+v_th = sqrt(T*2/m);
+tau_c = 1/(2*v_th*1.0939620792726545E-005)
+R = 165;
+t_tr = 2.0d-3;
+
 figure
-plot(1:nr, moment_radial_avg, 'b-', 'LineWidth', 2)
+plot(r_values, -moment_radial_avg, 'b-', 'LineWidth', 2)
+hold on
+plot(r_values,n/3*v_th^2/t_tr*tau_c*(1-1.46*sqrt((r_values-R)/R)))
+hold off
 xlabel('Radial index', 'interpreter', 'latex')
 ylabel(radial_ylabel, 'interpreter', 'latex')
 title(radial_title)
@@ -158,6 +179,10 @@ grid on
 if ~strcmp(radial_ylim, 'auto')
     ylim(radial_ylim);
 end
+
+%%
+
+
 
 %% Flux surface distribution at exit
 % Load exit data
@@ -193,3 +218,37 @@ ylabel('$Z$ / cm', 'interpreter', 'latex')
 title('Final Particle Positions - Helical Core')
 grid on
 axis equal
+
+%%
+
+ev = 1.5e4;
+flux = 21987891.968870077;
+c = 2.9979d10;
+R=165;
+r = 50;
+ev2erg=1.6022d-12;
+n = 3.0e13;
+echarge=4.8032d-10;
+j_par= c*R*ev*ev2erg*n/flux*1.46*sqrt(r/R)/echarge
+
+%% ion ion collision time
+n = 3.0e13;
+mu = 2;
+ev = 1.0e3;%1.5e4;
+T = ev;
+lambda = 15;
+
+nu = n*lambda*1.5e-7*mu^(-1/2)*T^(-3/2);
+
+tau_c = 1/nu
+
+%%
+ev = 1.5e4;
+c = 2.9979d10;
+ev2erg=1.6022d-12;
+H=ev*ev2erg;
+q=4.8032d-10;
+B=15000;
+R=50;
+n=3.0e13;
+vr_partial_f_partial_r = c*H*1.5/(q*B*R)*n*1/50

@@ -173,7 +173,7 @@ end subroutine carry_out_collisions
 
 subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
 
-    use gorilla_applets_types_mod, only: in, c, time_t, start
+    use gorilla_applets_types_mod, only: in, c, time_t, start, weights
     use collis_ions, only: stost
     use collis_ions, only: collis_init
     use tetra_physics_mod, only: particle_mass,particle_charge
@@ -242,10 +242,10 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         
         !$omp critical
         c%vpar_mat(j,ind_tetr) = vpar_mat_save - &
-                            c%weight_factor*start%weight(n,species)*delta_vpar/w_v*particle_to_background_coupling_strength
+                            c%weight_factor*weights%w(n,species)*delta_vpar/w_v*particle_to_background_coupling_strength
         vpar_mat = c%vpar_mat(j,ind_tetr)
         c%temp_mat(j,ind_tetr) = c%temp_mat(j,ind_tetr) + particle_mass/3*(vpar_mat_save**2 - vpar_mat**2) - &
-                            2.0_dp/3.0_dp*c%weight_factor*start%weight(n,species)*delta_epsilon/w_t &
+                            2.0_dp/3.0_dp*c%weight_factor*weights%w(n,species)*delta_epsilon/w_t &
                             *particle_to_background_coupling_strength
         !$omp end critical
     enddo

@@ -27,7 +27,7 @@ end subroutine identify_particles_entering_annulus
 
 subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quantities,species_in)
 
-    use gorilla_applets_types_mod, only: moment_specs, start, in
+    use gorilla_applets_types_mod, only: moment_specs, weights, in
     use gorilla_settings_mod, only: optional_quantities_type
 
     type(optional_quantities_type), intent(in)   :: optional_quantities
@@ -44,16 +44,16 @@ subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quan
         select case(moment_specs%moments_selector(m))
             case(1)
                 local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
-                                                    & start%weight(n,species)*optional_quantities%t_hamiltonian
+                                                    & weights%w(n,species)*optional_quantities%t_hamiltonian
             case(2)
                 local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
-                                                    & start%weight(n,species)*optional_quantities%gyrophase
+                                                    & weights%w(n,species)*optional_quantities%gyrophase
             case(3)
                 local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
-                                                    & start%weight(n,species)*optional_quantities%vpar_int
+                                                    & weights%w(n,species)*optional_quantities%vpar_int
             case(4)
                 local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
-                                                    & start%weight(n,species)*optional_quantities%vpar2_int
+                                                    & weights%w(n,species)*optional_quantities%vpar2_int
         end select
     enddo
 
@@ -85,7 +85,7 @@ end subroutine initialize_constants_of_motion
 
 subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species_in)
 
-    use gorilla_applets_types_mod, only: in, flux, start
+    use gorilla_applets_types_mod, only: in, flux, start, weights
     use tetra_physics_mod, only: tetra_physics
     use constants, only: ev2erg
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
@@ -107,17 +107,17 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     !This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by
     !only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine
     !(this is necessary for the energy and momentum conserving collision operator)
-    if (in%boole_boltzmann_energies) start%weight(n,species) =  start%weight(n,species)*in%energy_eV*ev2erg
+    if (in%boole_boltzmann_energies) weights%w(n,species) =  weights%w(n,species)*in%energy_eV*ev2erg
 
     r = z_save(1)
     phi = z_save(2)
     z = z_save(3)
 
     if (in%boole_refined_sqrt_g) then
-        start%weight(n,species) = start%weight(n,species)* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
+        weights%w(n,species) = weights%w(n,species)* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
                                         &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
     else
-        start%weight(n,species) = start%weight(n,species)*(r + tetra_physics(ind_tetr)%x1(1))
+        weights%w(n,species) = weights%w(n,species)*(r + tetra_physics(ind_tetr)%x1(1))
     endif
 
     if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then
@@ -137,19 +137,19 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     endif
     if (in%boole_linear_density_simulation) then
         ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
-        start%weight(n,species) = start%weight(n,species)*(1.1_dp - s_value)/1.1_dp
+        weights%w(n,species) = weights%w(n,species)*(1.1_dp - s_value)/1.1_dp
     endif
 
     if (in%boole_boltzmann_energies) then
         !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
         phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
         if (.not. in%boole_linear_temperature_simulation) then
-            start%weight(n,species) =start%weight(n,species)*sqrt(start%energy(n,species)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
+            weights%w(n,species) = weights%w(n,species)*sqrt(start%energy(n,species)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
                         & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/(in%energy_eV*ev2erg))
         else
             ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
             temperature = in%energy_eV*ev2erg*(1.1_dp - s_value)/1.1_dp
-            start%weight(n,species) = start%weight(n,species)*sqrt(start%energy(n,species)*ev2erg)/temperature**1.5_dp* &
+            weights%w(n,species) = weights%w(n,species)*sqrt(start%energy(n,species)*ev2erg)/temperature**1.5_dp* &
             & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
         endif
     endif

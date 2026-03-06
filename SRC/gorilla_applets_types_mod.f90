@@ -33,14 +33,13 @@ module gorilla_applets_types_mod
     real(dp), dimension(:,:,:), allocatable :: x
     real(dp), dimension(:,:),   allocatable :: pitch
     real(dp), dimension(:,:),   allocatable :: energy
-    real(dp), dimension(:,:),   allocatable :: weight
     real(dp), dimension(:,:),   allocatable :: jperp
-    real(dp), dimension(:),     allocatable :: particle_charge !used in self consistent electric field computation 
+    real(dp), dimension(:),     allocatable :: particle_charge !used in self consistent electric field computation
     real(dp), dimension(:),     allocatable :: particle_mass !used in self consistent electric field computation
     real(dp), dimension(:),     allocatable :: cm_over_e !used in self consistent electric field computation
-    real(dp), dimension(:),     allocatable :: v0 !This is the thermal velocity, not the particle velocity; 
+    real(dp), dimension(:),     allocatable :: v0 !This is the thermal velocity, not the particle velocity;
                                                   !used in self consistent electric field computation
-    real(dp), dimension(:),     allocatable :: t !tracing time, used in self consistent electric field computation
+    real(dp), dimension(:),     allocatable :: t !total tracing time
     real(dp)                                :: epsilon_max
     logical, dimension(:,:),    allocatable :: lost
     end type start_t
@@ -124,7 +123,7 @@ module gorilla_applets_types_mod
     logical  :: boole_poincare_plot !Used in divertor_heat_loads
     logical  :: boole_eliminate_particles_outside_flux !Used in helical_core
     real(dp) :: flux_threshold_for_elimination !Used in helical_core (0=axis, 1=boundary)
-    logical  :: boole_delta_f !Used in helical_core: use delta-f method for weights
+    logical  :: boole_delta_f = .false. !Used in helical_core: use delta-f method for weights
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
     integer  :: n_mappings_ignored !Used in divertor_heat_loads
     real(dp) :: lambda !Used in divertor_heat_loads
@@ -244,6 +243,13 @@ module gorilla_applets_types_mod
     real(dp) :: confined
     real(dp) :: step_anomalous_transport
     end type time_t
+
+    type weights_t
+    real(dp), dimension(:,:), allocatable :: w         ! current weight (particles x species)
+    real(dp), dimension(:,:), allocatable :: original  ! original weight, used in helical_core for delta-f damping
+    end type weights_t
+
+    type(weights_t) :: weights
 
     real(dp) :: maximum_s
 

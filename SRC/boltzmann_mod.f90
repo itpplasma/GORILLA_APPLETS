@@ -109,6 +109,7 @@ subroutine calc_boltzmann
     call calc_volume_integrals
     call initialize_exit_data
     call calc_starting_conditions(verts)
+    call set_weights
     call calc_poloidal_flux(verts)
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
     call give_file_names

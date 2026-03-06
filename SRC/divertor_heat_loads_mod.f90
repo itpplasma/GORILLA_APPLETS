@@ -387,8 +387,8 @@ end subroutine close_files
 
 subroutine calc_starting_conditions
 
-    use gorilla_applets_types_mod, only: in
-    
+    use gorilla_applets_types_mod, only: in, start
+
     real(dp), dimension(:,:), allocatable  :: rand_matrix
 
     call set_coordinate_limits
@@ -397,13 +397,14 @@ subroutine calc_starting_conditions
     call RANDOM_NUMBER(rand_matrix)
 
     call allocate_start_type
+    call allocate_weights
     call set_start_type(rand_matrix)
 
 end subroutine calc_starting_conditions
 
 subroutine set_start_type(rand_matrix)
 
-    use gorilla_applets_types_mod, only: in, start, g
+    use gorilla_applets_types_mod, only: in, start, g, weights
     use constants, only: pi, ev2erg
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
@@ -421,11 +422,11 @@ subroutine set_start_type(rand_matrix)
         start%pitch(i,1) = sqrt(1-constant/start%x(1,i,1))
     enddo
 
-    start%weight = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+    weights%w = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
     start%energy = in%energy_eV
 
     if (in%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        start%weight =  start%weight*10/sqrt(pi)
+        weights%w =  weights%w*10/sqrt(pi)
         start%energy(:,1) = 5*in%energy_eV*rand_matrix(5,:)
     endif
     
@@ -456,10 +457,17 @@ subroutine allocate_start_type
     allocate(start%x(3,in%num_particles,1))
     allocate(start%pitch(in%num_particles,1))
     allocate(start%energy(in%num_particles,1))
-    allocate(start%weight(in%num_particles,1))
     allocate(start%jperp(in%num_particles,1))
 
 end subroutine allocate_start_type
+
+subroutine allocate_weights
+
+    use gorilla_applets_types_mod, only: in, weights
+
+    allocate(weights%w(in%num_particles,1))
+
+end subroutine allocate_weights
 
 subroutine create_magnetic_field_file
     use tetra_grid_settings_mod, only: n1,n2,n3

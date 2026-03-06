@@ -469,7 +469,7 @@ subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
 !
 ! Sets particle weights for the delta-f method.
 !
-    use gorilla_applets_types_mod, only: start, in, g
+    use gorilla_applets_types_mod, only: start, in, g, weights
     use tetra_physics_mod, only: tetra_physics
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
@@ -497,10 +497,10 @@ subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
     ! start%jperp(n,species) = start%particle_mass(species) * vperp**2 * start%cm_over_e(species) &
     !                       / (2 * bmod_func(z_save, ind_tetr)) * (-1)
 
-    start%weight(n,species) = start%weight(n,species) * vpar!(-1)*v_r
-    !>the factor (-1) represents partial f_M / partial s (f_M is already accounted for previously, 
+    weights%w(n,species) = weights%w(n,species) * vpar!(-1)*v_r
+    !>the factor (-1) represents partial f_M / partial s (f_M is already accounted for previously,
     !later on I will clean up the weight calculation and make everything easier to read and follow)
-    start%weight(n,species) = start%weight(n,species) * (-1) 
+    weights%w(n,species) = weights%w(n,species) * (-1)
 
 end subroutine adapt_weights_delta_f
 
