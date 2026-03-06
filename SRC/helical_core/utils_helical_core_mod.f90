@@ -163,7 +163,7 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
 
                 ! Apply collisions if enabled
                 if (in%boole_collisions) then
-                    call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species)
+                    call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species,iswmode_in=4)
                     t%step = t%step / start%v0(species)
                 else
                     t%step = start%t(species) - t%confined
@@ -497,7 +497,7 @@ subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
     ! start%jperp(n,species) = start%particle_mass(species) * vperp**2 * start%cm_over_e(species) &
     !                       / (2 * bmod_func(z_save, ind_tetr)) * (-1)
 
-    start%weight(n,species) = start%weight(n,species) * (-1)*v_r
+    start%weight(n,species) = start%weight(n,species) * vpar!(-1)*v_r
     !>the factor (-1) represents partial f_M / partial s (f_M is already accounted for previously, 
     !later on I will clean up the weight calculation and make everything easier to read and follow)
     start%weight(n,species) = start%weight(n,species) * (-1) 

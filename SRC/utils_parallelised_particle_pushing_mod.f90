@@ -137,33 +137,41 @@ subroutine add_local_counter_to_counter(local_counter)
     
 end subroutine add_local_counter_to_counter
 
-subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species_in)
+subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species_in, iswmode_in)
 
     use gorilla_applets_types_mod, only: in, time_t
     use find_tetra_mod, only: find_tetra
-    
+
     integer, intent(in) :: i, n
     integer, intent(in), optional :: species_in
+    integer, intent(in), optional :: iswmode_in
     integer :: species = 1
+    integer :: iswmode = 1
     real(dp), dimension(3), intent(inout) :: x
     real(dp), intent(inout) :: vpar, vperp
     type(time_t) :: t
     integer :: ind_tetr, iface
 
     if (present(species_in)) species = species_in
+    !iswmode options:
+    !1 - full operator (pitch-angle and energy scattering and drag)
+    !2 - energy scattering and drag only
+    !3 - drag only
+    !4 - pitch-angle scattering only
+    if (present(iswmode_in)) iswmode = iswmode_in
 
     if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
     if (.not.(ind_tetr.eq.-1)) then
         if (in%boole_preserve_energy_and_momentum_during_collisions) then
-            call collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
+            call collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
         else
-            call collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
+            call collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
         endif
     endif
 
 end subroutine carry_out_collisions
 
-subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
+subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
 
     use gorilla_applets_types_mod, only: in, c, time_t, start
     use collis_ions, only: stost
@@ -171,26 +179,20 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     use tetra_physics_mod, only: particle_mass,particle_charge
     use constants, only: echarge,amp
     use gorilla_applets_settings_mod, only: i_option
-    
-    integer, intent(in) :: i, n, species
+
+    integer, intent(in) :: i, n, species, iswmode
     real(dp), dimension(3), intent(inout) :: x
     real(dp), intent(inout) :: vpar, vperp
     type(time_t) :: t
     integer :: ind_tetr
-    
+
     real(dp), dimension(5) :: zet
     real(dp), dimension(3) :: randnum
     real(dp), dimension(1) :: m, z, dens, temp, efcolf,velrat,enrat
     real(dp) :: vpar_background
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar, vpar_mat_save, vpar_mat
-    integer :: err, j, p, iswmode
+    integer :: err, j, p
     real(dp) ::  w_v, w_t, particle_to_background_coupling_strength, t_max
-
-    iswmode = 1
-    !1 - full operator (pitch-angle and energy scattering and drag)
-    !2 - energy scattering and drag only
-    !3 - drag only
-    !4 - pitch-angle scattering only
 
     w_v = 1.0_dp
     w_t = 1.0_dp
@@ -250,29 +252,23 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
 
 end subroutine collisions_with_background_updates
 
-subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
+subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
 
     use gorilla_applets_types_mod, only: in, c, time_t, start
     use collis_ions, only: stost
     use gorilla_applets_settings_mod, only: i_option
-    
-    integer, intent(in) :: i, n, species
+
+    integer, intent(in) :: i, n, species, iswmode
     real(dp), dimension(3), intent(inout) :: x
     real(dp), intent(inout) :: vpar, vperp
     type(time_t) :: t
     integer :: ind_tetr
-    
+
     real(dp), dimension(5) :: zet
     real(dp), dimension(3) :: randnum
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
-    integer :: err, iswmode
+    integer :: err
     real(dp) :: t_max
-
-    iswmode = 4
-    !1 - full operator (pitch-angle and energy scattering and drag)
-    !2 - energy scattering and drag only
-    !3 - drag only
-    !4 - pitch-angle scattering only
 
     allocate(efcolf(c%n))
     allocate(velrat(c%n))
