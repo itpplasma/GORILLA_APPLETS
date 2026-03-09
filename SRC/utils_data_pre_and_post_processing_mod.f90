@@ -209,9 +209,9 @@ subroutine set_starting_positions(rand_matrix)
     !compute starting conditions
     if (in%boole_point_source) then
         if (grid_kind.eq.2) then
-            start%x(1,:,:) = 160.0_dp !170.8509699_dp
+            start%x(1,:,:) = 209.0_dp!160.0_dp !170.8509699_dp
             start%x(2,:,:) = 0.01_dp
-            start%x(3,:,:) = 70.0_dp !8.922304_dp
+            start%x(3,:,:) = 10.0_dp!70.0_dp !8.922304_dp
         elseif (grid_kind.eq.4) then
             start%x(1,:,:) = 205.0_dp
             start%x(2,:,:) = 0.0_dp
@@ -342,21 +342,21 @@ end subroutine calc_poloidal_flux
 
 subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
-    use gorilla_applets_types_mod, only: in, c, start, s
+    use gorilla_applets_types_mod, only: in, c, start, s, flux
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
     use constants, only: echarge,amp, ame, ev2erg
-    use tetra_grid_settings_mod, only: grid_size
+    use tetra_grid_settings_mod, only: grid_size, grid_kind
     use collis_ions, only: collis_init
     use gorilla_settings_mod, only: coord_system
     use gorilla_applets_settings_mod, only: i_option
-    
+
     integer, intent(in), optional :: species_in
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
     integer :: i, j
     integer :: species = 1
     real(dp) :: m0, z0, n0, s_value, v0
-    logical :: boole_T_and_n_from_files = .false., boole_linear_density = .false.
+    logical :: boole_T_and_n_from_files = .false.
 
     if (present(species_in)) species = species_in
 
@@ -369,21 +369,42 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     m0 = particle_mass
     z0 = particle_charge/echarge
 
-    
+
     c%temp_mat = in%energy_eV
     if (i_option.eq.12) c%temp_mat(2,:) = s%temperature
     c%dens_mat = in%density
 
     if (boole_T_and_n_from_files) call get_T_and_n_from_files
-    !Use background density linear in s
-    if (boole_linear_density) then
-        n0 = 3.0_dp * 10.0_dp**13
-        do i = 1,ntetr/grid_size(2),3
-            s_value = tetra_physics(i)%x1(1)
-            c%dens_mat(1,i) = n0*(1-s_value*0.9_dp)
+
+    ! Apply linear density and/or temperature profiles based on input settings
+    if (in%boole_linear_density_simulation .or. in%boole_linear_temperature_simulation) then
+        do i = 1, ntetr/grid_size(2), 3
+            ! Compute s_value (normalized flux coordinate) for this tetrahedron
+            if (coord_system == 2) then
+                ! Flux coordinates: use s-coordinate directly
+                s_value = tetra_physics(i)%x1(1)
+            else if (grid_kind /= 3) then
+                ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
+                s_value = tetra_physics(i)%Aphi1 / flux%poloidal_max
+            else
+                ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
+                print*, 'Error in calc_collision_coefficients_for_all_tetrahedra: Linear profiles with &
+                        &cylindrical coordinates only supported for axisymmetric devices.'
+                stop
+            endif
+
+            ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
+            if (in%boole_linear_density_simulation) then
+                c%dens_mat(:,i) = in%density * (1.1_dp - s_value) / 1.1_dp
+            endif
+
+            ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
+            if (in%boole_linear_temperature_simulation) then
+                c%temp_mat(:,i) = in%energy_eV * (1.1_dp - s_value) / 1.1_dp
+            endif
         enddo
-        c%dens_mat(2,:) = c%dens_mat(1,:)
     endif
+
     do i = 1,grid_size(2)-1 !copy data from first phi slice to all other phi slices
         c%temp_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%temp_mat(:,1:ntetr/grid_size(2):3)
         c%dens_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%dens_mat(:,1:ntetr/grid_size(2):3)
@@ -547,19 +568,26 @@ subroutine prepare_next_round_of_parallelised_particle_pushing(species)
 
 end subroutine prepare_next_round_of_parallelised_particle_pushing
 
-subroutine normalise_prism_moments_and_prism_moments_squared(species_in)
+subroutine normalise_prism_moments_and_prism_moments_squared(species_in, boole_skip_time_normalisation_in)
 
     use gorilla_applets_types_mod, only: moment_specs, output, in, start
-    
+
     integer, intent(in), optional :: species_in
+    logical, intent(in), optional :: boole_skip_time_normalisation_in
     integer :: species = 1
     integer :: n
     real(dp) :: time
+    logical :: boole_skip_time_normalisation
 
     time = in%time_step
     if (present(species_in)) species = species_in
     time = start%t(species)
-    
+
+    boole_skip_time_normalisation = .false.
+    if (present(boole_skip_time_normalisation_in)) boole_skip_time_normalisation = boole_skip_time_normalisation_in
+
+    if (boole_skip_time_normalisation) time = 1.0_dp
+
     do n = 1,moment_specs%n_moments
         output%prism_moments(n,:,species) = output%prism_moments(n,:,species)/(output%prism_volumes*time*in%n_particles)
         if (moment_specs%boole_squared_moments) then
@@ -574,7 +602,7 @@ subroutine normalise_prism_moments_and_prism_moments_squared(species_in)
             endif
         endif
     enddo
-    
+
 end subroutine normalise_prism_moments_and_prism_moments_squared
 
 subroutine fourier_transform_moments

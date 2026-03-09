@@ -171,7 +171,7 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
 
                 ! Perform guiding-center orbit integration (NO anomalous displacement)
                 call orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                              local_tetr_moments, local_counter, species)
+                                              local_tetr_moments, local_counter, species, start%t(species))
 
                 t%confined = t%confined + t%step - t%remain
                 t_tot = t_tot + t%step - t%remain
@@ -205,7 +205,7 @@ end subroutine parallelised_particle_pushing_helical_core
 
 ! ====================================================================
 subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                    local_tetr_moments, local_counter, species)
+                                    local_tetr_moments, local_counter, species, t_tot)
 !
 ! Standard orbit timestep for helical core.
 ! Performs guiding-center orbit integration without anomalous displacement.
@@ -217,10 +217,10 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g, weights
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
-    use utils_orbit_timestep_mod, only: update_local_tetr_moments, initialize_constants_of_motion, compute_radial_fluxes, &
-        calc_particle_weights_and_jperp, identify_particles_entering_annulus
+    use utils_orbit_timestep_mod, only: initialize_constants_of_motion, compute_radial_fluxes, &
+        identify_particles_entering_annulus, update_local_tetr_moments
 
     real(dp), dimension(3), intent(inout)        :: x
     real(dp), intent(inout)                      :: vpar, vperp
@@ -230,10 +230,10 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
     integer, intent(in)                          :: n, species
     complex(dp), dimension(:,:), intent(inout)   :: local_tetr_moments
     type(counter_t), intent(inout)               :: local_counter
+    real(dp), intent(in)                         :: t_tot
 
     real(dp), dimension(3)                       :: z_save, x_new
-    real(dp)                                     :: t_pass, perpinv
-    real(dp)                                     :: rand_frac
+    real(dp)                                     :: t_pass, perpinv, rand_frac
     logical                                      :: boole_t_finished, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
     type(optional_quantities_type)               :: optional_quantities
@@ -246,8 +246,12 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
             return
         endif
         z_save = x - tetra_physics(ind_tetr)%x1
-        call calc_particle_weights_and_jperp(n, z_save, vpar, vperp, ind_tetr, species)
-        if (in%boole_delta_f) call adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
+        call calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, ind_tetr, species)
+        if (in%boole_delta_f) then
+            call adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
+            ! Store the original weight for time-dependent fading
+            weights%original(n, species) = weights%w(n, species)
+        endif
         particle_status%initialized = .true.
     endif
 
@@ -311,6 +315,9 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
         vperp = vperp_func(z_save, perpinv, ind_tetr_save)
 
         t%remain = t%remain - t_pass
+
+        ! Apply smooth fading of particle weights for t > t_tot*2/3 (only for delta-f method)
+        if (in%boole_delta_f) call apply_weight_fading(n, species, t, t_tot)
 
         call update_local_tetr_moments(local_tetr_moments, ind_tetr_save, n, optional_quantities, species)
         if ((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save, ind_tetr, x)
@@ -497,11 +504,136 @@ subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
     ! start%jperp(n,species) = start%particle_mass(species) * vperp**2 * start%cm_over_e(species) &
     !                       / (2 * bmod_func(z_save, ind_tetr)) * (-1)
 
-    weights%w(n,species) = weights%w(n,species) * vpar!(-1)*v_r
+    weights%w(n,species) = weights%w(n,species) * (-1)*v_r !vpar
     !>the factor (-1) represents partial f_M / partial s (f_M is already accounted for previously,
     !later on I will clean up the weight calculation and make everything easier to read and follow)
     weights%w(n,species) = weights%w(n,species) * (-1)
 
 end subroutine adapt_weights_delta_f
+
+! ====================================================================
+subroutine apply_weight_fading(n, species, t, t_tot)
+!
+! Applies smooth fading of particle weights for t > t_tot*2/3.
+! weights%w = weights%original * 0.5*(1 + cos(pi*(t - t_tot*2/3)/(t_tot/3)))
+! This smoothly fades from original weight at t=t_tot*2/3 to 0 at t=t_tot.
+!
+    use gorilla_applets_types_mod, only: weights, time_t
+    use constants, only: pi
+
+    integer, intent(in)       :: n, species
+    type(time_t), intent(in)  :: t
+    real(dp), intent(in)      :: t_tot
+
+    real(dp) :: t_current, fade_factor
+
+    ! Compute current time after this push: t%confined + (t%step - t%remain)
+    t_current = t%confined + t%step - t%remain
+
+    if (t_current > t_tot * 2.0_dp / 3.0_dp) then
+        fade_factor = 0.5_dp * (1.0_dp + cos(pi * (t_current - t_tot * 2.0_dp / 3.0_dp) / (t_tot / 3.0_dp)))
+        weights%w(n, species) = weights%original(n, species) * fade_factor
+    endif
+
+end subroutine apply_weight_fading
+
+! ====================================================================
+subroutine set_weights_helical_core
+!
+! Sets initial particle weights for helical core.
+! Copy of set_weights from utils_data_pre_and_post_processing_mod for local customization.
+!
+    use gorilla_applets_types_mod, only: in, weights, g, c
+    use constants, only: pi
+
+    weights%w = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+
+    if (in%boole_boltzmann_energies) then
+        weights%w = weights%w*10/sqrt(pi)
+    endif
+
+    c%weight_factor = 1/(weights%w(1,1)*g%amax)
+
+end subroutine set_weights_helical_core
+
+! ====================================================================
+subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, ind_tetr, species_in)
+!
+! Calculates particle weights and perpendicular invariant for helical core.
+! Copy of calc_particle_weights_and_jperp from utils_orbit_timestep_mod for local customization.
+!
+    use gorilla_applets_types_mod, only: in, flux, start, weights
+    use tetra_physics_mod, only: tetra_physics
+    use constants, only: ev2erg
+    use volume_integrals_and_sqrt_g_mod, only: sqrt_g
+    use supporting_functions_mod, only: bmod_func
+    use gorilla_settings_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
+
+    real(dp), intent(in) :: vpar, vperp
+    real(dp), dimension(3), intent(in) :: z_save
+    integer, intent(in) :: n, ind_tetr
+    integer, intent(in), optional :: species_in
+    integer :: species = 1
+    real(dp) :: local_poloidal_flux, phi_elec_func, temperature
+    real(dp) :: r, phi, z
+    real(dp) :: s_value
+
+    if (present(species_in)) species = species_in
+
+    ! This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by
+    ! only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine
+    ! (this is necessary for the energy and momentum conserving collision operator)
+    if (in%boole_boltzmann_energies) weights%w(n,species) = weights%w(n,species)*in%energy_eV*ev2erg
+
+    r = z_save(1)
+    phi = z_save(2)
+    z = z_save(3)
+
+    if (in%boole_refined_sqrt_g) then
+        weights%w(n,species) = weights%w(n,species)* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
+                                        &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
+    else
+        weights%w(n,species) = weights%w(n,species)*(r + tetra_physics(ind_tetr)%x1(1))
+    endif
+
+    if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then
+        if (coord_system == 2) then
+            ! Flux coordinates: use s-coordinate directly (s ranges from sfc_s_min to 1)
+            s_value = tetra_physics(ind_tetr)%x1(1) + z_save(1)
+        else if (grid_kind /= 3) then
+            ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
+            local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
+            s_value = local_poloidal_flux / flux%poloidal_max
+        else
+            ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
+            print*, 'Error in calc_particle_weights_and_jperp_helical_core: Computing radial coordinate from A_phi is only valid for &
+                    &axisymmetric devices. For stellarators (grid_kind=3), use flux coordinates (coord_system=2).'
+            stop
+        endif
+    endif
+    ! if (in%boole_linear_density_simulation) then
+    !     ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
+    !     weights%w(n,species) = weights%w(n,species)*(1.1_dp - s_value)/1.1_dp
+    ! endif
+
+    if (in%boole_boltzmann_energies) then
+        ! compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
+        phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
+        if (.not. in%boole_linear_temperature_simulation) then
+            weights%w(n,species) = weights%w(n,species)*sqrt(start%energy(n,species)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
+                        & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/(in%energy_eV*ev2erg))
+        else
+            ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
+            temperature = in%energy_eV*ev2erg*(1.1_dp - s_value)/1.1_dp
+            weights%w(n,species) = weights%w(n,species)*sqrt(start%energy(n,species)*ev2erg)/temperature**1.5_dp* &
+            & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
+        endif
+    endif
+
+    start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
+    ! -1 because of negative gyrophase
+
+end subroutine calc_particle_weights_and_jperp_helical_core
 
 end module utils_helical_core_mod

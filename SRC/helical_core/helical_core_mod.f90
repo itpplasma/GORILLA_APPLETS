@@ -31,9 +31,10 @@ subroutine calc_helical_core
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
         get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &
         calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
-        fourier_transform_moments, calc_starting_conditions, set_weights
+        fourier_transform_moments, calc_starting_conditions
     use utils_helical_core_mod, only: read_helical_core_inp_into_type, &
-        parallelised_particle_pushing_helical_core, eliminate_particles_outside_flux_threshold
+        parallelised_particle_pushing_helical_core, eliminate_particles_outside_flux_threshold, &
+        set_weights_helical_core
 
     call set_seed_for_random_numbers
     call read_helical_core_inp_into_type
@@ -53,13 +54,13 @@ subroutine calc_helical_core
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
 
     call calc_starting_conditions
-    call set_weights
+    call set_weights_helical_core
     call eliminate_particles_outside_flux_threshold
 
     ! Standard particle tracing (no scan, no diffusion coefficient calculation)
     call parallelised_particle_pushing_helical_core(species=1)
 
-    call normalise_prism_moments_and_prism_moments_squared
+    call normalise_prism_moments_and_prism_moments_squared(boole_skip_time_normalisation_in=in%boole_delta_f)
 
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
     call write_data_to_files
