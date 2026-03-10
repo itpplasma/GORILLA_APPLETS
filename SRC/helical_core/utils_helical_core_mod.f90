@@ -163,7 +163,7 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
 
                 ! Apply collisions if enabled
                 if (in%boole_collisions) then
-                    call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species,iswmode_in=4)
+                    call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species,iswmode_in=1)
                     t%step = t%step / start%v0(species)
                 else
                     t%step = start%t(species) - t%confined
@@ -514,9 +514,9 @@ end subroutine adapt_weights_delta_f
 ! ====================================================================
 subroutine apply_weight_fading(n, species, t, t_tot)
 !
-! Applies smooth fading of particle weights for t > t_tot*2/3.
-! weights%w = weights%original * 0.5*(1 + cos(pi*(t - t_tot*2/3)/(t_tot/3)))
-! This smoothly fades from original weight at t=t_tot*2/3 to 0 at t=t_tot.
+! Applies smooth fading of particle weights for t > t_tot*(1-alpha).
+! weights%w = weights%original * 0.5*(1 + cos(pi*(t - t_tot*(1-alpha))/(t_tot*alpha)))
+! This smoothly fades from original weight at t=t_tot*(1-alpha) to 0 at t=t_tot.
 !
     use gorilla_applets_types_mod, only: weights, time_t
     use constants, only: pi
@@ -525,46 +525,29 @@ subroutine apply_weight_fading(n, species, t, t_tot)
     type(time_t), intent(in)  :: t
     real(dp), intent(in)      :: t_tot
 
-    real(dp) :: t_current, fade_factor
+    real(dp) :: t_current, fade_factor, t_fade_start
+    real(dp) :: alpha = 1.0_dp / 3.0_dp  ! Fraction of tracing time over which fading occurs
 
     ! Compute current time after this push: t%confined + (t%step - t%remain)
     t_current = t%confined + t%step - t%remain
+    t_fade_start = t_tot * (1.0_dp - alpha)
 
-    if (t_current > t_tot * 2.0_dp / 3.0_dp) then
-        fade_factor = 0.5_dp * (1.0_dp + cos(pi * (t_current - t_tot * 2.0_dp / 3.0_dp) / (t_tot / 3.0_dp)))
+    if (t_current > t_fade_start) then
+        fade_factor = 0.5_dp * (1.0_dp + cos(pi * (t_current - t_fade_start) / (t_tot * alpha)))
         weights%w(n, species) = weights%original(n, species) * fade_factor
     endif
 
 end subroutine apply_weight_fading
 
 ! ====================================================================
-subroutine set_weights_helical_core
-!
-! Sets initial particle weights for helical core.
-! Copy of set_weights from utils_data_pre_and_post_processing_mod for local customization.
-!
-    use gorilla_applets_types_mod, only: in, weights, g, c
-    use constants, only: pi
-
-    weights%w = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
-
-    if (in%boole_boltzmann_energies) then
-        weights%w = weights%w*10/sqrt(pi)
-    endif
-
-    c%weight_factor = 1/(weights%w(1,1)*g%amax)
-
-end subroutine set_weights_helical_core
-
-! ====================================================================
 subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, ind_tetr, species_in)
 !
 ! Calculates particle weights and perpendicular invariant for helical core.
-! Copy of calc_particle_weights_and_jperp from utils_orbit_timestep_mod for local customization.
+! Computes the base weight and all particle-specific factors in one place.
 !
-    use gorilla_applets_types_mod, only: in, flux, start, weights
+    use gorilla_applets_types_mod, only: in, flux, start, weights, g
     use tetra_physics_mod, only: tetra_physics
-    use constants, only: ev2erg
+    use constants, only: ev2erg, pi
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
     use gorilla_settings_mod, only: coord_system
@@ -578,23 +561,31 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     real(dp) :: local_poloidal_flux, phi_elec_func, temperature
     real(dp) :: r, phi, z
     real(dp) :: s_value
+    real(dp) :: p_d, f, J_x, J_y
+    real(dp) :: base_weight
 
     if (present(species_in)) species = species_in
 
-    ! This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by
-    ! only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine
-    ! (this is necessary for the energy and momentum conserving collision operator)
-    if (in%boole_boltzmann_energies) weights%w(n,species) = weights%w(n,species)*in%energy_eV*ev2erg
+    ! Compute base weight (previously done in set_weights_helical_core)
+    base_weight = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+
+    if (in%boole_boltzmann_energies) then
+        base_weight = base_weight*10/sqrt(pi)
+        ! This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by
+        ! only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine
+        ! (this is necessary for the energy and momentum conserving collision operator)
+        base_weight = base_weight*in%energy_eV*ev2erg
+    endif
 
     r = z_save(1)
     phi = z_save(2)
     z = z_save(3)
 
     if (in%boole_refined_sqrt_g) then
-        weights%w(n,species) = weights%w(n,species)* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
+        weights%w(n,species) = base_weight* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
                                         &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
     else
-        weights%w(n,species) = weights%w(n,species)*(r + tetra_physics(ind_tetr)%x1(1))
+        weights%w(n,species) = base_weight*(r + tetra_physics(ind_tetr)%x1(1))
     endif
 
     if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then

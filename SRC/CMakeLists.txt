@@ -13,6 +13,7 @@ add_library(GORILLA_APPLETS STATIC
   gorilla_applets_sub_mod.f90
   llsq.f90
   utils_polyfit_mod.f90
+  marker_distribution_mod.f90
   mono_energetic_transp_coef_settings_mod.f90
   poincare_invariances_mod.f90
   pusher_tetra_field_lines_mod.f90

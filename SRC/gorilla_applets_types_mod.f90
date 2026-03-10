@@ -1,6 +1,7 @@
 module gorilla_applets_types_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
+    use marker_distribution_mod, only: distribution_3d_t, distribution_1d_t
 
     implicit none
 
@@ -42,6 +43,9 @@ module gorilla_applets_types_mod
     real(dp), dimension(:),     allocatable :: t !total tracing time
     real(dp)                                :: epsilon_max
     logical, dimension(:,:),    allocatable :: lost
+    type(distribution_3d_t) :: dist_position  ! starting distribution in position space
+    type(distribution_1d_t) :: dist_energy    ! starting distribution in energy
+    type(distribution_1d_t) :: dist_lambda    ! starting distribution in pitch angle
     end type start_t
 
     type(start_t) :: start

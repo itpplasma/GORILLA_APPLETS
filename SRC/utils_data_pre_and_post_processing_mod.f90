@@ -3,8 +3,8 @@ module utils_data_pre_and_post_processing_mod
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
     implicit none
-   
-contains 
+
+contains
 
 subroutine set_seed_for_random_numbers
 
@@ -114,17 +114,13 @@ subroutine calc_starting_conditions(verts)
     use gorilla_applets_types_mod, only: in, start
 
     real(dp), dimension(:,:), allocatable, intent(out), optional :: verts
-    real(dp), dimension(:,:,:), allocatable                :: rand_matrix
 
     call set_verts_and_coordinate_limits(verts)
 
-    allocate(rand_matrix(5,in%num_particles,in%n_species))
-    call RANDOM_NUMBER(rand_matrix)
-
     call allocate_start_type
     call allocate_weights
-    call set_starting_positions(rand_matrix)
-    call set_rest_of_start_type(rand_matrix)
+    call set_starting_positions()
+    call set_rest_of_start_type()
 
 end subroutine calc_starting_conditions
 
@@ -197,32 +193,46 @@ subroutine allocate_weights
 
 end subroutine allocate_weights
 
-subroutine set_starting_positions(rand_matrix)
+subroutine set_starting_positions()
 
     use gorilla_applets_types_mod, only: in, start, g
     use tetra_physics_mod, only: coord_system
     use tetra_grid_settings_mod, only: grid_kind
     use constants, only: pi
+    use marker_distribution_mod, only: pdf_flat, init_distribution_3d, sample_array_3d
 
-    real(dp), dimension(:,:,:), intent(in) :: rand_matrix
+    real(dp) :: xmin(3), xmax(3)
+    integer :: i_species
 
     !compute starting conditions
     if (in%boole_point_source) then
         if (grid_kind.eq.2) then
-            start%x(1,:,:) = 209.0_dp!160.0_dp !170.8509699_dp
-            start%x(2,:,:) = 0.01_dp
-            start%x(3,:,:) = 10.0_dp!70.0_dp !8.922304_dp
+            xmin = [209.0_dp, 0.01_dp, 10.0_dp]
+            xmax = xmin
         elseif (grid_kind.eq.4) then
-            start%x(1,:,:) = 205.0_dp
-            start%x(2,:,:) = 0.0_dp
-            start%x(3,:,:) = 0.0_dp
+            xmin = [205.0_dp, 0.0_dp, 0.0_dp]
+            xmax = xmin
         endif
         if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
     else
-        start%x(g%ind_a,:,:) = g%amin + (g%amax - g%amin)*rand_matrix(g%ind_a,:,:) !r in cylindrical, s in flux coordinates
-        start%x(g%ind_b,:,:) = 2*pi*rand_matrix(g%ind_b,:,:) !phi in cylindrical and flux coordinates
-        start%x(g%ind_c,:,:) = g%cmin + (g%cmax - g%cmin)*rand_matrix(g%ind_c,:,:) !z in cylindrical, theta in flux coordinates
+        ! Set bounds for uniform sampling
+        xmin(g%ind_a) = g%amin
+        xmax(g%ind_a) = g%amax
+        xmin(g%ind_b) = 0.0_dp
+        xmax(g%ind_b) = 2*pi
+        xmin(g%ind_c) = g%cmin
+        xmax(g%ind_c) = g%cmax
     endif
+
+    ! Initialize position distribution if not already done
+    if (.not. start%dist_position%initialized) then
+        call init_distribution_3d(start%dist_position, pdf_flat, xmin, xmax)
+    endif
+
+    ! Sample positions for all species
+    do i_species = 1, in%n_species
+        call sample_array_3d(start%dist_position, start%x(:,:,i_species))
+    enddo
 
 end subroutine set_starting_positions
 
@@ -241,22 +251,37 @@ subroutine set_weights
 
 end subroutine set_weights
 
-subroutine set_rest_of_start_type(rand_matrix)
+subroutine set_rest_of_start_type()
 
     use gorilla_applets_types_mod, only: in, start
     use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
     use gorilla_applets_settings_mod, only: i_option
     use constants, only: echarge,ame,clight
     use constants, only: ev2erg
+    use marker_distribution_mod, only: pdf_flat, init_distribution_1d, sample_array_1d
 
-    real(dp), dimension(:,:,:), intent(in) :: rand_matrix
+    integer :: i_species
 
-    start%pitch(:,:) = 2*rand_matrix(4,:,:)-1 !pitch parameter
-    start%energy = in%energy_eV
-    if (in%boole_boltzmann_energies) then
-        start%energy = 5*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
+    ! Initialize lambda (pitch angle) distribution if not already done
+    if (.not. start%dist_lambda%initialized) then
+        call init_distribution_1d(start%dist_lambda, pdf_flat, -1.0_dp, 1.0_dp)
     endif
-    
+
+    ! Initialize energy distribution if not already done
+    if (.not. start%dist_energy%initialized) then
+        if (in%boole_boltzmann_energies) then
+            call init_distribution_1d(start%dist_energy, pdf_flat, 0.0_dp, 5.0_dp*in%energy_eV)
+        else
+            call init_distribution_1d(start%dist_energy, pdf_flat, in%energy_eV, in%energy_eV)
+        endif
+    endif
+
+    ! Sample pitch and energy for all species
+    do i_species = 1, in%n_species
+        call sample_array_1d(start%dist_lambda, in%num_particles, start%pitch(:,i_species))
+        call sample_array_1d(start%dist_energy, in%num_particles, start%energy(:,i_species))
+    enddo
+
     if (in%boole_antithetic_variate) then
         start%x(:,1:in%num_particles:2,:) = start%x(:,2:in%num_particles:2,:)
         start%pitch(1:in%num_particles:2,:) = -start%pitch(2:in%num_particles:2,:)
