@@ -36,18 +36,18 @@ slice = floor(phi/((2*pi/5)/nphi))+1;
 tetr_plot = ntetr_per_slice*(slice-1)+1:3:ntetr_per_slice*slice;
 indices_plot = indices(tetr_plot,1:3);
 volumes_plot = volumes(n_triangles*(slice-1)+1:n_triangles*slice);
-mesh_x = zeros(4,n_triangles);
-mesh_y = zeros(4,n_triangles);
+mesh_R = zeros(4,n_triangles);
+mesh_Z = zeros(4,n_triangles);
 for t = 1:n_triangles
-    mesh_x(1:3,t) = coordinates(indices_plot(t,:),1);
-    mesh_y(1:3,t) = coordinates(indices_plot(t,:),3);
-    mesh_x(4,t) = mesh_x(1,t);
-    mesh_y(4,t) = mesh_y(1,t);
+    mesh_R(1:3,t) = coordinates(indices_plot(t,:),1);
+    mesh_Z(1:3,t) = coordinates(indices_plot(t,:),3);
+    mesh_R(4,t) = mesh_R(1,t);
+    mesh_Z(4,t) = mesh_Z(1,t);
 
-    if (max(mesh_y(:,t)) - min(mesh_y(:,t))) > pi
+    if (max(mesh_Z(:,t)) - min(mesh_Z(:,t))) > pi
         for i = 1:4
-            if mesh_y(i,t)==0
-                mesh_y(i,t)=2*pi;
+            if mesh_Z(i,t)==0
+                mesh_Z(i,t)=2*pi;
             end
         end
     end
@@ -74,7 +74,7 @@ switch plot_quantity
         moment_col = 5;  % vpar_int (real part)
         plot_title = 'Parallel Velocity Distribution - Helical Core';
         colorbar_label = '$\langle v_\parallel \rangle$';
-        clim_values = 'auto';
+        clim_values = [-3,3]*1e20;%'auto';
     case 'vpar2'
         moment_col = 7;  % vpar2_int (real part)
         plot_title = 'Parallel Velocity Squared - Helical Core';
@@ -97,10 +97,10 @@ volume_inner_ring = sum(volumes_plot(1:n_prisms_inner_ring));
 moment_inner_ring = volume_times_moment_inner_ring / volume_inner_ring;
 moment_plot(1:n_prisms_inner_ring) = moment_inner_ring;
 
-exit_data = load('exit_data.dat');
+%exit_data = load('exit_data.dat');
 
 figure
-fill(mesh_x,mesh_y,moment_plot,'EdgeColor','none')
+fill(mesh_R,mesh_Z,moment_plot,'EdgeColor','none')
 xlabel('$R$ / cm','interpreter','latex')
 ylabel('$Z$ / cm','interpreter','latex')
 title(plot_title)
@@ -122,7 +122,7 @@ grid on
 n_triangles_per_radial = nz * 2;
 
 % Compute volume-weighted average for each radial shell
-moment_radial = zeros(nr, 1);
+moment_radial = zeros(nr, 1);%$\\langle v_\\parallel \\rangle$
 volume_radial = zeros(nr, 1);
 
 for ir = 1:nr
@@ -163,14 +163,18 @@ T = ev*ev2erg;
 m = 2*1.6726d-24;
 tau_c = 6.6254e-04;
 v_th = sqrt(T*2/m);
-tau_c = 1/(2*v_th*1.0939620792726545E-005)
-R = 165;
+tau_c = 1/(2*v_th*1.0939620792726545E-005);
+R = 170;%165;
 t_tr = 2.0d-3;
+A_phi_max = 21986515.113518957;
+c = 2.9979d10;
+q=4.8032d-10;
 
 figure
-plot(r_values, -moment_radial_avg, 'b-', 'LineWidth', 2)
+plot(r_values, moment_radial_avg, 'b-', 'LineWidth', 2)
 hold on
-plot(r_values,n/3*v_th^2/t_tr*tau_c*(1-1.46*sqrt((r_values-R)/R)))
+%plot(r_values,n/3*v_th^2*tau_c/t_tr*(1-1.46*sqrt((r_values-R)/R)))
+plot(r_values,c*R*n*T/A_phi_max*1.46*sqrt((r_values-R)/R)/q)
 hold off
 xlabel('Radial index', 'interpreter', 'latex')
 ylabel(radial_ylabel, 'interpreter', 'latex')
@@ -180,9 +184,53 @@ if ~strcmp(radial_ylim, 'auto')
     ylim(radial_ylim);
 end
 
-%%
+%% 1D profile in R-direction at constant z
 
+z = 50;
+r_mean_intersection = nan(n_triangles, 1);
+signs = zeros(3,1);
+r_int = zeros(2,1);
+count = 0;
 
+for i=1:n_triangles
+    signs = sign(mesh_Z(1:3,i)-z);
+    if signs(1)==signs(2)&&signs(2)==signs(3)
+        %triangle does not contain chosen z
+    else
+        count = count+1;
+        if signs(1)*signs(2)*signs(3)==1 %two vertices below z, one vertex above
+            ind_sole = find(signs==1);
+        else
+            ind_sole = find(signs==-1);
+        end
+        for j = 1:2
+            ind_2 = mod(ind_sole+j-1,3)+1;
+            r1 = mesh_R(ind_sole,i);
+            r2 = mesh_R(ind_2,i);
+            z1 = mesh_Z(ind_sole,i);
+            z2 = mesh_Z(ind_2,i);
+            r_int(j) = r1+(r2-r1)*(z-z1)/(z2-z1);
+        end
+        r_mean_intersection(i) = (r_int(1)+r_int(2))/2;
+    end
+end
+
+r_plot = zeros(count,1);
+moment_r_plot = zeros(count,1);
+count = 0;
+for i=1:n_triangles
+    if ~isnan(r_mean_intersection(i))
+        count = count+1;
+        r_plot(count) = r_mean_intersection(i);
+        moment_r_plot(count) = moment_plot(i);
+    end
+end
+[r_plot,ind] = sort(r_plot);
+moment_r_plot = moment_r_plot(ind);
+
+figure
+plot(r_plot,moment_r_plot)
+grid on
 
 %% Flux surface distribution at exit
 % Load exit data
@@ -238,17 +286,33 @@ ev = 1.0e3;%1.5e4;
 T = ev;
 lambda = 15;
 
+
+
 nu = n*lambda*1.5e-7*mu^(-1/2)*T^(-3/2);
 
 tau_c = 1/nu
 
 %%
-ev = 1.5e4;
+ev = 1.0e4;
 c = 2.9979d10;
 ev2erg=1.6022d-12;
 H=ev*ev2erg;
 q=4.8032d-10;
 B=15000;
-R=50;
+a=50;
+R=165;
 n=3.0e13;
-vr_partial_f_partial_r = c*H*1.5/(q*B*R)*n*1/50
+mp=1.6726d-24;
+m = 2*mp;
+vr_partial_f_partial_r = c*H*1.5/(q*B*a)*n*1/50
+
+w_b = sqrt(m*H)*c*R*5/(2*a*q*B)
+
+Bz = 14512.249724543301*0.26874807661993838
+
+w_b = sqrt(m*H)*c/(2*q*Bz)
+
+v_th = sqrt(2*H/m);
+nu = v_th*2.1879241719542665E-005
+tau=1/nu
+lc = tau_c*v_th
