@@ -387,4 +387,14 @@ function pdf_flat(x) result(val)
     val = 1.0_dp
 end function pdf_flat
 
+function pdf_boltzmann(n,T,m,energy,q,Phi) result(val)
+
+    use constants, only: pi
+
+    real(dp), intent(in) :: n,T,m,energy,q,Phi
+    real(dp) :: val
+
+    val = n*(2*pi*T*m)**(-1.5_dp)*exp(-(energy+q*Phi)/T)
+end function pdf_boltzmann
+
 end module marker_distribution_mod

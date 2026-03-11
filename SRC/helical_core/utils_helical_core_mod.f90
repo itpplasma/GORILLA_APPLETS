@@ -552,46 +552,39 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     use supporting_functions_mod, only: bmod_func
     use gorilla_settings_mod, only: coord_system
     use tetra_grid_settings_mod, only: grid_kind
-    use marker_distribution_mod, only: evaluate_distribution_3d, evaluate_distribution_1d
+    use marker_distribution_mod, only: evaluate_distribution_3d, evaluate_distribution_1d, pdf_boltzmann
 
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
     integer, intent(in) :: n, ind_tetr
     integer, intent(in), optional :: species_in
     integer :: species = 1
-    real(dp) :: local_poloidal_flux, phi_elec_func, temperature
+    real(dp) :: local_poloidal_flux
     real(dp) :: r, phi, z
     real(dp) :: s_value
-    real(dp) :: p_d, f, J_x, J_y
-    real(dp) :: base_weight
-    real(dp) :: x_global(3), pdf_position, pdf_energy, pdf_lambda, d_lambda_epsilon_d_jperp_vpar, omega_c
+    real(dp) :: f, J_x, J_y
+    real(dp) :: boltzmann_stuff
+    real(dp) :: x_global(3), pdf_position, pdf_energy_ev, pdf_energy_erg, pdf_lambda, d_lambda_epsilon_d_jperp_vpar, omega_c
+    real(dp) :: density,T,m,energy_ev,energy_erg,q,Phi_elec
 
     if (present(species_in)) species = species_in
-
-    ! Compute base weight (previously done in set_weights_helical_core)
-    base_weight = (g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
-
-    if (in%boole_boltzmann_energies) then
-        base_weight = base_weight*10/sqrt(pi)
-        ! This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by
-        ! only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine
-        ! (this is necessary for the energy and momentum conserving collision operator)
-        base_weight = base_weight*in%energy_eV*ev2erg
-    endif
 
     r = z_save(1)
     phi = z_save(2)
     z = z_save(3)
 
+    m = start%particle_mass(species)
+    T = in%energy_eV*ev2erg
+    energy_ev = start%energy(n,species)
+    energy_erg = start%energy(n,species)*ev2erg
+    density = in%density
+
     ! Evaluate marker distributions at particle position/energy/pitch
     x_global = z_save + tetra_physics(ind_tetr)%x1
     pdf_position = evaluate_distribution_3d(start%dist_position, x_global)
-    pdf_energy = evaluate_distribution_1d(start%dist_energy, start%energy(n,species))
+    pdf_energy_ev = evaluate_distribution_1d(start%dist_energy, energy_ev)
+    pdf_energy_erg = pdf_energy_ev/ev2erg
     pdf_lambda = evaluate_distribution_1d(start%dist_lambda, start%pitch(n,species))
-
-    omega_c = bmod_func(z_save,ind_tetr)/start%cm_over_e(species)
-    J_y = start%particle_mass(species)**2*omega_c
-   
 
     if (in%boole_refined_sqrt_g) then
         J_x = (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
@@ -599,6 +592,9 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     else
         J_x = r + tetra_physics(ind_tetr)%x1(1)
     endif
+
+    !> delta distributions return 1, so we have to adjust manually
+    if (in%boole_point_source) pdf_position = pdf_position/((g%amax-g%amin)*(g%cmax-g%cmin)*2*pi)
     
 
     if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then
@@ -616,27 +612,32 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
             stop
         endif
     endif
+
     ! if (in%boole_linear_density_simulation) then
     !     ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
-    !     weights%w(n,species) = weights%w(n,species)*(1.1_dp - s_value)/1.1_dp
+    !     density = density*(1.1_dp - s_value)/1.1_dp
     ! endif
 
     if (in%boole_boltzmann_energies) then
-        phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
-        temperature = in%energy_eV*ev2erg
+        q = start%particle_charge(species)
+        Phi_elec = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
         if (in%boole_linear_temperature_simulation) then
             ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
-            temperature = temperature*(1.1_dp - s_value)/1.1_dp
+            T = T*(1.1_dp - s_value)/1.1_dp
         endif
-        f = in%density*sqrt(start%energy(n,species)*ev2erg)/temperature**1.5_dp* &
-              & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
-        d_lambda_epsilon_d_jperp_vpar = omega_c*sqrt(start%particle_mass(species)/(2.0_dp*start%energy(n,species)*ev2erg))
+        f = pdf_boltzmann(density,T,m,energy_erg,q,Phi_elec)!*d_lambda_epsilon_d_jperp_vpar
+
+        omega_c = bmod_func(z_save,ind_tetr)/start%cm_over_e(species)
+        d_lambda_epsilon_d_jperp_vpar = omega_c*sqrt(m/(2.0_dp*energy_erg))
+        boltzmann_stuff = sqrt(energy_erg)*(2*pi*m)**1.5_dp*T*10/sqrt(pi)
+        J_y = m**2*omega_c*pdf_lambda*pdf_energy_erg
     else 
-        f = in%density
+        f = density
     endif
 
-    weights%w(n,species) = base_weight*f*J_x!/pdf_position
-    start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
+    weights%w(n,species) = f*J_x/pdf_position
+    if (in%boole_boltzmann_energies) weights%w(n,species) = weights%w(n,species)*boltzmann_stuff
+    start%jperp(n,species) = m*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
     ! -1 because of negative gyrophase
 
 end subroutine calc_particle_weights_and_jperp_helical_core
