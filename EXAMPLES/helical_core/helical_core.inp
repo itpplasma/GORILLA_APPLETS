@@ -3,16 +3,16 @@
 &helical_core_nml
 !
   !time for tracing particles (in seconds)
-  time_step = 1.0d-20,!1.0d-1 ,
+  time_step = 2.0d-3,!1.0d-1 ,
 !
   !Kinetic energy of particles (in eV)
-  energy_eV = 1.5d4 ,
+  energy_eV = 1.0d3,!2.0d3 ,
 !
   !Number of species (usually 1)
   n_species = 1
 !
   !Number of particles to be traced
-  n_particles = 1.0d5,!1.0d5 ,
+  n_particles = 1.0d3,!1.0d5 ,
 !
   !Compute squares of moments
   boole_squared_moments = .false.,
@@ -35,11 +35,11 @@
   !refined jacobian determinant
   boole_refined_sqrt_g = .true.,
 !
-  !work with boltzmann energies instead of with monoenergetic particles
-  boole_boltzmann_energies = .true.,
+  !work with monoenergetic particles instead of with boltzmann energies
+  boole_monoenergetic = .true.,
 !
   !make density a linear function of poloidal flux
-  boole_linear_density_simulation = .true.,
+  boole_linear_density_simulation = .false.,
 !
   !Eliminate particles starting outside a flux surface threshold
   !boole_eliminate_particles_outside_flux = .true. enables elimination
@@ -53,7 +53,7 @@
 !
   !always initiate pairs of particles where both particles start at the same position but move
   !in opposite direction, this helps to reduce statistical noise
-  boole_antithetic_variate = .false.,
+  boole_antithetic_variate = .true.,
 !
   !make temperature a linear function of poloidal flux
   boole_linear_temperature_simulation = .false.,

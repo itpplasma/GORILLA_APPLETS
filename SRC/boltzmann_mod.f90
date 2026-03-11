@@ -12,7 +12,7 @@ subroutine read_boltzmann_inp_into_type
 
     real(dp) :: time_step,energy_eV,n_particles, density
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
-               boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
+               boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
@@ -23,7 +23,7 @@ subroutine read_boltzmann_inp_into_type
 
     !Namelist for boltzmann input
     NAMELIST /boltzmann_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions, &
-    & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
+    & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_monoenergetic, boole_linear_density_simulation, &
     & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
@@ -42,7 +42,7 @@ subroutine read_boltzmann_inp_into_type
     in%boole_collisions = boole_collisions
     in%boole_precalc_collisions = boole_precalc_collisions
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
-    in%boole_boltzmann_energies = boole_boltzmann_energies
+    in%boole_monoenergetic = boole_monoenergetic
     in%boole_linear_density_simulation = boole_linear_density_simulation
     in%boole_antithetic_variate = boole_antithetic_variate
     in%boole_linear_temperature_simulation = boole_linear_temperature_simulation

@@ -97,7 +97,7 @@ module gorilla_applets_types_mod
     logical  :: boole_collisions
     logical  :: boole_precalc_collisions
     logical  :: boole_refined_sqrt_g
-    logical  :: boole_boltzmann_energies
+    logical  :: boole_monoenergetic
     logical  :: boole_linear_density_simulation
     logical  :: boole_antithetic_variate
     logical  :: boole_linear_temperature_simulation

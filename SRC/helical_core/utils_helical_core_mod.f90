@@ -26,7 +26,7 @@ subroutine read_helical_core_inp_into_type
 
     real(dp) :: time_step, energy_eV, n_particles, density
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
-               boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
+               boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, &
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
@@ -37,7 +37,7 @@ subroutine read_helical_core_inp_into_type
     integer :: s_inp_unit
 
     NAMELIST /helical_core_nml/ time_step, energy_eV, n_particles, boole_squared_moments, boole_point_source, &
-    & boole_collisions, boole_precalc_collisions, density, boole_refined_sqrt_g, boole_boltzmann_energies, &
+    & boole_collisions, boole_precalc_collisions, density, boole_refined_sqrt_g, boole_monoenergetic, &
     & boole_linear_density_simulation, boole_antithetic_variate, boole_linear_temperature_simulation, i_integrator_type, &
     & seed_option, boole_write_vertex_indices, boole_write_vertex_coordinates, boole_write_prism_volumes, &
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
@@ -57,7 +57,7 @@ subroutine read_helical_core_inp_into_type
     in%boole_collisions = boole_collisions
     in%boole_precalc_collisions = boole_precalc_collisions
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
-    in%boole_boltzmann_energies = boole_boltzmann_energies
+    in%boole_monoenergetic = boole_monoenergetic
     in%boole_linear_density_simulation = boole_linear_density_simulation
     in%boole_antithetic_variate = boole_antithetic_variate
     in%boole_linear_temperature_simulation = boole_linear_temperature_simulation
@@ -563,8 +563,8 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     real(dp) :: r, phi, z
     real(dp) :: s_value
     real(dp) :: f, J_x, J_y
-    real(dp) :: boltzmann_stuff
-    real(dp) :: x_global(3), pdf_position, pdf_energy_ev, pdf_energy_erg, pdf_lambda, d_lambda_epsilon_d_jperp_vpar, omega_c
+    real(dp) :: x_global(3), pdf_position, pdf_energy_ev, pdf_energy_erg, pdf_lambda, d_lambda_epsilon_d_jperp_vpar, omega_c, &
+    pdf_velocity_space, pdf_gyroangle
     real(dp) :: density,T,m,energy_ev,energy_erg,q,Phi_elec
 
     if (present(species_in)) species = species_in
@@ -573,29 +573,6 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     phi = z_save(2)
     z = z_save(3)
 
-    m = start%particle_mass(species)
-    T = in%energy_eV*ev2erg
-    energy_ev = start%energy(n,species)
-    energy_erg = start%energy(n,species)*ev2erg
-    density = in%density
-
-    ! Evaluate marker distributions at particle position/energy/pitch
-    x_global = z_save + tetra_physics(ind_tetr)%x1
-    pdf_position = evaluate_distribution_3d(start%dist_position, x_global)
-    pdf_energy_ev = evaluate_distribution_1d(start%dist_energy, energy_ev)
-    pdf_energy_erg = pdf_energy_ev/ev2erg
-    pdf_lambda = evaluate_distribution_1d(start%dist_lambda, start%pitch(n,species))
-
-    if (in%boole_refined_sqrt_g) then
-        J_x = (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
-            & (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
-    else
-        J_x = r + tetra_physics(ind_tetr)%x1(1)
-    endif
-
-    !> delta distributions return 1, so we have to adjust manually
-    if (in%boole_point_source) pdf_position = pdf_position/((g%amax-g%amin)*(g%cmax-g%cmin)*2*pi)
-    
 
     if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then
         if (coord_system == 2) then
@@ -613,30 +590,57 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
         endif
     endif
 
+    m = start%particle_mass(species)
+    T = in%energy_eV*ev2erg
+    energy_ev = start%energy(n,species)
+    energy_erg = start%energy(n,species)*ev2erg
+    density = in%density
+
+    ! Evaluate marker distributions at particle position/energy/pitch
+    x_global = z_save + tetra_physics(ind_tetr)%x1
+    pdf_position = evaluate_distribution_3d(start%dist_position, x_global)
+    pdf_energy_ev = evaluate_distribution_1d(start%dist_energy, energy_ev)
+    if (pdf_energy_ev.eq.1.0_dp) then
+        pdf_energy_erg = 1.0_dp
+    else
+        pdf_energy_erg = pdf_energy_ev/ev2erg
+    endif
+    pdf_lambda = evaluate_distribution_1d(start%dist_lambda, start%pitch(n,species))
+
+    if (in%boole_refined_sqrt_g) then
+        J_x = (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
+            & (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
+    else
+        J_x = r + tetra_physics(ind_tetr)%x1(1)
+    endif
+
     ! if (in%boole_linear_density_simulation) then
     !     ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
     !     density = density*(1.1_dp - s_value)/1.1_dp
     ! endif
 
-    if (in%boole_boltzmann_energies) then
+    pdf_gyroangle = 1/(2*pi)
+
+    if (in%boole_monoenergetic) then
+        f = density*pdf_gyroangle/(2.0_dp*start%v0(species))
+        J_y = start%v0(species)
+        pdf_velocity_space = pdf_lambda*pdf_gyroangle
+    else
         q = start%particle_charge(species)
         Phi_elec = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
         if (in%boole_linear_temperature_simulation) then
             ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
             T = T*(1.1_dp - s_value)/1.1_dp
         endif
-        f = pdf_boltzmann(density,T,m,energy_erg,q,Phi_elec)!*d_lambda_epsilon_d_jperp_vpar
-
+        f = pdf_boltzmann(density,T,m,energy_erg,q,Phi_elec)
         omega_c = bmod_func(z_save,ind_tetr)/start%cm_over_e(species)
         d_lambda_epsilon_d_jperp_vpar = omega_c*sqrt(m/(2.0_dp*energy_erg))
-        boltzmann_stuff = sqrt(energy_erg)*(2*pi*m)**1.5_dp*T*10/sqrt(pi)
-        J_y = m**2*omega_c*pdf_lambda*pdf_energy_erg
-    else 
-        f = density
+        J_y = m**2*omega_c
+        pdf_velocity_space = pdf_lambda*pdf_energy_erg*pdf_gyroangle*d_lambda_epsilon_d_jperp_vpar
     endif
+    if (in%boole_point_source) f = f*((g%amax-g%amin)*(g%cmax-g%cmin)*2*pi)
 
-    weights%w(n,species) = f*J_x/pdf_position
-    if (in%boole_boltzmann_energies) weights%w(n,species) = weights%w(n,species)*boltzmann_stuff
+    weights%w(n,species) = f*J_x*J_y/(pdf_position*pdf_velocity_space)
     start%jperp(n,species) = m*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
     ! -1 because of negative gyrophase
 

@@ -46,8 +46,8 @@
   !refined jacobian determinant, must be set to .false. since this can only be made use of in cylindrical coordinates
   boole_refined_sqrt_g = .false.,
 !
-  !work with boltzmann energies instead of with monoenergetic articles
-  boole_boltzmann_energies = .true.,
+  !work with monoenergetic particles instead of with boltzmann energies
+  boole_monoenergetic = .false.,
 !
   !make density a linear function of poloidal flux
   boole_linear_density_simulation = .false.,

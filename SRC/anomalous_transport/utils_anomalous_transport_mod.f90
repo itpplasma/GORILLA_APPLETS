@@ -22,7 +22,7 @@ subroutine read_anomalous_transport_inp_into_type
 
     real(dp) :: time_step, energy_eV, n_particles, density, anomalous_diffusion_coefficient
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
-               boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
+               boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, &
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
@@ -32,7 +32,7 @@ subroutine read_anomalous_transport_inp_into_type
     integer :: s_inp_unit
 
     NAMELIST /anomalous_transport_nml/ time_step, energy_eV, n_particles, boole_squared_moments, boole_point_source, &
-    & boole_collisions, boole_precalc_collisions, density, boole_refined_sqrt_g, boole_boltzmann_energies, &
+    & boole_collisions, boole_precalc_collisions, density, boole_refined_sqrt_g, boole_monoenergetic, &
     & boole_linear_density_simulation, boole_antithetic_variate, boole_linear_temperature_simulation, i_integrator_type, &
     & seed_option, boole_write_vertex_indices, boole_write_vertex_coordinates, boole_write_prism_volumes, &
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
@@ -52,7 +52,7 @@ subroutine read_anomalous_transport_inp_into_type
     in%boole_collisions = boole_collisions
     in%boole_precalc_collisions = boole_precalc_collisions
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
-    in%boole_boltzmann_energies = boole_boltzmann_energies
+    in%boole_monoenergetic = boole_monoenergetic
     in%boole_linear_density_simulation = boole_linear_density_simulation
     in%boole_antithetic_variate = boole_antithetic_variate
     in%boole_linear_temperature_simulation = boole_linear_temperature_simulation
@@ -885,7 +885,7 @@ subroutine set_rest_of_start_type(rand_matrix)
 
     start%pitch(:,:) = 2*rand_matrix(4,:,:)-1 !pitch parameter
     start%energy = in%energy_eV
-    if (in%boole_boltzmann_energies) then
+    if (.not. in%boole_monoenergetic) then
         start%energy = 5*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
     endif
 

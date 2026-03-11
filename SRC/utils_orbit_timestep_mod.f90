@@ -107,7 +107,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     !This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by
     !only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine
     !(this is necessary for the energy and momentum conserving collision operator)
-    if (in%boole_boltzmann_energies) weights%w(n,species) =  weights%w(n,species)*in%energy_eV*ev2erg
+    if (.not. in%boole_monoenergetic) weights%w(n,species) =  weights%w(n,species)*in%energy_eV*ev2erg
 
     r = z_save(1)
     phi = z_save(2)
@@ -140,7 +140,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
         weights%w(n,species) = weights%w(n,species)*(1.1_dp - s_value)/1.1_dp
     endif
 
-    if (in%boole_boltzmann_energies) then
+    if (.not. in%boole_monoenergetic) then
         !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
         phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
         if (.not. in%boole_linear_temperature_simulation) then

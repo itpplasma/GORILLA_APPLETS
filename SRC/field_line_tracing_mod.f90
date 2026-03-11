@@ -15,7 +15,7 @@ module field_line_tracing_mod
     double precision, dimension(:), allocatable :: J_perp, poloidal_flux, temperature_vector
     logical :: boole_linear_density_simulation, boole_linear_temperature_simulation, &
              & boole_poincare_plot, boole_divertor_intersection, boole_collisions, boole_point_source, boole_precalc_collisions, &
-             & boole_refined_sqrt_g, boole_boltzmann_energies
+             & boole_refined_sqrt_g, boole_monoenergetic
     double precision, dimension(:,:,:), allocatable :: randcol
     integer :: randcoli = int(1.0d5)
     integer :: n_poincare_mappings, n_mappings_ignored
@@ -33,7 +33,7 @@ module field_line_tracing_mod
     !Namelist for field_line_tracing input
     NAMELIST /field_line_tracing_nml/ time_step,energy_eV,n_particles,boole_poincare_plot,n_poincare_mappings,n_mappings_ignored, &
     & boole_divertor_intersection, z_div_plate,boole_point_source,boole_collisions, &
-    & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
+    & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_monoenergetic, boole_linear_density_simulation, &
     & boole_linear_temperature_simulation,seed_option
 
     public :: calc_field_lines
@@ -199,7 +199,7 @@ print*, 'calc_starting_conditions finished'
         !$OMP PARALLEL DEFAULT(NONE) &
         !$OMP& SHARED(num_particles,kpart,v0,time_step,boole_collisions, &
         !$OMP& dtau,dtaumin,n_start,n_end, &
-        !$OMP& start_pos_pitch_mat,boole_boltzmann_energies, &
+        !$OMP& start_pos_pitch_mat,boole_monoenergetic, &
         !$OMP& density,energy_eV,dens_mat,temp_mat,vpar_mat,tetra_grid,tetra_physics, &
         !$OMP& efcolf_mat,velrat_mat,enrat_mat,num_background_species,randcol,randcoli,maxcol,boole_precalc_collisions, counter) &
         !$OMP& FIRSTPRIVATE(particle_mass, particle_charge) &
@@ -240,7 +240,7 @@ endif
             x = x_rand_beg
             vpar = pitchpar * v0
             vperp = sqrt(v0**2-vpar**2)
-            if (boole_boltzmann_energies) then
+            if (.not. boole_monoenergetic) then
                 v = sqrt(start_pos_pitch_mat(5,n)*ev2erg*2/particle_mass)
                 vpar = pitchpar * v
                 vperp = sqrt(v**2-vpar**2)
@@ -399,7 +399,7 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
             weights(n,1) = weights(n,1)*(max_poloidal_flux*1.1-poloidal_flux(n))/(max_poloidal_flux*1.1)
         endif
 
-        if (boole_boltzmann_energies) then
+        if (.not. boole_monoenergetic) then
             !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
             phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*(/r,phi,z/))
             if (.not. boole_linear_temperature_simulation) then
@@ -688,7 +688,7 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     start_pos_pitch_mat(4,:) = 1 !delete this once i have a proper subroutine for field line tracing
 
     call RANDOM_NUMBER(rand_matrix2)
-    if (boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+    if (.not. boole_monoenergetic) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
         start_pos_pitch_mat(5,:) = 5*energy_eV*rand_matrix2(:) !boltzmann energy distribution
         constant_part_of_weights = constant_part_of_weights*10/sqrt(pi)*energy_eV*ev2erg
     endif

@@ -243,7 +243,7 @@ subroutine set_weights
 
     weights%w = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
 
-    if (in%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+    if (.not. in%boole_monoenergetic) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
         weights%w =  weights%w*10/sqrt(pi)
     endif
 
@@ -269,10 +269,10 @@ subroutine set_rest_of_start_type()
 
     ! Initialize energy distribution if not already done
     if (.not. start%dist_energy%initialized) then
-        if (in%boole_boltzmann_energies) then
-            call init_distribution_1d(start%dist_energy, pdf_flat, 0.0_dp, 5.0_dp*in%energy_eV)
-        else
+        if (in%boole_monoenergetic) then
             call init_distribution_1d(start%dist_energy, pdf_flat, in%energy_eV, in%energy_eV)
+        else
+            call init_distribution_1d(start%dist_energy, pdf_flat, 0.0_dp, 5.0_dp*in%energy_eV)
         endif
     endif
 
