@@ -552,6 +552,7 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     use supporting_functions_mod, only: bmod_func
     use gorilla_settings_mod, only: coord_system
     use tetra_grid_settings_mod, only: grid_kind
+    use marker_distribution_mod, only: evaluate_distribution_3d, evaluate_distribution_1d
 
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
@@ -563,11 +564,12 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     real(dp) :: s_value
     real(dp) :: p_d, f, J_x, J_y
     real(dp) :: base_weight
+    real(dp) :: x_global(3), pdf_position, pdf_energy, pdf_lambda, d_lambda_epsilon_d_jperp_vpar, omega_c
 
     if (present(species_in)) species = species_in
 
     ! Compute base weight (previously done in set_weights_helical_core)
-    base_weight = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+    base_weight = (g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
 
     if (in%boole_boltzmann_energies) then
         base_weight = base_weight*10/sqrt(pi)
@@ -581,12 +583,23 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     phi = z_save(2)
     z = z_save(3)
 
+    ! Evaluate marker distributions at particle position/energy/pitch
+    x_global = z_save + tetra_physics(ind_tetr)%x1
+    pdf_position = evaluate_distribution_3d(start%dist_position, x_global)
+    pdf_energy = evaluate_distribution_1d(start%dist_energy, start%energy(n,species))
+    pdf_lambda = evaluate_distribution_1d(start%dist_lambda, start%pitch(n,species))
+
+    omega_c = bmod_func(z_save,ind_tetr)/start%cm_over_e(species)
+    J_y = start%particle_mass(species)**2*omega_c
+   
+
     if (in%boole_refined_sqrt_g) then
-        weights%w(n,species) = base_weight* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
-                                        &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
+        J_x = (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
+            & (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
     else
-        weights%w(n,species) = base_weight*(r + tetra_physics(ind_tetr)%x1(1))
+        J_x = r + tetra_physics(ind_tetr)%x1(1)
     endif
+    
 
     if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then
         if (coord_system == 2) then
@@ -598,8 +611,8 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
             s_value = local_poloidal_flux / flux%poloidal_max
         else
             ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
-            print*, 'Error in calc_particle_weights_and_jperp_helical_core: Computing radial coordinate from A_phi is only valid for &
-                    &axisymmetric devices. For stellarators (grid_kind=3), use flux coordinates (coord_system=2).'
+            print*, 'Error in calc_particle_weights_and_jperp_helical_core: Computing radial coordinate from A_phi is only valid &
+                    &for axisymmetric devices. For stellarators (grid_kind=3), use flux coordinates (coord_system=2).'
             stop
         endif
     endif
@@ -609,19 +622,20 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     ! endif
 
     if (in%boole_boltzmann_energies) then
-        ! compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
         phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
-        if (.not. in%boole_linear_temperature_simulation) then
-            weights%w(n,species) = weights%w(n,species)*sqrt(start%energy(n,species)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
-                        & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/(in%energy_eV*ev2erg))
-        else
+        temperature = in%energy_eV*ev2erg
+        if (in%boole_linear_temperature_simulation) then
             ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
-            temperature = in%energy_eV*ev2erg*(1.1_dp - s_value)/1.1_dp
-            weights%w(n,species) = weights%w(n,species)*sqrt(start%energy(n,species)*ev2erg)/temperature**1.5_dp* &
-            & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
+            temperature = temperature*(1.1_dp - s_value)/1.1_dp
         endif
+        f = in%density*sqrt(start%energy(n,species)*ev2erg)/temperature**1.5_dp* &
+              & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
+        d_lambda_epsilon_d_jperp_vpar = omega_c*sqrt(start%particle_mass(species)/(2.0_dp*start%energy(n,species)*ev2erg))
+    else 
+        f = in%density
     endif
 
+    weights%w(n,species) = base_weight*f*J_x!/pdf_position
     start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
     ! -1 because of negative gyrophase
 
