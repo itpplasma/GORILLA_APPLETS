@@ -247,11 +247,7 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
         endif
         z_save = x - tetra_physics(ind_tetr)%x1
         call calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, ind_tetr, species)
-        if (in%boole_delta_f) then
-            call adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
-            ! Store the original weight for time-dependent fading
-            weights%original(n, species) = weights%w(n, species)
-        endif
+        if (in%boole_delta_f) weights%original(n, species) = weights%w(n, species)
         particle_status%initialized = .true.
     endif
 
@@ -488,26 +484,11 @@ subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
 
     real(dp) :: v_r, base_weight, r, z
 
-    ! r = z_save(1)
-    ! z = z_save(3)
-
-    ! base_weight = in%density * (g%amax - g%amin) * (g%cmax - g%cmin) * 2 * pi
-
-    ! if (in%boole_refined_sqrt_g) then
-    !     base_weight = base_weight * (sqrt_g(ind_tetr,1) + r*sqrt_g(ind_tetr,2) + z*sqrt_g(ind_tetr,3)) / &
-    !                                 (sqrt_g(ind_tetr,4) + r*sqrt_g(ind_tetr,5) + z*sqrt_g(ind_tetr,6))
-    ! else
-    !     base_weight = base_weight * (r + tetra_physics(ind_tetr)%x1(1))
-    ! endif
-
     call calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
-    ! start%jperp(n,species) = start%particle_mass(species) * vperp**2 * start%cm_over_e(species) &
-    !                       / (2 * bmod_func(z_save, ind_tetr)) * (-1)
 
-    weights%w(n,species) = weights%w(n,species) * (-1)*v_r !vpar
-    !>the factor (-1) represents partial f_M / partial s (f_M is already accounted for previously,
-    !later on I will clean up the weight calculation and make everything easier to read and follow)
-    weights%w(n,species) = weights%w(n,species) * (-1)
+    !So far, we work with densities that decline like (1.1_dp - s_value)/1.1_dp, so -v^r\partial f/\partial r turns into
+    !-v^r*1.0_dp/1.1_dp(-f)=v_r*f/1.1_dp
+    weights%w(n,species) = weights%w(n,species) * v_r /1.1_dp!vpar
 
 end subroutine adapt_weights_delta_f
 
@@ -614,10 +595,10 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
         J_x = r + tetra_physics(ind_tetr)%x1(1)
     endif
 
-    ! if (in%boole_linear_density_simulation) then
-    !     ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
-    !     density = density*(1.1_dp - s_value)/1.1_dp
-    ! endif
+    if ((.not.in%boole_delta_f).and.(in%boole_linear_density_simulation)) then
+        ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
+        density = density*(1.1_dp - s_value)/1.1_dp
+    endif
 
     pdf_gyroangle = 1/(2*pi)
 
@@ -643,6 +624,8 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     weights%w(n,species) = f*J_x*J_y/(pdf_position*pdf_velocity_space)
     start%jperp(n,species) = m*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
     ! -1 because of negative gyrophase
+
+    if (in%boole_delta_f) call adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
 
 end subroutine calc_particle_weights_and_jperp_helical_core
 
