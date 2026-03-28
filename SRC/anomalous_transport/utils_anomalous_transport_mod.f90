@@ -555,7 +555,7 @@ subroutine scan_anomalous_transport
         call apply_phi_perturbation(eps_Phi)
 
         ! Recompute tetrahedron physics with updated phi_elec
-        call make_tetra_physics(coord_system, ipert, boole_keep_phi_elec=.true.)
+        call make_tetra_physics(coord_system, ipert, i_option=12)
 
         ! Generate filename for this scan point
         select case(in%i_scan_option)
