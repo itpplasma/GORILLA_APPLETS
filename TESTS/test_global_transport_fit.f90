@@ -22,8 +22,10 @@ program test_global_transport_fit
     call test_transport_signal_requires_density_separation()
     call test_transport_output_sanitization_handles_invalid_sigma()
     call test_local_flux_pair_recovery()
+    call test_local_reference_boundaries_avoid_axis_and_edge()
     call test_weighted_linear_transport_response()
     call test_batch_mean_and_variance()
+    call test_convergence_history_populated()
 
 contains
 
@@ -293,6 +295,24 @@ subroutine test_transport_output_sanitization_handles_invalid_sigma()
 
 end subroutine test_transport_output_sanitization_handles_invalid_sigma
 
+subroutine test_local_reference_boundaries_avoid_axis_and_edge()
+
+    use global_transport_fit_gorilla_mod, only: select_local_reference_boundaries
+
+    integer, allocatable :: boundary_indices(:)
+    integer :: i
+    real(dp), allocatable :: boundary_s(:)
+
+    allocate(boundary_s(27))
+    boundary_s = [(real(i - 1, dp) / 26.0_dp, i=1, 27)]
+
+    call select_local_reference_boundaries(boundary_s, 2, boundary_indices)
+
+    call assert_true(all(boundary_indices >= 3), 'Local reference boundaries must stay away from the magnetic axis')
+    call assert_true(all(boundary_indices <= 25), 'Local reference boundaries must stay away from the absorbing edge')
+
+end subroutine test_local_reference_boundaries_avoid_axis_and_edge
+
 subroutine test_local_flux_pair_recovery()
 
     real(dp) :: a_coeff
@@ -368,6 +388,51 @@ subroutine test_batch_mean_and_variance()
     call assert_close(variance_of_mean(2), 3.0_dp, 1.0d-12, 'Variance of mean for second observable is wrong')
 
 end subroutine test_batch_mean_and_variance
+
+subroutine test_convergence_history_populated()
+
+    type(global_transport_experiment_t), allocatable :: experiments(:)
+    type(global_transport_fit_control_t) :: control
+    type(global_transport_fit_result_t) :: result
+    real(dp), allocatable :: boundary_s(:)
+    real(dp), allocatable :: shell_volumes(:)
+    real(dp), allocatable :: source_1(:)
+    real(dp), allocatable :: source_2(:)
+    real(dp), allocatable :: knot_s(:)
+    real(dp), allocatable :: true_a(:)
+    real(dp), allocatable :: true_b(:)
+
+    call make_test_geometry(boundary_s, shell_volumes, source_1, source_2)
+
+    control%n_knots_a = 3
+    control%n_knots_b = 3
+    control%max_lm_iterations = 25
+    control%regularization_a = 1.0d-12
+    control%regularization_b = 1.0d-12
+    control%lm_damping = 1.0d-6
+
+    call make_knot_points(boundary_s, control%n_knots_a, knot_s)
+    allocate(true_a(control%n_knots_a))
+    allocate(true_b(control%n_knots_b))
+    true_a = (/5.0d-2, 2.0d-2, -1.0d-2/)
+    true_b = log((/2.0d-2, 3.0d-2, 5.0d-2/))
+
+    allocate(experiments(2))
+    call generate_synthetic_experiment(boundary_s, shell_volumes, source_1, knot_s, knot_s, true_a, true_b, 0.0_dp, experiments(1))
+    call generate_synthetic_experiment(boundary_s, shell_volumes, source_2, knot_s, knot_s, true_a, true_b, 0.0_dp, experiments(2))
+
+    call fit_global_transport(experiments, control, result)
+
+    call assert_true(allocated(result%history_objective), 'Convergence history not allocated')
+    call assert_true(size(result%history_objective) > 0, 'Convergence history is empty')
+    call assert_true(size(result%history_objective) == result%n_iterations, 'History length must match n_iterations')
+    call assert_true(all(result%history_objective >= 0.0_dp), 'Objective must be non-negative')
+    call assert_true(all(result%history_gradient_norm >= 0.0_dp), 'Gradient norm must be non-negative')
+    call assert_true(all(result%history_damping > 0.0_dp), 'Damping must be positive')
+    call assert_true(result%history_objective(size(result%history_objective)) < result%history_objective(1), &
+        'Final objective must be smaller than initial objective')
+
+end subroutine test_convergence_history_populated
 
 subroutine compute_objective_only(experiments, control, basis, parameters, objective)
 

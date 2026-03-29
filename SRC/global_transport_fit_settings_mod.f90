@@ -29,6 +29,7 @@ module global_transport_fit_settings_mod
     character(len=256), public, protected :: filename_local_profiles = 'global_transport_local_profiles.dat'
     character(len=256), public, protected :: filename_comparison_profiles = 'global_transport_comparison_profiles.dat'
     character(len=256), public, protected :: filename_experiment_1_summary = 'global_transport_experiment_1.dat'
+    character(len=256), public, protected :: filename_convergence_history = 'global_transport_convergence_history.dat'
     character(len=256), public, protected :: filename_experiment_2_summary = 'global_transport_experiment_2.dat'
     integer, public, protected :: max_source_trials = 4
     integer, public, protected :: min_supported_flux_boundaries = 3
@@ -80,7 +81,8 @@ subroutine load_global_transport_fit_inp()
         filename_density_1, filename_density_variance_1, filename_flux_1, filename_flux_variance_1, &
         filename_source_2, filename_density_2, filename_density_variance_2, filename_flux_2, &
         filename_flux_variance_2, filename_fit_summary, filename_fit_profiles, filename_local_profiles, &
-        filename_comparison_profiles, filename_experiment_1_summary, filename_experiment_2_summary, &
+        filename_comparison_profiles, filename_convergence_history, &
+        filename_experiment_1_summary, filename_experiment_2_summary, &
         max_source_trials, min_supported_flux_boundaries, n_global_batches, n_local_batches, n_local_gradients, &
         n_local_reference_surfaces, local_n_particles, local_density_gradient_1, local_density_gradient_2, &
         local_density_profile_reference_s, local_total_time, local_v_E, min_density_source_relstd, source_time_growth, &

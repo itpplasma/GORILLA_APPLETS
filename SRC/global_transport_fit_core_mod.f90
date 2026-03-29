@@ -57,6 +57,7 @@ subroutine fit_global_transport(experiments, control, result)
     real(dp) :: damping
     real(dp) :: gradient_norm
     real(dp) :: objective
+    real(dp) :: step_norm
     real(dp) :: trial_objective
     integer :: n_parameters
     integer :: iteration
@@ -74,12 +75,25 @@ subroutine fit_global_transport(experiments, control, result)
     damping = control%lm_damping
     converged = .false.
 
+    allocate(result%history_objective(control%max_lm_iterations))
+    allocate(result%history_gradient_norm(control%max_lm_iterations))
+    allocate(result%history_step_norm(control%max_lm_iterations))
+    allocate(result%history_damping(control%max_lm_iterations))
+    allocate(result%history_accepted(control%max_lm_iterations))
+
     call sanitize_parameters(control, parameters, sanitized_parameters)
     call move_alloc(sanitized_parameters, parameters)
 
     do iteration = 1, control%max_lm_iterations
         call compute_objective_gradient_and_jacobian(experiments, control, basis_a, basis_b, parameters, objective, gradient, jacobian)
         gradient_norm = maxval(abs(gradient))
+
+        result%history_objective(iteration) = objective
+        result%history_gradient_norm(iteration) = gradient_norm
+        result%history_damping(iteration) = damping
+        result%history_step_norm(iteration) = 0.0_dp
+        result%history_accepted(iteration) = .false.
+
         if (gradient_norm < control%gradient_tolerance) then
             converged = .true.
             exit
@@ -89,17 +103,21 @@ subroutine fit_global_transport(experiments, control, result)
         call add_diagonal_shift(hessian, damping)
         call solve_step(hessian, gradient, step)
 
-        if (maxval(abs(step)) < control%step_tolerance) then
+        step_norm = maxval(abs(step))
+        result%history_step_norm(iteration) = step_norm
+
+        if (step_norm < control%step_tolerance) then
             converged = .true.
             exit
         end if
 
         call try_lm_step(experiments, control, basis_a, basis_b, parameters, step, objective, damping, trial_objective, accepted)
+        result%history_accepted(iteration) = accepted
         if (accepted) then
             call sanitize_parameters(control, parameters + step, sanitized_parameters)
             call move_alloc(sanitized_parameters, parameters)
             damping = max(control%lm_damping * 1.0d-12, damping * control%lm_damping_decrease)
-            if (maxval(abs(step)) < 10.0_dp * control%step_tolerance) then
+            if (step_norm < 10.0_dp * control%step_tolerance) then
                 converged = .true.
                 exit
             end if
@@ -107,6 +125,12 @@ subroutine fit_global_transport(experiments, control, result)
             damping = damping * control%lm_damping_increase
         end if
     end do
+
+    result%history_objective = result%history_objective(:iteration)
+    result%history_gradient_norm = result%history_gradient_norm(:iteration)
+    result%history_step_norm = result%history_step_norm(:iteration)
+    result%history_damping = result%history_damping(:iteration)
+    result%history_accepted = result%history_accepted(:iteration)
 
     call compute_objective_gradient_and_jacobian(experiments, control, basis_a, basis_b, parameters, objective, gradient, jacobian)
     call build_lm_hessian(control, jacobian, parameters, hessian)
@@ -836,7 +860,7 @@ subroutine fill_result(boundary_s, knot_s_a, knot_s_b, basis_a, basis_b, paramet
     integer, intent(in) :: iteration
     logical, intent(in) :: converged
     type(global_transport_fit_control_t), intent(in) :: control
-    type(global_transport_fit_result_t), intent(out) :: result
+    type(global_transport_fit_result_t), intent(inout) :: result
 
     real(dp), allocatable :: a_boundary(:)
     real(dp), allocatable :: b_boundary(:)
