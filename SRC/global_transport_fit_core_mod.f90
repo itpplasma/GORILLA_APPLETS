@@ -126,11 +126,11 @@ subroutine fit_global_transport(experiments, control, result)
         end if
     end do
 
-    result%history_objective = result%history_objective(:iteration)
-    result%history_gradient_norm = result%history_gradient_norm(:iteration)
-    result%history_step_norm = result%history_step_norm(:iteration)
-    result%history_damping = result%history_damping(:iteration)
-    result%history_accepted = result%history_accepted(:iteration)
+    result%history_objective = result%history_objective(:min(iteration, control%max_lm_iterations))
+    result%history_gradient_norm = result%history_gradient_norm(:min(iteration, control%max_lm_iterations))
+    result%history_step_norm = result%history_step_norm(:min(iteration, control%max_lm_iterations))
+    result%history_damping = result%history_damping(:min(iteration, control%max_lm_iterations))
+    result%history_accepted = result%history_accepted(:min(iteration, control%max_lm_iterations))
 
     call compute_objective_gradient_and_jacobian(experiments, control, basis_a, basis_b, parameters, objective, gradient, jacobian)
     call build_lm_hessian(control, jacobian, parameters, hessian)
