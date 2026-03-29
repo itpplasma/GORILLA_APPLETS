@@ -6,6 +6,18 @@ module utils_orbit_timestep_mod
    
 contains
 
+integer function get_flux_shell_index(ind_tetr)
+
+    use tetra_grid_settings_mod, only: grid_size
+
+    integer, intent(in) :: ind_tetr
+    integer :: ind_in_first_phi_slice
+
+    ind_in_first_phi_slice = mod(ind_tetr - 1, grid_size(1) * grid_size(3) * 6) + 1
+    get_flux_shell_index = int((ind_in_first_phi_slice - 1) / (grid_size(3) * 6)) + 1
+
+end function get_flux_shell_index
+
 subroutine identify_particles_entering_annulus(x,local_counter,boole_lost_inside)
 
     use tetra_physics_mod, only: tetra_physics
@@ -142,15 +154,21 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
 
 end subroutine calc_particle_weights_and_jperp
 
-subroutine compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
+subroutine compute_radial_fluxes(ind_tetr_save, ind_tetr, x, particle_weight, local_weighted_radial_flux)
 
     use gorilla_applets_types_mod, only: output
     use tetra_grid_settings_mod, only: grid_size
 
     integer, intent(in) :: ind_tetr_save,ind_tetr
+    real(dp), intent(in), optional :: particle_weight
+    real(dp), intent(inout), optional :: local_weighted_radial_flux(:)
     integer, dimension(2) :: ind_r, ind_in_first_phi_slice
     real(dp), dimension(3)        :: x
     integer :: change, boundary_num
+    real(dp) :: weighted_change
+
+    weighted_change = 0.0_dp
+    if (present(particle_weight)) weighted_change = particle_weight
 
     ind_in_first_phi_slice = mod((/ind_tetr_save,ind_tetr/) - 1,grid_size(1)*grid_size(3)*6) + 1
     ind_r = int((ind_in_first_phi_slice - 1)/(grid_size(3)*6)) + 1
@@ -161,15 +179,31 @@ subroutine compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
             boundary_num = max(ind_r(2), ind_r(1))
             !$omp critical
             output%radial_flux(boundary_num) = output%radial_flux(boundary_num) + change
+            if (present(particle_weight)) output%weighted_radial_flux(boundary_num) = &
+                output%weighted_radial_flux(boundary_num) + change * weighted_change
             !$omp end critical
+            if (present(local_weighted_radial_flux)) then
+                local_weighted_radial_flux(boundary_num) = local_weighted_radial_flux(boundary_num) + change * weighted_change
+            end if
         else
             !$omp critical
             if (ind_r(1).eq.1) then
                 output%radial_flux(ind_r(1)) = output%radial_flux(ind_r(1)) - 1
+                if (present(particle_weight)) output%weighted_radial_flux(ind_r(1)) = &
+                    output%weighted_radial_flux(ind_r(1)) - weighted_change
             else
                 output%radial_flux(ind_r(1)+1) = output%radial_flux(ind_r(1)+1) + 1
+                if (present(particle_weight)) output%weighted_radial_flux(ind_r(1)+1) = &
+                    output%weighted_radial_flux(ind_r(1)+1) + weighted_change
             endif
             !$omp end critical
+            if (present(local_weighted_radial_flux)) then
+                if (ind_r(1).eq.1) then
+                    local_weighted_radial_flux(ind_r(1)) = local_weighted_radial_flux(ind_r(1)) - weighted_change
+                else
+                    local_weighted_radial_flux(ind_r(1) + 1) = local_weighted_radial_flux(ind_r(1) + 1) + weighted_change
+                endif
+            end if
         endif
     endif
 

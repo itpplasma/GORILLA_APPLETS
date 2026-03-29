@@ -70,11 +70,13 @@ subroutine read_self_consistent_electric_field_inp_into_type
 
 end subroutine read_self_consistent_electric_field_inp_into_type
 
-subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n_particles_in)
+subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n_particles_in,transport_samples)
 
     use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, exit_data, s, &
     g, maximum_s
+    use global_transport_fit_types_mod, only: global_transport_samples_t
     use tetra_grid_mod, only: ntetr
+    use tetra_grid_settings_mod, only: grid_size
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
     add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
@@ -86,9 +88,14 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     integer, intent(in)                               :: species, j
     integer, intent(in), optional                     :: n_particles_in
     logical, intent(in)                               :: boole_diffusion_coefficient
+    type(global_transport_samples_t), intent(inout), optional :: transport_samples
     integer                                           :: kpart, iantithetic, ind_tetr, iface, n_particles
     integer                                           :: p, l, n, i, k
+    integer                                           :: lost_count
     real(dp), dimension(3)                            :: x
+    real(dp), dimension(grid_size(1) + 1)            :: local_boundary_weighted_flux
+    real(dp), dimension(grid_size(1))                :: local_shell_time
+    real(dp), dimension(grid_size(1))                :: local_source_weight
     real(dp)                                          :: vpar,vperp, t_step_s, v, v_save,vpar_save, vperp_save, t_tot, v_init
     type(time_t)                                      :: t
     type(counter_t)                                   :: local_counter
@@ -122,10 +129,12 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     t_tot = 0.0_dp
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr) &
+    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr, &
+    !$OMP& transport_samples) &
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p,l,n,i,x,v_save,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
-    !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init) &
+    !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init, local_boundary_weighted_flux, local_shell_time, &
+    !$OMP& local_source_weight, lost_count) &
     !$OMP& FIRSTPRIVATE(thread_flag,local_rr)
     if (omp_get_thread_num().eq.0) print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO SCHEDULE(static)
@@ -147,6 +156,11 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
             call print_progress(n_particles,kpart,n)
 
             call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp,species)
+            if (present(transport_samples)) then
+                local_boundary_weighted_flux = 0.0_dp
+                local_shell_time = 0.0_dp
+                local_source_weight = 0.0_dp
+            endif
 
             i = 0
 
@@ -189,8 +203,14 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                     k = 1.0_dp !if boole_diffusion_coefficient.eqv..false., k is meaningless
                 endif
 
-                call orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_status,ind_tetr,iface,n,&
-                &local_tetr_moments, local_counter, species, j, t_step_s, k, boole_diffusion_coefficient,local_rr)
+                if (present(transport_samples)) then
+                    call orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_status,ind_tetr,iface,n,&
+                    &local_tetr_moments, local_counter, species, j, t_step_s, k, boole_diffusion_coefficient,local_rr, &
+                    &local_shell_time, local_source_weight, local_boundary_weighted_flux)
+                else
+                    call orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_status,ind_tetr,iface,n,&
+                    &local_tetr_moments, local_counter, species, j, t_step_s, k, boole_diffusion_coefficient,local_rr)
+                endif
 
                 t%confined = t%confined + t%step - t%remain
                 t_tot = t_tot + t%step - t%remain
@@ -215,6 +235,18 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
             counter%integration_steps = counter%integration_steps + i
             c%maxcol = max(dble(i)/dble(c%randcoli),c%maxcol)
             call add_local_counter_to_counter(local_counter)
+            if (present(transport_samples)) then
+                transport_samples%shell_time_sum = transport_samples%shell_time_sum + local_shell_time
+                transport_samples%shell_time_sumsq = transport_samples%shell_time_sumsq + local_shell_time**2
+                transport_samples%source_weight_sum = transport_samples%source_weight_sum + local_source_weight
+                transport_samples%boundary_weighted_flux_sum = transport_samples%boundary_weighted_flux_sum + &
+                    local_boundary_weighted_flux
+                transport_samples%boundary_weighted_flux_sumsq = transport_samples%boundary_weighted_flux_sumsq + &
+                    local_boundary_weighted_flux**2
+                lost_count = 0
+                if (particle_status%lost) lost_count = 1
+                transport_samples%lost_particles = transport_samples%lost_particles + lost_count
+            end if
             !$omp end critical
             call update_exit_data(particle_status%lost,t%confined,x,vpar,vperp,i,n,species_in=species)
             call update_start_type(x,vpar,vperp,n,species,ind_tetr)
@@ -226,12 +258,15 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !$OMP END DO
     !$OMP END PARALLEL
 
+    if (present(transport_samples)) transport_samples%n_particles = n_particles
+
     print*, 'Total tracing time of all particles divided by number of particles is: ', t_tot/n_particles, 's'
 
 end subroutine parallelised_particle_pushing
 
 subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_status,ind_tetr,iface, n,local_tetr_moments, &
-                                local_counter,species, j, t_step_s, k, boole_diffusion_coefficient,local_rr)
+                                local_counter,species, j, t_step_s, k, boole_diffusion_coefficient,local_rr, local_shell_time, &
+                                local_source_weight, local_boundary_weighted_flux)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly
@@ -243,13 +278,16 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     use gorilla_applets_types_mod, only: counter_t, particle_status_t, g, start, s, in, time_t, maximum_s
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
     use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
-                                        initialize_constants_of_motion, compute_radial_fluxes
+                                        initialize_constants_of_motion, compute_radial_fluxes, get_flux_shell_index
     use constants, only: echarge
     use russian_roulette_mod, only: play_russian_roulette, rr, local_rr_t
 
     integer, intent(in)                          :: species, j, n
     logical, intent(in)                          :: boole_diffusion_coefficient
     real(dp), intent(inout)                      :: t_step_s
+    real(dp), intent(inout), optional            :: local_boundary_weighted_flux(:)
+    real(dp), intent(inout), optional            :: local_shell_time(:)
+    real(dp), intent(inout), optional            :: local_source_weight(:)
     type(counter_t), intent(inout)               :: local_counter
     type(particle_status_t), intent(inout)       :: particle_status
     type(time_t)                                 :: t
@@ -278,6 +316,10 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         z_save = x-tetra_physics(ind_tetr)%x1
         if ((j.eq.1).or.(.not.in%boole_static_ne)) then
             call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species,boole_diffusion_coefficient)
+            if (present(local_source_weight)) then
+                local_source_weight(get_flux_shell_index(ind_tetr)) = local_source_weight(get_flux_shell_index(ind_tetr)) + &
+                    start%weight(n, species)
+            end if
         endif
         if ((.not.in%boole_static_ne).and.(species.eq.1)) then
             start%x(:,n,2) = start%x(:,n,1)
@@ -348,8 +390,10 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
                     s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2*start%weight(n,species)
                 endif
                 s%check(k) = s%check(k) + 1
-                i = min(int(s%j/10*v/start%v0(species))+1, s%j)
-                if (int(10*v/start%v0(species))+1.gt.s%j) print*, 'ATTENTION: particle is faster than 10*v_t'
+                i = min(int(s%j / 10 * v / start%v0(species)) + 1, s%j)
+                if ((s%j > 1) .and. (int(10 * v / start%v0(species)) + 1 > s%j)) then
+                    print *, 'ATTENTION: particle is faster than 10*v_t'
+                end if
                 s%f_v(k,i) = s%f_v(k,i) + (x(1) - s%s0)**2/s%n_particles 
                 !if (n.eq.1520) write(71,*) s%time(k), x, vpar, vperp
                 !$omp end critical
@@ -364,7 +408,17 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         t_step_s = t_step_s - t_pass
 
         call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities,species)
-        if((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
+        if (present(local_shell_time)) then
+            local_shell_time(get_flux_shell_index(ind_tetr_save)) = local_shell_time(get_flux_shell_index(ind_tetr_save)) + &
+                start%weight(n, species) * t_pass
+        end if
+        if ((grid_kind.eq.2).or.(grid_kind.eq.3)) then
+            if (present(local_boundary_weighted_flux)) then
+                call compute_radial_fluxes(ind_tetr_save, ind_tetr, x, start%weight(n, species), local_boundary_weighted_flux)
+            else
+                call compute_radial_fluxes(ind_tetr_save, ind_tetr, x, start%weight(n, species))
+            end if
+        endif
 
         if (rr%boole_russian_roulette) then
             particle_state_for_rr = (/vpar,vperp,t%confined,t%remain,t%step,x,dble(ind_tetr),dble(iface)/)
@@ -425,6 +479,13 @@ subroutine allocate_electric_potential_type
     use gorilla_applets_types_mod, only: ep, in
     use tetra_grid_mod, only: ntetr, nvert
     use tetra_grid_settings_mod, only: grid_size
+
+    if (allocated(ep%rho_prism)) deallocate(ep%rho_prism)
+    if (allocated(ep%rho_flux_layer)) deallocate(ep%rho_flux_layer)
+    if (allocated(ep%rho_vert)) deallocate(ep%rho_vert)
+    if (allocated(ep%phi_elec_from_rho)) deallocate(ep%phi_elec_from_rho)
+    if (allocated(ep%average_abs_phi_elec_from_rho)) deallocate(ep%average_abs_phi_elec_from_rho)
+    if (allocated(ep%total_tracing_time)) deallocate(ep%total_tracing_time)
 
     allocate(ep%rho_prism(ntetr/3))
     allocate(ep%rho_flux_layer(grid_size(1)))
@@ -755,6 +816,9 @@ subroutine associate_flux_labels_with_tetrahedra_and_vertices
     !     stop
     ! endif
 
+    if (allocated(g%vertices_per_flux_surface)) deallocate(g%vertices_per_flux_surface)
+    if (allocated(g%prisms_per_flux_tube)) deallocate(g%prisms_per_flux_tube)
+
     allocate(g%vertices_per_flux_surface(grid_size(1)+1,grid_size(2)*grid_size(3)))
     allocate(g%prisms_per_flux_tube(grid_size(1),grid_size(2)*grid_size(3)*2))
 
@@ -801,7 +865,7 @@ subroutine mirror_particles_on_domain_boundaries(x,vpar,n,ind_tetr,iface,z_save,
     integer, intent(inout) :: ind_tetr, iface
     real(dp) :: vperp
     real(dp), dimension(3) :: x_new
-    logical :: boole_diag = .true.
+    logical :: boole_diag = .false.
 
     x_new = (/x(1),-x(2)+2*pi,-x(3)+2*pi/n_field_periods/)
     vpar = -vpar
@@ -934,6 +998,10 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
 
     if (in%boole_linear_density_simulation) then
         start%weight(n,species) = start%weight(n,species)*(1.0_dp-0.9_dp*x(1))
+    endif
+    if (abs(in%density_log_gradient_per_s) > 0.0_dp) then
+        start%weight(n,species) = start%weight(n,species) * &
+            exp(in%density_log_gradient_per_s * (x(1) - in%density_profile_reference_s))
     endif
 
     if (boole_diffusion_coefficient) then
@@ -1070,7 +1138,7 @@ subroutine set_starting_positions(rand_matrix,species_in,s0)
     endif
 
     start%x(1,:,species) = sfc_s_min + rand_matrix(1,:,:)*(1-sfc_s_min)
-    if (present(s0).and.(.not.in%boole_static_ne))  start%x(1,:,species) = s0
+    if (present(s0)) start%x(1, :, species) = s0
     start%x(2,:,species) = 2*pi*rand_matrix(2,:,:) !theta
     start%x(3,:,species) = 2*pi/n_field_periods*rand_matrix(3,:,:) !phi
 
@@ -1134,36 +1202,31 @@ end subroutine set_rest_of_individual_particle_specifications
 
 subroutine set_particle_type_specifications
 
+    use constants, only: ev2erg
     use gorilla_applets_types_mod, only: in, start
-    use constants, only: echarge,ame,clight, ev2erg, amp
-    use gorilla_settings_mod, only: ispecies
+    use transport_benchmark_utils_mod, only: get_species_parameters
 
-    real(dp) :: charge, mass, cm_over_e
+    real(dp) :: charge
+    real(dp) :: cm_over_e
+    real(dp) :: electron_charge
+    real(dp) :: electron_cm_over_e
+    real(dp) :: electron_mass
+    real(dp) :: mass
 
-    select case(ispecies)
-        case(1) !electron
-            charge = -echarge
-            mass = ame
-            cm_over_e = -clight*ame/echarge
-        case(2) !deuterium ion
-            charge = echarge
-            mass = 2.d0*amp
-            cm_over_e=2.d0*clight*amp/echarge
-        case(3) !alpha particle
-            charge = 2.d0*echarge
-            mass = 4.d0*amp
-            cm_over_e=2.d0*clight*amp/echarge
-        case(4) !ionised tungsten
-            charge = 74.d0*echarge
-            mass = 184.d0*amp
-            cm_over_e= 184.d0*clight*amp/(74.d0*echarge)
-    end select  
+    call get_species_parameters(in%tracer_species, charge, mass, cm_over_e)
+    call get_species_parameters(1, electron_charge, electron_mass, electron_cm_over_e)
 
-    start%particle_charge = (/charge, -echarge/)
-    start%particle_mass = (/mass, ame/)
-    start%cm_over_e = (/cm_over_e, -clight*ame/echarge/)
-    start%t = (/in%time_step, in%time_step/) !/42.0_dp
-    if (in%boole_static_ne) start%t(2) = 0.0_dp
+    start%particle_charge = charge
+    start%particle_mass = mass
+    start%cm_over_e = cm_over_e
+    start%t = in%time_step
+
+    if (in%n_species >= 2) then
+        start%particle_charge(2) = electron_charge
+        start%particle_mass(2) = electron_mass
+        start%cm_over_e(2) = electron_cm_over_e
+        if (in%boole_static_ne) start%t(2) = 0.0_dp
+    end if
 
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
     start%epsilon_max = 16.0_dp
@@ -1191,6 +1254,7 @@ subroutine calc_s_shell_volumes
     integer :: ns, j, ind_prism
     real(dp) :: s
 
+    if (allocated(ep%s_shell_volumes)) deallocate(ep%s_shell_volumes)
     allocate(ep%s_shell_volumes(grid_size(1)))
     ep%s_shell_volumes = 0.0_dp
 
@@ -1211,13 +1275,13 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     use tetra_grid_mod, only: verts_sthetaphi
     use utils_data_pre_and_post_processing_mod, only: prepare_next_round_of_parallelised_particle_pushing, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, initialize_exit_data
-    use llsq_mod, only: llsq
     use tetra_physics_mod, only: particle_mass,tetra_physics
+    use transport_benchmark_utils_mod, only: fit_transport_coefficients
     use russian_roulette_mod, only: prepare_russian_roulette
     use tetra_grid_settings_mod, only: sfc_s_min
 
     integer :: ns, i, n_particles, file_id, n_ignored, ns_start
-    real(dp) :: extrapolation_factor, A, B, offset, tau_c_ei, v0, v_max, weights_before_redistribution
+    real(dp) :: extrapolation_factor, A, B, tau_c_ei, v0, v_max, weights_before_redistribution
     real(dp) :: standard_deviation, dummy
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str
@@ -1265,7 +1329,6 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
 
         !Initiate electrons at the different flux surfaces leaving out the boundaries
         s%s0 = dc%s_vertices(ns)
-        s%s0 = 0.5d0
 
         call RANDOM_NUMBER(rand_matrix)
         call set_starting_positions(rand_matrix,(/2/), s%s0)
@@ -1302,15 +1365,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
         !     enddo
         ! close(23)
 
-        !Starting index (Throw away first 20 percent of values)
-        i = ceiling(dble(s%k)*0.2_dp)
-        
-
-        call llsq ( int(s%k - i + 1, kind=8), s%time(i:s%k), s%delta_s(i:s%k), A, offset)
-
-        data_for_diffusion_coefficient = s%delta_s_squared-2*A*s%time*s%delta_s+A**2*s%time**2
-        call llsq ( int(s%k - i + 1, kind=8), s%time(i:s%k), data_for_diffusion_coefficient, B, offset)
-        B = B/2
+        call fit_transport_coefficients(s%time, s%delta_s, s%delta_s_squared, A, B)
 
         ! n_ignored = 0
         ! data_for_convection_coefficient = exit_data%x(1,:,2)-s%s0

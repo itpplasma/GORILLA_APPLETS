@@ -212,7 +212,7 @@ subroutine compute_objective_gradient_and_jacobian(experiments, control, basis_a
     call build_second_difference_matrix(control%n_knots_b, regularization_matrix_b)
 
     allocate(gradient(size(parameters)))
-    allocate(jacobian(total_observable_count(experiments), size(parameters)))
+    allocate(jacobian(total_observable_count(experiments, control%use_flux_objective), size(parameters)))
     jacobian = 0.0_dp
     gradient = 0.0_dp
     objective = 0.0_dp
@@ -220,7 +220,7 @@ subroutine compute_objective_gradient_and_jacobian(experiments, control, basis_a
 
     call accumulate_experiment_terms(experiments, control, basis_a, basis_b, parameters, objective, gradient, jacobian, row_offset)
     call add_regularization_terms(control, regularization_matrix_a, regularization_matrix_b, parameters, objective, gradient)
-    call apply_weighting_to_jacobian(experiments, jacobian, weighted_jacobian)
+    call apply_weighting_to_jacobian(experiments, control%use_flux_objective, jacobian, weighted_jacobian)
     jacobian = weighted_jacobian
 
 end subroutine compute_objective_gradient_and_jacobian
@@ -289,16 +289,23 @@ subroutine accumulate_single_experiment(experiment, control, basis_a, basis_b, p
 
     residual_density = density - experiment%density
     residual_flux = flux - experiment%flux
-    experiment_objective = 0.5_dp * sum(density_weights * residual_density**2) + 0.5_dp * sum(flux_weights * residual_flux**2)
+    experiment_objective = 0.5_dp * sum(density_weights * residual_density**2)
+    if (control%use_flux_objective) then
+        experiment_objective = experiment_objective + 0.5_dp * sum(flux_weights * residual_flux**2)
+    end if
     objective = objective + experiment_objective
 
-    call build_adjoint_rhs(flux_n, density_weights, flux_weights, residual_density, residual_flux, adjoint_rhs)
+    call build_adjoint_rhs(flux_n, density_weights, flux_weights, residual_density, residual_flux, control%use_flux_objective, &
+        adjoint_rhs)
     call solve_adjoint(system_matrix, adjoint_rhs, adjoint_state)
-    gradient = gradient + matmul(transpose(flux_param_partial), flux_weights * residual_flux) - &
-        matmul(transpose(matmul(divergence_matrix, flux_param_partial)), adjoint_state)
+    gradient = gradient - matmul(transpose(matmul(divergence_matrix, flux_param_partial)), adjoint_state)
+    if (control%use_flux_objective) then
+        gradient = gradient + matmul(transpose(flux_param_partial), flux_weights * residual_flux)
+    end if
 
     call build_density_sensitivity(system_matrix, divergence_matrix, flux_param_partial, density_sensitivity)
-    call build_observable_jacobian(flux_n, flux_param_partial, density_sensitivity, observable_jacobian)
+    call build_observable_jacobian(flux_n, flux_param_partial, density_sensitivity, control%use_flux_objective, &
+        observable_jacobian)
     jacobian(row_offset + 1:row_offset + size(observable_jacobian, 1), :) = observable_jacobian
     row_offset = row_offset + size(observable_jacobian, 1)
 
@@ -506,17 +513,22 @@ subroutine build_weights(variance, weights)
 
 end subroutine build_weights
 
-subroutine build_adjoint_rhs(flux_n, density_weights, flux_weights, residual_density, residual_flux, adjoint_rhs)
+subroutine build_adjoint_rhs(flux_n, density_weights, flux_weights, residual_density, residual_flux, use_flux_objective, &
+    adjoint_rhs)
 
     real(dp), intent(in) :: flux_n(:, :)
     real(dp), intent(in) :: density_weights(:)
     real(dp), intent(in) :: flux_weights(:)
     real(dp), intent(in) :: residual_density(:)
     real(dp), intent(in) :: residual_flux(:)
+    logical, intent(in) :: use_flux_objective
     real(dp), allocatable, intent(out) :: adjoint_rhs(:)
 
     allocate(adjoint_rhs(size(residual_density)))
-    adjoint_rhs = density_weights * residual_density + matmul(transpose(flux_n), flux_weights * residual_flux)
+    adjoint_rhs = density_weights * residual_density
+    if (use_flux_objective) then
+        adjoint_rhs = adjoint_rhs + matmul(transpose(flux_n), flux_weights * residual_flux)
+    end if
 
 end subroutine build_adjoint_rhs
 
@@ -554,21 +566,25 @@ subroutine build_density_sensitivity(system_matrix, divergence_matrix, flux_para
 
 end subroutine build_density_sensitivity
 
-subroutine build_observable_jacobian(flux_n, flux_param_partial, density_sensitivity, observable_jacobian)
+subroutine build_observable_jacobian(flux_n, flux_param_partial, density_sensitivity, use_flux_objective, observable_jacobian)
 
     real(dp), intent(in) :: flux_n(:, :)
     real(dp), intent(in) :: flux_param_partial(:, :)
     real(dp), intent(in) :: density_sensitivity(:, :)
+    logical, intent(in) :: use_flux_objective
     real(dp), allocatable, intent(out) :: observable_jacobian(:, :)
 
     integer :: n_density
     integer :: n_flux
 
     n_density = size(density_sensitivity, 1)
-    n_flux = size(flux_param_partial, 1)
+    n_flux = 0
+    if (use_flux_objective) n_flux = size(flux_param_partial, 1)
     allocate(observable_jacobian(n_density + n_flux, size(density_sensitivity, 2)))
     observable_jacobian(1:n_density, :) = density_sensitivity
-    observable_jacobian(n_density + 1:n_density + n_flux, :) = matmul(flux_n, density_sensitivity) + flux_param_partial
+    if (use_flux_objective) then
+        observable_jacobian(n_density + 1:n_density + n_flux, :) = matmul(flux_n, density_sensitivity) + flux_param_partial
+    end if
 
 end subroutine build_observable_jacobian
 
@@ -605,9 +621,10 @@ subroutine add_regularization_terms(control, regularization_matrix_a, regulariza
 
 end subroutine add_regularization_terms
 
-subroutine apply_weighting_to_jacobian(experiments, jacobian, weighted_jacobian)
+subroutine apply_weighting_to_jacobian(experiments, use_flux_objective, jacobian, weighted_jacobian)
 
     type(global_transport_experiment_t), intent(in) :: experiments(:)
+    logical, intent(in) :: use_flux_objective
     real(dp), intent(in) :: jacobian(:, :)
     real(dp), allocatable, intent(out) :: weighted_jacobian(:, :)
 
@@ -624,12 +641,15 @@ subroutine apply_weighting_to_jacobian(experiments, jacobian, weighted_jacobian)
         call build_weights(experiments(i)%density_variance, density_weights)
         call build_weights(experiments(i)%flux_variance, flux_weights)
         n_density = size(experiments(i)%density)
-        n_flux = size(experiments(i)%flux)
+        n_flux = 0
+        if (use_flux_objective) n_flux = size(experiments(i)%flux)
         weighted_jacobian(row_offset + 1:row_offset + n_density, :) = &
             spread(sqrt(density_weights), 2, size(jacobian, 2)) * jacobian(row_offset + 1:row_offset + n_density, :)
-        weighted_jacobian(row_offset + n_density + 1:row_offset + n_density + n_flux, :) = &
-            spread(sqrt(flux_weights), 2, size(jacobian, 2)) * &
-            jacobian(row_offset + n_density + 1:row_offset + n_density + n_flux, :)
+        if (n_flux > 0) then
+            weighted_jacobian(row_offset + n_density + 1:row_offset + n_density + n_flux, :) = &
+                spread(sqrt(flux_weights), 2, size(jacobian, 2)) * &
+                jacobian(row_offset + n_density + 1:row_offset + n_density + n_flux, :)
+        end if
         row_offset = row_offset + n_density + n_flux
     end do
 
@@ -772,15 +792,17 @@ subroutine fill_result(boundary_s, knot_s_a, knot_s_b, basis_a, basis_b, paramet
 
 end subroutine fill_result
 
-integer function total_observable_count(experiments)
+integer function total_observable_count(experiments, use_flux_objective)
 
     type(global_transport_experiment_t), intent(in) :: experiments(:)
+    logical, intent(in) :: use_flux_objective
 
     integer :: i
 
     total_observable_count = 0
     do i = 1, size(experiments)
-        total_observable_count = total_observable_count + size(experiments(i)%density) + size(experiments(i)%flux)
+        total_observable_count = total_observable_count + size(experiments(i)%density)
+        if (use_flux_objective) total_observable_count = total_observable_count + size(experiments(i)%flux)
     end do
 
 end function total_observable_count
