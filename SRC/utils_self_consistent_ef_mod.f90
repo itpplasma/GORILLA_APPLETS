@@ -321,7 +321,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
                     start%weight(n, species)
             end if
         endif
-        if ((.not.in%boole_static_ne).and.(species.eq.1)) then
+        if ((.not.in%boole_static_ne).and.(species.eq.1).and.(in%n_species.ge.2)) then
             start%x(:,n,2) = start%x(:,n,1)
             start%weight(n,2) = start%weight(n,1)
         endif 
