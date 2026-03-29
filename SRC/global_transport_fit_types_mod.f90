@@ -66,6 +66,11 @@ module global_transport_fit_types_mod
         real(dp), allocatable :: b_std(:)
         real(dp), allocatable :: knot_s_a(:)
         real(dp), allocatable :: knot_s_b(:)
+        real(dp), allocatable :: history_objective(:)
+        real(dp), allocatable :: history_gradient_norm(:)
+        real(dp), allocatable :: history_step_norm(:)
+        real(dp), allocatable :: history_damping(:)
+        logical, allocatable :: history_accepted(:)
     end type global_transport_fit_result_t
 
     type global_transport_samples_t

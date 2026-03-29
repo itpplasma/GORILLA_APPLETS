@@ -8,6 +8,7 @@ module global_transport_fit_gorilla_mod
     private
 
     public :: run_gorilla_mc_global_transport_fit
+    public :: select_local_reference_boundaries
 
 contains
 
@@ -15,11 +16,11 @@ subroutine run_gorilla_mc_global_transport_fit(control, result)
 
     use field_mod, only: ipert
     use global_transport_fit_core_mod, only: fit_global_transport
-    use global_transport_fit_io_mod, only: write_global_transport_fit_outputs
+    use global_transport_fit_io_mod, only: write_convergence_history, write_global_transport_fit_outputs
     use global_transport_fit_math_mod, only: compute_geometry_from_boundaries
-    use global_transport_fit_settings_mod, only: filename_comparison_profiles, filename_experiment_1_summary, &
-        filename_experiment_2_summary, filename_fit_profiles, filename_fit_summary, filename_local_profiles, &
-        local_density_gradient_1, local_density_gradient_2, local_density_profile_reference_s, local_n_particles, &
+    use global_transport_fit_settings_mod, only: filename_comparison_profiles, filename_convergence_history, &
+        filename_experiment_1_summary, filename_experiment_2_summary, filename_fit_profiles, filename_fit_summary, &
+        filename_local_profiles, local_density_gradient_1, local_density_gradient_2, local_n_particles, &
         local_total_time, local_v_E, max_source_trials, min_density_source_relstd, min_supported_flux_boundaries, &
         n_global_batches, n_local_batches, n_local_gradients, n_local_reference_surfaces, source_gradient_1, &
         source_gradient_2, source_reference_s_1, source_reference_s_2, source_time_growth, source_width_1, source_width_2
@@ -91,6 +92,7 @@ subroutine run_gorilla_mc_global_transport_fit(control, result)
 
     call fit_global_transport(experiments, control, result)
     call write_global_transport_fit_outputs(boundary_s, result, filename_fit_summary, filename_fit_profiles)
+    call write_convergence_history(result, filename_convergence_history)
 
     global_tracing_time = max(qualities(1)%tracing_time, qualities(2)%tracing_time)
     local_time_step = global_tracing_time
@@ -98,7 +100,7 @@ subroutine run_gorilla_mc_global_transport_fit(control, result)
     local_particle_count = in%num_particles
     if (local_n_particles > 0) local_particle_count = local_n_particles
     call build_local_transport_reference(boundary_s, n_local_reference_surfaces, local_density_gradient_1, &
-        local_density_gradient_2, n_local_gradients, local_density_profile_reference_s, local_v_E, local_time_step, &
+        local_density_gradient_2, n_local_gradients, local_v_E, local_time_step, &
         local_particle_count, n_local_batches, local_boundary_indices, local_boundary_s, local_a, local_a_std, local_b, &
         local_b_std, local_valid)
     call write_local_transport_profiles(local_boundary_indices, local_boundary_s, local_valid, local_a, local_a_std, local_b, &
@@ -454,7 +456,7 @@ subroutine write_experiment_summary(boundary_s, shell_volumes, boundary_areas, e
 end subroutine write_experiment_summary
 
 subroutine build_local_transport_reference(boundary_s, n_reference_surfaces, density_gradient_1, density_gradient_2, &
-    n_local_gradients, density_profile_reference_s, v_E, total_time, n_particles, n_batches, boundary_indices, &
+    n_local_gradients, v_E, total_time, n_particles, n_batches, boundary_indices, &
     local_boundary_s, local_a, local_a_std, local_b, local_b_std, local_valid)
 
     use gorilla_applets_types_mod, only: in
@@ -465,7 +467,6 @@ subroutine build_local_transport_reference(boundary_s, n_reference_surfaces, den
     real(dp), intent(in) :: boundary_s(:)
     real(dp), intent(in) :: density_gradient_1
     real(dp), intent(in) :: density_gradient_2
-    real(dp), intent(in) :: density_profile_reference_s
     real(dp), intent(in) :: total_time
     real(dp), intent(in) :: v_E
     integer, intent(in) :: n_particles
@@ -485,7 +486,7 @@ subroutine build_local_transport_reference(boundary_s, n_reference_surfaces, den
     real(dp), allocatable :: normalized_flux_mean(:)
     real(dp), allocatable :: normalized_flux_samples(:, :)
     real(dp), allocatable :: normalized_flux_var(:)
-    real(dp) :: density_value
+    real(dp) :: local_reference_s
     integer :: i
     integer :: i_batch
     integer :: i_gradient
@@ -502,15 +503,20 @@ subroutine build_local_transport_reference(boundary_s, n_reference_surfaces, den
     allocate(normalized_flux_samples(n_local_gradients, n_batches))
 
     do i = 1, size(boundary_indices)
+        local_reference_s = boundary_s(boundary_indices(i))
         do i_gradient = 1, n_local_gradients
-            density_value = in%density * exp(gradients(i_gradient) * (boundary_s(boundary_indices(i)) - density_profile_reference_s))
             do i_batch = 1, n_batches
-                call run_usual_transport_benchmark_case(boundary_s(boundary_indices(i)), 1, density_value, density_value, in%energy_eV, &
-                    density_value, in%energy_eV, in%energy_eV, total_time, n_particles, gradients(i_gradient), &
-                    density_profile_reference_s, v_E, in%collision_operator, in%boole_precalc_collisions, &
-                    in%i_integrator_type, result, reset_random_seed=.false., &
-                    boole_boltzmann_energies_in=.true., boole_static_ne_in=in%boole_static_ne)
-                normalized_flux_samples(i_gradient, i_batch) = result%weighted_flux_density / density_value
+                call run_usual_transport_benchmark_case(local_reference_s, 1, &
+                    in%density, in%density, in%energy_eV, &
+                    in%density, in%energy_eV, in%energy_eV, &
+                    total_time, n_particles, gradients(i_gradient), &
+                    local_reference_s, v_E, in%collision_operator, &
+                    in%boole_precalc_collisions, in%i_integrator_type, &
+                    result, reset_random_seed=.false., &
+                    boole_boltzmann_energies_in=.true., &
+                    boole_static_ne_in=in%boole_static_ne)
+                normalized_flux_samples(i_gradient, i_batch) = &
+                    result%weighted_flux_density / in%density
             end do
         end do
         call compute_mean_and_variance(normalized_flux_samples, normalized_flux_mean, normalized_flux_var)
@@ -535,21 +541,29 @@ subroutine select_local_reference_boundaries(boundary_s, n_reference_surfaces, b
     integer, intent(in) :: n_reference_surfaces
     integer, allocatable, intent(out) :: boundary_indices(:)
 
+    integer :: end_index
     integer :: i
+    integer :: margin
     integer :: n_interior
     integer :: n_selected
+    integer :: start_index
 
     n_interior = max(size(boundary_s) - 2, 1)
     n_selected = min(max(n_reference_surfaces, 1), n_interior)
     allocate(boundary_indices(n_selected))
 
+    margin = max(1, n_interior / 10)
+    start_index = min(1 + margin, size(boundary_s) - 1)
+    end_index = max(start_index, size(boundary_s) - 1 - margin)
+
     if (n_selected == 1) then
-        boundary_indices(1) = 1 + (n_interior + 1) / 2
+        boundary_indices(1) = (start_index + end_index) / 2
         return
     end if
 
     do i = 1, n_selected
-        boundary_indices(i) = 2 + int(real(i - 1, dp) * real(n_interior - 1, dp) / real(n_selected - 1, dp))
+        boundary_indices(i) = start_index + int(real(i - 1, dp) * real(end_index - start_index, dp) / &
+            real(n_selected - 1, dp))
     end do
 
 end subroutine select_local_reference_boundaries

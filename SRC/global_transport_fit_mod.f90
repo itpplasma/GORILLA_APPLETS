@@ -10,11 +10,13 @@ subroutine calc_global_transport_fit()
 
     use global_transport_fit_core_mod, only: fit_global_transport
     use global_transport_fit_gorilla_mod, only: run_gorilla_mc_global_transport_fit
-    use global_transport_fit_io_mod, only: load_global_transport_experiments, write_global_transport_fit_outputs
-    use global_transport_fit_settings_mod, only: control, filename_boundary_s, filename_density_1, filename_density_2, &
-        filename_density_variance_1, filename_density_variance_2, filename_fit_profiles, filename_fit_summary, &
-        filename_flux_1, filename_flux_2, filename_flux_variance_1, filename_flux_variance_2, filename_shell_volumes, &
-        filename_source_1, filename_source_2, load_global_transport_fit_inp, run_mode
+    use global_transport_fit_io_mod, only: load_global_transport_experiments, write_convergence_history, &
+        write_global_transport_fit_outputs
+    use global_transport_fit_settings_mod, only: control, filename_boundary_s, filename_convergence_history, &
+        filename_density_1, filename_density_2, filename_density_variance_1, filename_density_variance_2, &
+        filename_fit_profiles, filename_fit_summary, filename_flux_1, filename_flux_2, filename_flux_variance_1, &
+        filename_flux_variance_2, filename_shell_volumes, filename_source_1, filename_source_2, &
+        load_global_transport_fit_inp, run_mode
     use global_transport_fit_types_mod, only: global_transport_experiment_t, global_transport_fit_result_t
 
     type(global_transport_experiment_t), allocatable :: experiments(:)
@@ -45,6 +47,7 @@ subroutine calc_global_transport_fit()
         density_var_files, flux_files, flux_var_files, experiments)
     call fit_global_transport(experiments, control, result)
     call write_global_transport_fit_outputs(experiments(1)%boundary_s, result, filename_fit_summary, filename_fit_profiles)
+    call write_convergence_history(result, filename_convergence_history)
 
     print *, 'Global transport fit complete.'
     print *, 'objective = ', result%objective

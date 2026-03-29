@@ -10,6 +10,7 @@ module global_transport_fit_io_mod
     private
 
     public :: load_global_transport_experiments
+    public :: write_convergence_history
     public :: write_global_transport_fit_outputs
 
 contains
@@ -79,6 +80,27 @@ subroutine write_global_transport_fit_outputs(boundary_s, result, summary_file, 
     close(io_unit)
 
 end subroutine write_global_transport_fit_outputs
+
+subroutine write_convergence_history(result, filename)
+
+    type(global_transport_fit_result_t), intent(in) :: result
+    character(len=*), intent(in) :: filename
+
+    integer :: i
+    integer :: io_unit
+
+    if (.not.allocated(result%history_objective)) return
+
+    open(newunit=io_unit, file=filename, status='replace', action='write')
+    write(io_unit, '(A)') 'iteration objective gradient_norm step_norm damping accepted'
+    do i = 1, size(result%history_objective)
+        write(io_unit, '(I0,4(1X,ES24.16),1X,L1)') i, result%history_objective(i), &
+            result%history_gradient_norm(i), result%history_step_norm(i), &
+            result%history_damping(i), result%history_accepted(i)
+    end do
+    close(io_unit)
+
+end subroutine write_convergence_history
 
 subroutine read_vector_file(filename, vector)
 
