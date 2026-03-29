@@ -513,7 +513,7 @@ subroutine build_local_transport_reference(boundary_s, n_reference_surfaces, den
                     local_reference_s, v_E, in%collision_operator, &
                     in%boole_precalc_collisions, in%i_integrator_type, &
                     result, reset_random_seed=.false., &
-                    boole_boltzmann_energies_in=.true., &
+                    boole_boltzmann_energies_in=.false., &
                     boole_static_ne_in=in%boole_static_ne)
                 normalized_flux_samples(i_gradient, i_batch) = &
                     result%weighted_flux_density / in%density
