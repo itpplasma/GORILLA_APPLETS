@@ -2,6 +2,12 @@ add_library(GORILLA_APPLETS STATIC
   alpha_lifetime_gorilla_mod.f90
   boltzmann_mod.f90
   gorilla_applets_types_mod.f90
+  global_transport_fit_types_mod.f90
+  global_transport_fit_settings_mod.f90
+  global_transport_fit_math_mod.f90
+  global_transport_fit_core_mod.f90
+  global_transport_fit_io_mod.f90
+  global_transport_fit_mod.f90
   collis_ions_mod.f90
   direct_vmec_integrator_mod.f90
   divertor_heat_loads_mod.f90
@@ -14,6 +20,7 @@ add_library(GORILLA_APPLETS STATIC
   llsq.f90
   utils_polyfit_mod.f90
   mono_energetic_transp_coef_settings_mod.f90
+  transport_benchmark_utils_mod.f90
   poincare_invariances_mod.f90
   pusher_tetra_field_lines_mod.f90
   reversibility_test_mod.f90

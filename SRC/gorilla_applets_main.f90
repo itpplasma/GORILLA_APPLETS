@@ -17,6 +17,7 @@
   use divertor_heat_loads_mod, only: calc_divertor_heat_loads
   use self_consistent_electric_field_mod, only: calc_self_consistent_electric_field
   use anomalous_transport_mod, only: calc_anomalous_transport
+  use global_transport_fit_mod, only: calc_global_transport_fit
 !
   implicit none
 !
@@ -143,6 +144,12 @@
         case(13) !Calculate anomalous transport
 !
             call calc_anomalous_transport
+!
+!-------------------------------------------------------------------------------------------!
+!
+        case(15) !Fit global transport coefficients from two steady-state experiments
+!
+            call calc_global_transport_fit
 !
 !-------------------------------------------------------------------------------------------!
 !
