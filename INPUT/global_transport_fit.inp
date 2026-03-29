@@ -1,0 +1,29 @@
+! INPUT FILE FOR GLOBAL TRANSPORT FITTING
+!
+&global_transport_fit_nml
+  filename_boundary_s = 'boundary_s.dat' ,
+  filename_shell_volumes = 'shell_volumes.dat' ,
+  filename_source_1 = 'source_1.dat' ,
+  filename_density_1 = 'density_1.dat' ,
+  filename_density_variance_1 = 'density_variance_1.dat' ,
+  filename_flux_1 = 'flux_1.dat' ,
+  filename_flux_variance_1 = 'flux_variance_1.dat' ,
+  filename_source_2 = 'source_2.dat' ,
+  filename_density_2 = 'density_2.dat' ,
+  filename_density_variance_2 = 'density_variance_2.dat' ,
+  filename_flux_2 = 'flux_2.dat' ,
+  filename_flux_variance_2 = 'flux_variance_2.dat' ,
+  filename_fit_summary = 'global_transport_fit_summary.dat' ,
+  filename_fit_profiles = 'global_transport_fit_profiles.dat' ,
+  n_knots_a = 5 ,
+  n_knots_b = 5 ,
+  regularization_a = 1.d-8 ,
+  regularization_b = 1.d-8 ,
+  max_lm_iterations = 30 ,
+  gradient_tolerance = 1.d-10 ,
+  step_tolerance = 1.d-10 ,
+  lm_damping = 1.d-4 ,
+  lm_damping_increase = 1.d1 ,
+  lm_damping_decrease = 3.d-1 ,
+  outer_boundary_density = 0.d0
+/

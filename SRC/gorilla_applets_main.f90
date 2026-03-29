@@ -18,6 +18,7 @@
   use self_consistent_electric_field_mod, only: calc_self_consistent_electric_field
   use anomalous_transport_mod, only: calc_anomalous_transport
   use helical_core_mod, only: calc_helical_core
+  use global_transport_fit_mod, only: calc_global_transport_fit
 !
   implicit none
 !
@@ -150,6 +151,10 @@
         case(14) !Calculate helical core
 !
             call calc_helical_core
+!
+        case(15) !Fit global transport coefficients from two steady-state experiments
+!
+            call calc_global_transport_fit
 !
 !-------------------------------------------------------------------------------------------!
 !
