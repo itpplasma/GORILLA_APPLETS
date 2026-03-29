@@ -100,6 +100,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     use gorilla_applets_types_mod, only: in, flux, start
     use tetra_physics_mod, only: tetra_physics
     use constants, only: ev2erg
+    use metric_geometry_mod, only: metric_determinant_from_local
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
 
@@ -126,7 +127,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
         start%weight(n,species) = start%weight(n,species)* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
                                         &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
     else
-        start%weight(n,species) = start%weight(n,species)*(r + tetra_physics(ind_tetr)%x1(1))
+        start%weight(n,species) = start%weight(n,species) * metric_determinant_from_local(ind_tetr, z_save)
     endif
 
     if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then

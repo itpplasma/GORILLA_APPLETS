@@ -5,6 +5,9 @@ add_library(GORILLA_APPLETS STATIC
   global_transport_fit_types_mod.f90
   global_transport_fit_settings_mod.f90
   global_transport_fit_math_mod.f90
+  metric_geometry_mod.f90
+  transport_statistics_mod.f90
+  start_position_sampling_mod.f90
   global_transport_fit_core_mod.f90
   global_transport_fit_io_mod.f90
   global_transport_fit_gorilla_mod.f90

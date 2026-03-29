@@ -53,7 +53,7 @@ end subroutine calc_usual_transport_benchmark
 subroutine run_usual_transport_benchmark_case(surface_s, tracer_species, density, electron_density, electron_temperature_eV, &
     ion_density, ion_temperature_eV, temperature_eV, total_time, n_particles, density_log_gradient_per_s, &
     density_profile_reference_s, v_E, collision_operator, boole_precalc_collisions, i_integrator_type, result, &
-    write_outputs, summary_filename, boundary_filename)
+    write_outputs, summary_filename, boundary_filename, reset_random_seed, boole_boltzmann_energies_in, boole_static_ne_in)
 
     use field_mod, only: ipert
     use gorilla_settings_mod, only: coord_system
@@ -85,6 +85,9 @@ subroutine run_usual_transport_benchmark_case(surface_s, tracer_species, density
     logical, intent(in) :: boole_precalc_collisions
     type(usual_transport_result_t), intent(out) :: result
     logical, intent(in), optional :: write_outputs
+    logical, intent(in), optional :: reset_random_seed
+    logical, intent(in), optional :: boole_boltzmann_energies_in
+    logical, intent(in), optional :: boole_static_ne_in
     character(len=*), intent(in), optional :: boundary_filename
     character(len=*), intent(in), optional :: summary_filename
 
@@ -95,10 +98,15 @@ subroutine run_usual_transport_benchmark_case(surface_s, tracer_species, density
     logical :: reuse_initialized_grid
     integer :: target_boundary_index
 
-    call set_seed_for_random_numbers()
+    if (.not.present(reset_random_seed)) then
+        call set_seed_for_random_numbers()
+    elseif (reset_random_seed) then
+        call set_seed_for_random_numbers()
+    end if
     call configure_benchmark_input(surface_s, tracer_species, density, electron_density, electron_temperature_eV, &
         ion_density, ion_temperature_eV, temperature_eV, total_time, n_particles, density_log_gradient_per_s, &
-        density_profile_reference_s, collision_operator, boole_precalc_collisions, i_integrator_type)
+        density_profile_reference_s, collision_operator, boole_precalc_collisions, i_integrator_type, &
+        boole_boltzmann_energies_in, boole_static_ne_in)
     reuse_initialized_grid = allocated(tetra_grid)
     call get_ipert()
 
@@ -144,7 +152,8 @@ end subroutine run_usual_transport_benchmark_case
 
 subroutine configure_benchmark_input(surface_s, tracer_species, density, electron_density, electron_temperature_eV, &
     ion_density, ion_temperature_eV, temperature_eV, total_time, n_particles, density_log_gradient_per_s, &
-    density_profile_reference_s, collision_operator, boole_precalc_collisions, i_integrator_type)
+    density_profile_reference_s, collision_operator, boole_precalc_collisions, i_integrator_type, &
+    boole_boltzmann_energies_in, boole_static_ne_in)
 
     use gorilla_applets_types_mod, only: in
 
@@ -163,12 +172,23 @@ subroutine configure_benchmark_input(surface_s, tracer_species, density, electro
     integer, intent(in) :: n_particles
     integer, intent(in) :: tracer_species
     logical, intent(in) :: boole_precalc_collisions
+    logical, intent(in), optional :: boole_boltzmann_energies_in
+    logical, intent(in), optional :: boole_static_ne_in
+
+    logical :: boole_boltzmann_energies
+    logical :: boole_static_ne
+
+    boole_boltzmann_energies = .true.
+    if (present(boole_boltzmann_energies_in)) boole_boltzmann_energies = boole_boltzmann_energies_in
+    boole_static_ne = .false.
+    if (present(boole_static_ne_in)) boole_static_ne = boole_static_ne_in
 
     in%boole_antithetic_variate = .true.
-    in%boole_boltzmann_energies = .true.
+    in%boole_boltzmann_energies = boole_boltzmann_energies
     in%boole_calc_diffusion_coefficient = .false.
     in%boole_collisions = .true.
     in%boole_custom_background = .true.
+    in%boole_custom_source_profile = .false.
     in%boole_divertor_intersection = .false.
     in%boole_linear_density_simulation = .false.
     in%boole_linear_temperature_simulation = .false.
@@ -177,7 +197,7 @@ subroutine configure_benchmark_input(surface_s, tracer_species, density, electro
     in%boole_preserve_energy_and_momentum_during_collisions = .false.
     in%boole_refined_sqrt_g = .false.
     in%boole_squared_moments = .false.
-    in%boole_static_ne = .true.
+    in%boole_static_ne = boole_static_ne
     in%boole_write_boltzmann_density = .false.
     in%boole_write_electric_potential = .false.
     in%boole_write_exit_data = .false.
@@ -228,18 +248,20 @@ end subroutine prepare_boundary_geometry
 
 subroutine run_boundary_flux_transport_estimate(boundary_s, target_boundary_index, n_particles, lost_particles)
 
-    use gorilla_applets_types_mod, only: exit_data, start
+    use gorilla_applets_types_mod, only: exit_data
+    use start_position_sampling_mod, only: set_random_start_positions, validate_current_start_positions
     use transport_benchmark_utils_mod, only: get_local_start_band
     use utils_data_pre_and_post_processing_mod, only: calc_collision_coefficients_for_all_tetrahedra, &
         initialize_exit_data, prepare_next_round_of_parallelised_particle_pushing
     use utils_self_consistent_ef_mod, only: allocate_start_type, parallelised_particle_pushing, &
-        set_particle_type_specifications, set_rest_of_individual_particle_specifications, set_starting_positions
+        set_particle_type_specifications, set_rest_of_individual_particle_specifications
 
     real(dp), intent(in) :: boundary_s(:)
     integer, intent(in) :: n_particles
     integer, intent(in) :: target_boundary_index
     integer, intent(out) :: lost_particles
 
+    integer :: failed_positions
     real(dp), allocatable :: rand_matrix(:, :, :)
     real(dp) :: band_max_s
     real(dp) :: band_min_s
@@ -250,10 +272,17 @@ subroutine run_boundary_flux_transport_estimate(boundary_s, target_boundary_inde
     call allocate_start_type(n_particles)
     call set_particle_type_specifications()
     call initialize_exit_data(n_particles)
-    call set_starting_positions(rand_matrix, species_in=(/1/))
     call get_local_start_band(boundary_s, target_boundary_index, band_min_s, band_max_s)
-    start%x(1, :, 1) = band_min_s + (band_max_s - band_min_s) * rand_matrix(1, :, 1)
+    call set_random_start_positions(rand_matrix, species_in=(/1/), s_min_in=band_min_s, s_max_in=band_max_s)
     call set_rest_of_individual_particle_specifications(rand_matrix, species_in=(/1/), n_particles_in=n_particles)
+    call validate_current_start_positions(species_in=(/1/), s_min_in=band_min_s, s_max_in=band_max_s, &
+        max_validation_attempts=256, failed_positions=failed_positions)
+    if (failed_positions /= 0) then
+        print *, 'Error: unable to initialize validated local-reference starts on the GORILLA mesh.'
+        print *, 'failed_positions = ', failed_positions
+        print *, 'target_boundary_s = ', boundary_s(target_boundary_index)
+        stop
+    end if
     call prepare_next_round_of_parallelised_particle_pushing(1)
     call calc_collision_coefficients_for_all_tetrahedra(1)
     call parallelised_particle_pushing(species=1, j=1, boole_diffusion_coefficient=.false., n_particles_in=n_particles)

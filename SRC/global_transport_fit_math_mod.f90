@@ -83,27 +83,32 @@ subroutine compute_geometry_from_boundaries(boundary_s, shell_volumes, cell_cent
     real(dp), allocatable, intent(out) :: cell_centers(:)
     real(dp), allocatable, intent(out) :: boundary_areas(:)
 
+    real(dp), allocatable :: cell_volume_derivative(:)
     integer :: i
     integer :: n_cells
-    real(dp) :: ds_left
-    real(dp) :: ds_right
+    real(dp) :: delta_s
 
     n_cells = size(shell_volumes)
     allocate(cell_centers(n_cells))
     allocate(boundary_areas(n_cells + 1))
+    allocate(cell_volume_derivative(n_cells))
 
     do i = 1, n_cells
         cell_centers(i) = 0.5_dp * (boundary_s(i) + boundary_s(i + 1))
+        delta_s = boundary_s(i + 1) - boundary_s(i)
+        cell_volume_derivative(i) = shell_volumes(i) / max(delta_s, 1.0d-12)
     end do
 
-    boundary_areas(1) = shell_volumes(1) / max(cell_centers(1) - boundary_s(1), 1.0d-12)
+    boundary_areas = 0.0_dp
+    boundary_areas(1) = 0.0_dp
+    if (n_cells == 1) then
+        boundary_areas(2) = cell_volume_derivative(1)
+        return
+    end if
     do i = 2, n_cells
-        ds_left = boundary_s(i) - cell_centers(i - 1)
-        ds_right = cell_centers(i) - boundary_s(i)
-        boundary_areas(i) = 0.5_dp * (shell_volumes(i - 1) / max(ds_left, 1.0d-12) + &
-            shell_volumes(i) / max(ds_right, 1.0d-12))
+        boundary_areas(i) = 0.5_dp * (cell_volume_derivative(i - 1) + cell_volume_derivative(i))
     end do
-    boundary_areas(n_cells + 1) = shell_volumes(n_cells) / max(boundary_s(n_cells + 1) - cell_centers(n_cells), 1.0d-12)
+    boundary_areas(n_cells + 1) = cell_volume_derivative(n_cells)
 
 end subroutine compute_geometry_from_boundaries
 

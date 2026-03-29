@@ -185,7 +185,7 @@ subroutine set_flux_surface_constant_eps_phi_from_vE(x_start, reference_energy_e
                        dBpdR, dBpdp, dBpdZ, dBzdR, dBzdp, dBzdZ)
             bmod00 = sqrt(B_r**2 + B_p**2 + B_z**2)
             dA_theta_ds = psitor_max
-            ds_dr = 2.0_dp * sqrt(s) * sqrt(pi * bmod00 / psitor_max)
+            ds_dr = 2.0_dp * sqrt(max(s, 0.0_dp)) * sqrt(abs(pi * bmod00 / psitor_max))
         case (3)
             allocate(xstart(3, npoi))
             allocate(bstart(npoi))
@@ -202,7 +202,7 @@ subroutine set_flux_surface_constant_eps_phi_from_vE(x_start, reference_energy_e
             varphi = x_start(3)
             call splint_vmec_data(s, theta, varphi, A_phi, A_theta, dA_phi_ds, dA_theta_ds, aiota, R, Z, alam, &
                                   dR_ds, dR_dt, dR_dp, dZ_ds, dZ_dt, dZ_dp, dl_ds, dl_dt, dl_dp)
-            ds_dr = 2.0_dp * sqrt(s) * sqrt(pi * bmod00 / torflux)
+            ds_dr = 2.0_dp * sqrt(max(s, 0.0_dp)) * sqrt(abs(pi * bmod00 / torflux))
 
             deallocate(xstart)
             deallocate(bstart)

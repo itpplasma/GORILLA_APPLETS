@@ -30,15 +30,29 @@ module global_transport_fit_settings_mod
     character(len=256), public, protected :: filename_comparison_profiles = 'global_transport_comparison_profiles.dat'
     character(len=256), public, protected :: filename_experiment_1_summary = 'global_transport_experiment_1.dat'
     character(len=256), public, protected :: filename_experiment_2_summary = 'global_transport_experiment_2.dat'
+    integer, public, protected :: max_source_trials = 4
+    integer, public, protected :: min_supported_flux_boundaries = 3
+    integer, public, protected :: n_global_batches = 8
+    integer, public, protected :: n_local_batches = 8
+    integer, public, protected :: n_local_gradients = 5
+    integer, public, protected :: local_n_particles = 0
     integer, public, protected :: n_local_reference_surfaces = 5
     real(dp), public, protected :: local_density_gradient_1 = -6.0d0
     real(dp), public, protected :: local_density_gradient_2 = 6.0d0
     real(dp), public, protected :: local_density_profile_reference_s = 0.5d0
+    real(dp), public, protected :: local_total_time = -1.0d0
     real(dp), public, protected :: local_v_E = 0.0d0
+    real(dp), public, protected :: min_density_source_relstd = 5.0d-2
+    real(dp), public, protected :: source_time_growth = 3.0d0
     real(dp), public, protected :: source_gradient_1 = -6.0d0
     real(dp), public, protected :: source_gradient_2 = 6.0d0
     real(dp), public, protected :: source_reference_s_1 = 0.25d0
     real(dp), public, protected :: source_reference_s_2 = 0.75d0
+    real(dp), public, protected :: source_width_1 = 0.08d0
+    real(dp), public, protected :: source_width_2 = 0.08d0
+    real(dp), public, protected :: density_relative_sigma_floor = 1.0d-2
+    real(dp), public, protected :: flux_relative_sigma_floor = 1.0d-2
+    real(dp), public, protected :: density_support_fraction = 1.0d-3
 
 contains
 
@@ -53,8 +67,12 @@ subroutine load_global_transport_fit_inp()
     real(dp) :: lm_damping_decrease
     real(dp) :: lm_damping_increase
     real(dp) :: outer_boundary_density
+    real(dp) :: density_relative_sigma_floor_input
+    real(dp) :: flux_relative_sigma_floor_input
+    real(dp) :: density_support_fraction_input
     real(dp) :: regularization_a
     real(dp) :: regularization_b
+    real(dp) :: support_sigma_multiplier
     real(dp) :: step_tolerance
     logical :: use_flux_objective
 
@@ -63,10 +81,14 @@ subroutine load_global_transport_fit_inp()
         filename_source_2, filename_density_2, filename_density_variance_2, filename_flux_2, &
         filename_flux_variance_2, filename_fit_summary, filename_fit_profiles, filename_local_profiles, &
         filename_comparison_profiles, filename_experiment_1_summary, filename_experiment_2_summary, &
-        n_local_reference_surfaces, local_density_gradient_1, local_density_gradient_2, local_density_profile_reference_s, &
-        local_v_E, source_gradient_1, source_gradient_2, source_reference_s_1, source_reference_s_2, n_knots_a, &
-        n_knots_b, use_flux_objective, regularization_a, regularization_b, max_lm_iterations, gradient_tolerance, &
-        step_tolerance, lm_damping, lm_damping_increase, lm_damping_decrease, outer_boundary_density
+        max_source_trials, min_supported_flux_boundaries, n_global_batches, n_local_batches, n_local_gradients, &
+        n_local_reference_surfaces, local_n_particles, local_density_gradient_1, local_density_gradient_2, &
+        local_density_profile_reference_s, local_total_time, local_v_E, min_density_source_relstd, source_time_growth, &
+        source_gradient_1, source_gradient_2, source_reference_s_1, source_reference_s_2, source_width_1, source_width_2, &
+        density_relative_sigma_floor, flux_relative_sigma_floor, density_support_fraction, &
+        n_knots_a, n_knots_b, use_flux_objective, regularization_a, regularization_b, max_lm_iterations, &
+        gradient_tolerance, step_tolerance, lm_damping, lm_damping_increase, lm_damping_decrease, outer_boundary_density, &
+        support_sigma_multiplier
 
     n_knots_a = control%n_knots_a
     n_knots_b = control%n_knots_b
@@ -79,6 +101,10 @@ subroutine load_global_transport_fit_inp()
     lm_damping_increase = control%lm_damping_increase
     lm_damping_decrease = control%lm_damping_decrease
     outer_boundary_density = control%outer_boundary_density
+    support_sigma_multiplier = control%support_sigma_multiplier
+    density_relative_sigma_floor_input = control%density_relative_sigma_floor
+    flux_relative_sigma_floor_input = control%flux_relative_sigma_floor
+    density_support_fraction_input = control%density_support_fraction
     use_flux_objective = control%use_flux_objective
 
     open(newunit=fit_unit, file='global_transport_fit.inp', status='old', action='read')
@@ -97,6 +123,10 @@ subroutine load_global_transport_fit_inp()
     control%lm_damping_increase = lm_damping_increase
     control%lm_damping_decrease = lm_damping_decrease
     control%outer_boundary_density = outer_boundary_density
+    control%support_sigma_multiplier = support_sigma_multiplier
+    control%density_relative_sigma_floor = density_relative_sigma_floor_input
+    control%flux_relative_sigma_floor = flux_relative_sigma_floor_input
+    control%density_support_fraction = density_support_fraction_input
 
     print *, 'GORILLA_APPLETS: Loaded input data from global_transport_fit.inp'
 
