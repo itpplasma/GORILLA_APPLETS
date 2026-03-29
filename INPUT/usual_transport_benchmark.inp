@@ -1,0 +1,22 @@
+! INPUT FILE FOR LOCAL USUAL TRANSPORT BENCHMARK
+!
+&usual_transport_benchmark_nml
+  i_integrator_type = 1 ,
+  n_particles = 10000 ,
+  tracer_species = 1 ,
+  boole_precalc_collisions = .false. ,
+  density = 3.0d13 ,
+  density_log_gradient_per_s = -6.0d0 ,
+  density_profile_reference_s = 0.5d0 ,
+  electron_density = 3.0d13 ,
+  electron_temperature_eV = 3.5d3 ,
+  ion_density = 3.0d13 ,
+  ion_temperature_eV = 3.5d3 ,
+  surface_s = 0.5d0 ,
+  temperature_eV = 3.5d3 ,
+  total_time = 1.0d-4 ,
+  v_E = 0.0d0 ,
+  collision_operator = 4 ,
+  filename_transport_summary = 'usual_transport_summary.dat' ,
+  filename_boundary_flux = 'usual_transport_boundary_flux.dat'
+/

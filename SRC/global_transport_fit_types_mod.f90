@@ -9,6 +9,7 @@ module global_transport_fit_types_mod
     public :: global_transport_experiment_t
     public :: global_transport_fit_control_t
     public :: global_transport_fit_result_t
+    public :: global_transport_samples_t
 
     type global_transport_experiment_t
         real(dp), allocatable :: boundary_s(:)
@@ -24,6 +25,7 @@ module global_transport_fit_types_mod
         integer :: n_knots_a = 5
         integer :: n_knots_b = 5
         integer :: max_lm_iterations = 30
+        logical :: use_flux_objective = .true.
         real(dp) :: regularization_a = 1.0d-8
         real(dp) :: regularization_b = 1.0d-8
         real(dp) :: lm_damping = 1.0d-4
@@ -48,5 +50,16 @@ module global_transport_fit_types_mod
         real(dp), allocatable :: knot_s_a(:)
         real(dp), allocatable :: knot_s_b(:)
     end type global_transport_fit_result_t
+
+    type global_transport_samples_t
+        real(dp), allocatable :: source_weight_sum(:)
+        real(dp), allocatable :: shell_time_sum(:)
+        real(dp), allocatable :: shell_time_sumsq(:)
+        real(dp), allocatable :: boundary_weighted_flux_sum(:)
+        real(dp), allocatable :: boundary_weighted_flux_sumsq(:)
+        real(dp) :: total_source_weight = 0.0d0
+        integer :: n_particles = 0
+        integer :: lost_particles = 0
+    end type global_transport_samples_t
 
 end module global_transport_fit_types_mod

@@ -19,6 +19,7 @@
   use anomalous_transport_mod, only: calc_anomalous_transport
   use helical_core_mod, only: calc_helical_core
   use global_transport_fit_mod, only: calc_global_transport_fit
+  use usual_transport_benchmark_mod, only: calc_usual_transport_benchmark
 !
   implicit none
 !
@@ -155,6 +156,12 @@
         case(15) !Fit global transport coefficients from two steady-state experiments
 !
             call calc_global_transport_fit
+!
+!-------------------------------------------------------------------------------------------!
+!
+        case(16) !Compute local usual transport benchmark from honest Monte Carlo fluxes
+!
+            call calc_usual_transport_benchmark
 !
 !-------------------------------------------------------------------------------------------!
 !

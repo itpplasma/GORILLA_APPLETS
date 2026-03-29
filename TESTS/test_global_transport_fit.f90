@@ -7,11 +7,14 @@ program test_global_transport_fit
     use global_transport_fit_math_mod, only: build_piecewise_linear_basis
     use global_transport_fit_types_mod, only: global_transport_experiment_t, global_transport_fit_control_t, &
         global_transport_fit_result_t
+    use transport_benchmark_utils_mod, only: recover_transport_coefficients_from_flux_pair
 
     implicit none
 
     call test_fit_recovers_manufactured_profiles()
+    call test_fit_recovers_manufactured_profiles_density_only()
     call test_gradient_matches_finite_difference()
+    call test_local_flux_pair_recovery()
 
 contains
 
@@ -71,6 +74,54 @@ subroutine test_fit_recovers_manufactured_profiles()
 
 end subroutine test_fit_recovers_manufactured_profiles
 
+subroutine test_fit_recovers_manufactured_profiles_density_only()
+
+    type(global_transport_experiment_t), allocatable :: experiments(:)
+    type(global_transport_fit_control_t) :: control
+    type(global_transport_fit_result_t) :: result
+    real(dp), allocatable :: boundary_s(:)
+    real(dp), allocatable :: shell_volumes(:)
+    real(dp), allocatable :: source_1(:)
+    real(dp), allocatable :: source_2(:)
+    real(dp), allocatable :: knot_s(:)
+    real(dp), allocatable :: basis(:, :)
+    real(dp), allocatable :: true_a(:)
+    real(dp), allocatable :: true_b(:)
+    real(dp), allocatable :: expected_a(:)
+    real(dp), allocatable :: expected_b(:)
+
+    call make_test_geometry(boundary_s, shell_volumes, source_1, source_2)
+
+    control%n_knots_a = 3
+    control%n_knots_b = 3
+    control%max_lm_iterations = 25
+    control%regularization_a = 1.0d-12
+    control%regularization_b = 1.0d-12
+    control%lm_damping = 1.0d-6
+    control%use_flux_objective = .false.
+
+    call make_knot_points(boundary_s, control%n_knots_a, knot_s)
+    allocate(true_a(control%n_knots_a))
+    allocate(true_b(control%n_knots_b))
+    true_a = (/5.0d-2, 2.0d-2, -1.0d-2/)
+    true_b = log((/2.0d-2, 3.0d-2, 5.0d-2/))
+
+    allocate(experiments(2))
+    call generate_synthetic_experiment(boundary_s, shell_volumes, source_1, knot_s, knot_s, true_a, true_b, 0.0_dp, experiments(1))
+    call generate_synthetic_experiment(boundary_s, shell_volumes, source_2, knot_s, knot_s, true_a, true_b, 0.0_dp, experiments(2))
+
+    call fit_global_transport(experiments, control, result)
+
+    call build_piecewise_linear_basis(boundary_s, knot_s, basis)
+    expected_a = matmul(basis, true_a)
+    expected_b = exp(matmul(basis, true_b))
+
+    call assert_true(result%converged, 'Density-only LM fit did not converge')
+    call assert_close(maxval(abs(result%a_profile - expected_a)), 0.0_dp, 1.0d-6, 'Density-only A profile recovery failed')
+    call assert_close(maxval(abs(result%b_profile - expected_b)), 0.0_dp, 1.0d-6, 'Density-only B profile recovery failed')
+
+end subroutine test_fit_recovers_manufactured_profiles_density_only
+
 subroutine test_gradient_matches_finite_difference()
 
     type(global_transport_experiment_t), allocatable :: experiments(:)
@@ -129,6 +180,36 @@ subroutine test_gradient_matches_finite_difference()
     call assert_relative_close(maxval(abs(gradient - fd_gradient)), maxval(abs(fd_gradient)), 1.0d-9, 'LM gradient mismatch')
 
 end subroutine test_gradient_matches_finite_difference
+
+subroutine test_local_flux_pair_recovery()
+
+    real(dp) :: a_coeff
+    real(dp) :: b_coeff
+    real(dp) :: density_1
+    real(dp) :: density_2
+    real(dp) :: flux_1
+    real(dp) :: flux_2
+    real(dp) :: gradient_1
+    real(dp) :: gradient_2
+    real(dp) :: true_a
+    real(dp) :: true_b
+
+    true_a = 1.5d4
+    true_b = 2.5d3
+    gradient_1 = -6.0d0
+    gradient_2 = 3.0d0
+    density_1 = 2.0d13
+    density_2 = 3.0d13
+    flux_1 = density_1 * (true_a - true_b * gradient_1)
+    flux_2 = density_2 * (true_a - true_b * gradient_2)
+
+    call recover_transport_coefficients_from_flux_pair(flux_1, flux_2, density_1, density_2, gradient_1, gradient_2, &
+        a_coeff, b_coeff)
+
+    call assert_close(a_coeff, true_a, 1.0d-10, 'Local flux-pair A recovery failed')
+    call assert_close(b_coeff, true_b, 1.0d-10, 'Local flux-pair B recovery failed')
+
+end subroutine test_local_flux_pair_recovery
 
 subroutine compute_objective_only(experiments, control, basis, parameters, objective)
 

@@ -74,6 +74,7 @@ subroutine initialise_output
     allocate(output%electric_potential(n_prisms))
     allocate(output%boltzmann_density(n_prisms))
     allocate(output%radial_flux(grid_size(1)+1))
+    allocate(output%weighted_radial_flux(grid_size(1)+1))
     allocate(output%tetr_moments(moment_specs%n_moments,ntetr,in%n_species))
     allocate(output%prism_moments(moment_specs%n_moments,n_prisms,in%n_species))
     if (moment_specs%boole_squared_moments) allocate(output%prism_moments_squared(moment_specs%n_moments,n_prisms,in%n_species))
@@ -84,6 +85,7 @@ subroutine initialise_output
     output%electric_potential = 0.0_dp
     output%boltzmann_density = 0.0_dp
     output%radial_flux = 0.0_dp
+    output%weighted_radial_flux = 0.0_dp
     output%tetr_moments = 0.0_dp
     output%prism_moments = 0.0_dp
     if (moment_specs%boole_squared_moments) output%prism_moments_squared = 0.0_dp
@@ -102,6 +104,7 @@ subroutine deallocate_output
     if (allocated(output%electric_potential)) deallocate(output%electric_potential)
     if (allocated(output%boltzmann_density)) deallocate(output%boltzmann_density)
     if (allocated(output%radial_flux)) deallocate(output%radial_flux)
+    if (allocated(output%weighted_radial_flux)) deallocate(output%weighted_radial_flux)
     if (allocated(output%tetr_moments)) deallocate(output%tetr_moments)
     if (allocated(output%prism_moments)) deallocate(output%prism_moments)
     if (allocated(output%prism_moments_squared)) deallocate(output%prism_moments_squared)
@@ -399,6 +402,13 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     if (i_option.eq.12) c%temp_mat(2,:) = s%temperature
     c%dens_mat = in%density
 
+    if (in%boole_custom_background) then
+        c%temp_mat(1,:) = in%background_temperature_eV(1)
+        c%dens_mat(1,:) = in%background_density_cm3(1)
+        c%temp_mat(2,:) = in%background_temperature_eV(2)
+        c%dens_mat(2,:) = in%background_density_cm3(2)
+    end if
+
     if (boole_T_and_n_from_files) call get_T_and_n_from_files
 
     ! Apply linear density and/or temperature profiles based on input settings
@@ -581,9 +591,11 @@ subroutine prepare_next_round_of_parallelised_particle_pushing(species)
         endif
     endif
 
-    output%tetr_moments(:,:,species) = 0.0_dp
-    output%prism_moments(:,:,species) = 0.0_dp
-    if (moment_specs%boole_squared_moments) output%prism_moments_squared(:,:,species) = 0.0_dp
+    if (allocated(output%tetr_moments)) output%tetr_moments(:, :, species) = 0.0_dp
+    if (allocated(output%prism_moments)) output%prism_moments(:, :, species) = 0.0_dp
+    if (moment_specs%boole_squared_moments .and. allocated(output%prism_moments_squared)) then
+        output%prism_moments_squared(:, :, species) = 0.0_dp
+    end if
 
     counter%lost_particles = 0
     counter%lost_inside = 0

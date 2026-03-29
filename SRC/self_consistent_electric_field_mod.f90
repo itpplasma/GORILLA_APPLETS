@@ -36,6 +36,7 @@ subroutine calc_self_consistent_electric_field
 
     call set_seed_for_random_numbers
     call read_self_consistent_electric_field_inp_into_type
+    in%tracer_species = ispecies
     call get_ipert()
     call initialize_gorilla(i_option,ipert)
     

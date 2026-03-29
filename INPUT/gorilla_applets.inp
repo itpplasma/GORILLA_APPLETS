@@ -21,6 +21,7 @@
  !13 .. Compute anomalous transport
  !14 .. Compute helical core
  !15 .. Fit global transport coefficients from two steady-state experiments
+ !16 .. Compute local usual transport benchmark from honest Monte Carlo fluxes
  i_option = 1 ,
 !
 !------------------------------------------------------------------------------------------------------------!
