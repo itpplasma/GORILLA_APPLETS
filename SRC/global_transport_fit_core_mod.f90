@@ -6,6 +6,8 @@ module global_transport_fit_core_mod
         compute_geometry_from_boundaries, solve_linear_system
     use global_transport_fit_types_mod, only: global_transport_experiment_t, global_transport_fit_control_t, &
         global_transport_fit_result_t
+    use transport_statistics_mod, only: build_density_support_mask, build_inverse_variance_weights, &
+        build_supported_boundary_mask
 
     implicit none
 
@@ -17,6 +19,21 @@ module global_transport_fit_core_mod
     public :: solve_forward_problem
 
 contains
+
+subroutine sanitize_parameters(control, parameters_in, parameters_out)
+
+    type(global_transport_fit_control_t), intent(in) :: control
+    real(dp), intent(in) :: parameters_in(:)
+    real(dp), allocatable, intent(out) :: parameters_out(:)
+
+    real(dp), parameter :: max_abs_log_b = 20.0_dp
+
+    allocate(parameters_out(size(parameters_in)))
+    parameters_out = parameters_in
+    parameters_out(control%n_knots_a + 1:control%n_knots_a + control%n_knots_b) = max( &
+        min(parameters_out(control%n_knots_a + 1:control%n_knots_a + control%n_knots_b), max_abs_log_b), -max_abs_log_b)
+
+end subroutine sanitize_parameters
 
 subroutine fit_global_transport(experiments, control, result)
 
@@ -30,6 +47,7 @@ subroutine fit_global_transport(experiments, control, result)
     real(dp), allocatable :: basis_a(:, :)
     real(dp), allocatable :: basis_b(:, :)
     real(dp), allocatable :: parameters(:)
+    real(dp), allocatable :: sanitized_parameters(:)
     real(dp), allocatable :: step(:)
     real(dp), allocatable :: gradient(:)
     real(dp), allocatable :: jacobian(:, :)
@@ -56,6 +74,9 @@ subroutine fit_global_transport(experiments, control, result)
     damping = control%lm_damping
     converged = .false.
 
+    call sanitize_parameters(control, parameters, sanitized_parameters)
+    call move_alloc(sanitized_parameters, parameters)
+
     do iteration = 1, control%max_lm_iterations
         call compute_objective_gradient_and_jacobian(experiments, control, basis_a, basis_b, parameters, objective, gradient, jacobian)
         gradient_norm = maxval(abs(gradient))
@@ -75,7 +96,8 @@ subroutine fit_global_transport(experiments, control, result)
 
         call try_lm_step(experiments, control, basis_a, basis_b, parameters, step, objective, damping, trial_objective, accepted)
         if (accepted) then
-            parameters = parameters + step
+            call sanitize_parameters(control, parameters + step, sanitized_parameters)
+            call move_alloc(sanitized_parameters, parameters)
             damping = max(control%lm_damping * 1.0d-12, damping * control%lm_damping_decrease)
             if (maxval(abs(step)) < 10.0_dp * control%step_tolerance) then
                 converged = .true.
@@ -144,6 +166,7 @@ subroutine generate_synthetic_experiment(boundary_s, shell_volumes, source, knot
     real(dp), allocatable :: cell_centers(:)
     real(dp), allocatable :: density(:)
     real(dp), allocatable :: flux(:)
+    real(dp), allocatable :: integrated_flux(:)
 
     call build_piecewise_linear_basis(boundary_s, knot_s_a, basis_a)
     call build_piecewise_linear_basis(boundary_s, knot_s_b, basis_b)
@@ -161,10 +184,14 @@ subroutine generate_synthetic_experiment(boundary_s, shell_volumes, source, knot
     experiment%source = source
     experiment%density = density
     experiment%flux = flux
+    integrated_flux = boundary_areas * flux
+    experiment%integrated_flux = integrated_flux
     allocate(experiment%density_variance(size(density)))
     allocate(experiment%flux_variance(size(flux)))
+    allocate(experiment%integrated_flux_variance(size(flux)))
     experiment%density_variance = 1.0d-10
     experiment%flux_variance = 1.0d-10
+    experiment%integrated_flux_variance = max(boundary_areas**2 * experiment%flux_variance, 1.0d-10)
 
 end subroutine generate_synthetic_experiment
 
@@ -220,7 +247,7 @@ subroutine compute_objective_gradient_and_jacobian(experiments, control, basis_a
 
     call accumulate_experiment_terms(experiments, control, basis_a, basis_b, parameters, objective, gradient, jacobian, row_offset)
     call add_regularization_terms(control, regularization_matrix_a, regularization_matrix_b, parameters, objective, gradient)
-    call apply_weighting_to_jacobian(experiments, control%use_flux_objective, jacobian, weighted_jacobian)
+    call apply_weighting_to_jacobian(experiments, control, jacobian, weighted_jacobian)
     jacobian = weighted_jacobian
 
 end subroutine compute_objective_gradient_and_jacobian
@@ -266,9 +293,12 @@ subroutine accumulate_single_experiment(experiment, control, basis_a, basis_b, p
     real(dp), allocatable :: boundary_areas(:)
     real(dp), allocatable :: density(:)
     real(dp), allocatable :: flux(:)
+    real(dp), allocatable :: integrated_flux(:)
     real(dp), allocatable :: system_matrix(:, :)
     real(dp), allocatable :: flux_n(:, :)
     real(dp), allocatable :: flux_param_partial(:, :)
+    real(dp), allocatable :: integrated_flux_n(:, :)
+    real(dp), allocatable :: integrated_flux_param_partial(:, :)
     real(dp), allocatable :: density_sensitivity(:, :)
     real(dp), allocatable :: observable_jacobian(:, :)
     real(dp), allocatable :: density_weights(:)
@@ -284,27 +314,29 @@ subroutine accumulate_single_experiment(experiment, control, basis_a, basis_b, p
     call compute_geometry_from_boundaries(experiment%boundary_s, experiment%shell_volumes, cell_centers, boundary_areas)
     call solve_forward_with_partials(experiment, control%outer_boundary_density, a_boundary, b_boundary, cell_centers, boundary_areas, &
         density, flux, system_matrix, flux_n, flux_param_partial, divergence_matrix, da_dp, db_dp)
-    call build_weights(experiment%density_variance, density_weights)
-    call build_weights(experiment%flux_variance, flux_weights)
+    call multiply_flux_by_geometry(boundary_areas, flux_n, integrated_flux_n)
+    call multiply_flux_param_by_geometry(boundary_areas, flux_param_partial, integrated_flux_param_partial)
+    integrated_flux = boundary_areas * flux
+    call build_experiment_weights(control, experiment, density_weights, flux_weights)
 
     residual_density = density - experiment%density
-    residual_flux = flux - experiment%flux
+    residual_flux = integrated_flux - experiment%integrated_flux
     experiment_objective = 0.5_dp * sum(density_weights * residual_density**2)
     if (control%use_flux_objective) then
         experiment_objective = experiment_objective + 0.5_dp * sum(flux_weights * residual_flux**2)
     end if
     objective = objective + experiment_objective
 
-    call build_adjoint_rhs(flux_n, density_weights, flux_weights, residual_density, residual_flux, control%use_flux_objective, &
-        adjoint_rhs)
+    call build_adjoint_rhs(integrated_flux_n, density_weights, flux_weights, residual_density, residual_flux, &
+        control%use_flux_objective, adjoint_rhs)
     call solve_adjoint(system_matrix, adjoint_rhs, adjoint_state)
     gradient = gradient - matmul(transpose(matmul(divergence_matrix, flux_param_partial)), adjoint_state)
     if (control%use_flux_objective) then
-        gradient = gradient + matmul(transpose(flux_param_partial), flux_weights * residual_flux)
+        gradient = gradient + matmul(transpose(integrated_flux_param_partial), flux_weights * residual_flux)
     end if
 
     call build_density_sensitivity(system_matrix, divergence_matrix, flux_param_partial, density_sensitivity)
-    call build_observable_jacobian(flux_n, flux_param_partial, density_sensitivity, control%use_flux_objective, &
+    call build_observable_jacobian(integrated_flux_n, integrated_flux_param_partial, density_sensitivity, control%use_flux_objective, &
         observable_jacobian)
     jacobian(row_offset + 1:row_offset + size(observable_jacobian, 1), :) = observable_jacobian
     row_offset = row_offset + size(observable_jacobian, 1)
@@ -336,7 +368,7 @@ subroutine evaluate_profiles(parameters, basis_a, basis_b, a_boundary, b_boundar
     allocate(log_b(size(b_boundary)))
 
     a_boundary = matmul(basis_a, parameters(1:n_a))
-    log_b = matmul(basis_b, parameters(n_a + 1:n_a + n_b))
+    log_b = max(min(matmul(basis_b, parameters(n_a + 1:n_a + n_b)), 20.0_dp), -20.0_dp)
     b_boundary = exp(log_b)
 
     da_dp = 0.0_dp
@@ -503,15 +535,55 @@ subroutine build_divergence_matrix(boundary_areas, divergence_matrix)
 
 end subroutine build_divergence_matrix
 
-subroutine build_weights(variance, weights)
+subroutine multiply_flux_by_geometry(boundary_areas, flux_operator, integrated_flux_operator)
 
-    real(dp), intent(in) :: variance(:)
-    real(dp), allocatable, intent(out) :: weights(:)
+    real(dp), intent(in) :: boundary_areas(:)
+    real(dp), intent(in) :: flux_operator(:, :)
+    real(dp), allocatable, intent(out) :: integrated_flux_operator(:, :)
 
-    allocate(weights(size(variance)))
-    weights = 1.0_dp / max(variance, 1.0d-12)
+    integer :: i
 
-end subroutine build_weights
+    allocate(integrated_flux_operator(size(flux_operator, 1), size(flux_operator, 2)))
+    do i = 1, size(boundary_areas)
+        integrated_flux_operator(i, :) = boundary_areas(i) * flux_operator(i, :)
+    end do
+
+end subroutine multiply_flux_by_geometry
+
+subroutine multiply_flux_param_by_geometry(boundary_areas, flux_param_partial, integrated_flux_param_partial)
+
+    real(dp), intent(in) :: boundary_areas(:)
+    real(dp), intent(in) :: flux_param_partial(:, :)
+    real(dp), allocatable, intent(out) :: integrated_flux_param_partial(:, :)
+
+    integer :: i
+
+    allocate(integrated_flux_param_partial(size(flux_param_partial, 1), size(flux_param_partial, 2)))
+    do i = 1, size(boundary_areas)
+        integrated_flux_param_partial(i, :) = boundary_areas(i) * flux_param_partial(i, :)
+    end do
+
+end subroutine multiply_flux_param_by_geometry
+
+subroutine build_experiment_weights(control, experiment, density_weights, flux_weights)
+
+    type(global_transport_fit_control_t), intent(in) :: control
+    type(global_transport_experiment_t), intent(in) :: experiment
+    real(dp), allocatable, intent(out) :: density_weights(:)
+    real(dp), allocatable, intent(out) :: flux_weights(:)
+
+    logical, allocatable :: density_supported(:)
+    logical, allocatable :: flux_supported(:)
+
+    call build_density_support_mask(experiment%source, experiment%density, control%density_support_fraction, density_supported)
+    call build_supported_boundary_mask(experiment%integrated_flux, experiment%integrated_flux_variance, &
+        control%support_sigma_multiplier, flux_supported)
+    call build_inverse_variance_weights(experiment%density, experiment%density_variance, control%density_relative_sigma_floor, &
+        density_supported, density_weights)
+    call build_inverse_variance_weights(experiment%integrated_flux, experiment%integrated_flux_variance, &
+        control%flux_relative_sigma_floor, flux_supported, flux_weights)
+
+end subroutine build_experiment_weights
 
 subroutine build_adjoint_rhs(flux_n, density_weights, flux_weights, residual_density, residual_flux, use_flux_objective, &
     adjoint_rhs)
@@ -621,10 +693,10 @@ subroutine add_regularization_terms(control, regularization_matrix_a, regulariza
 
 end subroutine add_regularization_terms
 
-subroutine apply_weighting_to_jacobian(experiments, use_flux_objective, jacobian, weighted_jacobian)
+subroutine apply_weighting_to_jacobian(experiments, control, jacobian, weighted_jacobian)
 
     type(global_transport_experiment_t), intent(in) :: experiments(:)
-    logical, intent(in) :: use_flux_objective
+    type(global_transport_fit_control_t), intent(in) :: control
     real(dp), intent(in) :: jacobian(:, :)
     real(dp), allocatable, intent(out) :: weighted_jacobian(:, :)
 
@@ -638,11 +710,10 @@ subroutine apply_weighting_to_jacobian(experiments, use_flux_objective, jacobian
     allocate(weighted_jacobian(size(jacobian, 1), size(jacobian, 2)))
     row_offset = 0
     do i = 1, size(experiments)
-        call build_weights(experiments(i)%density_variance, density_weights)
-        call build_weights(experiments(i)%flux_variance, flux_weights)
+        call build_experiment_weights(control, experiments(i), density_weights, flux_weights)
         n_density = size(experiments(i)%density)
         n_flux = 0
-        if (use_flux_objective) n_flux = size(experiments(i)%flux)
+        if (control%use_flux_objective) n_flux = size(experiments(i)%integrated_flux)
         weighted_jacobian(row_offset + 1:row_offset + n_density, :) = &
             spread(sqrt(density_weights), 2, size(jacobian, 2)) * jacobian(row_offset + 1:row_offset + n_density, :)
         if (n_flux > 0) then
@@ -722,10 +793,12 @@ subroutine try_lm_step(experiments, control, basis_a, basis_b, parameters, step,
     real(dp), intent(out) :: trial_objective
     logical, intent(out) :: accepted
 
+    real(dp), allocatable :: trial_parameters(:)
     real(dp), allocatable :: trial_gradient(:)
     real(dp), allocatable :: trial_jacobian(:, :)
 
-    call compute_objective_gradient_and_jacobian(experiments, control, basis_a, basis_b, parameters + step, trial_objective, &
+    call sanitize_parameters(control, parameters + step, trial_parameters)
+    call compute_objective_gradient_and_jacobian(experiments, control, basis_a, basis_b, trial_parameters, trial_objective, &
         trial_gradient, trial_jacobian)
     accepted = trial_objective < objective
 

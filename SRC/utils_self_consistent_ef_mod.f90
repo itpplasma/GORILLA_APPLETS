@@ -237,12 +237,9 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
             call add_local_counter_to_counter(local_counter)
             if (present(transport_samples)) then
                 transport_samples%shell_time_sum = transport_samples%shell_time_sum + local_shell_time
-                transport_samples%shell_time_sumsq = transport_samples%shell_time_sumsq + local_shell_time**2
                 transport_samples%source_weight_sum = transport_samples%source_weight_sum + local_source_weight
                 transport_samples%boundary_weighted_flux_sum = transport_samples%boundary_weighted_flux_sum + &
                     local_boundary_weighted_flux
-                transport_samples%boundary_weighted_flux_sumsq = transport_samples%boundary_weighted_flux_sumsq + &
-                    local_boundary_weighted_flux**2
                 lost_count = 0
                 if (particle_status%lost) lost_count = 1
                 transport_samples%lost_particles = transport_samples%lost_particles + lost_count
@@ -258,7 +255,10 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !$OMP END DO
     !$OMP END PARALLEL
 
-    if (present(transport_samples)) transport_samples%n_particles = n_particles
+    if (present(transport_samples)) then
+        transport_samples%n_particles = n_particles
+        transport_samples%mean_tracing_time = t_tot / real(n_particles, dp)
+    end if
 
     print*, 'Total tracing time of all particles divided by number of particles is: ', t_tot/n_particles, 's'
 
@@ -981,7 +981,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     use gorilla_applets_types_mod, only: in, start, s, weights
     use tetra_physics_mod, only: tetra_physics
     use constants, only: ev2erg, pi
-    use volume_integrals_and_sqrt_g_mod, only: sqrt_g
+    use metric_geometry_mod, only: metric_determinant_from_local
     use supporting_functions_mod, only: bmod_func
 
     logical, intent(in) :: boole_diffusion_coefficient
@@ -993,13 +993,16 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     real(dp) :: phi_elec_func, temperature
 
     x = tetra_physics(ind_tetr)%x1 + z_save
-    weights%w(n,species) = weights%w(n,species)*abs((tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save)))
+    weights%w(n,species) = weights%w(n,species) * metric_determinant_from_local(ind_tetr, z_save)
     !print*, 'weight before = ', weights%w(n,species), n
 
     if (in%boole_linear_density_simulation) then
         weights%w(n,species) = weights%w(n,species)*(1.0_dp-0.9_dp*x(1))
     endif
-    if (abs(in%density_log_gradient_per_s) > 0.0_dp) then
+    if (in%boole_custom_source_profile) then
+        start%weight(n,species) = start%weight(n,species) * &
+            exp(-0.5_dp * ((x(1) - in%source_profile_reference_s) / max(in%source_profile_width, 1.0d-12))**2)
+    elseif (abs(in%density_log_gradient_per_s) > 0.0_dp) then
         start%weight(n,species) = start%weight(n,species) * &
             exp(in%density_log_gradient_per_s * (x(1) - in%density_profile_reference_s))
     endif
@@ -1140,37 +1143,17 @@ subroutine deallocate_weights
 
 end subroutine deallocate_weights
 
-subroutine set_starting_positions(rand_matrix,species_in,s0)
+subroutine set_starting_positions(rand_matrix, species_in, s0, s_min_in, s_max_in)
 
-    use gorilla_applets_types_mod, only: in, start, g
-    use tetra_physics_mod, only: coord_system
-    use tetra_grid_settings_mod, only: grid_kind
-    use constants, only: pi
-    use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods
+    use start_position_sampling_mod, only: set_random_start_positions
 
-    real(dp), dimension(:,:,:), intent(in) :: rand_matrix
+    real(dp), dimension(:, :, :), intent(in) :: rand_matrix
     integer, dimension(:), intent(in), optional :: species_in
-    integer, dimension(:), allocatable :: species
-    integer :: i
     real(dp), intent(in), optional :: s0
+    real(dp), intent(in), optional :: s_min_in
+    real(dp), intent(in), optional :: s_max_in
 
-    if (present(species_in)) then 
-        allocate(species(size(species_in)))
-        species = species_in
-    else
-        allocate(species(in%n_species))
-        species = [(i,i=1,in%n_species)]
-    endif
-
-    start%x(1,:,species) = sfc_s_min + rand_matrix(1,:,:)*(1-sfc_s_min)
-    if (present(s0)) start%x(1, :, species) = s0
-    start%x(2,:,species) = 2*pi*rand_matrix(2,:,:) !theta
-    start%x(3,:,species) = 2*pi/n_field_periods*rand_matrix(3,:,:) !phi
-
-    !unless a single species is initiated, make elctrons and ions start at identical positions in real space
-    if (size(species).gt.1) then 
-        start%x(:,:,in%n_species) = start%x(:,:,1)
-    endif
+    call set_random_start_positions(rand_matrix, species_in=species_in, s0=s0, s_min_in=s_min_in, s_max_in=s_max_in)
 
 end subroutine set_starting_positions
 

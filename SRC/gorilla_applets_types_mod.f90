@@ -136,8 +136,11 @@ module gorilla_applets_types_mod
     logical  :: boole_custom_background = .false.
     real(dp), dimension(2) :: background_density_cm3 = 0.0_dp
     real(dp), dimension(2) :: background_temperature_eV = 0.0_dp
+    logical  :: boole_custom_source_profile = .false.
     real(dp) :: density_log_gradient_per_s = 0.0_dp
     real(dp) :: density_profile_reference_s = 0.5_dp
+    real(dp) :: source_profile_reference_s = 0.5_dp
+    real(dp) :: source_profile_width = 0.1_dp
     real(dp) :: lambda !Used in divertor_heat_loads
     end type input_t
 

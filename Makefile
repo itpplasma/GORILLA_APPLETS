@@ -6,6 +6,7 @@ BUILD_NINJA := $(BUILD_DIR)/build.ninja
 all: build
 
 $(BUILD_NINJA):
+	if [ -f $(BUILD_DIR)/CMakeCache.txt ] && [ ! -f $(BUILD_NINJA) ]; then cmake -E rm -rf $(BUILD_DIR); fi
 	cmake -S . -B$(BUILD_DIR) -GNinja -DCMAKE_BUILD_TYPE=$(CONFIG) -DCMAKE_COLOR_DIAGNOSTICS=ON
 
 configure: $(BUILD_NINJA)
@@ -16,11 +17,14 @@ reconfigure:
 build: configure
 	cmake --build $(BUILD_DIR) --config $(CONFIG)
 
-test: build
-	cd $(BUILD_DIR) && ctest
+test: configure
+	cmake -E rm -rf $(BUILD_DIR)
+	cmake -S . -B$(BUILD_DIR) -GNinja -DCMAKE_BUILD_TYPE=$(CONFIG) -DCMAKE_COLOR_DIAGNOSTICS=ON
+	cmake --build $(BUILD_DIR) --config $(CONFIG) -- -j1
+	cd $(BUILD_DIR) && ctest --output-on-failure
 
 doc: configure
 	cmake --build --preset default --target doc
 
 clean:
-	rm -rf $(BUILD_DIR)
+	cmake -E rm -rf $(BUILD_DIR)

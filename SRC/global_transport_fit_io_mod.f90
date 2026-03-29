@@ -2,6 +2,7 @@ module global_transport_fit_io_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
+    use global_transport_fit_math_mod, only: compute_geometry_from_boundaries
     use global_transport_fit_types_mod, only: global_transport_experiment_t, global_transport_fit_result_t
 
     implicit none
@@ -26,11 +27,14 @@ subroutine load_global_transport_experiments(boundary_file, shell_volume_file, s
     type(global_transport_experiment_t), allocatable, intent(out) :: experiments(:)
 
     real(dp), allocatable :: boundary_s(:)
+    real(dp), allocatable :: boundary_areas(:)
+    real(dp), allocatable :: cell_centers(:)
     real(dp), allocatable :: shell_volumes(:)
     integer :: i
 
     call read_vector_file(boundary_file, boundary_s)
     call read_vector_file(shell_volume_file, shell_volumes)
+    call compute_geometry_from_boundaries(boundary_s, shell_volumes, cell_centers, boundary_areas)
     allocate(experiments(size(source_files)))
 
     do i = 1, size(source_files)
@@ -41,6 +45,8 @@ subroutine load_global_transport_experiments(boundary_file, shell_volume_file, s
         call read_vector_file(density_var_files(i), experiments(i)%density_variance)
         call read_vector_file(flux_files(i), experiments(i)%flux)
         call read_vector_file(flux_var_files(i), experiments(i)%flux_variance)
+        experiments(i)%integrated_flux = boundary_areas * experiments(i)%flux
+        experiments(i)%integrated_flux_variance = boundary_areas**2 * experiments(i)%flux_variance
     end do
 
 end subroutine load_global_transport_experiments
@@ -65,10 +71,10 @@ subroutine write_global_transport_fit_outputs(boundary_s, result, summary_file, 
     close(io_unit)
 
     open(newunit=io_unit, file=profiles_file, status='replace', action='write')
-    write(io_unit, '(A)') 'boundary_index boundary_s A_s A_s_std B_s B_s_std'
+    write(io_unit, '(A)') 'boundary_index boundary_s A_s A_s_std A_s_2sigma B_s B_s_std B_s_2sigma'
     do i = 1, size(boundary_s)
-        write(io_unit, '(I0,5(1X,ES24.16))') i, boundary_s(i), result%a_profile(i), result%a_std(i), result%b_profile(i), &
-            result%b_std(i)
+        write(io_unit, '(I0,7(1X,ES24.16))') i, boundary_s(i), result%a_profile(i), result%a_std(i), &
+            2.0_dp * result%a_std(i), result%b_profile(i), result%b_std(i), 2.0_dp * result%b_std(i)
     end do
     close(io_unit)
 

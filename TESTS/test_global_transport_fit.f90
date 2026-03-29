@@ -4,17 +4,26 @@ program test_global_transport_fit
 
     use global_transport_fit_core_mod, only: compute_objective_gradient_and_jacobian, fit_global_transport, &
         generate_synthetic_experiment
-    use global_transport_fit_math_mod, only: build_piecewise_linear_basis
+    use global_transport_fit_math_mod, only: build_piecewise_linear_basis, compute_geometry_from_boundaries
     use global_transport_fit_types_mod, only: global_transport_experiment_t, global_transport_fit_control_t, &
         global_transport_fit_result_t
     use transport_benchmark_utils_mod, only: recover_transport_coefficients_from_flux_pair
+    use transport_statistics_mod, only: build_supported_boundary_mask, compute_mean_and_variance, &
+        fit_linear_transport_response, sanitize_transport_output_triplet, transport_signal_supported
 
     implicit none
 
     call test_fit_recovers_manufactured_profiles()
     call test_fit_recovers_manufactured_profiles_density_only()
     call test_gradient_matches_finite_difference()
+    call test_forward_problem_has_zero_inner_flux()
+    call test_boundary_geometry_has_zero_axis_area()
+    call test_supported_boundary_mask_keeps_outer_loss_boundary()
+    call test_transport_signal_requires_density_separation()
+    call test_transport_output_sanitization_handles_invalid_sigma()
     call test_local_flux_pair_recovery()
+    call test_weighted_linear_transport_response()
+    call test_batch_mean_and_variance()
 
 contains
 
@@ -181,6 +190,109 @@ subroutine test_gradient_matches_finite_difference()
 
 end subroutine test_gradient_matches_finite_difference
 
+subroutine test_forward_problem_has_zero_inner_flux()
+
+    type(global_transport_experiment_t) :: experiment
+    real(dp), allocatable :: boundary_s(:)
+    real(dp), allocatable :: shell_volumes(:)
+    real(dp), allocatable :: source_1(:)
+    real(dp), allocatable :: source_2(:)
+    real(dp), allocatable :: knot_s(:)
+    real(dp), allocatable :: true_a(:)
+    real(dp), allocatable :: true_b(:)
+
+    call make_test_geometry(boundary_s, shell_volumes, source_1, source_2)
+    call make_knot_points(boundary_s, 3, knot_s)
+    allocate(true_a(3))
+    allocate(true_b(3))
+    true_a = (/5.0d-2, 2.0d-2, -1.0d-2/)
+    true_b = log((/2.0d-2, 3.0d-2, 5.0d-2/))
+
+    call generate_synthetic_experiment(boundary_s, shell_volumes, source_1, knot_s, knot_s, true_a, true_b, 0.0_dp, experiment)
+
+    call assert_close(experiment%flux(1), 0.0_dp, 1.0d-12, 'Inner boundary flux must vanish for torus topology')
+
+end subroutine test_forward_problem_has_zero_inner_flux
+
+subroutine test_boundary_geometry_has_zero_axis_area()
+
+    real(dp), allocatable :: boundary_s(:)
+    real(dp), allocatable :: boundary_areas(:)
+    real(dp), allocatable :: cell_centers(:)
+    real(dp), allocatable :: cell_volume_derivative(:)
+    real(dp), allocatable :: shell_volumes(:)
+    real(dp), allocatable :: source_1(:)
+    real(dp), allocatable :: source_2(:)
+
+    integer :: i
+
+    call make_test_geometry(boundary_s, shell_volumes, source_1, source_2)
+    call compute_geometry_from_boundaries(boundary_s, shell_volumes, cell_centers, boundary_areas)
+
+    call assert_close(boundary_areas(1), 0.0_dp, 1.0d-12, 'Magnetic-axis boundary area must vanish')
+    call assert_true(all(boundary_areas(2:) > 0.0_dp), 'All non-axis transport geometry factors must stay positive')
+
+    allocate(cell_volume_derivative(size(shell_volumes)))
+    do i = 1, size(shell_volumes)
+        cell_volume_derivative(i) = shell_volumes(i) / (boundary_s(i + 1) - boundary_s(i))
+    end do
+
+    call assert_close(boundary_areas(size(boundary_areas)), cell_volume_derivative(size(cell_volume_derivative)), 1.0d-12, &
+        'Outer transport geometry factor must match the outer shell volume derivative')
+    do i = 2, size(boundary_areas) - 1
+        call assert_close(boundary_areas(i), 0.5_dp * (cell_volume_derivative(i - 1) + cell_volume_derivative(i)), 1.0d-12, &
+            'Interior transport geometry factor must average adjacent shell volume derivatives')
+    end do
+
+end subroutine test_boundary_geometry_has_zero_axis_area
+
+subroutine test_supported_boundary_mask_keeps_outer_loss_boundary()
+
+    real(dp), allocatable :: flux(:)
+    real(dp), allocatable :: flux_variance(:)
+    logical, allocatable :: supported_mask(:)
+
+    flux = (/0.0_dp, 5.0d-4, 0.0_dp, 2.0d-3/)
+    flux_variance = (/0.0_dp, 1.0d-8, 1.0d-8, 1.0d-8/)
+
+    call build_supported_boundary_mask(flux, flux_variance, 2.0_dp, supported_mask)
+
+    call assert_true(.not. supported_mask(1), 'Magnetic-axis boundary must stay unsupported')
+    call assert_true(supported_mask(2), 'Interior supported boundary was dropped')
+    call assert_true(.not. supported_mask(3), 'Noise-only boundary must stay unsupported')
+    call assert_true(supported_mask(4), 'Outer absorbing-loss boundary must stay supported')
+
+end subroutine test_supported_boundary_mask_keeps_outer_loss_boundary
+
+subroutine test_transport_signal_requires_density_separation()
+
+    call assert_true(.not. transport_signal_supported(3, 2, 4.0d-2, 5.0d-2), &
+        'Source-dominated experiment must not pass the transport-signal gate')
+    call assert_true(transport_signal_supported(3, 2, 6.0d-2, 5.0d-2), &
+        'Transport-informative experiment must pass the transport-signal gate')
+
+end subroutine test_transport_signal_requires_density_separation
+
+subroutine test_transport_output_sanitization_handles_invalid_sigma()
+
+    real(dp) :: sanitized_2sigma
+    real(dp) :: sanitized_mean
+    real(dp) :: sanitized_std
+
+    call sanitize_transport_output_triplet(.false., 1.0_dp, huge(1.0_dp), sanitized_mean, sanitized_std, sanitized_2sigma)
+
+    call assert_true(sanitized_mean /= sanitized_mean, 'Invalid transport mean must be written as NaN')
+    call assert_true(sanitized_std /= sanitized_std, 'Invalid transport standard deviation must be written as NaN')
+    call assert_true(sanitized_2sigma /= sanitized_2sigma, 'Invalid transport 2sigma band must be written as NaN')
+
+    call sanitize_transport_output_triplet(.true., 3.0_dp, huge(1.0_dp), sanitized_mean, sanitized_std, sanitized_2sigma)
+
+    call assert_close(sanitized_mean, 3.0_dp, 1.0d-12, 'Valid transport mean must stay unchanged')
+    call assert_true(sanitized_std > 0.0_dp, 'Large valid transport standard deviation must remain positive after clipping')
+    call assert_true(sanitized_2sigma > sanitized_std, 'Transport 2sigma band must exceed 1sigma after clipping')
+
+end subroutine test_transport_output_sanitization_handles_invalid_sigma
+
 subroutine test_local_flux_pair_recovery()
 
     real(dp) :: a_coeff
@@ -210,6 +322,52 @@ subroutine test_local_flux_pair_recovery()
     call assert_close(b_coeff, true_b, 1.0d-10, 'Local flux-pair B recovery failed')
 
 end subroutine test_local_flux_pair_recovery
+
+subroutine test_weighted_linear_transport_response()
+
+    real(dp) :: a_coeff
+    real(dp) :: a_std
+    real(dp) :: b_coeff
+    real(dp) :: b_std
+    real(dp), allocatable :: gradients(:)
+    real(dp), allocatable :: normalized_flux(:)
+    real(dp), allocatable :: normalized_flux_variance(:)
+    logical :: valid_fit
+
+    gradients = (/-6.0_dp, -2.0_dp, 0.0_dp, 3.0_dp, 6.0_dp/)
+    normalized_flux = 1.5d4 - 2.5d3 * gradients
+    normalized_flux_variance = (/1.0d-2, 2.0d-2, 1.5d-2, 2.5d-2, 3.0d-2/)
+
+    call fit_linear_transport_response(gradients, normalized_flux, normalized_flux_variance, a_coeff, b_coeff, a_std, b_std, &
+        valid_fit)
+
+    call assert_true(valid_fit, 'Weighted local transport regression must be valid')
+    call assert_close(a_coeff, 1.5d4, 1.0d-10, 'Weighted local regression A recovery failed')
+    call assert_close(b_coeff, 2.5d3, 1.0d-10, 'Weighted local regression B recovery failed')
+    call assert_true(a_std > 0.0_dp, 'Weighted local regression A standard deviation must be positive')
+    call assert_true(b_std > 0.0_dp, 'Weighted local regression B standard deviation must be positive')
+
+end subroutine test_weighted_linear_transport_response
+
+subroutine test_batch_mean_and_variance()
+
+    real(dp), allocatable :: mean_values(:)
+    real(dp), allocatable :: samples(:, :)
+    real(dp), allocatable :: variance_of_mean(:)
+
+    allocate(samples(2, 3))
+    samples(:, 1) = (/1.0_dp, 4.0_dp/)
+    samples(:, 2) = (/2.0_dp, 7.0_dp/)
+    samples(:, 3) = (/3.0_dp, 10.0_dp/)
+
+    call compute_mean_and_variance(samples, mean_values, variance_of_mean)
+
+    call assert_close(mean_values(1), 2.0_dp, 1.0d-12, 'Batch mean for first observable is wrong')
+    call assert_close(mean_values(2), 7.0_dp, 1.0d-12, 'Batch mean for second observable is wrong')
+    call assert_close(variance_of_mean(1), 1.0_dp / 3.0_dp, 1.0d-12, 'Variance of mean for first observable is wrong')
+    call assert_close(variance_of_mean(2), 3.0_dp, 1.0d-12, 'Variance of mean for second observable is wrong')
+
+end subroutine test_batch_mean_and_variance
 
 subroutine compute_objective_only(experiments, control, basis, parameters, objective)
 
