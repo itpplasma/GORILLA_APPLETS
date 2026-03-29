@@ -20,6 +20,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: electric_potential
     real(dp), dimension(:), allocatable :: boltzmann_density
     real(dp), dimension(:), allocatable :: radial_flux
+    real(dp), dimension(:), allocatable :: weighted_radial_flux
     complex(dp), dimension(:,:,:), allocatable :: tetr_moments
     complex(dp), dimension(:,:,:), allocatable :: prism_moments
     complex(dp), dimension(:,:,:), allocatable :: prism_moments_squared
@@ -115,6 +116,7 @@ module gorilla_applets_types_mod
     integer  :: n_background_density_updates = 0
     logical  :: boole_static_ne !used in self consistent electric field computation
     integer  :: n_species = 1 !used in self consistent electric field computation
+    integer  :: tracer_species = 1
     integer  :: n_electric_potential_updates !used in self consistent electric field computation
     integer  :: update_dimension = 1 !used in self consistent electric field computation
     logical  :: boole_calc_diffusion_coefficient !used in anomalous transport
@@ -124,6 +126,12 @@ module gorilla_applets_types_mod
     logical  :: boole_poincare_plot !Used in divertor_heat_loads
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
     integer  :: n_mappings_ignored !Used in divertor_heat_loads
+    integer  :: collision_operator = 4
+    logical  :: boole_custom_background = .false.
+    real(dp), dimension(2) :: background_density_cm3 = 0.0_dp
+    real(dp), dimension(2) :: background_temperature_eV = 0.0_dp
+    real(dp) :: density_log_gradient_per_s = 0.0_dp
+    real(dp) :: density_profile_reference_s = 0.5_dp
     real(dp) :: lambda !Used in divertor_heat_loads
     logical  :: boole_custom_background = .false.
     real(dp), dimension(:), allocatable :: background_density_cm3

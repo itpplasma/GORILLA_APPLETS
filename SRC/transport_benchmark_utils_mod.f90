@@ -1,6 +1,7 @@
 module transport_benchmark_utils_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
+    use global_transport_fit_math_mod, only: compute_geometry_from_boundaries
 
     implicit none
 
@@ -14,6 +15,7 @@ module transport_benchmark_utils_mod
     public :: select_target_boundary
     public :: compute_boundary_areas
     public :: get_local_start_band
+    public :: recover_transport_coefficients_from_flux_pair
 
 contains
 
@@ -239,6 +241,8 @@ subroutine prepare_minimal_transport_output()
 
     allocate(output%radial_flux(grid_size(1) + 1))
     output%radial_flux = 0.0_dp
+    allocate(output%weighted_radial_flux(grid_size(1) + 1))
+    output%weighted_radial_flux = 0.0_dp
 
     if (in%boole_refined_sqrt_g) then
         allocate(output%refined_prism_volumes(n_prisms))
@@ -270,30 +274,14 @@ subroutine select_target_boundary(boundary_s, target_s, target_index)
 
 end subroutine select_target_boundary
 
-subroutine compute_boundary_areas(boundary_s, shell_volumes, av_nabla_stor, boundary_area)
+subroutine compute_boundary_areas(boundary_s, shell_volumes, boundary_area)
 
     real(dp), dimension(:), intent(in) :: boundary_s
     real(dp), dimension(:), intent(in) :: shell_volumes
-    real(dp), intent(in) :: av_nabla_stor
     real(dp), dimension(:), allocatable, intent(out) :: boundary_area
+    real(dp), allocatable :: cell_centers(:)
 
-    integer :: i
-    real(dp), allocatable :: shell_area(:)
-
-    allocate(shell_area(size(shell_volumes)))
-    do i = 1, size(shell_volumes)
-        shell_area(i) = shell_volumes(i) * av_nabla_stor / (boundary_s(i + 1) - boundary_s(i))
-    end do
-
-    allocate(boundary_area(size(boundary_s)))
-    boundary_area(1) = shell_area(1)
-    boundary_area(size(boundary_s)) = shell_area(size(shell_area))
-
-    do i = 2, size(boundary_s) - 1
-        boundary_area(i) = 0.5_dp * (shell_area(i - 1) + shell_area(i))
-    end do
-
-    deallocate(shell_area)
+    call compute_geometry_from_boundaries(boundary_s, shell_volumes, cell_centers, boundary_area)
 
 end subroutine compute_boundary_areas
 
@@ -308,5 +296,35 @@ subroutine get_local_start_band(boundary_s, target_index, band_min_s, band_max_s
     band_max_s = boundary_s(min(size(boundary_s), target_index + 1))
 
 end subroutine get_local_start_band
+
+subroutine recover_transport_coefficients_from_flux_pair(flux_density_1, flux_density_2, density_1, density_2, &
+    density_gradient_1, density_gradient_2, a_coeff, b_coeff)
+
+    real(dp), intent(in) :: flux_density_1
+    real(dp), intent(in) :: flux_density_2
+    real(dp), intent(in) :: density_1
+    real(dp), intent(in) :: density_2
+    real(dp), intent(in) :: density_gradient_1
+    real(dp), intent(in) :: density_gradient_2
+    real(dp), intent(out) :: a_coeff
+    real(dp), intent(out) :: b_coeff
+
+    real(dp) :: normalized_flux_1
+    real(dp) :: normalized_flux_2
+    real(dp) :: gradient_delta
+
+    gradient_delta = density_gradient_2 - density_gradient_1
+    if (abs(gradient_delta) < 1.0d-12) then
+        print *, 'Error: density gradients must differ to recover local transport coefficients.'
+        stop
+    end if
+
+    normalized_flux_1 = flux_density_1 / max(density_1, 1.0d-30)
+    normalized_flux_2 = flux_density_2 / max(density_2, 1.0d-30)
+
+    b_coeff = (normalized_flux_1 - normalized_flux_2) / gradient_delta
+    a_coeff = normalized_flux_1 + b_coeff * density_gradient_1
+
+end subroutine recover_transport_coefficients_from_flux_pair
 
 end module transport_benchmark_utils_mod

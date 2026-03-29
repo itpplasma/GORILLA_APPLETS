@@ -93,6 +93,8 @@ subroutine add_local_tetr_moments_to_output(local_tetr_moments,species_in)
     integer :: k, n_prisms
 
     if (present(species_in)) species = species_in
+
+    if (size(local_tetr_moments, 1) == 0) return
     
     n_prisms = ntetr/3
     
@@ -264,20 +266,18 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     
     real(dp), dimension(5) :: zet
     real(dp), dimension(3) :: randnum
-    real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
+    real(dp) :: efcolf(c%n)
+    real(dp) :: velrat(c%n)
+    real(dp) :: enrat(c%n)
+    real(dp) :: vpar_background(c%n)
     integer :: err, iswmode
     real(dp) :: t_max
 
-    iswmode = 4
+    iswmode = in%collision_operator
     !1 - full operator (pitch-angle and energy scattering and drag)
     !2 - energy scattering and drag only
     !3 - drag only
     !4 - pitch-angle scattering only
-
-    allocate(efcolf(c%n))
-    allocate(velrat(c%n))
-    allocate(enrat(c%n))
-    allocate(vpar_background(c%n))
 
     efcolf = c%efcolf_mat(:,ind_tetr)
     velrat = c%velrat_mat(:,ind_tetr)
