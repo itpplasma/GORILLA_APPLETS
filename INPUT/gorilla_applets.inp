@@ -19,6 +19,7 @@
  !11 .. Compute divertor heat loads
  !12 .. Compute self consistent electric field
  !13 .. Compute anomalous transport
+ !15 .. Fit global transport coefficients from two steady-state experiments
  i_option = 1 ,
 !
 !------------------------------------------------------------------------------------------------------------!
