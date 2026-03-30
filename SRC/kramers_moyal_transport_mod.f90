@@ -66,6 +66,8 @@ subroutine calc_km_d11_profile(surface_indices, result)
         tau_c_ei = 1.7d-4
     end if
 
+    s%temperature = in%energy_eV
+
     ! Set up displacement accumulation
     s%n_particles = n_particles
     s%k = 1000
@@ -87,15 +89,15 @@ subroutine calc_km_d11_profile(surface_indices, result)
     if (.not. allocated(dc%s_vertices)) allocate(dc%s_vertices(grid_size(1) + 1))
     dc%s_vertices = boundary_s
 
-    ! Tracing time: 2x collision time
-    start%t(in%tracer_species) = 2.0_dp * tau_c_ei
-    s%time = [(start%t(in%tracer_species) / s%k * i, i = 1, s%k)]
-
     allocate(rand_matrix(5, n_particles, 1))
 
     call allocate_start_type(n_particles)
     call set_particle_type_specifications()
     call initialize_exit_data(n_particles)
+
+    ! Tracing time: 2x collision time (must be after allocate_start_type)
+    start%t(in%tracer_species) = 2.0_dp * tau_c_ei
+    s%time = [(start%t(in%tracer_species) / s%k * i, i = 1, s%k)]
 
     first_surface = .true.
 
@@ -116,7 +118,7 @@ subroutine calc_km_d11_profile(surface_indices, result)
         call random_number(rand_matrix)
         call set_starting_positions(rand_matrix, (/in%tracer_species/), s%s0)
         call set_rest_of_individual_particle_specifications(rand_matrix, &
-            boole_diffusion_coefficient_in=.true., &
+            boole_diffusion_coefficient_in=.false., &
             species_in=(/in%tracer_species/), n_particles_in=n_particles)
 
         call prepare_next_round_of_parallelised_particle_pushing(in%tracer_species)
