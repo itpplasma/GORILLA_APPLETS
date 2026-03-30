@@ -15,7 +15,8 @@ subroutine calc_km_benchmark()
     use km_benchmark_settings_mod, only: background_charge, background_density, &
         background_mass_amu, background_temperature, collision_operator, &
         filename_output, i_integrator_type, load_km_benchmark_inp, &
-        n_background_species, n_particles, n_surfaces, boole_precalc_collisions, &
+        n_background_species, n_particles, n_profile_surfaces, n_surfaces, &
+        boole_precalc_collisions, profile_density, profile_energy_eV, &
         surface_s_values, temperature_eV, total_time, tracer_species, v_E
     use kramers_moyal_transport_mod, only: calc_km_d11_profile, km_d11_result_t
 
@@ -26,7 +27,15 @@ subroutine calc_km_benchmark()
     call configure_km_input()
     call initialize_km_grid(tracer_species, temperature_eV, v_E)
     call map_s_values_to_indices(surface_s_values, n_surfaces, surface_indices)
-    call calc_km_d11_profile(surface_indices, result)
+
+    if (n_profile_surfaces > 0) then
+        call calc_km_d11_profile(surface_indices, result, &
+            per_surface_energy_eV=profile_energy_eV(1:n_surfaces), &
+            per_surface_density=profile_density(1:n_surfaces, &
+                1:n_background_species))
+    else
+        call calc_km_d11_profile(surface_indices, result)
+    end if
     call write_km_csv(result, filename_output)
 
     print *, ''

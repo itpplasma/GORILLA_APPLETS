@@ -19,29 +19,35 @@ module kramers_moyal_transport_mod
 
 contains
 
-subroutine calc_km_d11_profile(surface_indices, result)
+subroutine calc_km_d11_profile(surface_indices, result, &
+    per_surface_energy_eV, per_surface_density)
 
+    use constants, only: ev2erg
     use gorilla_applets_types_mod, only: in, s, dc, start, g, exit_data, ep
     use tetra_grid_settings_mod, only: grid_size, sfc_s_min
     use tetra_grid_mod, only: verts_sthetaphi
-    !
     use transport_benchmark_utils_mod, only: fit_transport_coefficients, &
         set_active_species_parameters
     use utils_data_pre_and_post_processing_mod, only: &
         prepare_next_round_of_parallelised_particle_pushing, &
-        calc_collision_coefficients_for_all_tetrahedra, initialize_exit_data
+        calc_collision_coefficients_for_all_tetrahedra, &
+        initialize_exit_data, set_custom_background
     use utils_self_consistent_ef_mod, only: allocate_start_type, &
         parallelised_particle_pushing, set_particle_type_specifications, &
         set_rest_of_individual_particle_specifications, set_starting_positions
 
     integer, intent(in) :: surface_indices(:)
     type(km_d11_result_t), intent(out) :: result
+    real(dp), intent(in), optional :: per_surface_energy_eV(:)
+    real(dp), intent(in), optional :: per_surface_density(:, :)
 
     real(dp), allocatable :: rand_matrix(:, :, :)
     real(dp), allocatable :: boundary_s(:)
-    real(dp) :: A, B, tau_c_ei
-    integer :: ns, i, n_particles, idx
-    logical :: first_surface
+    real(dp) :: A, B, tau_c_ei, surface_energy
+    integer :: ns, i, n_particles, idx, n_bg
+    logical :: per_surface_collisions
+
+    per_surface_collisions = present(per_surface_energy_eV)
 
     n_particles = in%num_particles
     if (n_particles < 100) n_particles = 5000
@@ -52,23 +58,13 @@ subroutine calc_km_d11_profile(surface_indices, result)
     allocate(result%convection(result%n_surfaces))
     result%surface_indices = surface_indices
 
-    ! Get boundary s-coordinates
     allocate(boundary_s(grid_size(1) + 1))
     do i = 1, grid_size(1) + 1
         boundary_s(i) = verts_sthetaphi(1, grid_size(3) * (i - 1) + 1)
     end do
     result%boundary_s = boundary_s
 
-    ! Use tracing time from input (time_step), or estimate from collision time
-    if (in%time_step > 0.0_dp) then
-        tau_c_ei = in%time_step
-    else
-        tau_c_ei = 1.7d-4
-    end if
-
     s%temperature = in%energy_eV
-
-    ! Set up displacement accumulation
     s%n_particles = n_particles
     s%k = 1000
     s%j = 100
@@ -85,8 +81,8 @@ subroutine calc_km_d11_profile(surface_indices, result)
     allocate(s%check(s%k))
     allocate(s%boole_large_distance(n_particles))
 
-    ! Set up dc structure for vertex coordinates
-    if (.not. allocated(dc%s_vertices)) allocate(dc%s_vertices(grid_size(1) + 1))
+    if (.not. allocated(dc%s_vertices)) &
+        allocate(dc%s_vertices(grid_size(1) + 1))
     dc%s_vertices = boundary_s
 
     allocate(rand_matrix(5, n_particles, 1))
@@ -95,18 +91,50 @@ subroutine calc_km_d11_profile(surface_indices, result)
     call set_particle_type_specifications()
     call initialize_exit_data(n_particles)
 
-    ! Tracing time: 2x collision time (must be after allocate_start_type)
-    start%t(in%tracer_species) = 2.0_dp * tau_c_ei
-    s%time = [(start%t(in%tracer_species) / s%k * i, i = 1, s%k)]
-
-    first_surface = .true.
+    if (.not. per_surface_collisions) then
+        ! Compute collision coefficients once for all surfaces
+        call calc_collision_coefficients_for_all_tetrahedra(in%tracer_species)
+    end if
 
     do idx = 1, result%n_surfaces
         ns = surface_indices(idx)
         if (ns < 2 .or. ns > grid_size(1)) cycle
 
-        print '(A,I0,A,I0,A,F8.5)', '  KM D11: surface ', idx, '/', &
-            result%n_surfaces, ' at s=', boundary_s(ns)
+        ! Set per-surface energy and collision coefficients
+        if (per_surface_collisions) then
+            surface_energy = per_surface_energy_eV(idx)
+            in%energy_eV = surface_energy
+            s%temperature = surface_energy
+            start%v0(in%tracer_species) = sqrt( &
+                2.0_dp * surface_energy * ev2erg / &
+                start%particle_mass(in%tracer_species))
+
+            if (present(per_surface_density)) then
+                n_bg = size(per_surface_density, 2)
+                call set_custom_background(n_bg, &
+                    per_surface_density(idx, :), &
+                    spread(surface_energy, 1, n_bg), &
+                    in%background_mass, &
+                    in%background_charge_num)
+            end if
+            call calc_collision_coefficients_for_all_tetrahedra( &
+                in%tracer_species)
+        else
+            surface_energy = in%energy_eV
+        end if
+
+        ! Tracing time: 2x collision time estimate
+        if (in%time_step > 0.0_dp) then
+            tau_c_ei = in%time_step
+        else
+            tau_c_ei = 1.7d-4
+        end if
+        start%t(in%tracer_species) = 2.0_dp * tau_c_ei
+        s%time = [(start%t(in%tracer_species) / s%k * i, i = 1, s%k)]
+
+        print '(A,I0,A,I0,A,F8.5,A,F8.1,A)', &
+            '  KM D11: surface ', idx, '/', result%n_surfaces, &
+            ' at s=', boundary_s(ns), ' E=', surface_energy, ' eV'
 
         s%s0 = boundary_s(ns)
         s%delta_s = 0.0_dp
@@ -116,22 +144,23 @@ subroutine calc_km_d11_profile(surface_indices, result)
         s%boole_large_distance = .false.
 
         call random_number(rand_matrix)
-        call set_starting_positions(rand_matrix, (/in%tracer_species/), s%s0)
+        call set_starting_positions(rand_matrix, &
+            (/in%tracer_species/), s%s0)
         call set_rest_of_individual_particle_specifications(rand_matrix, &
             boole_diffusion_coefficient_in=.false., &
-            species_in=(/in%tracer_species/), n_particles_in=n_particles)
+            species_in=(/in%tracer_species/), &
+            n_particles_in=n_particles)
 
-        call prepare_next_round_of_parallelised_particle_pushing(in%tracer_species)
+        call prepare_next_round_of_parallelised_particle_pushing( &
+            in%tracer_species)
 
-        if (first_surface) then
-            call calc_collision_coefficients_for_all_tetrahedra(in%tracer_species)
-            first_surface = .false.
-        end if
+        call parallelised_particle_pushing( &
+            species=in%tracer_species, j=1, &
+            boole_diffusion_coefficient=.true., &
+            n_particles_in=n_particles)
 
-        call parallelised_particle_pushing(species=in%tracer_species, j=1, &
-            boole_diffusion_coefficient=.true., n_particles_in=n_particles)
-
-        call fit_transport_coefficients(s%time, s%delta_s, s%delta_s_squared, A, B)
+        call fit_transport_coefficients(s%time, s%delta_s, &
+            s%delta_s_squared, A, B)
 
         result%d11(idx) = B
         result%convection(idx) = A

@@ -21,5 +21,6 @@
                      0.33157895d0, 0.37789474d0, 0.42421053d0, 0.47052632d0, 0.51684211d0,
                      0.56315789d0, 0.60947368d0, 0.65578947d0, 0.70210526d0, 0.74842105d0,
                      0.79473684d0, 0.84105263d0, 0.88736842d0, 0.93368421d0, 0.98000000d0 ,
-  filename_output = 'km_d11_profile.csv'
+  filename_output = 'km_d11_profile.csv' ,
+  collision_profile_file = 'neo2_collision_profile_39461.dat'
 /

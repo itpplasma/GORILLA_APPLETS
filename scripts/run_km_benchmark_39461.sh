@@ -192,9 +192,33 @@ cat > "${run_dir}/km_benchmark.inp" <<EOF
                      0.33157895d0, 0.37789474d0, 0.42421053d0, 0.47052632d0, 0.51684211d0,
                      0.56315789d0, 0.60947368d0, 0.65578947d0, 0.70210526d0, 0.74842105d0,
                      0.79473684d0, 0.84105263d0, 0.88736842d0, 0.93368421d0, 0.98000000d0 ,
-  filename_output = 'km_d11_profile.csv'
+  filename_output = 'km_d11_profile.csv' ,
+  collision_profile_file = 'neo2_collision_profile_39461.dat'
 /
 EOF
+
+# Generate collision profile from NEO-2 data
+if [[ -f "${repo_root}/.venv/bin/python3" ]]; then
+    py="${repo_root}/.venv/bin/python3"
+else
+    py=python3
+fi
+"${py}" -c "
+import h5py, numpy as np
+e=4.8032e-10; m=9.1094e-28; ev=1.6022e-12
+f=h5py.File('${neo2_h5}','r')
+bs=f['boozer_s'][:]; ns=f['n_spec'][:]; cp=f['collpar_spec'][:,0]; f.close()
+with open('${run_dir}/neo2_collision_profile_39461.dat','w') as o:
+    o.write('# NEO-2 collision profile AUG 39461\n')
+    o.write('# Species: D+(1), Ne10+(10), Ne9+(9), Ne8+(8), e-(-1)\n')
+    o.write(f'{len(bs)} 5\n')
+    o.write('# s  n_D  n_Ne10  n_Ne9  n_Ne8  n_e  E_eV\n')
+    for i in range(len(bs)):
+        z2n=ns[i,1]+ns[i,2]*100+ns[i,3]*81+ns[i,4]*64
+        v=(2*np.pi*e**4*z2n*14/(m**2*cp[i]))**0.25
+        E=0.5*m*v**2/ev
+        o.write(f'{bs[i]:.8f}  {ns[i,1]:.6e}  {ns[i,2]:.6e}  {ns[i,3]:.6e}  {ns[i,4]:.6e}  {ns[i,0]:.6e}  {E:.1f}\n')
+"
 
 printf 'Running KM D11 benchmark on AUG 39461 (%s particles) ...\n' "${n_particles}"
 (
