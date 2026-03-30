@@ -79,18 +79,43 @@ Place in working directory:
 - MHD equilibrium files (NetCDF or g-file format)
 
 ### Active Development Areas
-Current branch `self_consistent_electric_field` focuses on:
-- Electron diffusion coefficient computation (`flux_deviation_mod.f90`)
-- Self-consistent electric field calculations (`utils_self_consistent_ef_mod.f90`)
-- Enhanced particle collision modeling
-- Flux surface analysis
+
+**Branch `transport-km-benchmark`**: Kramers-Moyal displacement-based D11 benchmark
+- Measures D11(s) via `<(ds)^2>/(2dt)` per flux surface (Kramers-Moyal / Einstein relation)
+- Existing infrastructure: `calc_electron_diffusion_coefficients` at `utils_self_consistent_ef_mod.f90:1254-1422`
+- KM fitting: `fit_transport_coefficients` at `transport_benchmark_utils_mod.f90:22-64`
+- Benchmark target: GORILLA vs NEO-2-QL vs NEOART on AUG 39461 neon discharge
+
+**Archived branch `global-transport-fitting`**: LM inverse problem approach (abandoned)
+- Steady-state PDE fitting failed: MC data doesn't reach steady state in feasible tracing time
+- Conservation violated by 100-30000x (net flux out << total source weight)
+- The displacement-based approach avoids this entirely
+
+### Transport Coefficient Estimation: Kramers-Moyal Method
+
+For a diffusion process ds = sqrt(2D*dt)*xi + A*dt:
+- **D11(s) = <(ds)^2> / (2dt)** at each flux surface (2nd Kramers-Moyal coefficient)
+- **A(s) = <ds> / dt** at each flux surface (1st coefficient = drift/convection)
+- No PDE solving, no iterative fitting, O(N) computation
+- Works with any tracing time in the diffusive regime (no steady-state needed)
+
+Existing code accumulates `s%delta_s` and `s%delta_s_squared` during particle pushing
+(when `boole_diffusion_coefficient=.true.`), then `fit_transport_coefficients` extracts
+A and D11 from the linear/quadratic growth of these moments vs time.
+
+### Benchmark: GORILLA vs NEO-2-QL vs NEOART
+
+Existing NEO-2-QL vs NEOART benchmark at AUG shots 39084/39461 (neon discharges):
+- Data: `$DATA/AUG/NEO-2/39461/neoart_benchmark_neon_discharge/`
+- NEOART data: `$DATA/AUG/NEO-ART/39461/neoart_benchmark_neon_discharge/`
+- Comparison tools: `$DATA/AUG/NEO-2/neo2_neoart_benchmark_tools/`
+- Conversion: D11_AX = D11_s / <nabla_s>^2 (see benchmark tools README)
 
 ### Data Visualization
-- **MATLAB/**: Comprehensive plotting scripts for each computational mode
+- **MATLAB/**: Legacy plotting scripts for each computational mode
 - Output format: ASCII data files, NetCDF for field data
-- Example: `mono_energetic_transport.m` for transport coefficient visualization
 
-### Testing Approach
-- Integration tests via EXAMPLES/ directory
-- Physics validation: reversibility, Boltzmann distribution, Poincaré invariant
-- No formal unit test framework; use `make test` for available tests
+### Testing
+- `make test` runs unit tests
+- `test_global_transport_fit`: LM fit tests (manufactured profiles, adjoint, boundary conditions)
+- `test_kramers_moyal`: KM displacement tests (1D random walk recovery, fit_transport_coefficients)
