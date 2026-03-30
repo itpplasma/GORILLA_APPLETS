@@ -9,6 +9,7 @@ add_library(GORILLA_APPLETS STATIC
   global_transport_fit_io_mod.f90
   global_transport_fit_gorilla_mod.f90
   global_transport_fit_mod.f90
+  kramers_moyal_transport_mod.f90
   collis_ions_mod.f90
   direct_vmec_integrator_mod.f90
   divertor_heat_loads_mod.f90
