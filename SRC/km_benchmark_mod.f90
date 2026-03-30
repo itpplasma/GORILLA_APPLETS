@@ -12,19 +12,18 @@ contains
 
 subroutine calc_km_benchmark()
 
-    use km_benchmark_settings_mod, only: collision_operator, electron_density, electron_temperature_eV, &
-        filename_output, i_integrator_type, ion_density, ion_temperature_eV, load_km_benchmark_inp, &
-        n_particles, n_surfaces, boole_precalc_collisions, surface_s_values, temperature_eV, &
-        total_time, tracer_species, v_E
+    use km_benchmark_settings_mod, only: background_charge, background_density, &
+        background_mass_amu, background_temperature, collision_operator, &
+        filename_output, i_integrator_type, load_km_benchmark_inp, &
+        n_background_species, n_particles, n_surfaces, boole_precalc_collisions, &
+        surface_s_values, temperature_eV, total_time, tracer_species, v_E
     use kramers_moyal_transport_mod, only: calc_km_d11_profile, km_d11_result_t
 
     type(km_d11_result_t) :: result
     integer, allocatable :: surface_indices(:)
 
     call load_km_benchmark_inp()
-    call configure_km_input(tracer_species, electron_density, electron_temperature_eV, ion_density, &
-        ion_temperature_eV, temperature_eV, total_time, n_particles, collision_operator, &
-        boole_precalc_collisions, i_integrator_type, v_E)
+    call configure_km_input()
     call initialize_km_grid(tracer_species, temperature_eV, v_E)
     call map_s_values_to_indices(surface_s_values, n_surfaces, surface_indices)
     call calc_km_d11_profile(surface_indices, result)
@@ -35,26 +34,19 @@ subroutine calc_km_benchmark()
 
 end subroutine calc_km_benchmark
 
-subroutine configure_km_input(tracer_species, electron_density, electron_temperature_eV, ion_density, &
-    ion_temperature_eV, temperature_eV, total_time, n_particles, collision_operator, &
-    boole_precalc_collisions, i_integrator_type, v_E)
+subroutine configure_km_input()
 
+    use km_benchmark_settings_mod, only: background_charge, background_density, &
+        background_mass_amu, background_temperature, collision_operator, &
+        n_background_species, n_particles, boole_precalc_collisions, &
+        temperature_eV, total_time, tracer_species, v_E, i_integrator_type
     use gorilla_applets_types_mod, only: in
     use utils_data_pre_and_post_processing_mod, only: set_custom_background
-    use constants, only: amp, ame
+    use constants, only: amp
 
-    integer, intent(in) :: collision_operator
-    integer, intent(in) :: i_integrator_type
-    integer, intent(in) :: n_particles
-    integer, intent(in) :: tracer_species
-    logical, intent(in) :: boole_precalc_collisions
-    real(dp), intent(in) :: electron_density
-    real(dp), intent(in) :: electron_temperature_eV
-    real(dp), intent(in) :: ion_density
-    real(dp), intent(in) :: ion_temperature_eV
-    real(dp), intent(in) :: temperature_eV
-    real(dp), intent(in) :: total_time
-    real(dp), intent(in) :: v_E
+    integer :: n
+
+    n = n_background_species
 
     in%boole_antithetic_variate = .false.
     in%boole_boltzmann_energies = .false.
@@ -80,13 +72,13 @@ subroutine configure_km_input(tracer_species, electron_density, electron_tempera
     in%boole_write_vertex_coordinates = .false.
     in%boole_write_vertex_indices = .false.
     in%collision_operator = collision_operator
-    in%density = electron_density
+    in%density = background_density(n)
     in%energy_eV = temperature_eV
-    call set_custom_background(2, &
-        (/ion_density, electron_density/), &
-        (/ion_temperature_eV, electron_temperature_eV/), &
-        (/2.0_dp * amp, ame/), &
-        (/1.0_dp, -1.0_dp/))
+    call set_custom_background(n, &
+        background_density(1:n), &
+        background_temperature(1:n), &
+        background_mass_amu(1:n) * amp, &
+        background_charge(1:n))
     in%i_integrator_type = i_integrator_type
     in%n_electric_potential_updates = 0
     in%n_particles = real(n_particles, dp)
