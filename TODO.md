@@ -1,146 +1,112 @@
 # TODO: GORILLA Kramers-Moyal D11 Benchmark
 
-Branch: `transport-km-benchmark`
-Benchmark target: GORILLA vs NEO-2-QL vs NEOART on AUG 39461 neon discharge
+Branch: `transport-km-benchmark` (stacked on `multi-species-collision-background` PR #25)
+Benchmark target: GORILLA vs NEO-2-QL on AUG 39461 neon discharge
+
+## Current status
+
+GORILLA D11 is 3-5x below NEO-2-QL across the full radius (see comparison plot).
+The radial trend matches (D11 increases with s) but the absolute magnitude is off.
+Per-surface collisionality matching and 5-species background are implemented.
+
+Comparison plot: https://litter.catbox.moe/e8vyqc.png
 
 ## Done
 
-- [x] KM unit tests: 1D random walk recovery, fit_transport_coefficients validation
-- [x] KM module: `kramers_moyal_transport_mod.f90` wrapping existing displacement infrastructure
-- [x] Updated CLAUDE.md with KM approach, archived LM references
-- [x] Branch created and pushed, stacked on `transport-tracing-guard` (PR #22)
+- [x] KM unit tests (1D random walk, fit_transport_coefficients)
+- [x] KM module (`kramers_moyal_transport_mod.f90`)
+- [x] i_option=14 driver (`km_benchmark_mod.f90`, `km_benchmark_settings_mod.f90`)
+- [x] N-species collision background (PR #25, `set_custom_background`)
+- [x] Per-surface collision profile (reads NEO-2 densities + collisionality-matched energy)
+- [x] Comparison script (`convert_and_compare_d11.py`)
+- [x] Run script (`run_km_benchmark_39461.sh`)
+- [x] Benchmark run: 5000 particles, 20 surfaces, 5 species, per-surface energy
+- [x] Bugs fixed: start%t allocation order, s%temperature init, mono-energetic energy flag,
+      aliasing in set_custom_background call
 
-## Remaining Work
+## Remaining: investigate 3-5x D11 offset
 
-### 1. Wire KM module into i_option or standalone driver
+The remaining offset is systematic and must be understood before publishing. Candidates:
 
-Add a new i_option (e.g. 16) or a standalone benchmark subroutine that:
-- Reads equilibrium from EQDSK/Boozer (AUG 39461: `$DATA/AUG/BOOZER/39461/39461.bc`)
-- Initializes GORILLA with the tokamak grid
-- Calls `calc_km_d11_profile` at the same 20 flux surfaces as NEO-2-QL (`boozer_s` from HDF5)
-- Writes D11(s) to CSV
+### 1. Coulomb logarithm mismatch
 
-Files:
-- `SRC/gorilla_applets_main.f90`: add case for new i_option
-- `SRC/kramers_moyal_transport_mod.f90`: may need to accept surface s-values directly (not just indices)
+GORILLA computes ln(Lambda) via `lambda_alpha_beta` in `collis_ions_mod.f90`.
+NEO-2 uses its own Coulomb logarithm from `libneo` (`collision_freqs.f90`).
+The formulas differ. At T=500 eV, n=7e13: GORILLA gives ln(Lambda)~14.
+Need to verify NEO-2 gives the same value. A factor of 2 in ln(Lambda)
+gives a factor of 2 in D11.
 
-### 2. Geometry conversion: D11_s to D11_AX
+Action: compare GORILLA and NEO-2 Coulomb logarithm at same parameters.
 
-The KM module outputs D11 in s-coordinate units. NEO-2 reports D11_AX in cm^2/s.
+### 2. Collision frequency definition
 
-Conversion: `D11_AX = D11_s / <nabla_s>^2`
+NEO-2's `collpar_spec` may include geometric factors (bounce averaging,
+trapped fraction) that the simple Spitzer formula in GORILLA does not.
+The implied mono-energetic energy from NEO-2 collpar varies 87-999 eV
+across the radius, which I match empirically. But the exact relationship
+between NEO-2 collpar and GORILLA efcolf is not verified analytically.
 
-where `<nabla_s>` = `av_nabla_stor` from NEO-2 output or computed from GORILLA geometry.
+Action: read NEO-2 source code for collpar definition. Or run NEO-2 at
+a single surface with known parameters and compare collision frequency.
 
-Formula derivation in `$DATA/AUG/NEO-2/neo2_neoart_benchmark_tools/doc/README.md`.
+### 3. Energy convolution
 
-Need to either:
-- Read `av_nabla_stor` from the NEO-2 HDF5 output, or
-- Compute `<nabla_s>` from the GORILLA tetrahedral mesh geometry
+NEO-2 D11_AX is the FULL energy-integrated transport coefficient
+(velocity-space integral of mono-energetic D11 weighted by the
+distribution function). GORILLA computes mono-energetic D11 at a single
+energy. The energy convolution typically gives a factor of 1-3x enhancement.
 
-Files:
-- `SRC/kramers_moyal_transport_mod.f90`: add conversion routine
-- Test: verify conversion with known S, V, R_axis values
+Action: run GORILLA at multiple energies per surface to scan nu_star,
+compute the energy convolution integral, compare with NEO-2.
 
-### 3. Benchmark run on AUG 39461
+### 4. Tracing time estimate
 
-Run GORILLA KM D11 on the 20 NEO-2 flux surfaces for AUG 39461.
+The hardcoded tau_c_ei = 1.7e-4 s may be too short at some surfaces
+(especially at high energy where collision time is longer). Although
+convergence was verified at s=0.5, other surfaces may need longer tracing.
 
-Input data:
-- Equilibrium: `$DATA/AUG/EQDSK/39461/eqdsk_39461_5.38s`
-- Boozer: `$DATA/AUG/BOOZER/39461/39461.bc`
-- Grid: need to determine appropriate n1/n2/n3 for this equilibrium
+Action: run convergence test at multiple surfaces with varying total_time.
 
-Parameters:
-- Species: electrons (tracer_species=1)
-- Collision operator: Lorentz (collision_operator=4, mono-energetic)
-- Energy: match NEO-2 (check `T_spec` in HDF5, likely 3.5 keV for electrons)
-- v_E: 0 (no ExB drift initially)
-- Particles: 5000-40000 per surface (start with 5000, increase for convergence)
-- Tracing time: 2x collision time (auto-estimated from nu_star)
+### 5. Orbit dynamics validation
 
-NEO-2-QL reference:
-- `$DATA/AUG/NEO-2/39461/neoart_benchmark_neon_discharge/neon_discharge_out.h5`
-- 20 surfaces: boozer_s = 0.1 to 0.98
-- D11_AX shape (20, 25) -- 20 surfaces, 25 species pairs
-- av_nabla_stor available for conversion
+GORILLA's polynomial pusher (ipusher=2, poly_order=2) may not capture
+electron banana orbits accurately enough. The D11/Dp0 ratio from GORILLA
+(~0.1 at banana-plateau transition) is lower than expected (~0.5).
 
-NEOART reference:
-- `$DATA/AUG/NEO-ART/39461/neoart_benchmark_neon_discharge/neon_discharge_neoart.nc`
+Action: compare GORILLA banana orbit width with analytical estimate.
+Run single trapped particle orbit and measure radial excursion.
 
-Output directory: `$DATA/AUG/GORILLA/39461/neoart_benchmark_neon_discharge/`
-
-Script: `scripts/run_km_benchmark_39461.sh`
-
-### 4. Comparison plots
-
-Generate plots comparing GORILLA D11 against NEO-2-QL and NEOART:
-
-1. **D11(rho_pol) radial profile**: all three codes on same axes
-2. **Convergence study**: D11 vs N_particles at one surface (e.g. s=0.5)
-3. **A(s) drift coefficient**: verify A ~= 0 for Lorentz with v_E=0
-
-Use existing comparison tools at `$DATA/AUG/NEO-2/neo2_neoart_benchmark_tools/` or write new plotting script.
-
-Upload to Litterbox, link in PR.
-
-### 5. Cleanup stale data
-
-Remove (user must do manually):
-```
-rm -rf ~/data/AUG/GORILLA/30835
-rm -rf ~/data/AUG/NEO-2/30835
-rm -rf ~/data/AUG/COMPARISONS/30835
-```
-
-### 6. Update $DATA/AUG/README.md
-
-Add GORILLA benchmark project to the project list:
-```
-- Benchmark of mono-energetic D11 between GORILLA (Kramers-Moyal) and NEO-2-QL
-  for AUG shot 39461
-
-    AUG/
-    ├── GORILLA/
-    │   └── 39461/neoart_benchmark_neon_discharge/
-    ├── NEO-2/
-    │   └── 39461/neoart_benchmark_neon_discharge/
-    └── NEO-ART/
-        └── 39461/neoart_benchmark_neon_discharge/
-```
-
-### 7. Documentation in $DATA benchmark directories
-
-- `$DATA/AUG/GORILLA/39461/neoart_benchmark_neon_discharge/README.md`: document GORILLA setup, parameters, how to reproduce
-- Reference the NEO-2/NEOART benchmark tools documentation
-
-### 8. PR
-
-Create PR for `transport-km-benchmark` with:
-- Summary of KM approach vs abandoned LM approach
-- D11 comparison plots (Litterbox links)
-- Test results
-- Link to benchmark data location
-
-## Physics Notes
-
-- D11 = <(ds)^2>/(2dt) at each flux surface (Kramers-Moyal 2nd coefficient)
-- A = <ds>/dt at each flux surface (1st coefficient, should be ~0 for Lorentz/v_E=0)
-- Conversion to physical units: D11_AX = D11_s / <nabla_s>^2
-- NEO-2 uses NEO-2-QL (field-line integration, tokamak version) for this benchmark
-- NEOART is a fluid code (banana-plateau + Pfirsch-Schluter), expected to match NEO-2 in high-collisionality edge
-- GORILLA uses particle orbit tracing with Lorentz collision operator (mono-energetic)
-
-## Key Files
+## Files
 
 | File | Purpose |
 |------|---------|
-| `SRC/kramers_moyal_transport_mod.f90` | KM D11 profile estimation |
-| `SRC/transport_benchmark_utils_mod.f90` | fit_transport_coefficients (KM fitting) |
-| `SRC/utils_self_consistent_ef_mod.f90:1254-1422` | Original D11 estimation loop |
-| `SRC/utils_self_consistent_ef_mod.f90:377-399` | Displacement accumulation in pusher |
-| `SRC/gorilla_applets_types_mod.f90:207-234` | delta_s_delta_s_squared_t type |
+| `SRC/kramers_moyal_transport_mod.f90` | KM D11 profile, per-surface collision support |
+| `SRC/km_benchmark_mod.f90` | i_option=14 driver |
+| `SRC/km_benchmark_settings_mod.f90` | settings + collision profile reader |
+| `SRC/transport_benchmark_utils_mod.f90` | fit_transport_coefficients |
+| `SRC/utils_data_pre_and_post_processing_mod.f90` | set_custom_background, set_c, collision init |
+| `SRC/collis_ions_mod.f90` | Coulomb collision operator (N-species) |
 | `TESTS/test_kramers_moyal.f90` | KM unit tests |
-| `$DATA/AUG/NEO-2/neo2_neoart_benchmark_tools/doc/README.md` | Conversion formulas |
-| `$DATA/AUG/NEO-2/39461/.../neon_discharge_out.h5` | NEO-2-QL reference D11 |
-| `$DATA/AUG/NEO-ART/39461/.../neon_discharge_neoart.nc` | NEOART reference D11 |
+| `TESTS/test_multi_species_collision.f90` | N-species collision test |
+| `INPUT/km_benchmark.inp` | benchmark input (5 species, profile file) |
+| `INPUT/neo2_collision_profile_39461.dat` | per-surface density+energy from NEO-2 |
+| `scripts/run_km_benchmark_39461.sh` | end-to-end benchmark runner |
+| `scripts/convert_and_compare_d11.py` | D11 conversion and comparison plot |
+
+## Reference data
+
+| Data | Location |
+|------|----------|
+| NEO-2 D11 | `$DATA/AUG/NEO-2/39461/neoart_benchmark_neon_discharge/neon_discharge_out.h5` |
+| NEOART D11 | `$DATA/AUG/NEO-ART/39461/neoart_benchmark_neon_discharge/neon_discharge_neoart.nc` |
+| EQDSK | `$DATA/AUG/EQDSK/39461/eqdsk_39461_5.38s` |
+| Convex wall | `$DATA/AUG/BOOZER/39461/convexwall.dat` |
+| Benchmark tools | `$DATA/AUG/NEO-2/neo2_neoart_benchmark_tools/` |
+| GORILLA output | `$DATA/AUG/GORILLA/39461/neoart_benchmark_neon_discharge/` |
+
+## GitHub issues
+
+- itpplasma/GORILLA_APPLETS#23 -- N-species collision support (PR #25)
+- itpplasma/GORILLA_APPLETS#24 -- read collision profiles from HDF5
+- itpplasma/libneo#271 -- expose collision modules for GORILLA
+- itpplasma/libneo#272 -- Zeff and collision frequency utilities
