@@ -147,6 +147,8 @@ subroutine configure_benchmark_input(surface_s, tracer_species, density, electro
     density_profile_reference_s, collision_operator, boole_precalc_collisions, i_integrator_type)
 
     use gorilla_applets_types_mod, only: in
+    use utils_data_pre_and_post_processing_mod, only: set_custom_background
+    use constants, only: amp, ame
 
     real(dp), intent(in) :: density
     real(dp), intent(in) :: density_log_gradient_per_s
@@ -168,7 +170,6 @@ subroutine configure_benchmark_input(surface_s, tracer_species, density, electro
     in%boole_boltzmann_energies = .true.
     in%boole_calc_diffusion_coefficient = .false.
     in%boole_collisions = .true.
-    in%boole_custom_background = .true.
     in%boole_divertor_intersection = .false.
     in%boole_linear_density_simulation = .false.
     in%boole_linear_temperature_simulation = .false.
@@ -193,8 +194,11 @@ subroutine configure_benchmark_input(surface_s, tracer_species, density, electro
     in%density_log_gradient_per_s = density_log_gradient_per_s
     in%density_profile_reference_s = density_profile_reference_s
     in%energy_eV = temperature_eV
-    in%background_density_cm3 = (/ion_density, electron_density/)
-    in%background_temperature_eV = (/ion_temperature_eV, electron_temperature_eV/)
+    call set_custom_background(2, &
+        (/ion_density, electron_density/), &
+        (/ion_temperature_eV, electron_temperature_eV/), &
+        (/2.0_dp * amp, ame/), &
+        (/1.0_dp, -1.0_dp/))
     in%i_integrator_type = i_integrator_type
     in%n_electric_potential_updates = 0
     in%n_particles = real(n_particles, dp)

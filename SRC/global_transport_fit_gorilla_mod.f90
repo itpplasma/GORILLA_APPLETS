@@ -26,7 +26,9 @@ subroutine run_gorilla_mc_global_transport_fit(control, result)
     use gorilla_applets_types_mod, only: in, s
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
     use transport_benchmark_utils_mod, only: prepare_minimal_transport_output
-    use utils_data_pre_and_post_processing_mod, only: get_ipert, set_seed_for_random_numbers
+    use constants, only: amp, ame
+    use utils_data_pre_and_post_processing_mod, only: get_ipert, set_seed_for_random_numbers, &
+        set_custom_background
     use utils_self_consistent_ef_mod, only: allocate_electric_potential_type, associate_flux_labels_with_tetrahedra_and_vertices, &
         calc_s_shell_volumes, print_errors_for_bad_inputs, read_self_consistent_electric_field_inp_into_type
     use volume_integrals_and_sqrt_g_mod, only: calc_volume_integrals_in_flux_coordinates
@@ -50,9 +52,11 @@ subroutine run_gorilla_mc_global_transport_fit(control, result)
 
     in%tracer_species = 1
     in%n_species = 1
-    in%boole_custom_background = .true.
-    in%background_density_cm3 = (/in%density, in%density/)
-    in%background_temperature_eV = (/in%energy_eV, in%energy_eV/)
+    call set_custom_background(2, &
+        (/in%density, in%density/), &
+        (/in%energy_eV, in%energy_eV/), &
+        (/2.0_dp * amp, ame/), &
+        (/1.0_dp, -1.0_dp/))
     in%collision_operator = 4
     s%temperature = in%energy_eV
     call prepare_minimal_transport_output()

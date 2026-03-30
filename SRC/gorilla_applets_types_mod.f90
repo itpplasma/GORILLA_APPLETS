@@ -128,16 +128,13 @@ module gorilla_applets_types_mod
     integer  :: n_mappings_ignored !Used in divertor_heat_loads
     integer  :: collision_operator = 4
     logical  :: boole_custom_background = .false.
-    real(dp), dimension(2) :: background_density_cm3 = 0.0_dp
-    real(dp), dimension(2) :: background_temperature_eV = 0.0_dp
-    real(dp) :: density_log_gradient_per_s = 0.0_dp
-    real(dp) :: density_profile_reference_s = 0.5_dp
-    real(dp) :: lambda !Used in divertor_heat_loads
-    logical  :: boole_custom_background = .false.
     real(dp), dimension(:), allocatable :: background_density_cm3
     real(dp), dimension(:), allocatable :: background_temperature_eV
     real(dp), dimension(:), allocatable :: background_mass
     real(dp), dimension(:), allocatable :: background_charge_num
+    real(dp) :: density_log_gradient_per_s = 0.0_dp
+    real(dp) :: density_profile_reference_s = 0.5_dp
+    real(dp) :: lambda !Used in divertor_heat_loads
     end type input_t
 
     type(input_t) :: in
