@@ -28,8 +28,11 @@ if(APPLE)
   add_link_options(-L/opt/local/lib)
 endif()
 
+enable_testing()
+
 add_subdirectory(SRC)
 add_subdirectory(SRC_CORE)
+add_subdirectory(TESTS)
 
 add_executable(gorilla_applets_main.x
   SRC/gorilla_applets_main.f90

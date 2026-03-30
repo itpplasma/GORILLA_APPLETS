@@ -285,7 +285,7 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
 
     vpar_background = c%vpar_mat(:,ind_tetr)
 
-    vpar = vpar - vpar_background(1)
+    vpar = vpar - vpar_background(1) ! TODO(#23): handle multi-species vpar_background
     !since vpar_background actually has num_background_particles entries, consider giving it as an extra
     !optional input variable to stost, before randnum
     zet(1:3) = x !spatial position
