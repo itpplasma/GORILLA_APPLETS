@@ -458,8 +458,8 @@ subroutine perform_electric_potential_update(i)
 
     phi_elec = phi_elec + ep%phi_elec_from_rho
 
-    !boole_keep_phi_elec=.true. prevents make_tetra_physics from overwriting phi_elec
-    call make_tetra_physics(coord_system,ipert,boole_keep_phi_elec=.true.)
+    ! boole_keep_phi_elec=.true. prevents make_tetra_physics from overwriting phi_elec
+    call make_tetra_physics(coord_system, ipert, boole_keep_phi_elec=.true.)
 
     if (i.gt.0) call print_data(i)
 

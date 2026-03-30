@@ -555,7 +555,7 @@ subroutine scan_anomalous_transport
         ! Apply electric potential perturbation
         call apply_phi_perturbation(eps_Phi)
 
-        ! Recompute tetrahedron physics with updated phi_elec
+        ! boole_keep_phi_elec=.true. prevents make_tetra_physics from overwriting phi_elec
         call make_tetra_physics(coord_system, ipert, boole_keep_phi_elec=.true.)
 
         ! Generate filename for this scan point

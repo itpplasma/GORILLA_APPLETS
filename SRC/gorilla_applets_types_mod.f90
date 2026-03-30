@@ -131,6 +131,11 @@ module gorilla_applets_types_mod
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
     integer  :: n_mappings_ignored !Used in divertor_heat_loads
     real(dp) :: lambda !Used in divertor_heat_loads
+    logical  :: boole_custom_background = .false.
+    real(dp), dimension(:), allocatable :: background_density_cm3
+    real(dp), dimension(:), allocatable :: background_temperature_eV
+    real(dp), dimension(:), allocatable :: background_mass
+    real(dp), dimension(:), allocatable :: background_charge_num
     end type input_t
 
     type(input_t) :: in
