@@ -9,6 +9,7 @@ add_library(GORILLA_APPLETS STATIC
   global_transport_fit_io_mod.f90
   global_transport_fit_gorilla_mod.f90
   global_transport_fit_mod.f90
+  km_benchmark_diagnostics_mod.f90
   kramers_moyal_transport_mod.f90
   km_benchmark_settings_mod.f90
   km_benchmark_mod.f90

@@ -12,6 +12,31 @@ n_particles="${N_PARTICLES:-5000}"
 grid_n1="${GRID_N1:-24}"
 grid_n2="${GRID_N2:-20}"
 grid_n3="${GRID_N3:-24}"
+fit_start_fraction="${FIT_START_FRACTION:-0.2}"
+fit_end_fraction="${FIT_END_FRACTION:-1.0}"
+trace_time_multiplier="${TRACE_TIME_MULTIPLIER:-2.0}"
+diagnostics_prefix="${DIAGNOSTICS_PREFIX:-km_trace}"
+enable_energy_scan="${ENABLE_ENERGY_SCAN:-1}"
+energy_scan_points="${ENERGY_SCAN_POINTS:-9}"
+energy_scan_min_factor="${ENERGY_SCAN_MIN_FACTOR:-0.5}"
+energy_scan_max_factor="${ENERGY_SCAN_MAX_FACTOR:-10.0}"
+trace_scan_multipliers="${TRACE_SCAN_MULTIPLIERS:-}"
+
+trace_scan_enabled=.false.
+trace_scan_count=0
+trace_scan_values="0.0d0"
+if [[ -n "${trace_scan_multipliers}" ]]; then
+    IFS=',' read -r -a trace_scan_array <<< "${trace_scan_multipliers}"
+    trace_scan_count="${#trace_scan_array[@]}"
+    trace_scan_enabled=.true.
+    trace_scan_values="${trace_scan_multipliers}"
+fi
+
+if [[ "${enable_energy_scan}" == "1" ]]; then
+    energy_scan_enabled=.true.
+else
+    energy_scan_enabled=.false.
+fi
 
 eqdsk="${DATA}/AUG/EQDSK/39461/eqdsk_39461_5.38s"
 convex_wall="${DATA}/AUG/BOOZER/39461/convexwall.dat"
@@ -145,6 +170,9 @@ printf 'Fluxtube volume precomputation done.\n'
 # Step 2: Run KM benchmark
 run_dir="${case_dir}/km_benchmark"
 mkdir -p "${run_dir}"
+rm -f "${run_dir}/km_d11_profile.csv"
+rm -f "${case_dir}/gorilla_d11_comparison.png"
+rm -f "${run_dir}/${diagnostics_prefix}"_surface_*.csv
 
 ln -snf "$(realpath --relative-to "${run_dir}" "${repo_root}/BUILD/gorilla_applets_main.x")" \
     "${run_dir}/gorilla_applets_main.x"
@@ -181,6 +209,18 @@ cat > "${run_dir}/km_benchmark.inp" <<EOF
   temperature_eV = 5.0d2 ,
   total_time = 0.0d0 ,
   v_E = 0.0d0 ,
+  boole_run_energy_scan = ${energy_scan_enabled} ,
+  energy_scan_points = ${energy_scan_points} ,
+  energy_scan_min_factor = ${energy_scan_min_factor} ,
+  energy_scan_max_factor = ${energy_scan_max_factor} ,
+  boole_run_trace_scan = ${trace_scan_enabled} ,
+  n_trace_scan_multipliers = ${trace_scan_count} ,
+  trace_scan_multipliers = ${trace_scan_values} ,
+  boole_write_surface_trace = .true. ,
+  trace_time_multiplier = ${trace_time_multiplier} ,
+  fit_start_fraction = ${fit_start_fraction} ,
+  fit_end_fraction = ${fit_end_fraction} ,
+  diagnostics_prefix = '${diagnostics_prefix}' ,
   i_integrator_type = 1 ,
   n_background_species = 5 ,
   background_mass_amu = 2.014d0, 20.18d0, 20.18d0, 20.18d0, 5.486d-4 ,
@@ -197,7 +237,10 @@ cat > "${run_dir}/km_benchmark.inp" <<EOF
 /
 EOF
 
-# Generate collision profile from NEO-2 data
+# Generate collision profile from NEO-2 data using the actual species densities
+# and temperatures stored in the benchmark run. We intentionally do not infer a
+# mono-energetic reference energy from collpar_spec, because NEO-2 collpar is a
+# normalized collisionality parameter rather than a raw collision frequency.
 if [[ -f "${repo_root}/.venv/bin/python3" ]]; then
     py="${repo_root}/.venv/bin/python3"
 else
@@ -205,19 +248,22 @@ else
 fi
 "${py}" -c "
 import h5py, numpy as np
-e=4.8032e-10; m=9.1094e-28; ev=1.6022e-12
 f=h5py.File('${neo2_h5}','r')
-bs=f['boozer_s'][:]; ns=f['n_spec'][:]; cp=f['collpar_spec'][:,0]; f.close()
+bs=f['boozer_s'][:]
+ns=f['n_spec'][:]
+Ts=f['T_spec'][:] / 1.602176634e-12
+f.close()
 with open('${run_dir}/neo2_collision_profile_39461.dat','w') as o:
     o.write('# NEO-2 collision profile AUG 39461\n')
     o.write('# Species: D+(1), Ne10+(10), Ne9+(9), Ne8+(8), e-(-1)\n')
     o.write(f'{len(bs)} 5\n')
-    o.write('# s  n_D  n_Ne10  n_Ne9  n_Ne8  n_e  E_eV\n')
+    o.write('# s  n_D  n_Ne10  n_Ne9  n_Ne8  n_e  T_D_eV  T_Ne10_eV  T_Ne9_eV  T_Ne8_eV  T_e_eV  E_ref_eV\n')
     for i in range(len(bs)):
-        z2n=ns[i,1]+ns[i,2]*100+ns[i,3]*81+ns[i,4]*64
-        v=(2*np.pi*e**4*z2n*14/(m**2*cp[i]))**0.25
-        E=0.5*m*v**2/ev
-        o.write(f'{bs[i]:.8f}  {ns[i,1]:.6e}  {ns[i,2]:.6e}  {ns[i,3]:.6e}  {ns[i,4]:.6e}  {ns[i,0]:.6e}  {E:.1f}\n')
+        e_ref = Ts[i,0]
+        o.write(
+            f'{bs[i]:.8f}  {ns[i,1]:.6e}  {ns[i,2]:.6e}  {ns[i,3]:.6e}  {ns[i,4]:.6e}  {ns[i,0]:.6e}  '
+            f'{Ts[i,1]:.6f}  {Ts[i,2]:.6f}  {Ts[i,3]:.6f}  {Ts[i,4]:.6f}  {Ts[i,0]:.6f}  {e_ref:.6f}\n'
+        )
 "
 
 printf 'Running KM D11 benchmark on AUG 39461 (%s particles) ...\n' "${n_particles}"
@@ -234,6 +280,9 @@ fi
 
 printf 'KM benchmark done. Results in %s\n' "${run_dir}/km_d11_profile.csv"
 cat "${run_dir}/km_d11_profile.csv"
+if [[ -f "${run_dir}/${diagnostics_prefix}_surface_001_moments.csv" ]]; then
+    printf '\nTrace files written with prefix %s in %s\n' "${diagnostics_prefix}" "${run_dir}"
+fi
 
 # Step 3: Generate comparison plot
 plot_args=(

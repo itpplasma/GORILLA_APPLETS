@@ -36,3 +36,33 @@ target_include_directories(test_kramers_moyal.x PUBLIC
 )
 
 add_test(NAME test_kramers_moyal COMMAND test_kramers_moyal.x)
+
+add_executable(test_km_benchmark_diagnostics.x
+  test_km_benchmark_diagnostics.f90
+)
+
+target_link_libraries(test_km_benchmark_diagnostics.x
+  GORILLA_APPLETS
+)
+
+target_include_directories(test_km_benchmark_diagnostics.x PUBLIC
+  ${CMAKE_BINARY_DIR}/SRC
+  ${CMAKE_BINARY_DIR}/SRC_CORE
+)
+
+add_test(NAME test_km_benchmark_diagnostics COMMAND test_km_benchmark_diagnostics.x)
+
+add_executable(test_km_benchmark_settings.x
+  test_km_benchmark_settings.f90
+)
+
+target_link_libraries(test_km_benchmark_settings.x
+  GORILLA_APPLETS
+)
+
+target_include_directories(test_km_benchmark_settings.x PUBLIC
+  ${CMAKE_BINARY_DIR}/SRC
+  ${CMAKE_BINARY_DIR}/SRC_CORE
+)
+
+add_test(NAME test_km_benchmark_settings COMMAND test_km_benchmark_settings.x)

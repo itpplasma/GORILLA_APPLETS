@@ -14,14 +14,21 @@ subroutine calc_km_benchmark()
 
     use km_benchmark_settings_mod, only: background_charge, background_density, &
         background_mass_amu, background_temperature, collision_operator, &
-        filename_output, i_integrator_type, load_km_benchmark_inp, &
+        filename_output, find_nearest_profile_surface, i_integrator_type, &
+        load_km_benchmark_inp, &
         n_background_species, n_particles, n_profile_surfaces, n_surfaces, &
-        boole_precalc_collisions, profile_density, profile_energy_eV, &
-        surface_s_values, temperature_eV, total_time, tracer_species, v_E
-    use kramers_moyal_transport_mod, only: calc_km_d11_profile, km_d11_result_t
+        boole_precalc_collisions, profile_density, profile_temperature, &
+        profile_tracer_energy_eV, surface_s_values, temperature_eV, total_time, &
+        tracer_species, v_E
+    use kramers_moyal_transport_mod, only: calc_km_d11_profile, km_d11_result_t, &
+        write_km_csv
 
     type(km_d11_result_t) :: result
+    real(dp), allocatable :: selected_profile_density(:, :)
+    real(dp), allocatable :: selected_profile_energy(:)
+    real(dp), allocatable :: selected_profile_temperature(:, :)
     integer, allocatable :: surface_indices(:)
+    integer :: i, profile_index
 
     call load_km_benchmark_inp()
     call configure_km_input()
@@ -29,10 +36,20 @@ subroutine calc_km_benchmark()
     call map_s_values_to_indices(surface_s_values, n_surfaces, surface_indices)
 
     if (n_profile_surfaces > 0) then
+        allocate(selected_profile_density(size(surface_indices), n_background_species))
+        allocate(selected_profile_temperature(size(surface_indices), n_background_species))
+        allocate(selected_profile_energy(size(surface_indices)))
+        do i = 1, size(surface_indices)
+            profile_index = i
+            if (n_surfaces > 0) profile_index = find_nearest_profile_surface(surface_s_values(i))
+            selected_profile_density(i, :) = profile_density(profile_index, 1:n_background_species)
+            selected_profile_temperature(i, :) = profile_temperature(profile_index, 1:n_background_species)
+            selected_profile_energy(i) = profile_tracer_energy_eV(profile_index)
+        end do
         call calc_km_d11_profile(surface_indices, result, &
-            per_surface_energy_eV=profile_energy_eV(1:n_surfaces), &
-            per_surface_density=profile_density(1:n_surfaces, &
-                1:n_background_species))
+            per_surface_energy_eV=selected_profile_energy, &
+            per_surface_density=selected_profile_density, &
+            per_surface_temperature=selected_profile_temperature)
     else
         call calc_km_d11_profile(surface_indices, result)
     end if
@@ -196,25 +213,5 @@ subroutine map_s_values_to_indices(surface_s_values, n_surfaces, surface_indices
     end do
 
 end subroutine map_s_values_to_indices
-
-subroutine write_km_csv(result, filename)
-
-    use kramers_moyal_transport_mod, only: km_d11_result_t
-
-    type(km_d11_result_t), intent(in) :: result
-    character(len=*), intent(in) :: filename
-
-    integer :: csv_unit, i
-
-    open(newunit=csv_unit, file=filename, status='replace', action='write')
-    write(csv_unit, '(A)') 's,d11_s,convection_A'
-    do i = 1, result%n_surfaces
-        write(csv_unit, '(ES24.16,A,ES24.16,A,ES24.16)') &
-            result%boundary_s(result%surface_indices(i)), ',', &
-            result%d11(i), ',', result%convection(i)
-    end do
-    close(csv_unit)
-
-end subroutine write_km_csv
 
 end module km_benchmark_mod

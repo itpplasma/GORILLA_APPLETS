@@ -9,6 +9,18 @@ program test_kramers_moyal
 
 contains
 
+subroutine set_deterministic_seed()
+    integer :: i, n
+    integer, allocatable :: seed(:)
+
+    call random_seed(size=n)
+    allocate(seed(n))
+    do i = 1, n
+        seed(i) = 104729 + 37 * i
+    end do
+    call random_seed(put=seed)
+end subroutine set_deterministic_seed
+
 subroutine test_fit_transport_coefficients_pure_diffusion()
     real(dp), parameter :: D_true = 0.03_dp
     integer, parameter :: n_samples = 1000
@@ -67,6 +79,8 @@ subroutine test_kramers_moyal_1d_random_walk()
     real(dp) :: max_err
     integer :: i, step, cell, n_valid
     logical :: alive(n_particles)
+
+    call set_deterministic_seed()
 
     ! True D(x) = 0.02 + 0.02 * sin(pi*x)
     do i = 1, n_cells

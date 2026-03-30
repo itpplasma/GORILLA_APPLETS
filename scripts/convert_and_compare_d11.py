@@ -12,8 +12,8 @@ from scipy.io import netcdf_file
 
 
 def load_gorilla_csv(path):
-    data = np.loadtxt(path, delimiter=",", skiprows=1)
-    return data[:, 0], data[:, 1], data[:, 2]
+    data = np.genfromtxt(path, delimiter=",", names=True)
+    return data
 
 
 def load_neo2(path):
@@ -55,9 +55,15 @@ def main():
     parser.add_argument("--show", action="store_true")
     args = parser.parse_args()
 
-    gorilla_s, d11_s, convection_a = load_gorilla_csv(args.gorilla_csv)
+    gorilla = load_gorilla_csv(args.gorilla_csv)
     neo2_s, d11_ax_neo2, av_nabla_stor, z_spec = load_neo2(args.neo2_h5)
-    gorilla_d11_r = convert_gorilla_d11(d11_s, gorilla_s, av_nabla_stor, neo2_s)
+    gorilla_s = gorilla["s"]
+    gorilla_d11_r = convert_gorilla_d11(gorilla["d11_s"], gorilla_s, av_nabla_stor, neo2_s)
+    gorilla_convolved_r = None
+    if "d11_convolved_s" in gorilla.dtype.names:
+        gorilla_convolved_r = convert_gorilla_d11(
+            gorilla["d11_convolved_s"], gorilla_s, av_nabla_stor, neo2_s
+        )
 
     sp = args.species_index
     species_labels = {0: "e", 1: "D", 2: "Ne$^{10+}$", 3: "Ne$^{9+}$", 4: "Ne$^{8+}$"}
@@ -68,7 +74,7 @@ def main():
     linewidth = 2
     figsize = (14, 10)
 
-    fig, axes = plt.subplots(2, 1, figsize=figsize, height_ratios=[3, 1])
+    fig, axes = plt.subplots(3, 1, figsize=(14, 13), height_ratios=[3, 1.2, 1])
 
     # D11 comparison
     ax = axes[0]
@@ -76,6 +82,10 @@ def main():
             label=f"NEO-2-QL {species_label}", markersize=markersize, linewidth=linewidth)
     ax.plot(gorilla_s, gorilla_d11_r * 1e-4, "s-",
             label=f"GORILLA KM {species_label}", markersize=markersize, linewidth=linewidth)
+    if gorilla_convolved_r is not None:
+        ax.plot(gorilla_s, gorilla_convolved_r * 1e-4, "d--",
+                label=f"GORILLA convolved {species_label}",
+                markersize=markersize - 1, linewidth=linewidth)
 
     if args.neoart_nc:
         rho_pol_neoart, d11_neoart = load_neoart(args.neoart_nc, charge_stages=[10])
@@ -92,16 +102,35 @@ def main():
     ax.tick_params(axis="both", labelsize=fontsize - 2)
     ax.set_title("GORILLA vs NEO-2-QL: mono-energetic $D_{11}$", fontsize=fontsize)
 
-    # Drift coefficient A(s)
+    # Ratio to NEO-2
     ax2 = axes[1]
-    ax2.plot(gorilla_s, convection_a, "s-", markersize=markersize, linewidth=linewidth,
-             label="GORILLA A(s)")
-    ax2.axhline(0, color="k", linewidth=0.5)
+    neo2_diag_interp = interp1d(
+        neo2_s, d11_ax_neo2[:, sp, sp] * 1e-4, kind="linear", fill_value="extrapolate"
+    )
+    ratio_mono = (gorilla_d11_r * 1e-4) / neo2_diag_interp(gorilla_s)
+    ax2.plot(gorilla_s, ratio_mono, "s-", markersize=markersize, linewidth=linewidth,
+             label="GORILLA / NEO-2")
+    if gorilla_convolved_r is not None:
+        ratio_conv = (gorilla_convolved_r * 1e-4) / neo2_diag_interp(gorilla_s)
+        ax2.plot(gorilla_s, ratio_conv, "d--", markersize=markersize - 1, linewidth=linewidth,
+                 label="GORILLA convolved / NEO-2")
+    ax2.axhline(1.0, color="k", linewidth=0.5)
     ax2.set_xlabel(r"$s_\mathrm{tor}$ (boozer_s)", fontsize=fontsize)
-    ax2.set_ylabel("A(s) [1/s]", fontsize=fontsize)
+    ax2.set_ylabel("ratio", fontsize=fontsize)
     ax2.legend(fontsize=fontsize - 2)
     ax2.grid(True, alpha=0.3)
     ax2.tick_params(axis="both", labelsize=fontsize - 2)
+
+    # Drift coefficient A(s)
+    ax3 = axes[2]
+    ax3.plot(gorilla_s, gorilla["convection_A"], "s-", markersize=markersize, linewidth=linewidth,
+             label="GORILLA A(s)")
+    ax3.axhline(0, color="k", linewidth=0.5)
+    ax3.set_xlabel(r"$s_\mathrm{tor}$ (boozer_s)", fontsize=fontsize)
+    ax3.set_ylabel("A(s) [1/s]", fontsize=fontsize)
+    ax3.legend(fontsize=fontsize - 2)
+    ax3.grid(True, alpha=0.3)
+    ax3.tick_params(axis="both", labelsize=fontsize - 2)
 
     plt.tight_layout()
     plt.savefig(args.output, dpi=150, bbox_inches="tight")

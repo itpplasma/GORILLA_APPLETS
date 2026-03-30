@@ -6,6 +6,15 @@ module utils_parallelised_particle_pushing_mod
    
 contains
 
+pure logical function is_valid_tetra_index(ind_tetr, n_tetra) result(valid)
+
+    integer, intent(in) :: ind_tetr
+    integer, intent(in) :: n_tetra
+
+    valid = ind_tetr >= 1 .and. ind_tetr <= n_tetra
+
+end function is_valid_tetra_index
+
 subroutine print_progress(num_particles,kpart,n)
 
     integer :: num_particles, kpart, n
@@ -143,6 +152,7 @@ subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, specie
 
     use gorilla_applets_types_mod, only: in, time_t
     use find_tetra_mod, only: find_tetra
+    use tetra_physics_mod, only: tetra_physics
     
     integer, intent(in) :: i, n
     integer, intent(in), optional :: species_in
@@ -155,12 +165,14 @@ subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, specie
     if (present(species_in)) species = species_in
 
     if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
-    if (.not.(ind_tetr.eq.-1)) then
+    if (allocated(tetra_physics) .and. is_valid_tetra_index(ind_tetr, size(tetra_physics))) then
         if (in%boole_preserve_energy_and_momentum_during_collisions) then
             call collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
         else
             call collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
         endif
+    else
+        ind_tetr = -1
     endif
 
 end subroutine carry_out_collisions
@@ -338,14 +350,17 @@ subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_
     if(present(phi_0_mappings)) exit_data%phi_0_mappings(n,species) = phi_0_mappings
 
     ! Compute flux surface label from poloidal flux (normalized, no square root)
-    if (present(ind_tetr) .and. ind_tetr /= -1) then
-        z_local = x - tetra_physics(ind_tetr)%x1
-        local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi * z_local)
-        exit_data%flux_surface(n,species) = (local_poloidal_flux - flux%poloidal_min) / &
-                                             (flux%poloidal_max - flux%poloidal_min)
-    else
-        exit_data%flux_surface(n,species) = -1.0_dp  ! Mark as invalid if outside domain
-    endif
+    if (present(ind_tetr) .and. allocated(tetra_physics)) then
+        if (is_valid_tetra_index(ind_tetr, size(tetra_physics))) then
+            z_local = x - tetra_physics(ind_tetr)%x1
+            local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + &
+                sum(tetra_physics(ind_tetr)%gAphi * z_local)
+            exit_data%flux_surface(n,species) = (local_poloidal_flux - flux%poloidal_min) / &
+                (flux%poloidal_max - flux%poloidal_min)
+            return
+        end if
+    end if
+    exit_data%flux_surface(n,species) = -1.0_dp  ! Mark as invalid if outside domain
 
 end subroutine update_exit_data
 
@@ -367,9 +382,15 @@ subroutine update_start_type(x,vpar,vperp,n,species,ind_tetr)
     start%pitch(n,species) = vpar/v
     start%energy(n,species) = 0.5_dp*v**2*start%particle_mass(species)/ev2erg
 
-    if (ind_tetr.eq.-1) then
+    if (.not. allocated(tetra_physics)) then
+        start%lost(n,species) = .true.
+        return
+    end if
+
+    if (.not. is_valid_tetra_index(ind_tetr, size(tetra_physics))) then
         start%lost(n,species) = .true.
     else
+        start%lost(n,species) = .false.
         x_local = x-tetra_physics(ind_tetr)%x1
         start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(x_local,ind_tetr))*(-1)
         !-1 because of negative gyrophase
