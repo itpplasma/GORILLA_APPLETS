@@ -1,0 +1,22 @@
+! INPUT FILE FOR KRAMERS-MOYAL D11 BENCHMARK
+!
+&km_benchmark_nml
+  n_particles = 5000 ,
+  tracer_species = 1 ,
+  collision_operator = 4 ,
+  boole_precalc_collisions = .false. ,
+  temperature_eV = 5.0d2 ,
+  electron_density = 7.7d13 ,
+  electron_temperature_eV = 5.0d2 ,
+  ion_density = 7.1d13 ,
+  ion_temperature_eV = 5.0d2 ,
+  total_time = 0.0d0 ,
+  v_E = 0.0d0 ,
+  i_integrator_type = 1 ,
+  n_surfaces = 20 ,
+  surface_s_values = 0.10000000d0, 0.14631579d0, 0.19263158d0, 0.23894737d0, 0.28526316d0,
+                     0.33157895d0, 0.37789474d0, 0.42421053d0, 0.47052632d0, 0.51684211d0,
+                     0.56315789d0, 0.60947368d0, 0.65578947d0, 0.70210526d0, 0.74842105d0,
+                     0.79473684d0, 0.84105263d0, 0.88736842d0, 0.93368421d0, 0.98000000d0 ,
+  filename_output = 'km_d11_profile.csv'
+/
