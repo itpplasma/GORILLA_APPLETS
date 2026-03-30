@@ -43,6 +43,7 @@ subroutine calc_km_d11_profile(surface_indices, result, &
 
     real(dp), allocatable :: rand_matrix(:, :, :)
     real(dp), allocatable :: boundary_s(:)
+    real(dp), allocatable :: saved_mass(:), saved_charge(:)
     real(dp) :: A, B, tau_c_ei, surface_energy
     integer :: ns, i, n_particles, idx, n_bg
     logical :: per_surface_collisions
@@ -92,8 +93,10 @@ subroutine calc_km_d11_profile(surface_indices, result, &
     call initialize_exit_data(n_particles)
 
     if (.not. per_surface_collisions) then
-        ! Compute collision coefficients once for all surfaces
         call calc_collision_coefficients_for_all_tetrahedra(in%tracer_species)
+    else
+        saved_mass = in%background_mass
+        saved_charge = in%background_charge_num
     end if
 
     do idx = 1, result%n_surfaces
@@ -114,8 +117,7 @@ subroutine calc_km_d11_profile(surface_indices, result, &
                 call set_custom_background(n_bg, &
                     per_surface_density(idx, :), &
                     spread(surface_energy, 1, n_bg), &
-                    in%background_mass, &
-                    in%background_charge_num)
+                    saved_mass, saved_charge)
             end if
             call calc_collision_coefficients_for_all_tetrahedra( &
                 in%tracer_species)
