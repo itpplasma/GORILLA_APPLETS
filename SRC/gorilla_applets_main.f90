@@ -18,6 +18,7 @@
   use self_consistent_electric_field_mod, only: calc_self_consistent_electric_field
   use anomalous_transport_mod, only: calc_anomalous_transport
   use helical_core_mod, only: calc_helical_core
+  use rmp_response_currents_mod, only: calc_rmp_response_currents
 !
   implicit none
 !
@@ -150,6 +151,12 @@
         case(14) !Calculate helical core
 !
             call calc_helical_core
+!
+!-------------------------------------------------------------------------------------------!
+!
+        case(15) !Calculate RMP response currents
+!
+            call calc_rmp_response_currents
 !
 !-------------------------------------------------------------------------------------------!
 !

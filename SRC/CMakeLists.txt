@@ -30,6 +30,8 @@ add_library(GORILLA_APPLETS STATIC
   anomalous_transport/anomalous_transport_mod.f90
   helical_core/utils_helical_core_mod.f90
   helical_core/helical_core_mod.f90
+  rmp_response_currents/utils_rmp_response_currents_mod.f90
+  rmp_response_currents/rmp_response_currents_mod.f90
   volume_integrals_and_sqrt_g_mod.f90
   zzg.f90
   self_consistent_electric_field_mod.f90
