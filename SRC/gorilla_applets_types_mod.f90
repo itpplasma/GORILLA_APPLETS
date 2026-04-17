@@ -1,6 +1,7 @@
 module gorilla_applets_types_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
+    use marker_distribution_mod, only: distribution_3d_t, distribution_1d_t
 
     implicit none
 
@@ -33,16 +34,18 @@ module gorilla_applets_types_mod
     real(dp), dimension(:,:,:), allocatable :: x
     real(dp), dimension(:,:),   allocatable :: pitch
     real(dp), dimension(:,:),   allocatable :: energy
-    real(dp), dimension(:,:),   allocatable :: weight
     real(dp), dimension(:,:),   allocatable :: jperp
-    real(dp), dimension(:),     allocatable :: particle_charge !used in self consistent electric field computation 
+    real(dp), dimension(:),     allocatable :: particle_charge !used in self consistent electric field computation
     real(dp), dimension(:),     allocatable :: particle_mass !used in self consistent electric field computation
     real(dp), dimension(:),     allocatable :: cm_over_e !used in self consistent electric field computation
-    real(dp), dimension(:),     allocatable :: v0 !This is the thermal velocity, not the particle velocity; 
+    real(dp), dimension(:),     allocatable :: v0 !This is the thermal velocity, not the particle velocity;
                                                   !used in self consistent electric field computation
-    real(dp), dimension(:),     allocatable :: t !tracing time, used in self consistent electric field computation
+    real(dp), dimension(:),     allocatable :: t !total tracing time
     real(dp)                                :: epsilon_max
     logical, dimension(:,:),    allocatable :: lost
+    type(distribution_3d_t) :: dist_position  ! starting distribution in position space
+    type(distribution_1d_t) :: dist_energy    ! starting distribution in energy
+    type(distribution_1d_t) :: dist_lambda    ! starting distribution in pitch angle
     end type start_t
 
     type(start_t) :: start
@@ -94,7 +97,7 @@ module gorilla_applets_types_mod
     logical  :: boole_collisions
     logical  :: boole_precalc_collisions
     logical  :: boole_refined_sqrt_g
-    logical  :: boole_boltzmann_energies
+    logical  :: boole_monoenergetic
     logical  :: boole_linear_density_simulation
     logical  :: boole_antithetic_variate
     logical  :: boole_linear_temperature_simulation
@@ -122,6 +125,9 @@ module gorilla_applets_types_mod
     real(dp) :: anomalous_diffusion_coefficient   !anomalous diffusion coefficient in cm^2/s
     logical  :: boole_divertor_intersection !Used in divertor_heat_loads
     logical  :: boole_poincare_plot !Used in divertor_heat_loads
+    logical  :: boole_eliminate_particles_outside_flux !Used in helical_core
+    real(dp) :: flux_threshold_for_elimination !Used in helical_core (0=axis, 1=boundary)
+    logical  :: boole_delta_f = .false. !Used in helical_core: use delta-f method for weights
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
     integer  :: n_mappings_ignored !Used in divertor_heat_loads
     real(dp) :: lambda !Used in divertor_heat_loads
@@ -241,6 +247,13 @@ module gorilla_applets_types_mod
     real(dp) :: confined
     real(dp) :: step_anomalous_transport
     end type time_t
+
+    type weights_t
+    real(dp), dimension(:,:), allocatable :: w         ! current weight (particles x species)
+    real(dp), dimension(:,:), allocatable :: original  ! original weight, used in helical_core for delta-f damping
+    end type weights_t
+
+    type(weights_t) :: weights
 
     real(dp) :: maximum_s
 

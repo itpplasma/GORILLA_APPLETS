@@ -19,7 +19,7 @@ subroutine read_divertor_heat_loads_inp_into_type
 
     real(dp) :: time_step,energy_eV,n_particles, density, lambda
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
-               boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
+               boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
@@ -31,7 +31,7 @@ subroutine read_divertor_heat_loads_inp_into_type
     !Namelist for divertor_heat_loads input
     NAMELIST /divertor_heat_loads_nml/ time_step,energy_eV,n_particles, lambda, boole_divertor_intersection, boole_poincare_plot, &
     & n_poincare_mappings,n_mappings_ignored,boole_squared_moments,boole_point_source,boole_collisions, boole_precalc_collisions, &
-    & density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
+    & density,boole_refined_sqrt_g,boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
     & boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data
@@ -49,7 +49,7 @@ subroutine read_divertor_heat_loads_inp_into_type
     in%boole_collisions = boole_collisions
     in%boole_precalc_collisions = boole_precalc_collisions
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
-    in%boole_boltzmann_energies = boole_boltzmann_energies
+    in%boole_monoenergetic = boole_monoenergetic
     in%boole_linear_density_simulation = boole_linear_density_simulation
     in%boole_antithetic_variate = boole_antithetic_variate
     in%boole_linear_temperature_simulation = boole_linear_temperature_simulation
@@ -387,8 +387,8 @@ end subroutine close_files
 
 subroutine calc_starting_conditions
 
-    use gorilla_applets_types_mod, only: in
-    
+    use gorilla_applets_types_mod, only: in, start
+
     real(dp), dimension(:,:), allocatable  :: rand_matrix
 
     call set_coordinate_limits
@@ -397,13 +397,14 @@ subroutine calc_starting_conditions
     call RANDOM_NUMBER(rand_matrix)
 
     call allocate_start_type
+    call allocate_weights
     call set_start_type(rand_matrix)
 
 end subroutine calc_starting_conditions
 
 subroutine set_start_type(rand_matrix)
 
-    use gorilla_applets_types_mod, only: in, start, g
+    use gorilla_applets_types_mod, only: in, start, g, weights
     use constants, only: pi, ev2erg
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
@@ -421,11 +422,11 @@ subroutine set_start_type(rand_matrix)
         start%pitch(i,1) = sqrt(1-constant/start%x(1,i,1))
     enddo
 
-    start%weight = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+    weights%w = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
     start%energy = in%energy_eV
 
-    if (in%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        start%weight =  start%weight*10/sqrt(pi)
+    if (.not. in%boole_monoenergetic) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+        weights%w =  weights%w*10/sqrt(pi)
         start%energy(:,1) = 5*in%energy_eV*rand_matrix(5,:)
     endif
     
@@ -456,10 +457,17 @@ subroutine allocate_start_type
     allocate(start%x(3,in%num_particles,1))
     allocate(start%pitch(in%num_particles,1))
     allocate(start%energy(in%num_particles,1))
-    allocate(start%weight(in%num_particles,1))
     allocate(start%jperp(in%num_particles,1))
 
 end subroutine allocate_start_type
+
+subroutine allocate_weights
+
+    use gorilla_applets_types_mod, only: in, weights
+
+    allocate(weights%w(in%num_particles,1))
+
+end subroutine allocate_weights
 
 subroutine create_magnetic_field_file
     use tetra_grid_settings_mod, only: n1,n2,n3

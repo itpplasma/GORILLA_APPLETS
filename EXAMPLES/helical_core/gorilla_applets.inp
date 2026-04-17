@@ -1,6 +1,6 @@
-! INPUT FILE FOR COMPUTATION OF MONO-ENERGETIC TRANSPORT COEFFICIENT AND NUMERICAL DIFFUSION COEFFICIENT
+4! INPUT FILE FOR HELICAL CORE PARTICLE TRACING
 !
-! TRANSPORT COEFFICIENT NAMELIST 
+! TRANSPORT COEFFICIENT NAMELIST
 &GORILLA_APPLETS_NML
 !
 !------------------------------------------------------------------------------------------------------------!
@@ -20,7 +20,7 @@
  !12 .. Compute self consistent electric field
  !13 .. Compute anomalous transport
  !14 .. Compute helical core
- i_option = 9 ,
+ i_option = 14 ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !

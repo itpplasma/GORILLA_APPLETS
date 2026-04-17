@@ -12,7 +12,7 @@ subroutine print_progress(num_particles,kpart,n)
     logical :: print_progress_for_every_particle = .false.
 
     if ((.not.print_progress_for_every_particle).and.(num_particles.gt.10)) then
-        if (modulo(kpart,int(num_particles/10)).eq.0) then
+        if (modulo(kpart,int(num_particles/100)).eq.0) then
             print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
         endif
     else
@@ -137,60 +137,62 @@ subroutine add_local_counter_to_counter(local_counter)
     
 end subroutine add_local_counter_to_counter
 
-subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species_in)
+subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species_in, iswmode_in)
 
     use gorilla_applets_types_mod, only: in, time_t
     use find_tetra_mod, only: find_tetra
-    
+
     integer, intent(in) :: i, n
     integer, intent(in), optional :: species_in
+    integer, intent(in), optional :: iswmode_in
     integer :: species = 1
+    integer :: iswmode = 1
     real(dp), dimension(3), intent(inout) :: x
     real(dp), intent(inout) :: vpar, vperp
     type(time_t) :: t
     integer :: ind_tetr, iface
 
     if (present(species_in)) species = species_in
+    !iswmode options:
+    !1 - full operator (pitch-angle and energy scattering and drag)
+    !2 - energy scattering and drag only
+    !3 - drag only
+    !4 - pitch-angle scattering only
+    if (present(iswmode_in)) iswmode = iswmode_in
 
     if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
     if (.not.(ind_tetr.eq.-1)) then
         if (in%boole_preserve_energy_and_momentum_during_collisions) then
-            call collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
+            call collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
         else
-            call collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
+            call collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
         endif
     endif
 
 end subroutine carry_out_collisions
 
-subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
+subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
 
-    use gorilla_applets_types_mod, only: in, c, time_t, start
+    use gorilla_applets_types_mod, only: in, c, time_t, start, weights
     use collis_ions, only: stost
     use collis_ions, only: collis_init
     use tetra_physics_mod, only: particle_mass,particle_charge
     use constants, only: echarge,amp
     use gorilla_applets_settings_mod, only: i_option
-    
-    integer, intent(in) :: i, n, species
+
+    integer, intent(in) :: i, n, species, iswmode
     real(dp), dimension(3), intent(inout) :: x
     real(dp), intent(inout) :: vpar, vperp
     type(time_t) :: t
     integer :: ind_tetr
-    
+
     real(dp), dimension(5) :: zet
     real(dp), dimension(3) :: randnum
     real(dp), dimension(1) :: m, z, dens, temp, efcolf,velrat,enrat
     real(dp) :: vpar_background
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar, vpar_mat_save, vpar_mat
-    integer :: err, j, p, iswmode
+    integer :: err, j, p
     real(dp) ::  w_v, w_t, particle_to_background_coupling_strength, t_max
-
-    iswmode = 1
-    !1 - full operator (pitch-angle and energy scattering and drag)
-    !2 - energy scattering and drag only
-    !3 - drag only
-    !4 - pitch-angle scattering only
 
     w_v = 1.0_dp
     w_t = 1.0_dp
@@ -240,39 +242,33 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         
         !$omp critical
         c%vpar_mat(j,ind_tetr) = vpar_mat_save - &
-                            c%weight_factor*start%weight(n,species)*delta_vpar/w_v*particle_to_background_coupling_strength
+                            c%weight_factor*weights%w(n,species)*delta_vpar/w_v*particle_to_background_coupling_strength
         vpar_mat = c%vpar_mat(j,ind_tetr)
         c%temp_mat(j,ind_tetr) = c%temp_mat(j,ind_tetr) + particle_mass/3*(vpar_mat_save**2 - vpar_mat**2) - &
-                            2.0_dp/3.0_dp*c%weight_factor*start%weight(n,species)*delta_epsilon/w_t &
+                            2.0_dp/3.0_dp*c%weight_factor*weights%w(n,species)*delta_epsilon/w_t &
                             *particle_to_background_coupling_strength
         !$omp end critical
     enddo
 
 end subroutine collisions_with_background_updates
 
-subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species)
+subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
 
     use gorilla_applets_types_mod, only: in, c, time_t, start
     use collis_ions, only: stost
     use gorilla_applets_settings_mod, only: i_option
-    
-    integer, intent(in) :: i, n, species
+
+    integer, intent(in) :: i, n, species, iswmode
     real(dp), dimension(3), intent(inout) :: x
     real(dp), intent(inout) :: vpar, vperp
     type(time_t) :: t
     integer :: ind_tetr
-    
+
     real(dp), dimension(5) :: zet
     real(dp), dimension(3) :: randnum
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
-    integer :: err, iswmode
+    integer :: err
     real(dp) :: t_max
-
-    iswmode = 4
-    !1 - full operator (pitch-angle and energy scattering and drag)
-    !2 - energy scattering and drag only
-    !3 - drag only
-    !4 - pitch-angle scattering only
 
     allocate(efcolf(c%n))
     allocate(velrat(c%n))
@@ -316,6 +312,8 @@ subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_
 
     use gorilla_applets_types_mod, only: exit_data, in, flux
     use tetra_physics_mod, only: tetra_physics
+    use gorilla_settings_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
 
     integer, intent(in)                 :: i, n
     integer, intent(in), optional       :: phi_0_mappings, species_in, ind_tetr
@@ -337,12 +335,23 @@ subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_
     exit_data%integration_step(n,species) = i
     if(present(phi_0_mappings)) exit_data%phi_0_mappings(n,species) = phi_0_mappings
 
-    ! Compute flux surface label from poloidal flux (normalized, no square root)
+    ! Compute flux surface label (s-coordinate, ranging from sfc_s_min to 1 in flux coordinates)
     if (present(ind_tetr) .and. ind_tetr /= -1) then
         z_local = x - tetra_physics(ind_tetr)%x1
-        local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi * z_local)
-        exit_data%flux_surface(n,species) = (local_poloidal_flux - flux%poloidal_min) / &
-                                             (flux%poloidal_max - flux%poloidal_min)
+        if (coord_system == 2) then
+            ! Flux coordinates: use s-coordinate directly (x(1) is s)
+            exit_data%flux_surface(n,species) = tetra_physics(ind_tetr)%x1(1) + z_local(1)
+        else if (grid_kind /= 3) then
+            ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
+            local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi * z_local)
+            exit_data%flux_surface(n,species) = (local_poloidal_flux - flux%poloidal_min) / &
+                                                 (flux%poloidal_max - flux%poloidal_min)
+        else
+            ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
+            print*, 'Error in update_exit_data: Computing flux surface label from A_phi is only valid for &
+                    &axisymmetric devices. For stellarators (grid_kind=3), use flux coordinates (coord_system=2).'
+            stop
+        endif
     else
         exit_data%flux_surface(n,species) = -1.0_dp  ! Mark as invalid if outside domain
     endif

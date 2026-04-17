@@ -3,8 +3,8 @@ module utils_data_pre_and_post_processing_mod
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
     implicit none
-   
-contains 
+
+contains
 
 subroutine set_seed_for_random_numbers
 
@@ -111,20 +111,16 @@ end subroutine deallocate_output
 
 subroutine calc_starting_conditions(verts)
 
-    use gorilla_applets_types_mod, only: in
+    use gorilla_applets_types_mod, only: in, start
 
     real(dp), dimension(:,:), allocatable, intent(out), optional :: verts
-    real(dp), dimension(:,:,:), allocatable                :: rand_matrix
 
     call set_verts_and_coordinate_limits(verts)
 
-    allocate(rand_matrix(5,in%num_particles,in%n_species))
-    call RANDOM_NUMBER(rand_matrix)
-
     call allocate_start_type
-    call set_starting_positions(rand_matrix)
-    call set_weights
-    call set_rest_of_start_type(rand_matrix)
+    call allocate_weights
+    call set_starting_positions()
+    call set_rest_of_start_type()
 
 end subroutine calc_starting_conditions
 
@@ -178,7 +174,6 @@ subroutine allocate_start_type
     allocate(start%x(3,in%num_particles,in%n_species))
     allocate(start%pitch(in%num_particles,in%n_species))
     allocate(start%energy(in%num_particles,in%n_species))
-    allocate(start%weight(in%num_particles,in%n_species))
     allocate(start%jperp(in%num_particles,in%n_species))
     allocate(start%lost(in%num_particles,in%n_species))
     allocate(start%particle_charge(in%n_species))
@@ -189,66 +184,104 @@ subroutine allocate_start_type
 
 end subroutine allocate_start_type
 
-subroutine set_starting_positions(rand_matrix)
+subroutine allocate_weights
+
+    use gorilla_applets_types_mod, only: in, weights
+
+    allocate(weights%w(in%num_particles,in%n_species))
+    if (in%boole_delta_f) allocate(weights%original(in%num_particles,in%n_species))
+
+end subroutine allocate_weights
+
+subroutine set_starting_positions()
 
     use gorilla_applets_types_mod, only: in, start, g
     use tetra_physics_mod, only: coord_system
     use tetra_grid_settings_mod, only: grid_kind
     use constants, only: pi
+    use marker_distribution_mod, only: pdf_flat, init_distribution_3d, sample_array_3d
 
-    real(dp), dimension(:,:,:), intent(in) :: rand_matrix
+    real(dp) :: xmin(3), xmax(3)
+    integer :: i_species
 
     !compute starting conditions
     if (in%boole_point_source) then
         if (grid_kind.eq.2) then
-            start%x(1,:,:) = 160.0_dp !170.8509699_dp
-            start%x(2,:,:) = 0.01_dp
-            start%x(3,:,:) = 70.0_dp !8.922304_dp
+            xmin = [209.0_dp, 0.01_dp, 10.0_dp]
+            xmax = xmin
         elseif (grid_kind.eq.4) then
-            start%x(1,:,:) = 205.0_dp
-            start%x(2,:,:) = 0.0_dp
-            start%x(3,:,:) = 0.0_dp
+            xmin = [205.0_dp, 0.0_dp, 0.0_dp]
+            xmax = xmin
         endif
         if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
     else
-        start%x(g%ind_a,:,:) = g%amin + (g%amax - g%amin)*rand_matrix(g%ind_a,:,:) !r in cylindrical, s in flux coordinates
-        start%x(g%ind_b,:,:) = 2*pi*rand_matrix(g%ind_b,:,:) !phi in cylindrical and flux coordinates
-        start%x(g%ind_c,:,:) = g%cmin + (g%cmax - g%cmin)*rand_matrix(g%ind_c,:,:) !z in cylindrical, theta in flux coordinates
+        ! Set bounds for uniform sampling
+        xmin(g%ind_a) = g%amin
+        xmax(g%ind_a) = g%amax
+        xmin(g%ind_b) = 0.0_dp
+        xmax(g%ind_b) = 2*pi
+        xmin(g%ind_c) = g%cmin
+        xmax(g%ind_c) = g%cmax
     endif
+
+    ! Initialize position distribution if not already done
+    if (.not. start%dist_position%initialized) then
+        call init_distribution_3d(start%dist_position, pdf_flat, xmin, xmax)
+    endif
+
+    ! Sample positions for all species
+    do i_species = 1, in%n_species
+        call sample_array_3d(start%dist_position, start%x(:,:,i_species))
+    enddo
 
 end subroutine set_starting_positions
 
 subroutine set_weights
 
-    use gorilla_applets_types_mod, only: in, start, g, c
+    use gorilla_applets_types_mod, only: in, weights, g, c
     use constants, only: pi
 
-    start%weight = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+    weights%w = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
 
-    if (in%boole_boltzmann_energies) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        start%weight =  start%weight*10/sqrt(pi)
+    if (.not. in%boole_monoenergetic) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
+        weights%w =  weights%w*10/sqrt(pi)
     endif
 
-    c%weight_factor = 1/(start%weight(1,1)*g%amax)
+    c%weight_factor = 1/(weights%w(1,1)*g%amax)
 
 end subroutine set_weights
 
-subroutine set_rest_of_start_type(rand_matrix)
+subroutine set_rest_of_start_type()
 
     use gorilla_applets_types_mod, only: in, start
     use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
     use gorilla_applets_settings_mod, only: i_option
     use constants, only: echarge,ame,clight
     use constants, only: ev2erg
+    use marker_distribution_mod, only: pdf_flat, init_distribution_1d, sample_array_1d
 
-    real(dp), dimension(:,:,:), intent(in) :: rand_matrix
+    integer :: i_species
 
-    start%pitch(:,:) = 2*rand_matrix(4,:,:)-1 !pitch parameter
-    start%energy = in%energy_eV
-    if (in%boole_boltzmann_energies) then
-        start%energy = 5*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
+    ! Initialize lambda (pitch angle) distribution if not already done
+    if (.not. start%dist_lambda%initialized) then
+        call init_distribution_1d(start%dist_lambda, pdf_flat, -1.0_dp, 1.0_dp)
     endif
-    
+
+    ! Initialize energy distribution if not already done
+    if (.not. start%dist_energy%initialized) then
+        if (in%boole_monoenergetic) then
+            call init_distribution_1d(start%dist_energy, pdf_flat, in%energy_eV, in%energy_eV)
+        else
+            call init_distribution_1d(start%dist_energy, pdf_flat, 0.0_dp, 5.0_dp*in%energy_eV)
+        endif
+    endif
+
+    ! Sample pitch and energy for all species
+    do i_species = 1, in%n_species
+        call sample_array_1d(start%dist_lambda, in%num_particles, start%pitch(:,i_species))
+        call sample_array_1d(start%dist_energy, in%num_particles, start%energy(:,i_species))
+    enddo
+
     if (in%boole_antithetic_variate) then
         start%x(:,1:in%num_particles:2,:) = start%x(:,2:in%num_particles:2,:)
         start%pitch(1:in%num_particles:2,:) = -start%pitch(2:in%num_particles:2,:)
@@ -267,6 +300,7 @@ subroutine set_rest_of_start_type(rand_matrix)
     endif
 
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
+    start%lost = .false.
 
 end subroutine set_rest_of_start_type
 
@@ -333,21 +367,21 @@ end subroutine calc_poloidal_flux
 
 subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
-    use gorilla_applets_types_mod, only: in, c, start, s
+    use gorilla_applets_types_mod, only: in, c, start, s, flux
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
     use constants, only: echarge,amp, ame, ev2erg
-    use tetra_grid_settings_mod, only: grid_size
+    use tetra_grid_settings_mod, only: grid_size, grid_kind
     use collis_ions, only: collis_init
     use gorilla_settings_mod, only: coord_system
     use gorilla_applets_settings_mod, only: i_option
-    
+
     integer, intent(in), optional :: species_in
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
     integer :: i, j
     integer :: species = 1
     real(dp) :: m0, z0, n0, s_value, v0
-    logical :: boole_T_and_n_from_files = .false., boole_linear_density = .false.
+    logical :: boole_T_and_n_from_files = .false.
 
     if (present(species_in)) species = species_in
 
@@ -360,21 +394,42 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     m0 = particle_mass
     z0 = particle_charge/echarge
 
-    
+
     c%temp_mat = in%energy_eV
     if (i_option.eq.12) c%temp_mat(2,:) = s%temperature
     c%dens_mat = in%density
 
     if (boole_T_and_n_from_files) call get_T_and_n_from_files
-    !Use background density linear in s
-    if (boole_linear_density) then
-        n0 = 3.0_dp * 10.0_dp**13
-        do i = 1,ntetr/grid_size(2),3
-            s_value = tetra_physics(i)%x1(1)
-            c%dens_mat(1,i) = n0*(1-s_value*0.9_dp)
+
+    ! Apply linear density and/or temperature profiles based on input settings
+    if (in%boole_linear_density_simulation .or. in%boole_linear_temperature_simulation) then
+        do i = 1, ntetr/grid_size(2), 3
+            ! Compute s_value (normalized flux coordinate) for this tetrahedron
+            if (coord_system == 2) then
+                ! Flux coordinates: use s-coordinate directly
+                s_value = tetra_physics(i)%x1(1)
+            else if (grid_kind /= 3) then
+                ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
+                s_value = tetra_physics(i)%Aphi1 / flux%poloidal_max
+            else
+                ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
+                print*, 'Error in calc_collision_coefficients_for_all_tetrahedra: Linear profiles with &
+                        &cylindrical coordinates only supported for axisymmetric devices.'
+                stop
+            endif
+
+            ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
+            if (in%boole_linear_density_simulation) then
+                c%dens_mat(:,i) = in%density * (1.1_dp - s_value) / 1.1_dp
+            endif
+
+            ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
+            if (in%boole_linear_temperature_simulation) then
+                c%temp_mat(:,i) = in%energy_eV * (1.1_dp - s_value) / 1.1_dp
+            endif
         enddo
-        c%dens_mat(2,:) = c%dens_mat(1,:)
     endif
+
     do i = 1,grid_size(2)-1 !copy data from first phi slice to all other phi slices
         c%temp_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%temp_mat(:,1:ntetr/grid_size(2):3)
         c%dens_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%dens_mat(:,1:ntetr/grid_size(2):3)
@@ -538,19 +593,26 @@ subroutine prepare_next_round_of_parallelised_particle_pushing(species)
 
 end subroutine prepare_next_round_of_parallelised_particle_pushing
 
-subroutine normalise_prism_moments_and_prism_moments_squared(species_in)
+subroutine normalise_prism_moments_and_prism_moments_squared(species_in, boole_skip_time_normalisation_in)
 
     use gorilla_applets_types_mod, only: moment_specs, output, in, start
-    
+
     integer, intent(in), optional :: species_in
+    logical, intent(in), optional :: boole_skip_time_normalisation_in
     integer :: species = 1
     integer :: n
     real(dp) :: time
+    logical :: boole_skip_time_normalisation
 
     time = in%time_step
     if (present(species_in)) species = species_in
     time = start%t(species)
-    
+
+    boole_skip_time_normalisation = .false.
+    if (present(boole_skip_time_normalisation_in)) boole_skip_time_normalisation = boole_skip_time_normalisation_in
+
+    if (boole_skip_time_normalisation) time = 1.0_dp
+
     do n = 1,moment_specs%n_moments
         output%prism_moments(n,:,species) = output%prism_moments(n,:,species)/(output%prism_volumes*time*in%n_particles)
         if (moment_specs%boole_squared_moments) then
@@ -565,7 +627,7 @@ subroutine normalise_prism_moments_and_prism_moments_squared(species_in)
             endif
         endif
     enddo
-    
+
 end subroutine normalise_prism_moments_and_prism_moments_squared
 
 subroutine fourier_transform_moments
@@ -664,19 +726,19 @@ end subroutine find_minimal_angle_between_curlA_and_tetrahedron_faces
 
 subroutine analyse_particle_weight_distribution
 
-    use gorilla_applets_types_mod, only: in, start
+    use gorilla_applets_types_mod, only: in, weights
 
     integer  :: i
     real(dp) :: maximum_weight, minimum_weight, average_weight
 
-    maximum_weight = start%weight(1,1)
-    minimum_weight = start%weight(1,1)
+    maximum_weight = weights%w(1,1)
+    minimum_weight = weights%w(1,1)
     average_weight = 0
 
     do i = 1,int(in%n_particles)
-        average_weight = average_weight + start%weight(i,1)
-        maximum_weight = max(maximum_weight,start%weight(i,1))
-        minimum_weight = min(minimum_weight,start%weight(i,1))
+        average_weight = average_weight + weights%w(i,1)
+        maximum_weight = max(maximum_weight,weights%w(i,1))
+        minimum_weight = min(minimum_weight,weights%w(i,1))
     enddo
 
     average_weight = average_weight/in%n_particles

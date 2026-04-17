@@ -22,7 +22,7 @@ subroutine read_anomalous_transport_inp_into_type
 
     real(dp) :: time_step, energy_eV, n_particles, density, anomalous_diffusion_coefficient
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
-               boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
+               boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, &
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
@@ -32,7 +32,7 @@ subroutine read_anomalous_transport_inp_into_type
     integer :: s_inp_unit
 
     NAMELIST /anomalous_transport_nml/ time_step, energy_eV, n_particles, boole_squared_moments, boole_point_source, &
-    & boole_collisions, boole_precalc_collisions, density, boole_refined_sqrt_g, boole_boltzmann_energies, &
+    & boole_collisions, boole_precalc_collisions, density, boole_refined_sqrt_g, boole_monoenergetic, &
     & boole_linear_density_simulation, boole_antithetic_variate, boole_linear_temperature_simulation, i_integrator_type, &
     & seed_option, boole_write_vertex_indices, boole_write_vertex_coordinates, boole_write_prism_volumes, &
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
@@ -52,7 +52,7 @@ subroutine read_anomalous_transport_inp_into_type
     in%boole_collisions = boole_collisions
     in%boole_precalc_collisions = boole_precalc_collisions
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
-    in%boole_boltzmann_energies = boole_boltzmann_energies
+    in%boole_monoenergetic = boole_monoenergetic
     in%boole_linear_density_simulation = boole_linear_density_simulation
     in%boole_antithetic_variate = boole_antithetic_variate
     in%boole_linear_temperature_simulation = boole_linear_temperature_simulation
@@ -214,7 +214,7 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g, s, flux
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g, s, flux, weights
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
     use utils_orbit_timestep_mod, only: update_local_tetr_moments, initialize_constants_of_motion, compute_radial_fluxes, &
         calc_particle_weights_and_jperp, identify_particles_entering_annulus
@@ -272,8 +272,8 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
                     if (ind_tetr.eq.-1) then
                         print*, "ATTENTION: particle pushing across the hole surrounding the magnetic axis was unsuccessful"
                         exit
-                    else
-                        print*, "particle pushing across the hole surrounding the magnetic axis was successful"
+                    !else
+                        !print*, "particle pushing across the hole surrounding the magnetic axis was successful"
                     endif
                 else
                     ! Particle left at the outer boundary - displace toward the magnetic axis
@@ -325,8 +325,8 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
                 s_local = (local_poloidal_flux - flux%poloidal_min) / (flux%poloidal_max - flux%poloidal_min)
 
                 !$omp critical
-                s%delta_s(k) = s%delta_s(k) + (s_local - s%s0) * start%weight(n,species)
-                s%delta_s_squared(k) = s%delta_s_squared(k) + (s_local - s%s0)**2 * start%weight(n,species)
+                s%delta_s(k) = s%delta_s(k) + (s_local - s%s0) * weights%w(n,species)
+                s%delta_s_squared(k) = s%delta_s_squared(k) + (s_local - s%s0)**2 * weights%w(n,species)
                 s%check(k) = s%check(k) + 1
                 !$omp end critical
 
@@ -359,7 +359,7 @@ subroutine calc_diffusion_coefficient(filename_in, D_out)
 !   filename_in - custom filename for output data (default: 'diffusion_coefficient_data.dat')
 !   D_out       - returns the computed diffusion coefficient B
 !
-    use gorilla_applets_types_mod, only: in, s, start
+    use gorilla_applets_types_mod, only: in, s, start, weights
     use llsq_mod, only: llsq
     use utils_data_pre_and_post_processing_mod, only: initialize_exit_data, set_weights
 
@@ -401,6 +401,7 @@ subroutine calc_diffusion_coefficient(filename_in, D_out)
     call RANDOM_NUMBER(rand_matrix)
 
     call allocate_start_type(n_particles)  ! Use local allocate_start_type with explicit particle count
+    call allocate_weights(n_particles)
     call set_starting_positions_point_source(rand_matrix, (/1/))  ! This also sets s%s0
     call set_weights
     call set_rest_of_start_type(rand_matrix)  ! This also sets start%t(1)
@@ -429,8 +430,8 @@ subroutine calc_diffusion_coefficient(filename_in, D_out)
     ! Normalize by total weight
     do i = 1, s%k
         if (s%check(i) > 0) then
-            s%delta_s(i) = s%delta_s(i) / sum(start%weight(:,1))
-            s%delta_s_squared(i) = s%delta_s_squared(i) / sum(start%weight(:,1))
+            s%delta_s(i) = s%delta_s(i) / sum(weights%w(:,1))
+            s%delta_s_squared(i) = s%delta_s_squared(i) / sum(weights%w(:,1))
         endif
     enddo
 
@@ -884,7 +885,7 @@ subroutine set_rest_of_start_type(rand_matrix)
 
     start%pitch(:,:) = 2*rand_matrix(4,:,:)-1 !pitch parameter
     start%energy = in%energy_eV
-    if (in%boole_boltzmann_energies) then
+    if (.not. in%boole_monoenergetic) then
         start%energy = 5*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
     endif
 
@@ -929,7 +930,6 @@ subroutine allocate_start_type(n_particles_in)
     allocate(start%x(3, n_particles, in%n_species))
     allocate(start%pitch(n_particles, in%n_species))
     allocate(start%energy(n_particles, in%n_species))
-    allocate(start%weight(n_particles, in%n_species))
     allocate(start%jperp(n_particles, in%n_species))
     allocate(start%lost(n_particles, in%n_species))
     allocate(start%particle_charge(in%n_species))
@@ -941,6 +941,28 @@ subroutine allocate_start_type(n_particles_in)
 end subroutine allocate_start_type
 
 ! ====================================================================
+subroutine allocate_weights(n_particles_in)
+!
+! Allocates the weights array.
+! If n_particles_in is provided, uses that; otherwise uses in%num_particles.
+!
+    use gorilla_applets_types_mod, only: in, weights
+
+    integer, intent(in), optional :: n_particles_in
+    integer :: n_particles
+
+    if (present(n_particles_in)) then
+        n_particles = n_particles_in
+    else
+        n_particles = in%num_particles
+    endif
+
+    call deallocate_weights
+    allocate(weights%w(n_particles, in%n_species))
+
+end subroutine allocate_weights
+
+! ====================================================================
 subroutine deallocate_start_type
 !
 ! Deallocates arrays in the start type.
@@ -950,7 +972,6 @@ subroutine deallocate_start_type
     if (allocated(start%x))               deallocate(start%x)
     if (allocated(start%pitch))           deallocate(start%pitch)
     if (allocated(start%energy))          deallocate(start%energy)
-    if (allocated(start%weight))          deallocate(start%weight)
     if (allocated(start%jperp))           deallocate(start%jperp)
     if (allocated(start%lost))            deallocate(start%lost)
     if (allocated(start%particle_charge)) deallocate(start%particle_charge)
@@ -960,5 +981,16 @@ subroutine deallocate_start_type
     if (allocated(start%v0))              deallocate(start%v0)
 
 end subroutine deallocate_start_type
+
+! ====================================================================
+subroutine deallocate_weights
+!
+! Deallocates the weights array.
+!
+    use gorilla_applets_types_mod, only: weights
+
+    if (allocated(weights%w)) deallocate(weights%w)
+
+end subroutine deallocate_weights
 
 end module utils_anomalous_transport_mod

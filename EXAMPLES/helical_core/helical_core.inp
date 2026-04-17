@@ -1,18 +1,21 @@
-! INPUT FILE FOR BOLTZMANN
+! INPUT FILE FOR HELICAL CORE PARTICLE TRACING
 !
-&boltzmann_nml
+&helical_core_nml
 !
-  !time for tracing particles
-  time_step = 1.0d-3 ,
+  !time for tracing particles (in seconds)
+  time_step = 2.0d-3,!1.0d-1 ,
 !
-  !Kinetic energy of particles
-  energy_eV = 3.5d3 ,
+  !Kinetic energy of particles (in eV)
+  energy_eV = 1.0d3,!2.0d3 ,
+!
+  !Number of species (usually 1)
+  n_species = 1
 !
   !Number of particles to be traced
-  n_particles = 1.0d2 ,
+  n_particles = 1.0d3,!1.0d5 ,
 !
-  !Compute squares of moments 
-  boole_squared_moments = .true.,
+  !Compute squares of moments
+  boole_squared_moments = .false.,
 !
   !Start all particles from the same physical position
   boole_point_source = .false.,
@@ -21,35 +24,41 @@
   boole_collisions = .true.,
 !
   !precalcualte random numbers for collisions
-  boole_precalc_collisions = .true.,
+  boole_precalc_collisions = .false.,
 !
   !make collisions energy and momentum conserving
   boole_preserve_energy_and_momentum_during_collisions = .false.,
 !
-  !decides how often background densities should be updated
-  n_background_density_updates = 0,
-!
   !Simulated density of particles
-  density = 1,
+  density = 3.0d13,
 !
   !refined jacobian determinant
   boole_refined_sqrt_g = .true.,
 !
   !work with monoenergetic particles instead of with boltzmann energies
-  boole_monoenergetic = .false.,
+  boole_monoenergetic = .true.,
 !
   !make density a linear function of poloidal flux
-  boole_linear_density_simulation = .true.,
+  boole_linear_density_simulation = .false.,
+!
+  !Eliminate particles starting outside a flux surface threshold
+  !boole_eliminate_particles_outside_flux = .true. enables elimination
+  !flux_threshold_for_elimination = normalized flux value (0=axis, 1=boundary)
+  !Particles with normalized poloidal flux > threshold are eliminated at start
+  boole_eliminate_particles_outside_flux = .false.,
+  flux_threshold_for_elimination = 0.5d0,
+!
+  !Use delta-f method for particle weights
+  boole_delta_f = .true.,
 !
   !always initiate pairs of particles where both particles start at the same position but move
   !in opposite direction, this helps to reduce statistical noise
   boole_antithetic_variate = .true.,
 !
   !make temperature a linear function of poloidal flux
-  boole_linear_temperature_simulation = .true.,
+  boole_linear_temperature_simulation = .false.,
 !
   !Set integrator type
-  !(must be 1, otherwise it currently does not work)
   ! 1 ... GORILLA
   ! 2 ... DIRECT
   i_integrator_type = 1 ,
@@ -60,13 +69,11 @@
   seed_option = 2
 
   !write data to files
-  boole_write_vertex_indices = .false. ,
-  boole_write_vertex_coordinates = .false. ,
-  boole_write_prism_volumes = .false. ,
+  boole_write_vertex_indices = .true. ,
+  boole_write_vertex_coordinates = .true. ,
+  boole_write_prism_volumes = .true. ,
   boole_write_refined_prism_volumes = .false. ,
-  boole_write_boltzmann_density = .false. ,
-  boole_write_electric_potential = .false. ,
-  boole_write_moments = .false. ,
+  boole_write_moments = .true. ,
   boole_write_fourier_moments = .true. ,
   boole_write_exit_data = .true. ,
   boole_write_grid_data = .true.

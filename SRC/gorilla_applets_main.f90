@@ -17,6 +17,7 @@
   use divertor_heat_loads_mod, only: calc_divertor_heat_loads
   use self_consistent_electric_field_mod, only: calc_self_consistent_electric_field
   use anomalous_transport_mod, only: calc_anomalous_transport
+  use helical_core_mod, only: calc_helical_core
 !
   implicit none
 !
@@ -143,6 +144,12 @@
         case(13) !Calculate anomalous transport
 !
             call calc_anomalous_transport
+!
+!-------------------------------------------------------------------------------------------!
+!
+        case(14) !Calculate helical core
+!
+            call calc_helical_core
 !
 !-------------------------------------------------------------------------------------------!
 !

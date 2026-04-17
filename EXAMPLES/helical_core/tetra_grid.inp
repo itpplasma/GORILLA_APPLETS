@@ -1,27 +1,27 @@
-! INPUT FILE FOR TETRAHEDRONAL GRID
+! INPUT FILE FOR TETRAHEDRONAL GRID - HELICAL CORE EXAMPLE
 !
 ! TETRA_GRID SETTINGS NAMELIST
 &TETRA_GRID_NML
-!    
+!
  !Grid Size
  !Rectangular: nR, Field-aligned: ns
- n1 = 100 ,
- !Rectangular: nphi, Field-aligned: nphi                  			
- n2 = 101 ,
- !Rectangular: nZ, Field-aligned: ntheta                          		
- n3 = 101 ,
+ n1 = 20 ,
+ !Rectangular: nphi, Field-aligned: nphi
+ n2 = 30,
+ !Rectangular: nZ, Field-aligned: ntheta
+ n3 = 50 ,
 !
  !Grid kind
  !1 ... rectangular grid for axisymmetric EFIT data (g-file)
- !2 ... field-aligned grid for axisymmetric EFIT data (g-file)
+ !2 ... field-aligned grid for axisymmetric EFIT data (g-file) (z.b. ASDEX)
  !3 ... field-aligned grid for non-axisymmetric VMEC (netcdf)
- !4 ... SOLEDGE3X_EIRENE grid
- grid_kind = 3 ,
+ !4 ... SOLEDGE3X_EIRENE grid (WEST)
+ grid_kind = 2 ,
 !
  !MHD equilibrium filename
  g_file_filename = 'MHD_EQUILIBRIA/g_file_for_test' ,
  convex_wall_filename = 'MHD_EQUILIBRIA/convex_wall_for_test.dat' ,
- netcdf_filename = 'MHD_EQUILIBRIA/netcdf_file_for_test.nc' ,
+ netcdf_filename = 'wout_EIM_1000_1000_1000_1000_+0000_+0000.01.00jh_l_ref3_w7x-sc1.nc',
 !
  !MESH_SOLEDGE3X_EIRENE filename
  knots_SOLEDGE3X_EIRENE_filename = 'MHD_EQUILIBRIA/MESH_SOLEDGE3X_EIRENE/knots_for_test.dat' ,
@@ -36,17 +36,19 @@
  n_field_periods_manual =  1 ,
 !
  !Symmetry Flux Coordinates Annulus (Minimal value for flux coordinates s)
- sfc_s_min = 1.d-1 ,
+ !Note: with i_radial_spacing=2, a larger sfc_s_min can be used since sqrt spacing
+ !provides better resolution near the core
+ sfc_s_min = 1.d-7 ,
 !
  !Radial grid spacing option
  !1 ... equidistant in s (normalized toroidal flux)
  !2 ... equidistant in sqrt(s) (approximately equidistant in minor radius)
- i_radial_spacing = 1 ,
+ i_radial_spacing = 2 ,
 !
  !Option for $\theta$-variable being used in grid
  ! 1 ... theta scaling in symmetry flux coordinates
  ! 2 ... theta scaling in geometrical theta angle
- theta_geom_flux = 1 ,
+ theta_geom_flux = 2 ,
 !
  !Option for $\theta$-variable origin
  ! .true. $\theta$-variable starts at the line between O- and X-Point
@@ -65,7 +67,5 @@
  filename_mesh_sthetaphi = 'mesh_sthetaphi.obj' ,
 !
 !------------------------------------------------------------------------------------------------------------!
-!    
+!
 /
-
-

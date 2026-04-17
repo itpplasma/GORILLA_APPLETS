@@ -12,7 +12,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
 
     real(dp) :: time_step,energy_eV,n_particles, density
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
-               boole_boltzmann_energies, boole_linear_density_simulation, boole_antithetic_variate, &
+               boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
@@ -23,7 +23,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
 
     !Namelist for self consistent electric field input
     NAMELIST /self_consistent_ef_nml/ time_step,energy_eV,n_particles,boole_squared_moments,boole_point_source,boole_collisions, &
-    & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_boltzmann_energies, boole_linear_density_simulation, &
+    & boole_precalc_collisions,density,boole_refined_sqrt_g,boole_monoenergetic, boole_linear_density_simulation, &
     & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
@@ -43,7 +43,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%boole_collisions = boole_collisions
     in%boole_precalc_collisions = boole_precalc_collisions
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
-    in%boole_boltzmann_energies = boole_boltzmann_energies
+    in%boole_monoenergetic = boole_monoenergetic
     in%boole_linear_density_simulation = boole_linear_density_simulation
     in%boole_antithetic_variate = boole_antithetic_variate
     in%boole_linear_temperature_simulation = boole_linear_temperature_simulation
@@ -73,7 +73,7 @@ end subroutine read_self_consistent_electric_field_inp_into_type
 subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n_particles_in)
 
     use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, exit_data, s, &
-    g, maximum_s
+    g, maximum_s, weights
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
@@ -122,7 +122,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     t_tot = 0.0_dp
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr) &
+    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr,weights) &
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p,l,n,i,x,v_save,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
     !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init) &
@@ -178,7 +178,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                         if (local_rr%boole_eliminated) exit
                     else
                         particle_state_for_rr = (/vpar,vperp,t%confined,t%remain,t%step,x,dble(ind_tetr),dble(iface)/)
-                        call play_russian_roulette(start%weight(n,species),v,v_save,particle_state_for_rr,local_rr)
+                        call play_russian_roulette(weights%w(n,species),v,v_save,particle_state_for_rr,local_rr)
                     endif
                 endif
 
@@ -240,7 +240,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, g, start, s, in, time_t, maximum_s
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, g, start, s, in, time_t, maximum_s, weights
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
     use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
                                         initialize_constants_of_motion, compute_radial_fluxes
@@ -279,9 +279,9 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         if ((j.eq.1).or.(.not.in%boole_static_ne)) then
             call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species,boole_diffusion_coefficient)
         endif
-        if ((.not.in%boole_static_ne).and.(species.eq.1)) then
+        if ((.not.in%boole_static_ne).and.(species.eq.2)) then
             start%x(:,n,2) = start%x(:,n,1)
-            start%weight(n,2) = start%weight(n,1)
+            weights%w(n,2) = weights%w(n,1)
         endif 
         particle_status%initialized = .true.
     endif
@@ -341,11 +341,11 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
                 if (abs(x(1)-s%s0).gt.critical_distance) s%boole_large_distance(n)=.true.
                 
                 !$omp critical
-                s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)*start%weight(n,species)
-                s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2*start%weight(n,species)
+                s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)*weights%w(n,species)
+                s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2*weights%w(n,species)
                 if (s%boole_large_distance(n)) then !delete contribution to delta_s, double contribution to delta_s_squared
-                    s%delta_s(k) = s%delta_s(k) - (x(1) - s%s0)*start%weight(n,species)
-                    s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2*start%weight(n,species)
+                    s%delta_s(k) = s%delta_s(k) - (x(1) - s%s0)*weights%w(n,species)
+                    s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2*weights%w(n,species)
                 endif
                 s%check(k) = s%check(k) + 1
                 i = min(int(s%j/10*v/start%v0(species))+1, s%j)
@@ -368,7 +368,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
 
         if (rr%boole_russian_roulette) then
             particle_state_for_rr = (/vpar,vperp,t%confined,t%remain,t%step,x,dble(ind_tetr),dble(iface)/)
-            call play_russian_roulette(start%weight(n,species),v,v_save,particle_state_for_rr,local_rr)
+            call play_russian_roulette(weights%w(n,species),v,v_save,particle_state_for_rr,local_rr)
         endif
 
         if(boole_t_finished.or.local_rr%boole_eliminated) then !Orbit stops within cell, because "flight"-time t%step has finished
@@ -388,7 +388,7 @@ end subroutine orbit_timestep_gorilla_self_consistent_ef
 
 subroutine initiate_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,particle_status,n,species)
 
-    use gorilla_applets_types_mod, only : particle_status_t, time_t, start
+    use gorilla_applets_types_mod, only : particle_status_t, time_t, weights
     use russian_roulette_mod, only: local_rr_t, prepare_next_split_particle
 
     type(local_rr_t):: local_rr
@@ -411,7 +411,7 @@ subroutine initiate_next_split_particle(local_rr,vpar,vperp,t,x,ind_tetr,iface,p
         x =                       local_rr%particle_state(id,6:8)
         ind_tetr =                int(local_rr%particle_state(id,9))
         iface =                   int(local_rr%particle_state(id,10))
-        start%weight(n,species) = local_rr%weight(id)
+        weights%w(n,species) = local_rr%weight(id)
 
         particle_status%lost = .false.
         particle_status%initialized = .true.
@@ -522,7 +522,7 @@ end subroutine calc_phi_elec_from_rho
 
 subroutine calc_average_charge_density_per_flux_layer(i)
 
-    use gorilla_applets_types_mod, only:  g, output, ep, in, start, one_d, exit_data
+    use gorilla_applets_types_mod, only:  g, output, ep, in, start, one_d, exit_data, weights
     use tetra_grid_mod, only: nvert, verts_sthetaphi
     use tetra_grid_settings_mod, only: grid_size
     use constants, only: echarge
@@ -559,7 +559,7 @@ subroutine calc_average_charge_density_per_flux_layer(i)
         if (in%boole_linear_density_simulation) then
             electron_density_factor = 1.0d0
         else
-            factor_from_ion_weights = sum(start%weight(:,1))/(in%num_particles*in%density*sum(output%prism_volumes(:)))
+            factor_from_ion_weights = sum(weights%w(:,1))/(in%num_particles*in%density*sum(output%prism_volumes(:)))
             electron_density_factor = in%density/(sum(electron_densities*ep%s_shell_volumes)/sum(ep%s_shell_volumes))*&
                                       factor_from_ion_weights
         endif
@@ -914,7 +914,7 @@ end subroutine treat_particles_that_are_lost_but_should_not_be
 
 subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species, boole_diffusion_coefficient)
 
-    use gorilla_applets_types_mod, only: in, start, s
+    use gorilla_applets_types_mod, only: in, start, s, weights
     use tetra_physics_mod, only: tetra_physics
     use constants, only: ev2erg, pi
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
@@ -929,23 +929,23 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     real(dp) :: phi_elec_func, temperature
 
     x = tetra_physics(ind_tetr)%x1 + z_save
-    start%weight(n,species) = start%weight(n,species)*abs((tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save)))
-    !print*, 'weight before = ', start%weight(n,species), n
+    weights%w(n,species) = weights%w(n,species)*abs((tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save)))
+    !print*, 'weight before = ', weights%w(n,species), n
 
     if (in%boole_linear_density_simulation) then
-        start%weight(n,species) = start%weight(n,species)*(1.0_dp-0.9_dp*x(1))
+        weights%w(n,species) = weights%w(n,species)*(1.0_dp-0.9_dp*x(1))
     endif
 
     if (boole_diffusion_coefficient) then
-        start%weight(n,species) = 1.0_dp/s%n_particles
-    elseif (in%boole_boltzmann_energies) then
+        weights%w(n,species) = 1.0_dp/s%n_particles
+    elseif (.not. in%boole_monoenergetic) then
 
         temperature = in%energy_eV
         if (boole_diffusion_coefficient) temperature = s%temperature
-        start%weight(n,species) = start%weight(n,species)/  &
+        weights%w(n,species) = weights%w(n,species)/  &
         (sqrt(start%energy(n,species)/temperature)*exp(-start%energy(n,species)/temperature)/(temperature*ev2erg*sqrt(pi)/2))
         !the last term is the integral of the function from zero to inf over energy in correct units
-        !start%weight(n,species) = start%weight(n,species)/((1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))*  &
+        !weights%w(n,species) = weights%w(n,species)/((1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))*  &
         !sqrt(start%energy(n,species)/s%temperature)*exp(-start%energy(n,species)/s%temperature)/(s%temperature*ev2erg*14035.0_dp))
         !the last term is the integral of the function from zero to inf over energy in correct units
 
@@ -953,19 +953,19 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
         phi_elec_func = 0.0_dp !when working with fixed sources, electric potentials are not useful since they change the weights
         !and thus the magnitude o the sources
 
-        start%weight(n,species) = start%weight(n,species)*2/sqrt(pi)*sqrt(start%energy(n,species)*ev2erg)
+        weights%w(n,species) = weights%w(n,species)*2/sqrt(pi)*sqrt(start%energy(n,species)*ev2erg)
         ! if (.not.boole_diffusion_coefficient) then 
-        !     start%weight(n,species) = start%weight(n,species)*start%epsilon_max*in%energy_eV*ev2erg
+        !     weights%w(n,species) = weights%w(n,species)*start%epsilon_max*in%energy_eV*ev2erg
         ! endif
         if (.not. in%boole_linear_temperature_simulation) then
             temperature = in%energy_eV*ev2erg
             if (boole_diffusion_coefficient) temperature = s%temperature*ev2erg
-            start%weight(n,species) =start%weight(n,species)/temperature**1.5_dp* &
+            weights%w(n,species) =weights%w(n,species)/temperature**1.5_dp* &
                         & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
         else
             temperature = in%energy_eV*ev2erg*(1.0_dp-0.9*x(1))
             if (boole_diffusion_coefficient) temperature = s%temperature*ev2erg*(1.0_dp-0.9*x(1))
-            start%weight(n,species) = start%weight(n,species)/temperature**1.5_dp* &
+            weights%w(n,species) = weights%w(n,species)/temperature**1.5_dp* &
                         & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
         endif
     endif
@@ -975,8 +975,8 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     
     !-1 because of negative gyrophase
     
-!print*, 'weight after = ', start%weight(n,species)*(1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))/14035.0_dp/2*sqrt(pi)
-!print*, 'weight after for real = ', start%weight(n,species)
+!print*, 'weight after = ', weights%w(n,species)*(1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))/14035.0_dp/2*sqrt(pi)
+!print*, 'weight after for real = ', weights%w(n,species)
 
 
 
@@ -984,15 +984,16 @@ end subroutine calc_particle_weights_and_jperp
 
 subroutine calc_starting_conditions
 
-    use gorilla_applets_types_mod, only: in
+    use gorilla_applets_types_mod, only: in, start
     use tetra_grid_settings_mod, only: sfc_s_min
-    
+
     real(dp), dimension(:,:,:), allocatable                :: rand_matrix
 
     allocate(rand_matrix(5,in%num_particles,in%n_species))
     call RANDOM_NUMBER(rand_matrix)
 
     call allocate_start_type
+    call allocate_weights
     call set_particle_type_specifications
     call set_starting_positions(rand_matrix)!,s0=sfc_s_min*1.1_dp)
     call set_rest_of_individual_particle_specifications(rand_matrix)
@@ -1018,7 +1019,6 @@ subroutine allocate_start_type(n_particles_in)
     allocate(start%x(3,n_particles,in%n_species))
     allocate(start%pitch(n_particles,in%n_species))
     allocate(start%energy(n_particles,in%n_species))
-    allocate(start%weight(n_particles,in%n_species))
     allocate(start%jperp(n_particles,in%n_species))
     allocate(start%lost(n_particles,in%n_species))
     allocate(start%particle_charge(in%n_species))
@@ -1029,6 +1029,24 @@ subroutine allocate_start_type(n_particles_in)
 
 end subroutine allocate_start_type
 
+subroutine allocate_weights(n_particles_in)
+
+    use gorilla_applets_types_mod, only: in, weights
+
+    integer, intent(in), optional :: n_particles_in
+    integer :: n_particles
+
+    if (present(n_particles_in)) then
+        n_particles = n_particles_in
+    else
+        n_particles = in%num_particles
+    endif
+
+    call deallocate_weights
+    allocate(weights%w(n_particles,in%n_species))
+
+end subroutine allocate_weights
+
 subroutine deallocate_start_type
 
     use gorilla_applets_types_mod, only: start
@@ -1036,7 +1054,6 @@ subroutine deallocate_start_type
     if (allocated(start%x))               deallocate(start%x)
     if (allocated(start%pitch))           deallocate(start%pitch)
     if (allocated(start%energy))          deallocate(start%energy)
-    if (allocated(start%weight))          deallocate(start%weight)
     if (allocated(start%jperp))           deallocate(start%jperp)
     if (allocated(start%lost))            deallocate(start%lost)
     if (allocated(start%particle_charge)) deallocate(start%particle_charge)
@@ -1046,6 +1063,14 @@ subroutine deallocate_start_type
     if (allocated(start%v0))              deallocate(start%v0)
 
 end subroutine deallocate_start_type
+
+subroutine deallocate_weights
+
+    use gorilla_applets_types_mod, only: weights
+
+    if (allocated(weights%w)) deallocate(weights%w)
+
+end subroutine deallocate_weights
 
 subroutine set_starting_positions(rand_matrix,species_in,s0)
 
@@ -1114,7 +1139,7 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
 
     start%pitch(:,species) = 2*rand_matrix(4,:,:)-1 !pitch parameter
     start%energy(:,species) = in%energy_eV
-    if (in%boole_boltzmann_energies.or.boole_diffusion_coefficient) then
+    if ((.not. in%boole_monoenergetic).or.boole_diffusion_coefficient) then
         !start%energy(:,species) = start%epsilon_max*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
         temperature = in%energy_eV
         if (boole_diffusion_coefficient) temperature = s%temperature
@@ -1174,11 +1199,11 @@ end subroutine set_particle_type_specifications
 
 subroutine set_weight
 
-    use gorilla_applets_types_mod, only: start, in
+    use gorilla_applets_types_mod, only: in, weights
     use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods
     use constants, only: pi
 
-    start%weight = in%density*(1-sfc_s_min)*4*pi**2/n_field_periods
+    weights%w = in%density*(1-sfc_s_min)*4*pi**2/n_field_periods
 
 end subroutine set_weight
 
@@ -1356,7 +1381,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
     !     enddo
     ! close(23)
 
-    !print*, start%weight(:,2)
+    !print*, weights%w(:,2)
 
     enddo
 
@@ -1385,7 +1410,7 @@ end subroutine calc_electron_diffusion_coefficients
 
 subroutine calc_electron_density_via_random_walk(iteration_step) !call this after every ion pushing sequence
 
-    use gorilla_applets_types_mod, only: in, time_t, dc, ep, g, output, start, exit_data
+    use gorilla_applets_types_mod, only: in, time_t, dc, ep, g, output, start, exit_data, weights
     use tetra_grid_settings_mod, only: grid_size, sfc_s_min
     use binsrc_mod, only: binsrc
     use tetra_grid_mod, only: ntetr, verts_sthetaphi
@@ -1410,7 +1435,7 @@ subroutine calc_electron_density_via_random_walk(iteration_step) !call this afte
 
     do i = 1,particle_multiplication
         position(i:num_particles:particle_multiplication) = start%x(1,:,2)
-        weight(i:num_particles:particle_multiplication) = start%weight(:,2)
+        weight(i:num_particles:particle_multiplication) = weights%w(:,2)
     enddo
 
     ! call RANDOM_NUMBER(position)

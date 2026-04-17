@@ -199,7 +199,7 @@ subroutine calc_volume_integrals
                     & log((capital_delta+beta*r(2))/(capital_delta+beta*r(1)))*epsilon*capital_delta**2/(2*beta**2)
         endif
 
-        if (in%boole_boltzmann_energies) then
+        if (.not. in%boole_monoenergetic) then
 
             !calculate electric potential using the refined approach
             !(compare with appendix B (introductory pages + B2) of master thesis from Jonatan Schatzlmayr)

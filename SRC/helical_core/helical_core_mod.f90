@@ -1,4 +1,15 @@
-module anomalous_transport_mod
+module helical_core_mod
+!
+! Module for helical core particle tracing.
+!
+! This is a simplified version of anomalous_transport_mod that:
+!   - Traces particles in a helical core geometry
+!   - Does NOT include anomalous transport displacement (straight-line displacements)
+!   - Does NOT include electric potential perturbation scans
+!
+! The module uses the same infrastructure as anomalous transport but removes
+! all anomalous-specific features.
+!
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
@@ -6,7 +17,7 @@ module anomalous_transport_mod
 
 contains
 
-subroutine calc_anomalous_transport
+subroutine calc_helical_core
 
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
     use constants, only: ev2erg
@@ -15,18 +26,17 @@ subroutine calc_anomalous_transport
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, output
+    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, output, weights
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
         get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &
         calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
-        fourier_transform_moments, calc_starting_conditions, set_weights
-    use utils_anomalous_transport_mod, only: read_anomalous_transport_inp_into_type, &
-        parallelised_particle_pushing_anomalous_transport, calc_diffusion_coefficient, &
-        scan_anomalous_transport
+        fourier_transform_moments, calc_starting_conditions
+    use utils_helical_core_mod, only: read_helical_core_inp_into_type, &
+        parallelised_particle_pushing_helical_core, eliminate_particles_outside_flux_threshold
 
     call set_seed_for_random_numbers
-    call read_anomalous_transport_inp_into_type
+    call read_helical_core_inp_into_type
     call get_ipert()
     call initialize_gorilla(i_option,ipert)
 
@@ -43,20 +53,12 @@ subroutine calc_anomalous_transport
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
 
     call calc_starting_conditions
-    call set_weights
+    call eliminate_particles_outside_flux_threshold
 
-    ! Scan over parameter, calculate diffusion coefficient, or run standard transport
-    ! i_scan_option: 0=no scan, 1=scan over eps_Phi, 2=scan over n3, 3=scan over n2
-    if (in%i_scan_option > 0) then
-        call scan_anomalous_transport
-    elseif (in%boole_calc_diffusion_coefficient) then
-        call calc_diffusion_coefficient
-    else
-        call parallelised_particle_pushing_anomalous_transport(species=1)
-    endif
+    ! Standard particle tracing (no scan, no diffusion coefficient calculation)
+    call parallelised_particle_pushing_helical_core(species=1)
 
-    call normalise_prism_moments_and_prism_moments_squared
-
+    call normalise_prism_moments_and_prism_moments_squared(boole_skip_time_normalisation_in=in%boole_delta_f)
 
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
     call write_data_to_files
@@ -76,6 +78,6 @@ subroutine calc_anomalous_transport
          print*, 'number of times that particles were pushed across the inside hole = ', counter%lost_inside
     endif
 
-end subroutine calc_anomalous_transport
+end subroutine calc_helical_core
 
-end module anomalous_transport_mod
+end module helical_core_mod

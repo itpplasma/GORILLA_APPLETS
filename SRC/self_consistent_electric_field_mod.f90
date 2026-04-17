@@ -17,7 +17,7 @@ subroutine calc_self_consistent_electric_field
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_volume_integrals_in_flux_coordinates
-    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, s, output
+    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, s, output, weights
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
     get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &
@@ -44,7 +44,7 @@ subroutine calc_self_consistent_electric_field
     call calc_volume_integrals_in_flux_coordinates
     s%temperature = in%energy_eV
 
-    if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
+    !if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
 
     call initialize_exit_data
     call associate_flux_labels_with_tetrahedra_and_vertices
@@ -74,8 +74,8 @@ subroutine calc_self_consistent_electric_field
             ep%rho_prism = ep%rho_prism + real(output%prism_moments(1,:,species))*start%particle_charge(species)
         enddo
         call perform_electric_potential_update(i)
-        !print*, 'average ion weight is ', sum(start%weight(:,1))/in%n_particles
-        !print*, 'average electron weight is ', sum(start%weight(:,2))/in%n_particles
+        !print*, 'average ion weight is ', sum(weights%w(:,1))/in%n_particles
+        !print*, 'average electron weight is ', sum(weights%w(:,2))/in%n_particles
     enddo
 
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
@@ -96,7 +96,7 @@ subroutine calc_self_consistent_electric_field
          print*, 'number of times that particles were pushed across the inside hole = ', counter%lost_inside
     endif
     print*, 'Average abs Delta Phi at all the electric potential updates = ', ep%average_abs_phi_elec_from_rho
-    print*, sum(start%weight(:,1))/(in%num_particles*in%density*sum(output%prism_volumes(:)))
+    print*, sum(weights%w(:,1))/(in%num_particles*in%density*sum(output%prism_volumes(:)))
     print*, sum(output%prism_volumes(:)*output%prism_moments(1,:,1))/(sum(output%prism_volumes(:))*in%density)
 
 end subroutine calc_self_consistent_electric_field

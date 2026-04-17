@@ -27,7 +27,7 @@ end subroutine identify_particles_entering_annulus
 
 subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quantities,species_in)
 
-    use gorilla_applets_types_mod, only: moment_specs, start, in
+    use gorilla_applets_types_mod, only: moment_specs, weights, in
     use gorilla_settings_mod, only: optional_quantities_type
 
     type(optional_quantities_type), intent(in)   :: optional_quantities
@@ -44,16 +44,16 @@ subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quan
         select case(moment_specs%moments_selector(m))
             case(1)
                 local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
-                                                    & start%weight(n,species)*optional_quantities%t_hamiltonian
+                                                    & weights%w(n,species)*optional_quantities%t_hamiltonian
             case(2)
                 local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
-                                                    & start%weight(n,species)*optional_quantities%gyrophase
+                                                    & weights%w(n,species)*optional_quantities%gyrophase
             case(3)
                 local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
-                                                    & start%weight(n,species)*optional_quantities%vpar_int
+                                                    & weights%w(n,species)*optional_quantities%vpar_int
             case(4)
                 local_tetr_moments(m,ind_tetr) = local_tetr_moments(m,ind_tetr) + &
-                                                    & start%weight(n,species)*optional_quantities%vpar2_int
+                                                    & weights%w(n,species)*optional_quantities%vpar2_int
         end select
     enddo
 
@@ -85,11 +85,13 @@ end subroutine initialize_constants_of_motion
 
 subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species_in)
 
-    use gorilla_applets_types_mod, only: in, flux, start
+    use gorilla_applets_types_mod, only: in, flux, start, weights
     use tetra_physics_mod, only: tetra_physics
     use constants, only: ev2erg
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
+    use gorilla_settings_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
 
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
@@ -98,41 +100,56 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     integer :: species = 1
     real(dp) :: local_poloidal_flux, phi_elec_func, temperature
     real(dp) :: r, phi, z
+    real(dp) :: s_value
 
     if (present(species_in)) species = species_in
 
-    !This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by 
-    !only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine 
+    !This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by
+    !only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine
     !(this is necessary for the energy and momentum conserving collision operator)
-    if (in%boole_boltzmann_energies) start%weight(n,species) =  start%weight(n,species)*in%energy_eV*ev2erg 
+    if (.not. in%boole_monoenergetic) weights%w(n,species) =  weights%w(n,species)*in%energy_eV*ev2erg
 
     r = z_save(1)
     phi = z_save(2)
     z = z_save(3)
 
     if (in%boole_refined_sqrt_g) then
-        start%weight(n,species) = start%weight(n,species)* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
+        weights%w(n,species) = weights%w(n,species)* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
                                         &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
     else
-        start%weight(n,species) = start%weight(n,species)*(r + tetra_physics(ind_tetr)%x1(1))
+        weights%w(n,species) = weights%w(n,species)*(r + tetra_physics(ind_tetr)%x1(1))
     endif
 
     if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then
-        local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
+        if (coord_system == 2) then
+            ! Flux coordinates: use s-coordinate directly (s ranges from sfc_s_min to 1)
+            s_value = tetra_physics(ind_tetr)%x1(1) + z_save(1)
+        else if (grid_kind /= 3) then
+            ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
+            local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
+            s_value = local_poloidal_flux / flux%poloidal_max
+        else
+            ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
+            print*, 'Error in calc_particle_weights_and_jperp: Computing radial coordinate from A_phi is only valid for &
+                    &axisymmetric devices. For stellarators (grid_kind=3), use flux coordinates (coord_system=2).'
+            stop
+        endif
     endif
     if (in%boole_linear_density_simulation) then
-        start%weight(n,species) = start%weight(n,species)*(flux%poloidal_max*1.1_dp-local_poloidal_flux)/(flux%poloidal_max*1.1_dp)
+        ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
+        weights%w(n,species) = weights%w(n,species)*(1.1_dp - s_value)/1.1_dp
     endif
 
-    if (in%boole_boltzmann_energies) then
+    if (.not. in%boole_monoenergetic) then
         !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
         phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
         if (.not. in%boole_linear_temperature_simulation) then
-            start%weight(n,species) =start%weight(n,species)*sqrt(start%energy(n,species)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
+            weights%w(n,species) = weights%w(n,species)*sqrt(start%energy(n,species)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
                         & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/(in%energy_eV*ev2erg))
         else
-            temperature = in%energy_eV*ev2erg*(flux%poloidal_max*1.1_dp-local_poloidal_flux)/(flux%poloidal_max*1.1_dp)
-            start%weight(n,species) = start%weight(n,species)*sqrt(start%energy(n,species)*ev2erg)/temperature**1.5_dp* &
+            ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
+            temperature = in%energy_eV*ev2erg*(1.1_dp - s_value)/1.1_dp
+            weights%w(n,species) = weights%w(n,species)*sqrt(start%energy(n,species)*ev2erg)/temperature**1.5_dp* &
             & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
         endif
     endif

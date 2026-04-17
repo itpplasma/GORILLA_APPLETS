@@ -19,6 +19,7 @@
  !11 .. Compute divertor heat loads
  !12 .. Compute self consistent electric field
  !13 .. Compute anomalous transport
+ !14 .. Compute helical core
  i_option = 11 ,
 !
 !------------------------------------------------------------------------------------------------------------!
