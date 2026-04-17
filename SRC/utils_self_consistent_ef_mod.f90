@@ -279,7 +279,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         if ((j.eq.1).or.(.not.in%boole_static_ne)) then
             call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species,boole_diffusion_coefficient)
         endif
-        if ((.not.in%boole_static_ne).and.(species.eq.1)) then
+        if ((.not.in%boole_static_ne).and.(species.eq.2)) then
             start%x(:,n,2) = start%x(:,n,1)
             weights%w(n,2) = weights%w(n,1)
         endif 
