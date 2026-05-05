@@ -189,7 +189,11 @@ subroutine allocate_weights
     use gorilla_applets_types_mod, only: in, weights
 
     allocate(weights%w(in%num_particles,in%n_species))
-    if (in%boole_delta_f) allocate(weights%original(in%num_particles,in%n_species))
+    weights%w = (0.0_dp, 0.0_dp)
+    if (in%boole_delta_f) then
+        allocate(weights%original(in%num_particles,in%n_species))
+        weights%original = (0.0_dp, 0.0_dp)
+    end if
 
 end subroutine allocate_weights
 
@@ -731,14 +735,14 @@ subroutine analyse_particle_weight_distribution
     integer  :: i
     real(dp) :: maximum_weight, minimum_weight, average_weight
 
-    maximum_weight = weights%w(1,1)
-    minimum_weight = weights%w(1,1)
+    maximum_weight = abs(weights%w(1,1))
+    minimum_weight = abs(weights%w(1,1))
     average_weight = 0
 
     do i = 1,int(in%n_particles)
-        average_weight = average_weight + weights%w(i,1)
-        maximum_weight = max(maximum_weight,weights%w(i,1))
-        minimum_weight = min(minimum_weight,weights%w(i,1))
+        average_weight = average_weight + abs(weights%w(i,1))
+        maximum_weight = max(maximum_weight, abs(weights%w(i,1)))
+        minimum_weight = min(minimum_weight, abs(weights%w(i,1)))
     enddo
 
     average_weight = average_weight/in%n_particles

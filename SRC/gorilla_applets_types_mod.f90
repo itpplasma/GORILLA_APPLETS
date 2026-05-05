@@ -249,8 +249,8 @@ module gorilla_applets_types_mod
     end type time_t
 
     type weights_t
-    real(dp), dimension(:,:), allocatable :: w         ! current weight (particles x species)
-    real(dp), dimension(:,:), allocatable :: original  ! original weight, used in helical_core for delta-f damping
+    complex(dp), dimension(:,:), allocatable :: w         ! current weight (complex for delta-f, Im=0 in other applets)
+    complex(dp), dimension(:,:), allocatable :: original  ! original weight, used in helical_core for delta-f damping
     end type weights_t
 
     type(weights_t) :: weights

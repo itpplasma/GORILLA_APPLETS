@@ -178,7 +178,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                         if (local_rr%boole_eliminated) exit
                     else
                         particle_state_for_rr = (/vpar,vperp,t%confined,t%remain,t%step,x,dble(ind_tetr),dble(iface)/)
-                        call play_russian_roulette(weights%w(n,species),v,v_save,particle_state_for_rr,local_rr)
+                        block; real(dp) :: w_rr; w_rr = real(weights%w(n,species),dp); call play_russian_roulette(w_rr,v,v_save,particle_state_for_rr,local_rr); weights%w(n,species) = cmplx(w_rr,0.0_dp,kind=dp); end block
                     endif
                 endif
 
@@ -368,7 +368,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
 
         if (rr%boole_russian_roulette) then
             particle_state_for_rr = (/vpar,vperp,t%confined,t%remain,t%step,x,dble(ind_tetr),dble(iface)/)
-            call play_russian_roulette(weights%w(n,species),v,v_save,particle_state_for_rr,local_rr)
+            block; real(dp) :: w_rr; w_rr = real(weights%w(n,species),dp); call play_russian_roulette(w_rr,v,v_save,particle_state_for_rr,local_rr); weights%w(n,species) = cmplx(w_rr,0.0_dp,kind=dp); end block
         endif
 
         if(boole_t_finished.or.local_rr%boole_eliminated) then !Orbit stops within cell, because "flight"-time t%step has finished
