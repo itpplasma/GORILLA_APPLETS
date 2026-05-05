@@ -30,18 +30,20 @@ add_library(GORILLA_APPLETS STATIC
   anomalous_transport/anomalous_transport_mod.f90
   helical_core/utils_helical_core_mod.f90
   helical_core/helical_core_mod.f90
+  profile_data_mod.f90
+  perturbation_field_mod.f90
   rmp_response_currents/utils_rmp_response_currents_mod.f90
   rmp_response_currents/rmp_response_currents_mod.f90
   volume_integrals_and_sqrt_g_mod.f90
   zzg.f90
   self_consistent_electric_field_mod.f90
   )
-target_link_libraries(GORILLA_APPLETS 
+target_link_libraries(GORILLA_APPLETS
   GORILLA
-  blas
-  lapack
-  netcdf
-  netcdff
+  ${BLAS_LIBRARIES}
+  ${LAPACK_LIBRARIES}
+  netCDF::netcdf
+  netCDF::netcdff
 )
 target_include_directories(GORILLA_APPLETS PUBLIC ${CMAKE_BINARY_DIR}/SRC_CORE)
 
