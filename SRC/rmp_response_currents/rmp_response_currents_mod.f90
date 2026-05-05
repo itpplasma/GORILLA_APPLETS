@@ -23,7 +23,12 @@ subroutine calc_rmp_response_currents
         fourier_transform_moments, calc_starting_conditions
     use utils_helical_core_mod, only: eliminate_particles_outside_flux_threshold
     use utils_rmp_response_currents_mod, only: read_rmp_response_currents_inp_into_type, &
-        parallelised_particle_pushing_rmp_response_currents
+        parallelised_particle_pushing_rmp_response_currents, &
+        profile_dir, equil_mapping_file, boole_constant_delta_B_psi, delta_B_psi_const, &
+        pert_m_fourier, pert_n_fourier, delta_B_psi_file, boole_skip_phase_for_test, &
+        bias_starting_positions_to_s_window
+    use profile_data_mod, only: load_profiles
+    use perturbation_field_mod, only: init_constant_perturbation, load_perturbation_field, boole_skip_phase
 
     call set_seed_for_random_numbers
     call read_rmp_response_currents_inp_into_type
@@ -42,8 +47,22 @@ subroutine calc_rmp_response_currents
 
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
 
+    ! Load plasma profiles and initialise the perturbation field for the
+    ! delta-f weight evolution (Albert 2016, Eq. 4).
+    if (in%boole_delta_f) then
+        call load_profiles(trim(profile_dir), trim(equil_mapping_file))
+        if (boole_constant_delta_B_psi) then
+            call init_constant_perturbation(delta_B_psi_const, pert_m_fourier, pert_n_fourier)
+            boole_skip_phase = boole_skip_phase_for_test
+        else
+            call load_perturbation_field(trim(delta_B_psi_file), trim(equil_mapping_file), &
+                                         pert_m_fourier, pert_n_fourier)
+        end if
+    end if
+
     call calc_starting_conditions
     call eliminate_particles_outside_flux_threshold
+    if (in%boole_delta_f) call bias_starting_positions_to_s_window
 
     call parallelised_particle_pushing_rmp_response_currents(species=1)
 
