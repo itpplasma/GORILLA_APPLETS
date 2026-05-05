@@ -7,26 +7,16 @@ project (GORILLA_APPLETS
 
 enable_language(Fortran)
 
-if(UNIX AND NOT APPLE)
-  include_directories(/usr/include)
-elseif(APPLE)
-  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-    include_directories(/opt/local/include)
-  elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-    include_directories(/usr/local/include)
-  endif()
-endif()
-
 find_package(BLAS REQUIRED)
 find_package(LAPACK REQUIRED)
 find_package(netCDF REQUIRED)
+find_package(netCDF-Fortran REQUIRED)
+
+get_target_property(_NETCDFF_INC netCDF::netcdff INTERFACE_INCLUDE_DIRECTORIES)
+include_directories(${netCDF_INCLUDE_DIR} ${_NETCDFF_INC})
 
 add_compile_options(-g -fbacktrace -ffpe-trap=zero,overflow,invalid -fbounds-check -fopenmp)
 add_link_options(-g -fbacktrace -ffpe-trap=zero,overflow,invalid -fbounds-check -fopenmp)
-
-if(APPLE)
-  add_link_options(-L/opt/local/lib)
-endif()
 
 add_subdirectory(SRC)
 add_subdirectory(SRC_CORE)
