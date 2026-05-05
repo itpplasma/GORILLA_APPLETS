@@ -44,6 +44,16 @@ module utils_rmp_response_currents_mod
     real(dp),           public :: s_inner_sample = 0.0_dp
     real(dp),           public :: s_outer_sample = 1.0_dp
 
+    ! Initial-energy distribution for the markers.
+    !   'mono'        : delta function at in%energy_eV
+    !   'uniform'     : flat in [0, e_cutoff_factor * in%energy_eV]
+    !   'maxwellian'  : p(E) ∝ sqrt(E) * exp(-E/T) on the same range,
+    !                   T = in%energy_eV (velocity-Jacobian-weighted Maxwellian)
+    character(len=32), public :: energy_dist_kind = 'maxwellian'
+    real(dp),          public :: e_cutoff_factor  = 5.0_dp
+    ! Module-private temperature plumbed into pdf_maxwellian_energy.
+    real(dp)                  :: T_sample_eV     = 0.0_dp
+
     ! Per-particle regularisation storage. Allocated alongside weights%w
     ! when boole_delta_f is on. tau_c is the local collision time at the
     ! starting position; t_reg_on the switch-on time of the damping;
@@ -59,7 +69,7 @@ subroutine read_rmp_response_currents_inp_into_type
 
     real(dp) :: time_step, energy_eV, n_particles, density
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
-               boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
+               boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, &
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
@@ -69,8 +79,12 @@ subroutine read_rmp_response_currents_inp_into_type
 
     integer :: s_inp_unit
 
+    ! Note: energy_dist_kind, e_cutoff_factor are module-level publics with
+    ! defaults at declaration; the NAMELIST references them directly so the
+    ! namelist key matches the module variable name 1:1.
     NAMELIST /rmp_response_currents_nml/ time_step, energy_eV, n_particles, boole_squared_moments, boole_point_source, &
-    & boole_collisions, boole_precalc_collisions, density, boole_refined_sqrt_g, boole_monoenergetic, &
+    & boole_collisions, boole_precalc_collisions, density, boole_refined_sqrt_g, &
+    & energy_dist_kind, e_cutoff_factor, &
     & boole_linear_density_simulation, boole_antithetic_variate, boole_linear_temperature_simulation, i_integrator_type, &
     & seed_option, boole_write_vertex_indices, boole_write_vertex_coordinates, boole_write_prism_volumes, &
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
@@ -95,7 +109,10 @@ subroutine read_rmp_response_currents_inp_into_type
     in%boole_collisions = boole_collisions
     in%boole_precalc_collisions = boole_precalc_collisions
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
-    in%boole_monoenergetic = boole_monoenergetic
+    ! Sanity-fix e_cutoff_factor if user passed a non-positive value.
+    if (e_cutoff_factor <= 0.0_dp) e_cutoff_factor = 5.0_dp
+    ! Note: in%boole_monoenergetic is no longer used in the rmp applet --
+    ! the new energy_dist_kind module variable takes its place.
     in%boole_linear_density_simulation = boole_linear_density_simulation
     in%boole_antithetic_variate = boole_antithetic_variate
     in%boole_linear_temperature_simulation = boole_linear_temperature_simulation
@@ -136,6 +153,225 @@ subroutine allocate_delta_f_per_particle(n_particles, n_species)
     trace_time = 0.0_dp
 
 end subroutine allocate_delta_f_per_particle
+
+! ====================================================================
+! Initial-condition setup, copied from utils_data_pre_and_post_processing_mod
+! so the rmp applet owns the chain and can iterate freely (in particular on
+! the energy distribution).
+! ====================================================================
+subroutine calc_starting_conditions_rmp_response_currents(verts)
+
+    use gorilla_applets_types_mod, only: in, start
+
+    real(dp), dimension(:,:), allocatable, intent(out), optional :: verts
+
+    call set_verts_and_coordinate_limits_rmp(verts)
+
+    call allocate_start_type_rmp
+    call allocate_weights_rmp
+    call set_starting_positions_rmp()
+    call set_rest_of_start_type_rmp()
+
+end subroutine calc_starting_conditions_rmp_response_currents
+
+! --------------------------------------------------------------------
+subroutine set_verts_and_coordinate_limits_rmp(verts)
+
+    use tetra_physics_mod, only: coord_system, tetra_physics
+    use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
+    use tetra_grid_settings_mod, only: grid_size
+    use magdata_in_symfluxcoor_mod, only : raxis, zaxis
+    use gorilla_applets_types_mod, only: g
+
+    real(dp), dimension(:,:), allocatable, intent(out), optional :: verts
+    real(dp), dimension(:,:), allocatable :: verts_local
+    integer :: i
+
+    g%ind_a = 1 !(R in cylindrical coordinates, s in flux coordinates)
+    g%ind_b = 2 !(phi in cylindrical and flux coordinates)
+    g%ind_c = 3 !(z in cylindrical coordinates, theta in flux coordinates)
+    if (coord_system.eq.2) then
+        g%ind_b = 3
+        g%ind_c = 2
+    endif
+
+    allocate(verts_local(3,nvert))
+    if (coord_system.eq.1) verts_local = verts_rphiz
+    if (coord_system.eq.2) verts_local = verts_sthetaphi
+
+    g%amin = minval(verts_local(g%ind_a,:))
+    g%amax = maxval(verts_local(g%ind_a,:))
+    g%cmin = minval(verts_local(g%ind_c,:))
+    g%cmax = maxval(verts_local(g%ind_c,:))
+
+    g%raxis = raxis
+    g%zaxis = zaxis
+
+    g%dist_from_o_point_within_grid = 0.0_dp
+    do i = 1,3*grid_size(3)
+        g%dist_from_o_point_within_grid = max(g%dist_from_o_point_within_grid, &
+                                              1.1_dp*sqrt((tetra_physics(i)%x1(1)-raxis)**2 + (tetra_physics(i)%x1(3)-zaxis)**2))
+    enddo
+
+    if (present(verts)) call move_alloc(verts_local, verts)
+
+end subroutine set_verts_and_coordinate_limits_rmp
+
+! --------------------------------------------------------------------
+subroutine allocate_start_type_rmp
+
+    use gorilla_applets_types_mod, only: start, in
+    use gorilla_applets_settings_mod, only: i_option
+
+    allocate(start%x(3,in%num_particles,in%n_species))
+    allocate(start%pitch(in%num_particles,in%n_species))
+    allocate(start%energy(in%num_particles,in%n_species))
+    allocate(start%jperp(in%num_particles,in%n_species))
+    allocate(start%lost(in%num_particles,in%n_species))
+    allocate(start%particle_charge(in%n_species))
+    allocate(start%particle_mass(in%n_species))
+    allocate(start%cm_over_e(in%n_species))
+    allocate(start%t(in%n_species))
+    allocate(start%v0(in%n_species))
+
+end subroutine allocate_start_type_rmp
+
+! --------------------------------------------------------------------
+subroutine allocate_weights_rmp
+
+    use gorilla_applets_types_mod, only: in, weights
+
+    allocate(weights%w(in%num_particles,in%n_species))
+    weights%w = (0.0_dp, 0.0_dp)
+    if (in%boole_delta_f) then
+        allocate(weights%original(in%num_particles,in%n_species))
+        weights%original = (0.0_dp, 0.0_dp)
+    end if
+
+end subroutine allocate_weights_rmp
+
+! --------------------------------------------------------------------
+subroutine set_starting_positions_rmp()
+
+    use gorilla_applets_types_mod, only: in, start, g
+    use tetra_physics_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
+    use constants, only: pi
+    use marker_distribution_mod, only: pdf_flat, init_distribution_3d, sample_array_3d
+
+    real(dp) :: xmin(3), xmax(3)
+    integer :: i_species
+
+    !compute starting conditions
+    if (in%boole_point_source) then
+        if (grid_kind.eq.2) then
+            xmin = [209.0_dp, 0.01_dp, 10.0_dp]
+            xmax = xmin
+        elseif (grid_kind.eq.4) then
+            xmin = [205.0_dp, 0.0_dp, 0.0_dp]
+            xmax = xmin
+        endif
+        if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
+    else
+        ! Set bounds for uniform sampling
+        xmin(g%ind_a) = g%amin
+        xmax(g%ind_a) = g%amax
+        xmin(g%ind_b) = 0.0_dp
+        xmax(g%ind_b) = 2*pi
+        xmin(g%ind_c) = g%cmin
+        xmax(g%ind_c) = g%cmax
+    endif
+
+    ! Initialize position distribution if not already done
+    if (.not. start%dist_position%initialized) then
+        call init_distribution_3d(start%dist_position, pdf_flat, xmin, xmax)
+    endif
+
+    ! Sample positions for all species
+    do i_species = 1, in%n_species
+        call sample_array_3d(start%dist_position, start%x(:,:,i_species))
+    enddo
+
+end subroutine set_starting_positions_rmp
+
+! --------------------------------------------------------------------
+subroutine set_rest_of_start_type_rmp()
+
+    use gorilla_applets_types_mod, only: in, start
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
+    use gorilla_applets_settings_mod, only: i_option
+    use constants, only: echarge, ame, clight
+    use constants, only: ev2erg
+    use marker_distribution_mod, only: pdf_flat, init_distribution_1d, sample_array_1d
+
+    integer :: i_species
+
+    ! Initialize lambda (pitch angle) distribution if not already done
+    if (.not. start%dist_lambda%initialized) then
+        call init_distribution_1d(start%dist_lambda, pdf_flat, -1.0_dp, 1.0_dp)
+    endif
+
+    ! Initialize energy distribution if not already done.
+    ! Dispatch on energy_dist_kind:
+    !   'mono'        : delta function at in%energy_eV
+    !   'uniform'     : flat in [0, e_cutoff_factor * in%energy_eV]
+    !   'maxwellian'  : sqrt(E)*exp(-E/T) on [0, e_cutoff_factor * T], T = in%energy_eV
+    if (.not. start%dist_energy%initialized) then
+        select case(trim(energy_dist_kind))
+        case('mono')
+            call init_distribution_1d(start%dist_energy, pdf_flat, &
+                                      in%energy_eV, in%energy_eV)
+        case('uniform')
+            call init_distribution_1d(start%dist_energy, pdf_flat, &
+                                      0.0_dp, e_cutoff_factor * in%energy_eV)
+        case('maxwellian')
+            T_sample_eV = in%energy_eV       ! plumb T into the pdf function
+            call init_distribution_1d(start%dist_energy, pdf_maxwellian_energy, &
+                                      0.0_dp, e_cutoff_factor * in%energy_eV)
+        case default
+            print *, "Error: unknown energy_dist_kind = '", trim(energy_dist_kind), &
+                     "' (expected 'mono', 'uniform', or 'maxwellian')"
+            error stop
+        end select
+    endif
+
+    ! Sample pitch and energy for all species
+    do i_species = 1, in%n_species
+        call sample_array_1d(start%dist_lambda, in%num_particles, start%pitch(:,i_species))
+        call sample_array_1d(start%dist_energy, in%num_particles, start%energy(:,i_species))
+    enddo
+
+    if (in%boole_antithetic_variate) then
+        start%x(:,1:in%num_particles:2,:) = start%x(:,2:in%num_particles:2,:)
+        start%pitch(1:in%num_particles:2,:) = -start%pitch(2:in%num_particles:2,:)
+        start%energy(1:in%num_particles:2,:) = start%energy(2:in%num_particles:2,:)
+    endif
+
+    start%particle_charge = particle_charge
+    start%particle_mass = particle_mass
+    start%cm_over_e = cm_over_e
+    start%t = in%time_step
+    if (i_option.eq.12) then
+        start%particle_charge(2) = -echarge
+        start%particle_mass(2) = ame
+        start%cm_over_e(2) = -clight*ame/echarge
+        start%t(2) = in%time_step/42.0_dp
+    endif
+
+    start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
+    start%lost = .false.
+
+    ! Debug: dump sampled initial energies (one per line, eV) for sampler verification.
+    block
+        integer :: u, ip
+        open(newunit=u, file='initial_energies.dat', status='replace', action='write')
+        do ip = 1, in%num_particles
+            write(u,'(es16.8)') start%energy(ip, 1)
+        enddo
+        close(u)
+    end block
+
+end subroutine set_rest_of_start_type_rmp
 
 ! ====================================================================
 subroutine parallelised_particle_pushing_rmp_response_currents(species, n_particles_in)
@@ -781,5 +1017,25 @@ subroutine bias_starting_positions_to_s_window()
     print *, ''
 
 end subroutine bias_starting_positions_to_s_window
+
+! ====================================================================
+! Velocity-Jacobian-weighted Maxwellian energy PDF for the 1D sampler.
+! p(E) dE = (4 pi v^2 / m) * f_M(v) dE  ∝  sqrt(E) * exp(-E/T)
+! T is taken from module-private T_sample_eV, which the caller (the
+! 'maxwellian' branch of set_rest_of_start_type_rmp) sets from
+! in%energy_eV before calling init_distribution_1d.  Matches
+! pdf_interface(x(:)) -> val so it can be passed to init_distribution_1d.
+! ====================================================================
+function pdf_maxwellian_energy(x) result(val)
+    real(dp), intent(in) :: x(:)
+    real(dp) :: val, E
+
+    E = x(1)
+    if (E <= 0.0_dp .or. T_sample_eV <= 0.0_dp) then
+        val = 0.0_dp
+        return
+    endif
+    val = sqrt(E) * exp(-E / T_sample_eV)
+end function pdf_maxwellian_energy
 
 end module utils_rmp_response_currents_mod

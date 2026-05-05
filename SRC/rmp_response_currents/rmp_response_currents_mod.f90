@@ -20,10 +20,11 @@ subroutine calc_rmp_response_currents
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
         get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &
         calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
-        fourier_transform_moments, calc_starting_conditions
+        fourier_transform_moments
     use utils_helical_core_mod, only: eliminate_particles_outside_flux_threshold
     use utils_rmp_response_currents_mod, only: read_rmp_response_currents_inp_into_type, &
         parallelised_particle_pushing_rmp_response_currents, &
+        calc_starting_conditions_rmp_response_currents, &
         profile_dir, equil_mapping_file, boole_constant_delta_B_psi, delta_B_psi_const, &
         pert_m_fourier, pert_n_fourier, delta_B_psi_file, boole_skip_phase_for_test, &
         bias_starting_positions_to_s_window
@@ -60,7 +61,7 @@ subroutine calc_rmp_response_currents
         end if
     end if
 
-    call calc_starting_conditions
+    call calc_starting_conditions_rmp_response_currents
     call eliminate_particles_outside_flux_threshold
     if (in%boole_delta_f) call bias_starting_positions_to_s_window
 
