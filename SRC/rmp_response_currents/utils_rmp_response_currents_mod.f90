@@ -31,6 +31,13 @@ module utils_rmp_response_currents_mod
     ! Coulomb logarithm for the local collision frequency.
     real(dp),           public :: coulomb_log              = 17.0_dp
 
+    ! Diagnostic: when true, bypass the delta-f weight evolution entirely
+    ! and hold w(t) = 1 (real, constant) for the whole trace. Useful for
+    ! tracer-style runs where each marker should deposit its raw v_par
+    ! contribution at unit weight, decoupled from the Albert delta-f
+    ! amplitude/regularisation machinery. Set nu_r_frac = 0 alongside.
+    logical,            public :: boole_constant_unit_weight = .false.
+
     ! Optional sanity DFT over toroidal mode numbers. With the complex
     ! drive the prism moment is already the (m,n) Fourier amplitude, so
     ! the DFT is only useful as a leakage check.
@@ -170,6 +177,7 @@ subroutine read_rmp_response_currents_inp_into_type
     & profile_dir, equil_mapping_file, boole_constant_delta_B_r, delta_B_r_const, &
     & pert_m_fourier, pert_n_fourier, delta_B_r_file, species_for_delta_f, &
     & nu_r_frac, m_collision_times_reg_on, coulomb_log, &
+    & boole_constant_unit_weight, &
     & boole_compute_n_modes_dft, s_outer_cut, boole_skip_phase_for_test, &
     & s_inner_sample, s_outer_sample, n_respawn_max, boole_equidistant_s_sampling, &
     & boole_stratify_theta, boole_stratify_phi, &
@@ -726,11 +734,20 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         z_save = x - tetra_physics(ind_tetr)%x1
         call calc_particle_weights_and_jperp_rmp_response_currents(n, z_save, vpar, vperp, ind_tetr, species)
         if (in%boole_delta_f) then
-            ! Always start from w(0) = 0 (paper convention).
-            weights%w(n, species) = (0.0_dp, 0.0_dp)
-            weights%original(n, species) = (0.0_dp, 0.0_dp)
             ! Per-particle regularisation parameters from local profile values.
+            ! In unit-weight mode we still need trace_time to be set so the
+            ! trace duration matches the standard delta-f run; nu_r and
+            ! t_reg_on go unused because update_delta_f_weight is a no-op.
             call init_regularisation_for_particle(n, ind_tetr, x, vpar, vperp, species)
+            if (boole_constant_unit_weight) then
+                ! Tracer mode: hold w(t) = 1 + 0i for the whole trace.
+                weights%w(n, species) = (1.0_dp, 0.0_dp)
+                weights%original(n, species) = (1.0_dp, 0.0_dp)
+            else
+                ! Always start from w(0) = 0 (paper convention).
+                weights%w(n, species) = (0.0_dp, 0.0_dp)
+                weights%original(n, species) = (0.0_dp, 0.0_dp)
+            end if
         end if
         particle_status%initialized = .true.
     endif
@@ -967,6 +984,9 @@ subroutine update_delta_f_weight(n, ind_tetr, x, vpar, vperp, t_pass, t, species
     complex(dp) :: wdot_s
     real(dp)    :: t_current, nu_r_loc, decay
     complex(dp), parameter :: zero_c = (0.0_dp, 0.0_dp)
+
+    ! Tracer mode: weight is fixed at 1, no evolution.
+    if (boole_constant_unit_weight) return
 
     call eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
 
