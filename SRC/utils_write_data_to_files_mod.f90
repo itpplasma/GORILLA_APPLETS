@@ -71,7 +71,7 @@ subroutine write_vertex_coordinates
     use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
     use gorilla_applets_types_mod, only: filenames
 
-    integer :: vc_unit
+    integer :: vc_unit, st_unit
     integer :: i
 
     open(newunit = vc_unit, file = filenames%vertex_coordinates)
@@ -88,6 +88,14 @@ subroutine write_vertex_coordinates
         end do
     endif
     close(vc_unit)
+
+    ! Also dump per-vertex (s, theta_SFL, phi) so post-processing can
+    ! compute coherent (m,n) Fourier projections of cell moments.
+    open(newunit = st_unit, file = 'vertex_sthetaphi.dat')
+    do i = 1, nvert
+        write(st_unit,101) verts_sthetaphi(1, i), verts_sthetaphi(2, i), verts_sthetaphi(3, i)
+    end do
+    close(st_unit)
 
 end subroutine write_vertex_coordinates
 

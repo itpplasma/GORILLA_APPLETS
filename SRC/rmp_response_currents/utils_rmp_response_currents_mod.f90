@@ -9,14 +9,14 @@ module utils_rmp_response_currents_mod
     ! consumed by calc_rmp_response_currents after grid build.
     character(len=512), public :: profile_dir          = './profiles'
     character(len=512), public :: equil_mapping_file   = './flux_functions.dat'
-    logical,            public :: boole_constant_delta_B_psi = .true.
-    real(dp),           public :: delta_B_psi_const    = 0.0_dp
+    logical,            public :: boole_constant_delta_B_r = .true.
+    real(dp),           public :: delta_B_r_const    = 0.0_dp
     integer,            public :: pert_m_fourier       = 0
     integer,            public :: pert_n_fourier       = 0
-    character(len=512), public :: delta_B_psi_file     = ''
+    character(len=512), public :: delta_B_r_file     = ''
     integer,            public :: species_for_delta_f  = 1
     ! Diagnostic: if .true., skip the exp(i*(m theta + n phi)) factor in
-    ! the constant-amplitude perturbation and return delta_B_psi_const as
+    ! the constant-amplitude perturbation and return delta_B_r_const as
     ! a truly uniform (axisymmetric) real-valued perturbation.
     logical,            public :: boole_skip_phase_for_test = .false.
 
@@ -43,6 +43,54 @@ module utils_rmp_response_currents_mod
     ! [s_inner_sample, s_outer_sample]. Default = full plasma.
     real(dp),           public :: s_inner_sample = 0.0_dp
     real(dp),           public :: s_outer_sample = 1.0_dp
+
+    ! Maximum number of respawn attempts per particle. When > 0 and delta-f
+    ! is on, a particle that exits the computational domain (ind_tetr=-1)
+    ! has its starting position re-drawn (within the bias window intersected
+    ! with s_outer_cut) and continues being traced; deposits accumulate
+    ! across attempts and the per-particle time average uses the SUM of
+    ! actual t_confined across attempts. Default = 0 (no respawn).
+    integer,            public :: n_respawn_max = 0
+
+    ! When true, replace the rejection-sampled bias of starting positions
+    ! with one marker per radial s-layer (theta and phi uniform in their
+    ! valid ranges). The number of placed markers is the count of layer
+    ! midpoints falling in [s_inner_sample, s_outer_sample] -- so set
+    ! n_particles in the input to at least this count (typically ~ n1).
+    ! Layers in excess of n_particles slots are skipped; unused slots are
+    ! marked lost.
+    logical,            public :: boole_equidistant_s_sampling = .false.
+
+    ! Within each radial layer of the equidistant-in-s spawner, place
+    ! markers on a stratified theta grid: marker k of K in a layer draws
+    ! theta uniformly inside the bin [(k-1)*2pi/K, k*2pi/K). Reduces
+    ! poloidal-phase clustering at small K. Only takes effect when
+    ! boole_equidistant_s_sampling = .true.
+    logical,            public :: boole_stratify_theta = .false.
+
+    ! Same idea for phi. When BOTH stratification flags are on, the phi
+    ! bin assignment for marker k uses a per-layer random permutation
+    ! (Fisher-Yates) of {1..K} -- a Latin-hypercube layout so that the
+    ! (theta, phi) pairs aren't locked to a diagonal.
+    logical,            public :: boole_stratify_phi = .false.
+
+    ! Diagnostic: when true, dump marker n=1's trajectory (R, phi, Z,
+    ! vpar, ind_tetr) at sparse intervals to traj_n1.dat for comparison
+    ! of orbit-derived q vs qsaf from flux_functions.dat. Negligible
+    ! overhead since only one marker is logged.
+    logical,            public :: boole_dump_orbit_n1 = .false.
+    integer,            public :: orbit_dump_stride  = 50
+    integer,            public :: traj_dump_unit     = 0
+    ! Persistent push-step counter; used by the trajectory dump to stride.
+    integer,            public :: traj_step_count    = 0
+
+    ! Population filter: keep only passing or only trapped markers.
+    ! 'none' (default), 'passing', or 'trapped'. Filtered-out markers
+    ! get start%lost = .true. and are skipped during tracing. Useful for
+    ! decomposing the screening current into its passing vs trapped
+    ! contributions (Fortran sums them; their plotted magnitudes add up
+    ! to the unfiltered result with the same n_particles divisor).
+    character(len=16),  public :: trapping_filter_mode = 'none'
 
     ! Initial-energy distribution for the markers.
     !   'mono'        : delta function at in%energy_eV
@@ -90,11 +138,13 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, &
     & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f, &
-    & profile_dir, equil_mapping_file, boole_constant_delta_B_psi, delta_B_psi_const, &
-    & pert_m_fourier, pert_n_fourier, delta_B_psi_file, species_for_delta_f, &
+    & profile_dir, equil_mapping_file, boole_constant_delta_B_r, delta_B_r_const, &
+    & pert_m_fourier, pert_n_fourier, delta_B_r_file, species_for_delta_f, &
     & nu_r_frac, n_collision_times_trace, m_collision_times_reg_on, coulomb_log, &
     & boole_compute_n_modes_dft, s_outer_cut, boole_skip_phase_for_test, &
-    & s_inner_sample, s_outer_sample
+    & s_inner_sample, s_outer_sample, n_respawn_max, boole_equidistant_s_sampling, &
+    & boole_stratify_theta, boole_stratify_phi, &
+    & boole_dump_orbit_n1, orbit_dump_stride, trapping_filter_mode
 
     open(newunit = s_inp_unit, file='rmp_response_currents.inp', status='unknown')
     read(s_inp_unit,nml=rmp_response_currents_nml)
@@ -265,7 +315,8 @@ subroutine set_starting_positions_rmp()
     !compute starting conditions
     if (in%boole_point_source) then
         if (grid_kind.eq.2) then
-            xmin = [209.0_dp, 0.01_dp, 10.0_dp]
+            ! Barycenter of tetra 66417 (s,theta_SFL,phi) = (0.7486, 1.512, 0.995)
+            xmin = [205.071641_dp, 0.994838_dp, 31.737695_dp]
             xmax = xmin
         elseif (grid_kind.eq.4) then
             xmin = [205.0_dp, 0.0_dp, 0.0_dp]
@@ -347,6 +398,16 @@ subroutine set_rest_of_start_type_rmp()
         start%energy(1:in%num_particles:2,:) = start%energy(2:in%num_particles:2,:)
     endif
 
+    ! Diagnostic: when the orbit-q dump is on, force marker n=1 to be a
+    ! deeply-passing co-current particle (pitch ≈ +1) so its trajectory
+    ! follows a magnetic field line. Trapped/barely-passing markers give
+    ! poloidal-bounce dominated motion that cannot be used for q.
+    if (boole_dump_orbit_n1 .and. in%num_particles >= 1) then
+        do i_species = 1, in%n_species
+            start%pitch(1, i_species) = 1.0_dp
+        end do
+    end if
+
     start%particle_charge = particle_charge
     start%particle_mass = particle_mass
     start%cm_over_e = cm_over_e
@@ -386,14 +447,25 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     integer, intent(in)                               :: species
     integer, intent(in), optional                     :: n_particles_in
     integer                                           :: kpart, iantithetic, ind_tetr, iface, n_particles
-    integer                                           :: p, l, n, i
+    integer                                           :: p, l, n, i, i_total, n_respawn_used, n_respawn_total
+    integer                                           :: n_truly_lost
     real(dp), dimension(3)                            :: x
-    real(dp)                                          :: vpar, vperp, t_tot, trace_time_n
+    real(dp)                                          :: vpar, vperp, t_tot, trace_time_n, t_actual_n
     type(time_t)                                      :: t
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
     complex(dp), dimension(:,:), allocatable          :: local_tetr_moments
+    ! Per-particle workspace for the delta-f time average. Each marker's
+    ! deposits accumulate here across ALL respawn attempts (we do NOT reset
+    ! the workspace on respawn). At the end of all attempts we divide by
+    ! t_actual_n -- the SUM of t_confined across attempts -- and fold into
+    ! local_tetr_moments. So even a marker that is killed and never
+    ! respawned contributes its short-trace deposit divided by its actual
+    ! short trace time, which is statistically equivalent to its share of a
+    ! full trace (rather than being suppressed by the full intended T_n).
+    complex(dp), dimension(:,:), allocatable          :: particle_tetr_moments
     logical                                           :: thread_flag = .true.
+    logical                                           :: respawn_success
 
     if (present(n_particles_in)) then
         n_particles = n_particles_in
@@ -410,13 +482,25 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
 
     t_tot = 0.0_dp
 
+    n_respawn_total = 0
+    n_truly_lost    = 0
+
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, trace_time) &
-    !$OMP& REDUCTION(+:t_tot) &
-    !$OMP& PRIVATE(p, l, n, i, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n) &
+    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, trace_time, moment_specs, ntetr, n_respawn_max, &
+    !$OMP&        boole_dump_orbit_n1, traj_dump_unit, orbit_dump_stride, traj_step_count) &
+    !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
+    !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success) &
     !$OMP& FIRSTPRIVATE(thread_flag)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
+
+    ! Per-thread allocation of the per-particle workspace. Allocatables in
+    ! PRIVATE start unallocated on each thread, so this must happen inside
+    ! the parallel region. Only used in the delta-f path; harmless to
+    ! allocate either way.
+    if (in%boole_delta_f) then
+        allocate(particle_tetr_moments(moment_specs%n_moments, ntetr))
+    end if
 
     !$OMP DO SCHEDULE(static)
     do p = 1, n_particles/iantithetic
@@ -438,47 +522,102 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                 cycle
             endif
 
-            call initialise_loop_variables(l, n, local_counter, particle_status, t, local_tetr_moments, x, vpar, vperp, species)
+            ! Per-particle accumulators that persist across respawn attempts.
+            if (in%boole_delta_f) particle_tetr_moments = (0.0_dp, 0.0_dp)
+            t_actual_n     = 0.0_dp
+            i_total        = 0
+            n_respawn_used = 0
 
-            ! Initial trace-time bound. Overwritten on first orbit_timestep
-            ! call from per-particle profile values when boole_delta_f.
-            trace_time_n = start%t(species)
+            ! Respawn-and-retry loop. The body executes once normally; on
+            ! kill it may re-execute with a freshly biased starting position
+            ! (delta-f only, up to n_respawn_max times). Deposits and
+            ! t_confined accumulate across attempts so a marker that took
+            ! several tries to find a stable orbit still contributes the
+            ! right time-averaged quantity at the end.
+            do
+                ! NOTE: initialise_loop_variables zeroes local_tetr_moments
+                ! when l==1 -- harmless here because in delta-f mode we
+                ! deposit into particle_tetr_moments, not local_tetr_moments,
+                ! and the per-particle fold-in happens AFTER this loop.
+                call initialise_loop_variables(l, n, local_counter, particle_status, t, local_tetr_moments, x, vpar, vperp, species)
 
-            i = 0
+                ! Initial trace-time bound. Overwritten on the first
+                ! orbit_timestep call from per-particle profile values when
+                ! boole_delta_f is on (and re-initialised on respawn since
+                ! particle_status%initialized was reset).
+                trace_time_n = start%t(species)
 
-            do while (t%confined.lt.trace_time_n)
-                i = i + 1
+                i = 0
 
-                if (in%boole_collisions) then
-                    call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species, iswmode_in=1)
-                    t%step = t%step / start%v0(species)
-                else
-                    t%step = trace_time_n - t%confined
-                endif
+                do while (t%confined.lt.trace_time_n)
+                    i = i + 1
 
-                call orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                                          local_tetr_moments, local_counter, species, trace_time_n)
+                    if (in%boole_collisions) then
+                        call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species, iswmode_in=1)
+                        t%step = t%step / start%v0(species)
+                    else
+                        t%step = trace_time_n - t%confined
+                    endif
 
-                t%confined = t%confined + t%step - t%remain
-                t_tot = t_tot + t%step - t%remain
+                    if (in%boole_delta_f) then
+                        call orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
+                                                                  particle_tetr_moments, local_counter, species, trace_time_n)
+                    else
+                        call orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
+                                                                  local_tetr_moments, local_counter, species, trace_time_n)
+                    end if
 
-                if (in%boole_delta_f .and. allocated(trace_time)) then
-                    if (trace_time(n, species) > 0.0_dp) trace_time_n = trace_time(n, species)
+                    t%confined = t%confined + t%step - t%remain
+                    t_tot = t_tot + t%step - t%remain
+
+                    if (in%boole_delta_f .and. allocated(trace_time)) then
+                        if (trace_time(n, species) > 0.0_dp) trace_time_n = trace_time(n, species)
+                    end if
+
+                    if (ind_tetr.eq.-1) exit
+                enddo
+
+                i_total    = i_total    + i
+                t_actual_n = t_actual_n + t%confined
+
+                ! Did the marker complete its trace (or run out of trace
+                ! time naturally)? If so, we are done.
+                if (ind_tetr /= -1) exit
+
+                ! Killed. Decide whether to respawn or accept the loss.
+                if (.not. in%boole_delta_f .or. n_respawn_used >= n_respawn_max) then
+                    call handle_lost_particles(local_counter, particle_status%lost)
+                    n_truly_lost = n_truly_lost + 1
+                    exit
                 end if
 
-                if (ind_tetr.eq.-1) then
+                call respawn_particle_in_window(n, species, respawn_success)
+                if (.not. respawn_success) then
                     call handle_lost_particles(local_counter, particle_status%lost)
+                    n_truly_lost = n_truly_lost + 1
                     exit
-                endif
+                end if
+                n_respawn_used  = n_respawn_used  + 1
+                n_respawn_total = n_respawn_total + 1
             enddo
 
+            ! Per-particle time average using the SUM of t_confined over all
+            ! attempts (= the actual integration time we have data for).
+            ! This makes killed-and-not-respawned markers contribute their
+            ! short trace at full weight, instead of being suppressed by
+            ! division by the full intended T_n they never reached.
+            if (in%boole_delta_f .and. t_actual_n > 0.0_dp) then
+                local_tetr_moments = local_tetr_moments &
+                                   + particle_tetr_moments / t_actual_n
+            end if
+
             !$omp critical
-            counter%integration_steps = counter%integration_steps + i
-            c%maxcol = max(dble(i)/dble(c%randcoli), c%maxcol)
+            counter%integration_steps = counter%integration_steps + i_total
+            c%maxcol = max(dble(i_total)/dble(c%randcoli), c%maxcol)
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
 
-            call update_exit_data(particle_status%lost, t%confined, x, vpar, vperp, i, n, species_in=species, ind_tetr=ind_tetr)
+            call update_exit_data(particle_status%lost, t_actual_n, x, vpar, vperp, i_total, n, species_in=species, ind_tetr=ind_tetr)
             call update_start_type(x, vpar, vperp, n, species, ind_tetr)
         enddo
 
@@ -487,9 +626,15 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
         !$omp end critical
     enddo
     !$OMP END DO
+
+    if (allocated(particle_tetr_moments)) deallocate(particle_tetr_moments)
     !$OMP END PARALLEL
 
     print*, 'Total tracing time / number of particles: ', t_tot/n_particles, 's'
+    if (in%boole_delta_f .and. n_respawn_max > 0) then
+        print*, 'Respawn attempts used (across all particles): ', n_respawn_total
+        print*, 'Particles still lost after respawn budget   : ', n_truly_lost
+    end if
 
 end subroutine parallelised_particle_pushing_rmp_response_currents
 
@@ -609,6 +754,25 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
 
         call update_local_tetr_moments(local_tetr_moments, ind_tetr_save, n, optional_quantities, species)
         if ((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save, ind_tetr, x)
+
+        ! Diagnostic: dump marker n=1 trajectory for orbit-q comparison.
+        ! Use ind_tetr (the tetra containing the post-push x), NOT
+        ! ind_tetr_save (the pre-push tetra) -- otherwise barycentric
+        ! interpolation in the post-processor extrapolates outside the
+        ! tetra and gives spurious s excursions.
+        if (boole_dump_orbit_n1 .and. n == 1 .and. traj_dump_unit /= 0 .and. ind_tetr /= -1) then
+            traj_step_count = traj_step_count + 1
+            if (mod(traj_step_count, orbit_dump_stride) == 0) then
+                !$omp critical (traj_dump)
+                write(traj_dump_unit, '(es16.8, 3es16.8, es16.8, 4es16.8, i10, i10)') &
+                    t%confined + t%step - t%remain, x(1), x(2), x(3), vpar, &
+                    real(weights%w(n, species), dp), aimag(weights%w(n, species)), &
+                    real(weights%w(n, species), dp) * vpar, &
+                    aimag(weights%w(n, species)) * vpar, &
+                    ind_tetr, iper_phi
+                !$omp end critical (traj_dump)
+            end if
+        end if
 
         ! Outer computational-domain cut: kill the particle on first entry
         ! into a tetra whose s exceeds s_outer_cut. Moments for the tetra just
@@ -793,8 +957,8 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
     use tetra_physics_mod, only: tetra_physics, coord_system
     use tetra_grid_mod, only: tetra_grid, verts_sthetaphi
     use constants, only: ev2erg
-    use profile_data_mod, only: eval_profiles, profile_values_t, eval_q, get_psi_tor_edge
-    use perturbation_field_mod, only: eval_delta_B_psi
+    use profile_data_mod, only: eval_profiles, profile_values_t
+    use perturbation_field_mod, only: eval_delta_B_s
 
     integer,     intent(in)  :: ind_tetr, species
     real(dp),    intent(in)  :: x(3), vpar, vperp
@@ -802,9 +966,9 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
 
     real(dp)    :: z_cell(3), s_loc, theta_loc, phi_loc
     real(dp)    :: B0_loc
-    complex(dp) :: dB_psi
+    complex(dp) :: dB_s
     real(dp)    :: v_sq, T_alpha_erg, A1, A2
-    real(dp)    :: mass, charge, ds_dpsi_pol, q_loc, psi_tor_edge
+    real(dp)    :: mass, charge
     type(profile_values_t) :: pv
 
     wdot_s = (0.0_dp, 0.0_dp)
@@ -822,7 +986,7 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
     B0_loc = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z_cell)
     if (B0_loc <= 0.0_dp) return
 
-    call eval_delta_B_psi(s_loc, theta_loc, phi_loc, dB_psi)
+    call eval_delta_B_s(s_loc, theta_loc, phi_loc, dB_s)
 
     call eval_profiles(s_loc, pv)
 
@@ -837,26 +1001,18 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
     end if
     if (T_alpha_erg <= 0.0_dp) T_alpha_erg = in%energy_eV * ev2erg
 
-    psi_tor_edge = get_psi_tor_edge()
-    q_loc = eval_q(s_loc)
-    if (abs(psi_tor_edge) > 0.0_dp .and. abs(q_loc) > 0.0_dp) then
-        ds_dpsi_pol = q_loc / psi_tor_edge
-    else
-        ds_dpsi_pol = 0.0_dp
-    end if
-
+    ! A_1, A_2 in d/ds form (no ds/dpsi_pol conversion); the contravariant
+    ! component delta_B^s in the source closes the chain rule.
     if (charge > 0.0_dp) then
-        A1 = (pv%dlnn_ds + (charge/T_alpha_erg) * pv%dPhi0_ds &
-              - 1.5_dp * pv%dlnTi_ds) * ds_dpsi_pol
-        A2 = pv%dlnTi_ds * ds_dpsi_pol
+        A1 = pv%dlnn_ds + (charge/T_alpha_erg) * pv%dPhi0_ds - 1.5_dp * pv%dlnTi_ds
+        A2 = pv%dlnTi_ds
     else
-        A1 = (pv%dlnn_ds + (charge/T_alpha_erg) * pv%dPhi0_ds &
-              - 1.5_dp * pv%dlnTe_ds) * ds_dpsi_pol
-        A2 = pv%dlnTe_ds * ds_dpsi_pol
+        A1 = pv%dlnn_ds + (charge/T_alpha_erg) * pv%dPhi0_ds - 1.5_dp * pv%dlnTe_ds
+        A2 = pv%dlnTe_ds
     end if
 
     wdot_s = (-vpar * (A1 + A2 * mass * v_sq / (2.0_dp * T_alpha_erg))) &
-             * (dB_psi / cmplx(B0_loc, 0.0_dp, kind=dp))
+             * (dB_s / cmplx(B0_loc, 0.0_dp, kind=dp))
 
 end subroutine eval_wdot_s
 
@@ -943,6 +1099,126 @@ real(dp) function eval_s_local(ind_tetr, x) result(s_loc)
 end function eval_s_local
 
 ! ====================================================================
+! Total physical volume of the spawn region (the part of the mesh whose
+! prisms have their reference s in [s_inner_sample, s_outer_sample]).
+! This is the V_W factor that the delta-f current density is missing
+! before applying it to the moments (see
+! docs/2026-05-06-spawn-volume-normalisation.md).
+!
+! For each prism we use verts_sthetaphi at the first knot of the prism's
+! first tetra as the prism's reference s -- same convention as the
+! diagnostic scripts. Sums over all phi slices since markers are placed
+! uniformly in phi too.
+! ====================================================================
+real(dp) function compute_spawn_volume() result(V_W)
+
+    use gorilla_applets_types_mod, only: output
+    use tetra_grid_mod, only: tetra_grid, verts_sthetaphi, ntetr
+
+    integer  :: n_prisms, p, knot1
+    real(dp) :: s_p
+
+    n_prisms = ntetr / 3
+    V_W = 0.0_dp
+    do p = 1, n_prisms
+        knot1 = tetra_grid(3*p - 2)%ind_knot(1)
+        s_p   = verts_sthetaphi(1, knot1)
+        if (s_p >= s_inner_sample .and. s_p <= s_outer_sample) then
+            V_W = V_W + output%prism_volumes(p)
+        end if
+    end do
+
+end function compute_spawn_volume
+
+! ====================================================================
+! Population filter: classify each marker as trapped or passing using
+! conservation of energy and magnetic moment, then mark non-matching
+! ones as lost. Trapping condition:
+!     pitch^2 < 1 - B_start / B_max(s_marker),
+! with B_max(s) found by scanning theta on the marker's flux surface
+! via magdata_in_symfluxcoord_ext.
+!
+! Note on normalisation: filtered-out markers stay in the n_particles
+! divisor, so the plotted magnitude is the FILTERED population's
+! contribution to the (unfiltered) j_par. Passing-only and trapped-only
+! plotted profiles add up to the original.
+! ====================================================================
+subroutine filter_markers_by_trapping(species)
+
+    use gorilla_applets_types_mod, only: in, start
+    use tetra_physics_mod, only: tetra_physics
+    use find_tetra_mod, only: find_tetra
+    use magdata_in_symfluxcoordinates_mod, only: magdata_in_symfluxcoord_ext
+    use constants, only: pi
+
+    integer, intent(in) :: species
+
+    integer, parameter :: n_theta_scan = 100
+    integer  :: n, ind_tetr, iface, k, n_kept, n_dropped
+    real(dp) :: x(3), z_cell(3), s_loc, B_start, B_max
+    real(dp) :: pitch, eps_eff, theta_scan
+    real(dp) :: psi_d, q_d, dq_d, sqrtg_d, dbmod_dt_d
+    real(dp) :: bmod_at_scan, R_d, dR_ds_d, dR_dt_d, Z_d, dZ_ds_d, dZ_dt_d
+    logical  :: is_trapped, keep
+
+    if (trim(trapping_filter_mode) /= 'passing' .and. &
+        trim(trapping_filter_mode) /= 'trapped') return
+
+    n_kept    = 0
+    n_dropped = 0
+
+    do n = 1, in%num_particles
+        if (start%lost(n, species)) cycle
+
+        x = start%x(:, n, species)
+        call find_tetra(x, 0.0_dp, 0.0_dp, ind_tetr, iface)
+        if (ind_tetr == -1) then
+            start%lost(n, species) = .true.
+            n_dropped = n_dropped + 1
+            cycle
+        end if
+
+        s_loc   = eval_s_local(ind_tetr, x)
+        z_cell  = x - tetra_physics(ind_tetr)%x1
+        B_start = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z_cell)
+
+        ! B_max on the flux surface s_loc.
+        B_max = 0.0_dp
+        do k = 1, n_theta_scan
+            theta_scan = 2.0_dp * pi * (k - 1) / n_theta_scan
+            psi_d = 0.0_dp
+            call magdata_in_symfluxcoord_ext(1, s_loc, psi_d, theta_scan, &
+                                             q_d, dq_d, sqrtg_d, bmod_at_scan, dbmod_dt_d, &
+                                             R_d, dR_ds_d, dR_dt_d, &
+                                             Z_d, dZ_ds_d, dZ_dt_d)
+            if (bmod_at_scan > B_max) B_max = bmod_at_scan
+        end do
+
+        pitch   = start%pitch(n, species)
+        eps_eff = 1.0_dp - B_start / B_max
+        is_trapped = (eps_eff > 0.0_dp .and. pitch * pitch < eps_eff)
+
+        if (trim(trapping_filter_mode) == 'passing') then
+            keep = .not. is_trapped
+        else
+            keep = is_trapped
+        end if
+
+        if (.not. keep) then
+            start%lost(n, species) = .true.
+            n_dropped = n_dropped + 1
+        else
+            n_kept = n_kept + 1
+        end if
+    end do
+
+    print *, ''
+    print '(a, a)', ' [trapping filter] mode = ', trim(trapping_filter_mode)
+    print '(a, i0, a, i0)', '   kept: ', n_kept, ', dropped: ', n_dropped
+
+end subroutine filter_markers_by_trapping
+
+! ====================================================================
 ! Resamples the starting positions so they all land in the s-window
 ! [s_inner_sample, s_outer_sample].  For each particle, draws a fresh
 ! (R, phi, Z) (or (s, phi, theta)) from the same bounding box used by
@@ -1017,6 +1293,300 @@ subroutine bias_starting_positions_to_s_window()
     print *, ''
 
 end subroutine bias_starting_positions_to_s_window
+
+! ====================================================================
+! Equidistant-in-s spawner. Reconstructs the radial s-edges of the grid
+! (matching tetra_grid_settings_mod's logarithmic-extra-rings + linear
+! main-grid layout) and places ONE marker at each layer whose midpoint
+! falls inside [s_inner_sample, s_outer_sample]. Theta and phi are
+! sampled uniformly from the full mesh box, and a position is accepted
+! only if its local s lands inside that layer (rejection per layer).
+!
+! n_particles in the input must be >= the number of layers in the
+! window; layers in excess of the slot count are skipped and a warning
+! is printed. Unused slots get marked as lost.
+! ====================================================================
+subroutine spawn_equidistant_in_s(species, n_spawned)
+
+    use gorilla_applets_types_mod, only: in, start, g
+    use tetra_grid_settings_mod, only: sfc_s_min, sfc_s_max, grid_size, n_extra_rings
+    use tetra_physics_mod, only: coord_system
+    use find_tetra_mod, only: find_tetra
+    use magdata_in_symfluxcoordinates_mod, only: magdata_in_symfluxcoord_ext
+    use constants, only: pi
+
+    integer, intent(in)  :: species
+    integer, intent(out) :: n_spawned
+
+    ! Direct (s, theta, phi) -> (R, phi, Z) sampler via the equilibrium's
+    ! symflux mapping. No rejection, so a small retry budget covers the
+    ! occasional find_tetra miss at the very edge of the mesh.
+    integer, parameter   :: max_tries = 20
+    integer  :: nr, n1, k_layer, ind_tetr, iface, n_tries, k
+    integer  :: n_layers_window, k_per_layer, k_in_layer
+    integer  :: j_swap, tmp_int, phi_bin_idx
+    integer, allocatable :: phi_bin_perm(:)
+    real(dp) :: s_mid, s_low_lyr, s_high_lyr, s_target, x(3), u(3), u_scalar
+    real(dp) :: theta_loc, phi_loc, R_loc, Z_loc
+    real(dp) :: s_second_ring
+    real(dp), allocatable :: s_edges(:)
+    logical  :: placed
+    ! Dummy outputs from magdata_in_symfluxcoord_ext (we only need R, Z).
+    real(dp) :: psi_d, q_d, dq_ds_d, sqrtg_d, bmod_d, dbmod_dt_d
+    real(dp) :: dR_ds_d, dR_dt_d, dZ_ds_d, dZ_dt_d
+
+    nr = grid_size(1)
+    n1 = nr - n_extra_rings
+
+    allocate(s_edges(nr + 1))
+    s_edges(1) = sfc_s_min
+    if (n_extra_rings > 0) then
+        s_second_ring = sfc_s_min + (sfc_s_max - sfc_s_min) / dble(n1)
+        do k = 1, n_extra_rings
+            s_edges(k + 1) = exp(log(sfc_s_min) &
+                + dble(k) * (log(s_second_ring) - log(sfc_s_min)) / dble(n_extra_rings + 1))
+        end do
+    end if
+    do k = 1, n1
+        s_edges(n_extra_rings + 1 + k) = sfc_s_min + dble(k) * (sfc_s_max - sfc_s_min) / dble(n1)
+    end do
+
+    ! Pre-pass: count layers whose midpoint falls in the spawn window.
+    ! Sets the multiplicity per layer when n_particles > n_layers.
+    n_layers_window = 0
+    do k_layer = 1, nr
+        s_mid = 0.5_dp * (s_edges(k_layer) + s_edges(k_layer + 1))
+        if (s_mid >= s_inner_sample .and. s_mid <= s_outer_sample) then
+            n_layers_window = n_layers_window + 1
+        end if
+    end do
+
+    if (n_layers_window == 0) then
+        print *, 'ERROR (spawn_equidistant_in_s): no layer midpoints fall in spawn window.'
+        deallocate(s_edges)
+        n_spawned = 0
+        return
+    end if
+
+    ! Markers per layer: ceil(n_particles / n_layers_window). The very last
+    ! layer may get fewer than this if n_particles isn't an exact multiple
+    ! (we cap at in%num_particles).
+    k_per_layer = (in%num_particles + n_layers_window - 1) / n_layers_window
+
+    print *, ''
+    print *, 'Equidistant-in-s spawn enabled.'
+    print '(a, i0, a, i0)', '   Total radial layers: ', nr, ', main-grid layers (n1): ', n1
+    print '(a, f8.5, a, f8.5, a)', '   Spawn window: [', s_inner_sample, &
+                                    ', ', s_outer_sample, ']'
+    print '(a, i0, a, i0, a, i0)', '   Layers in window: ', n_layers_window, &
+                                    ', markers per layer: ', k_per_layer, &
+                                    ' (total slots: ', in%num_particles, ')'
+
+    n_spawned = 0
+
+    if (boole_stratify_phi) allocate(phi_bin_perm(k_per_layer))
+
+    do k_layer = 1, nr
+        s_low_lyr  = s_edges(k_layer)
+        s_high_lyr = s_edges(k_layer + 1)
+        s_mid      = 0.5_dp * (s_low_lyr + s_high_lyr)
+
+        if (s_mid < s_inner_sample .or. s_mid > s_outer_sample) cycle
+
+        if (boole_stratify_phi) then
+            ! Fresh Fisher-Yates shuffle of bin indices for this layer.
+            do k = 1, k_per_layer
+                phi_bin_perm(k) = k
+            end do
+            do k = k_per_layer, 2, -1
+                call random_number(u_scalar)
+                j_swap = 1 + int(u_scalar * dble(k))
+                if (j_swap > k) j_swap = k
+                tmp_int           = phi_bin_perm(k)
+                phi_bin_perm(k)   = phi_bin_perm(j_swap)
+                phi_bin_perm(j_swap) = tmp_int
+            end do
+        end if
+
+        do k_in_layer = 1, k_per_layer
+            if (n_spawned >= in%num_particles) exit
+
+            placed = .false.
+            do n_tries = 1, max_tries
+                call random_number(u)
+                ! Direct draw inside this layer: s uniform within layer
+                ! edges, theta and phi uniform in [0, 2 pi]. With
+                ! boole_stratify_theta on, marker k of K in this layer
+                ! draws theta from bin [(k-1)/K, k/K)*2pi instead.
+                s_target  = s_low_lyr + u(1) * (s_high_lyr - s_low_lyr)
+                if (boole_stratify_theta) then
+                    theta_loc = (dble(k_in_layer - 1) + u(2)) &
+                              * 2.0_dp * pi / dble(k_per_layer)
+                else
+                    theta_loc = u(2) * 2.0_dp * pi
+                end if
+                if (boole_stratify_phi) then
+                    phi_bin_idx = phi_bin_perm(k_in_layer)
+                    phi_loc = (dble(phi_bin_idx - 1) + u(3)) &
+                            * 2.0_dp * pi / dble(k_per_layer)
+                else
+                    phi_loc = u(3) * 2.0_dp * pi
+                end if
+
+                if (coord_system == 1) then
+                    ! Symflux -> cylindrical via the equilibrium mapping.
+                    ! psi_d is overwritten as output when inp_label=1.
+                    psi_d = 0.0_dp
+                    call magdata_in_symfluxcoord_ext(1, s_target, psi_d, theta_loc, &
+                                                     q_d, dq_ds_d, sqrtg_d, bmod_d, dbmod_dt_d, &
+                                                     R_loc, dR_ds_d, dR_dt_d, &
+                                                     Z_loc, dZ_ds_d, dZ_dt_d)
+                    x(1) = R_loc
+                    x(2) = phi_loc
+                    x(3) = Z_loc
+                else
+                    x(1) = s_target
+                    x(2) = theta_loc
+                    x(3) = phi_loc
+                end if
+
+                call find_tetra(x, 0.0_dp, 0.0_dp, ind_tetr, iface)
+                if (ind_tetr == -1) cycle  ! at the mesh edge; retry with a fresh draw
+
+                n_spawned = n_spawned + 1
+                start%x(:, n_spawned, species) = x
+                start%lost(n_spawned, species) = .false.
+                placed = .true.
+                exit
+            end do
+            if (.not. placed) then
+                print '(a, i0, a, i0, a, f7.4, a)', &
+                    '   WARNING: could not place marker ', k_in_layer, &
+                    ' for layer ', k_layer, ' (s_mid = ', s_mid, ')'
+            end if
+        end do
+    end do
+
+    do k = n_spawned + 1, in%num_particles
+        start%lost(k, species) = .true.
+    end do
+
+    deallocate(s_edges)
+    if (allocated(phi_bin_perm)) deallocate(phi_bin_perm)
+
+    print '(a, i0, a, i0, a)', '   Placed ', n_spawned, &
+                                ' markers (', in%num_particles, ' slots available)'
+    print *, ''
+
+end subroutine spawn_equidistant_in_s
+
+! ====================================================================
+! Single-particle respawn within the bias window intersected with the
+! computational-domain cut. Used to redraw start%x(:,n,species) when a
+! marker exits the domain mid-trace, so it can be re-traced from a fresh
+! valid position. Thread-safe (only writes to its own particle's start
+! position; find_tetra reads the immutable mesh; random_number is per
+! thread under gfortran/OpenMP).
+! ====================================================================
+subroutine respawn_particle_in_window(n, species, success)
+
+    use gorilla_applets_types_mod, only: start, g
+    use tetra_physics_mod, only: coord_system
+    use find_tetra_mod, only: find_tetra
+    use constants, only: pi
+
+    integer, intent(in)  :: n, species
+    logical, intent(out) :: success
+
+    integer, parameter :: max_tries = 1000
+    integer  :: ind_tetr, iface, n_tries
+    real(dp) :: x(3), s_loc, u(3), x_amin, x_amax, x_cmin, x_cmax
+    real(dp) :: s_lo, s_hi
+    real(dp), parameter :: eps_cut = 1.0e-3_dp
+
+    s_lo = s_inner_sample
+    s_hi = s_outer_sample
+    if (s_outer_cut < 1.0_dp) s_hi = min(s_hi, s_outer_cut - eps_cut)
+
+    success = .false.
+    if (s_hi <= s_lo) return
+
+    x_amin = g%amin; x_amax = g%amax
+    x_cmin = g%cmin; x_cmax = g%cmax
+
+    do n_tries = 1, max_tries
+        call random_number(u)
+        if (coord_system .eq. 1) then
+            x(1) = x_amin + u(1) * (x_amax - x_amin)   ! R
+            x(2) = u(2) * 2.0_dp * pi                  ! phi
+            x(3) = x_cmin + u(3) * (x_cmax - x_cmin)   ! Z
+        else
+            x(1) = x_amin + u(1) * (x_amax - x_amin)   ! s
+            x(2) = x_cmin + u(2) * (x_cmax - x_cmin)   ! theta
+            x(3) = u(3) * 2.0_dp * pi                  ! phi
+        end if
+        call find_tetra(x, 0.0_dp, 0.0_dp, ind_tetr, iface)
+        if (ind_tetr == -1) cycle
+        s_loc = eval_s_local(ind_tetr, x)
+        if (s_loc >= s_lo .and. s_loc <= s_hi) then
+            start%x(:, n, species) = x
+            success = .true.
+            return
+        end if
+    end do
+
+end subroutine respawn_particle_in_window
+
+! ====================================================================
+! Diagnostic: dump per-particle starting positions to a file. Writes
+! columns
+!   n  x1  x2  x3  s  lost
+! where (x1, x2, x3) are in the active coord_system (cylindrical:
+! (R, phi, Z); flux: (s, theta, phi)). s is evaluated via find_tetra
+! at the same position; -1 marks particles outside the mesh.
+! ====================================================================
+subroutine dump_start_positions(filename, species)
+
+    use gorilla_applets_types_mod, only: in, start
+    use tetra_physics_mod, only: tetra_physics
+    use tetra_grid_mod, only: tetra_grid, verts_sthetaphi
+    use find_tetra_mod, only: find_tetra
+
+    character(len=*), intent(in) :: filename
+    integer, intent(in)          :: species
+
+    integer  :: u, n, ind_tetr, iface, lost_int
+    real(dp) :: x(3), s_loc, theta_loc, z_cell(3), B_start, pitch
+
+    open(newunit=u, file=trim(filename), status='unknown', action='write')
+    write(u, '(a)') '# n  x1  x2  x3  s  theta_SFL  B_start  pitch  lost'
+    do n = 1, in%num_particles
+        x = start%x(:, n, species)
+        s_loc      = -1.0_dp
+        theta_loc  = -1.0_dp
+        B_start    = -1.0_dp
+        pitch      =  start%pitch(n, species)
+        if (.not. start%lost(n, species)) then
+            call find_tetra(x, 0.0_dp, 0.0_dp, ind_tetr, iface)
+            if (ind_tetr /= -1) then
+                s_loc = eval_s_local(ind_tetr, x)
+                ! theta_SFL approximated from first vertex of the tetra (same
+                ! convention used by the wdot evaluator).
+                theta_loc = verts_sthetaphi(2, tetra_grid(ind_tetr)%ind_knot(1))
+                z_cell = x - tetra_physics(ind_tetr)%x1
+                B_start = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z_cell)
+            end if
+        end if
+        if (start%lost(n, species)) then
+            lost_int = 1
+        else
+            lost_int = 0
+        end if
+        write(u, '(i6, 7es16.8, i4)') n, x(1), x(2), x(3), s_loc, theta_loc, B_start, pitch, lost_int
+    end do
+    close(u)
+
+end subroutine dump_start_positions
 
 ! ====================================================================
 ! Velocity-Jacobian-weighted Maxwellian energy PDF for the 1D sampler.

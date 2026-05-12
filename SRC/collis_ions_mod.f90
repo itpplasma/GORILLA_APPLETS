@@ -192,7 +192,7 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
 !               2 - step over pitch exceeds 1 (pitch was
 !                   replaced by randomly distributed on [-1,1]),
 !               3 - new pitch module exceeds 1, reflection from
-!                   the boudary was performed,
+!                   the boundary was performed,
 !               10 or >10 - new momentum module is less then
 !                   prescribed minimum, reflection was performed.
 !

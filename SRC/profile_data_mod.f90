@@ -24,7 +24,7 @@ module profile_data_mod
     private
     public :: load_profiles, eval_profiles, cleanup_profiles
     public :: eval_q, get_psi_tor_edge
-    public :: eval_s_from_psi_pol
+    public :: eval_s_from_psi_pol, eval_ds_dreff
     public :: profile_values_t
 
     ! Result type returned by eval_profiles
@@ -56,6 +56,11 @@ module profile_data_mod
     !     d/dpsi_pol = (q(s)/psi_tor_edge) d/ds.
     real(dp), allocatable :: q_spl(:),   q_dd(:)
     real(dp) :: psi_tor_edge_stored = 0.0_dp
+
+    ! r_eff(s) spline built from flux_functions.dat (column "r" in cm).
+    ! Used by eval_ds_dreff to convert delta_B_r (input as Gauss) to the
+    ! contravariant component delta_B^s = (ds/dr_eff) * delta_B_r [Gauss/cm].
+    real(dp), allocatable :: r_eff_spl(:), r_eff_dd(:)
 
     ! Map psi_pol -> s_true = psi_tor/psi_tor_edge so that an arbitrary
     ! poloidal-flux value (e.g. tetra_physics(...)%Aphi1 + gAphi . z_cell
@@ -120,6 +125,12 @@ subroutine load_profiles(profile_dir, equil_mapping_file)
     allocate(q_spl(ns), q_dd(ns))
     q_spl = q_equil
     call spline_natural(ns, s_grid, q_spl, q_dd)
+
+    ! Store r_eff(s) [cm] so eval_ds_dreff can return the geometric factor
+    ! that converts delta_B_r (Gauss) to delta_B^s (Gauss/cm).
+    allocate(r_eff_spl(ns), r_eff_dd(ns))
+    r_eff_spl = r_equil
+    call spline_natural(ns, s_grid, r_eff_spl, r_eff_dd)
 
     ! Map psi_pol -> true s so the applet can convert local poloidal
     ! flux (from Aphi1 + gAphi . z_cell) to physical s for profile
@@ -245,6 +256,8 @@ subroutine cleanup_profiles()
     if (allocated(Phi_dd))  deallocate(Phi_dd)
     if (allocated(q_spl))   deallocate(q_spl)
     if (allocated(q_dd))    deallocate(q_dd)
+    if (allocated(r_eff_spl)) deallocate(r_eff_spl)
+    if (allocated(r_eff_dd))  deallocate(r_eff_dd)
     if (allocated(psi_pol_sorted))   deallocate(psi_pol_sorted)
     if (allocated(s_of_psi_pol_spl)) deallocate(s_of_psi_pol_spl)
     if (allocated(s_of_psi_pol_dd))  deallocate(s_of_psi_pol_dd)
@@ -269,6 +282,29 @@ end function eval_q
 real(dp) function get_psi_tor_edge()
     get_psi_tor_edge = psi_tor_edge_stored
 end function get_psi_tor_edge
+
+! ============================================================
+! ds / dr_eff at a given s, in 1/cm.  Builds on the r_eff(s) spline
+! from flux_functions.dat: derivative dr_eff/ds is taken from the spline
+! and inverted.  Used by eval_delta_B_s to convert delta_B_r [Gauss] to
+! delta_B^s [Gauss/cm] = (ds/dr_eff) * delta_B_r.
+! ============================================================
+real(dp) function eval_ds_dreff(s_val) result(ds_dreff)
+    real(dp), intent(in) :: s_val
+    real(dp) :: s_clamped, r_val, dr_ds
+
+    if (ns < 2 .or. .not. profiles_loaded) then
+        ds_dreff = 0.0_dp
+        return
+    end if
+    s_clamped = max(0.0_dp, min(1.0_dp, s_val))
+    call splint_with_deriv(ns, s_grid, r_eff_spl, r_eff_dd, s_clamped, r_val, dr_ds)
+    if (dr_ds > 0.0_dp) then
+        ds_dreff = 1.0_dp / dr_ds
+    else
+        ds_dreff = 0.0_dp
+    end if
+end function eval_ds_dreff
 
 ! ============================================================
 ! Convert a local poloidal flux value (e.g. as evaluated inside a

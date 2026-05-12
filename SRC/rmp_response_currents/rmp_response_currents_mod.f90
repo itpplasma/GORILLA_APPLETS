@@ -25,9 +25,12 @@ subroutine calc_rmp_response_currents
     use utils_rmp_response_currents_mod, only: read_rmp_response_currents_inp_into_type, &
         parallelised_particle_pushing_rmp_response_currents, &
         calc_starting_conditions_rmp_response_currents, &
-        profile_dir, equil_mapping_file, boole_constant_delta_B_psi, delta_B_psi_const, &
-        pert_m_fourier, pert_n_fourier, delta_B_psi_file, boole_skip_phase_for_test, &
-        bias_starting_positions_to_s_window
+        profile_dir, equil_mapping_file, boole_constant_delta_B_r, delta_B_r_const, &
+        pert_m_fourier, pert_n_fourier, delta_B_r_file, boole_skip_phase_for_test, &
+        bias_starting_positions_to_s_window, dump_start_positions, &
+        spawn_equidistant_in_s, boole_equidistant_s_sampling, &
+        boole_dump_orbit_n1, traj_dump_unit, traj_step_count, &
+        compute_spawn_volume, filter_markers_by_trapping, trapping_filter_mode
     use profile_data_mod, only: load_profiles
     use perturbation_field_mod, only: init_constant_perturbation, load_perturbation_field, boole_skip_phase
 
@@ -52,22 +55,77 @@ subroutine calc_rmp_response_currents
     ! delta-f weight evolution (Albert 2016, Eq. 4).
     if (in%boole_delta_f) then
         call load_profiles(trim(profile_dir), trim(equil_mapping_file))
-        if (boole_constant_delta_B_psi) then
-            call init_constant_perturbation(delta_B_psi_const, pert_m_fourier, pert_n_fourier)
+        if (boole_constant_delta_B_r) then
+            call init_constant_perturbation(delta_B_r_const, pert_m_fourier, pert_n_fourier)
             boole_skip_phase = boole_skip_phase_for_test
         else
-            call load_perturbation_field(trim(delta_B_psi_file), trim(equil_mapping_file), &
+            call load_perturbation_field(trim(delta_B_r_file), trim(equil_mapping_file), &
                                          pert_m_fourier, pert_n_fourier)
         end if
     end if
 
     call calc_starting_conditions_rmp_response_currents
     call eliminate_particles_outside_flux_threshold
-    if (in%boole_delta_f) call bias_starting_positions_to_s_window
+    if (in%boole_delta_f) then
+        if (boole_equidistant_s_sampling) then
+            block
+                integer :: n_spawned
+                call spawn_equidistant_in_s(species=1, n_spawned=n_spawned)
+            end block
+        else
+            call bias_starting_positions_to_s_window
+        end if
+    end if
+
+    ! Optional trapped/passing population filter (post-spawn).
+    if (trim(trapping_filter_mode) /= 'none') then
+        call filter_markers_by_trapping(species=1)
+    end if
+
+    ! Diagnostic: dump per-particle initial positions to start_positions.dat.
+    call dump_start_positions('start_positions.dat', species=1)
+
+    ! Diagnostic: open trajectory dump for marker n=1 (q-vs-s comparison).
+    if (boole_dump_orbit_n1) then
+        open(newunit=traj_dump_unit, file='traj_n1.dat', status='unknown', action='write')
+        write(traj_dump_unit, '(a)') '# t  R  phi  Z  vpar  Re(w)  Im(w)  Re(w*vpar)  Im(w*vpar)  ind_tetr  iper_phi'
+        traj_step_count = 0
+    end if
 
     call parallelised_particle_pushing_rmp_response_currents(species=1)
 
-    call normalise_prism_moments_and_prism_moments_squared(boole_skip_time_normalisation_in=in%boole_delta_f)
+    if (boole_dump_orbit_n1 .and. traj_dump_unit /= 0) then
+        close(traj_dump_unit)
+        traj_dump_unit = 0
+    end if
+
+    ! For delta-f the per-particle time average is already applied at
+    ! deposit time inside orbit_timestep_rmp_response_currents (each
+    ! contribution is divided by that marker's own T_n = N_collisions *
+    ! tau_c(s_n), since the trace time varies across the population). So
+    ! we skip the global time divisor here -- otherwise we would divide by
+    ! in%time_step a second time. The volume / N_particles part of the
+    ! normalisation still runs.
+    call normalise_prism_moments_and_prism_moments_squared( &
+        boole_skip_time_normalisation_in=in%boole_delta_f)
+
+    ! Apply the spawn-window volume V_W. With markers placed uniformly in
+    ! (R, phi, Z) inside the spawn region, each marker represents
+    ! (n(s) * V_W / N_p) physical particles, so the per-cell density
+    ! moment carries an extra factor V_W relative to what the deposit
+    ! sums to. See docs/2026-05-06-spawn-volume-normalisation.md.
+    if (in%boole_delta_f) then
+        block
+            real(dp) :: V_W
+            V_W = compute_spawn_volume()
+            output%prism_moments(:,:,:) = output%prism_moments(:,:,:) * V_W
+            if (moment_specs%boole_squared_moments) then
+                output%prism_moments_squared(:,:,:) = output%prism_moments_squared(:,:,:) * V_W**2
+            end if
+            print '(a, es12.5, a)', ' Spawn-window volume V_W = ', V_W, &
+                                     ' cm^3 (applied as moment multiplier)'
+        end block
+    end if
 
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
     call write_data_to_files

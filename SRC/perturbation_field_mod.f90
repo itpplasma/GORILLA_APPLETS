@@ -1,7 +1,7 @@
 !
 ! perturbation_field_mod.f90
 !
-! Loads a prescribed magnetic perturbation field delta_B_psi for a single
+! Loads a prescribed magnetic perturbation field delta_B_s for a single
 ! (m,n) Fourier harmonic from a text file and evaluates it along particle
 ! orbits.
 !
@@ -9,10 +9,10 @@
 ! the GORILLA flux coordinate s).  Along an orbit at position (s, theta, phi),
 ! the real perturbation is reconstructed as:
 !
-!   delta_B_psi(s, theta, phi) = Re[ delta_B_hat(s) * exp(i*(m*theta + n*phi)) ]
+!   delta_B_s(s, theta, phi) = Re[ delta_B_hat(s) * exp(i*(m*theta + n*phi)) ]
 !
 ! Input file format (three columns):
-!   r_eff [cm]    Re(delta_B_psi) [Gauss]    Im(delta_B_psi) [Gauss]
+!   r_eff [cm]    Re(delta_B_s) [Gauss]    Im(delta_B_s) [Gauss]
 !
 ! The r_eff -> s mapping uses the same equil_r_q_psi.dat as profile_data_mod.
 !
@@ -24,7 +24,7 @@ module perturbation_field_mod
 
     private
     public :: load_perturbation_field, init_constant_perturbation, &
-              eval_delta_B_psi, cleanup_perturbation_field
+              eval_delta_B_s, cleanup_perturbation_field
     public :: pert_m_mode, pert_n_mode
 
     ! Mode numbers
@@ -41,7 +41,7 @@ module perturbation_field_mod
 
     logical :: perturbation_loaded = .false.
 
-    ! Constant-amplitude mode: dB_psi = dB_const * cos(m theta + n phi).
+    ! Constant-amplitude mode: dB_s = dB_const * cos(m theta + n phi).
     ! Skips the radial spline and just returns dB_const at every s.
     logical :: use_constant_amplitude = .false.
     real(dp) :: dB_constant = 0.0_dp
@@ -167,7 +167,7 @@ end subroutine load_perturbation_field
 ! Constant-amplitude initialisation
 !
 ! Sets up a radially constant perturbation envelope:
-!   delta_B_psi = dB_const * cos(m*theta + n*phi)
+!   delta_B_s = dB_const * cos(m*theta + n*phi)
 ! ============================================================
 subroutine init_constant_perturbation(dB_const, m_mode, n_mode)
 
@@ -182,34 +182,41 @@ subroutine init_constant_perturbation(dB_const, m_mode, n_mode)
 
     print *, ''
     print *, 'Perturbation field: constant amplitude mode'
-    print *, '  dB_psi_const = ', dB_const, ' Gauss'
+    print *, '  dB_s_const = ', dB_const, ' Gauss'
     print *, '  Mode: m = ', m_mode, ', n = ', n_mode
     print *, ''
 
 end subroutine init_constant_perturbation
 
 ! ============================================================
-! Evaluate delta_B_psi at a particle position (s, theta, phi)
+! Evaluate delta_B^s at a particle position (s, theta, phi).
 !
-! Constant mode: dB_psi = dB_const * cos(m*theta + n*phi)
-! File mode:     dB_psi = Re[ dB_hat(s) * exp(i*(m*theta + n*phi)) ]
-!              = Re(dB_hat)*cos(phase) - Im(dB_hat)*sin(phase)
+! The user-supplied input (dB_constant or the file-loaded amplitude)
+! is the radial perturbation delta_B_r in Gauss.  We convert to the
+! contravariant component delta_B^s = (ds/dr_eff) * delta_B_r [Gauss/cm]
+! using eval_ds_dreff(s) from profile_data_mod.
+!
+! Constant mode: dB_s = (ds/dr_eff)(s) * dB_r_const * exp(i(m theta + n phi))
+! File mode:     dB_s = (ds/dr_eff)(s) * Re[ dB_hat_r(s) * exp(i(...)) ]
 ! ============================================================
-subroutine eval_delta_B_psi(s_val, theta, phi, dB_psi)
+subroutine eval_delta_B_s(s_val, theta, phi, dB_s)
+
+    use profile_data_mod, only: eval_ds_dreff
 
     real(dp),    intent(in)  :: s_val, theta, phi
-    complex(dp), intent(out) :: dB_psi
+    complex(dp), intent(out) :: dB_s
 
-    real(dp) :: s_clamped, dB_re, dB_im, phase, dummy
+    real(dp) :: s_clamped, dB_re, dB_im, phase, dummy, ds_dreff
     complex(dp), parameter :: i_imag = (0.0_dp, 1.0_dp)
 
     phase = real(pert_m_mode, dp) * theta + real(pert_n_mode, dp) * phi
+    ds_dreff = eval_ds_dreff(s_val)
 
     if (use_constant_amplitude) then
         if (boole_skip_phase) then
-            dB_psi = cmplx(dB_constant, 0.0_dp, kind=dp)
+            dB_s = cmplx(ds_dreff * dB_constant, 0.0_dp, kind=dp)
         else
-            dB_psi = dB_constant * exp(i_imag * phase)
+            dB_s = ds_dreff * dB_constant * exp(i_imag * phase)
         end if
         return
     end if
@@ -219,9 +226,9 @@ subroutine eval_delta_B_psi(s_val, theta, phi, dB_psi)
     call splint_pert(ns_pert, s_pert_grid, dB_re_spl, dB_re_dd, s_clamped, dB_re, dummy)
     call splint_pert(ns_pert, s_pert_grid, dB_im_spl, dB_im_dd, s_clamped, dB_im, dummy)
 
-    dB_psi = cmplx(dB_re, dB_im, kind=dp) * exp(i_imag * phase)
+    dB_s = ds_dreff * cmplx(dB_re, dB_im, kind=dp) * exp(i_imag * phase)
 
-end subroutine eval_delta_B_psi
+end subroutine eval_delta_B_s
 
 ! ============================================================
 ! Cleanup
