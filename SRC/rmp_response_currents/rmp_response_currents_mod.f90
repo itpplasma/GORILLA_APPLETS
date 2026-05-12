@@ -30,6 +30,8 @@ subroutine calc_rmp_response_currents
         bias_starting_positions_to_s_window, dump_start_positions, &
         spawn_equidistant_in_s, boole_equidistant_s_sampling, &
         boole_dump_orbit_n1, traj_dump_unit, traj_step_count, &
+        boole_dump_collisions_n1, coll_dump_unit, coll_event_count, &
+        coll_dt_sum, coll_dist_sum, &
         compute_spawn_volume, filter_markers_by_trapping, trapping_filter_mode
     use profile_data_mod, only: load_profiles
     use perturbation_field_mod, only: init_constant_perturbation, load_perturbation_field, boole_skip_phase
@@ -92,7 +94,27 @@ subroutine calc_rmp_response_currents
         traj_step_count = 0
     end if
 
+    ! Diagnostic: open collision-event dump for marker n=1.
+    if (boole_dump_collisions_n1) then
+        open(newunit=coll_dump_unit, file='coll_n1.dat', status='unknown', action='write')
+        write(coll_dump_unit, '(a)') '# event  t  ind_tetr  R  phi  Z  vpar  vperp  v_tot  dt_to_next_collision'
+        coll_event_count = 0
+    end if
+
     call parallelised_particle_pushing_rmp_response_currents(species=1)
+
+    if (boole_dump_collisions_n1 .and. coll_dump_unit /= 0) then
+        close(coll_dump_unit)
+        coll_dump_unit = 0
+        print*, ''
+        print*, '=== Collision-event diagnostics for marker n=1 ==='
+        print*, 'Total collision events: ', coll_event_count
+        if (coll_event_count > 0) then
+            print*, 'Mean dt between collisions [s]   : ', coll_dt_sum   / real(coll_event_count, 8)
+            print*, 'Mean distance between events [cm]: ', coll_dist_sum / real(coll_event_count, 8)
+        end if
+        print*, ''
+    end if
 
     if (boole_dump_orbit_n1 .and. traj_dump_unit /= 0) then
         close(traj_dump_unit)

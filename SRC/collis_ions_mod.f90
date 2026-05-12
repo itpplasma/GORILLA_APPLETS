@@ -227,8 +227,7 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
   if (present(tau)) then
     dtau = min(epsilon**2/(2*dhh),tau,upper_limit)
     if (z(4).lt.q) then
-      !dtau = min(dtau*(q/z(4))**2,tau),upper_limit)
-      dtau = min(1.0d-2/(2*dhh),tau,upper_limit)
+      dtau = min(dtau*(q/z(4))**2,tau,upper_limit)
     endif
   endif
 

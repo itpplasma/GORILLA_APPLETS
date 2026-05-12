@@ -21,10 +21,12 @@ module utils_rmp_response_currents_mod
     logical,            public :: boole_skip_phase_for_test = .false.
 
     ! Regularisation parameters (Albert 2016 Eq. 4 with linear damping).
-    ! The integration window per particle is N * tau_c long, the damping
-    ! switches on at M * tau_c, and nu_r = nu_r_frac * nu_c.
+    ! The damping rate is nu_r = nu_r_frac * nu_c per marker (still tied
+    ! to the local collision frequency, since nu_r is a physics quantity),
+    ! and the damping switches on at M * tau_c. The total trace time is
+    ! now controlled by the global namelist parameter time_step -- every
+    ! marker traces for the same wall-clock interval.
     real(dp),           public :: nu_r_frac                = 0.5_dp
-    integer,            public :: n_collision_times_trace  = 10
     integer,            public :: m_collision_times_reg_on = 3
     ! Coulomb logarithm for the local collision frequency.
     real(dp),           public :: coulomb_log              = 17.0_dp
@@ -84,6 +86,33 @@ module utils_rmp_response_currents_mod
     ! Persistent push-step counter; used by the trajectory dump to stride.
     integer,            public :: traj_step_count    = 0
 
+    ! Collision-event diagnostic for marker n=1: writes one row per call to
+    ! carry_out_collisions to coll_n1.dat, with the pre-push tetra, the
+    ! step size dt to the next collision, |v|, etc. Counters (event total
+    ! and dt sum) accumulate on every event so end-of-run statistics are
+    ! exact regardless of stride. The stride only governs which rows hit
+    ! disk -- coll_n1.dat gets every coll_dump_stride-th event.
+    logical, public :: boole_dump_collisions_n1 = .false.
+    integer, public :: coll_dump_unit          = 0
+    integer, public :: coll_dump_stride        = 1
+    integer, public :: coll_event_count        = 0
+    real(dp), public :: coll_dt_sum            = 0.0_dp
+    real(dp), public :: coll_dist_sum          = 0.0_dp
+
+    ! Point-source spawn position when boole_point_source = .true.,
+    ! interpreted in the integrator's native (a, b, c) chart. For
+    ! grid_kind=2 / cylindrical that's (R, phi, Z) in cm/rad/cm. If left
+    ! at its sentinel default (all zeros) the legacy fallback in
+    ! set_starting_positions_rmp is used.
+    real(dp), public :: point_source_x(3) = 0.0_dp
+
+    ! Override marker n=1's pitch (v_par/v) to a fixed value. Useful for
+    ! single-marker diagnostics where you want a deterministic orbit
+    ! (pitch=1 -> pure field-line follower, v_perp=0). When .false. the
+    ! pitch sampled from the normal distribution is kept.
+    logical,  public :: boole_force_marker1_pitch = .false.
+    real(dp), public :: marker1_pitch_value       = 1.0_dp
+
     ! Population filter: keep only passing or only trapped markers.
     ! 'none' (default), 'passing', or 'trapped'. Filtered-out markers
     ! get start%lost = .true. and are skipped during tracing. Useful for
@@ -105,9 +134,9 @@ module utils_rmp_response_currents_mod
     ! Per-particle regularisation storage. Allocated alongside weights%w
     ! when boole_delta_f is on. tau_c is the local collision time at the
     ! starting position; t_reg_on the switch-on time of the damping;
-    ! nu_r the damping rate; trace_time the per-particle confinement time.
+    ! nu_r the damping rate.
     real(dp), allocatable, public :: tau_c(:,:), t_reg_on(:,:)
-    real(dp), allocatable, public :: nu_r(:,:),  trace_time(:,:)
+    real(dp), allocatable, public :: nu_r(:,:)
 
 contains
 
@@ -140,11 +169,13 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f, &
     & profile_dir, equil_mapping_file, boole_constant_delta_B_r, delta_B_r_const, &
     & pert_m_fourier, pert_n_fourier, delta_B_r_file, species_for_delta_f, &
-    & nu_r_frac, n_collision_times_trace, m_collision_times_reg_on, coulomb_log, &
+    & nu_r_frac, m_collision_times_reg_on, coulomb_log, &
     & boole_compute_n_modes_dft, s_outer_cut, boole_skip_phase_for_test, &
     & s_inner_sample, s_outer_sample, n_respawn_max, boole_equidistant_s_sampling, &
     & boole_stratify_theta, boole_stratify_phi, &
-    & boole_dump_orbit_n1, orbit_dump_stride, trapping_filter_mode
+    & boole_dump_orbit_n1, orbit_dump_stride, trapping_filter_mode, &
+    & point_source_x, boole_force_marker1_pitch, marker1_pitch_value, &
+    & boole_dump_collisions_n1, coll_dump_stride
 
     open(newunit = s_inp_unit, file='rmp_response_currents.inp', status='unknown')
     read(s_inp_unit,nml=rmp_response_currents_nml)
@@ -195,12 +226,10 @@ subroutine allocate_delta_f_per_particle(n_particles, n_species)
     if (.not. allocated(tau_c))      allocate(tau_c(n_particles, n_species))
     if (.not. allocated(t_reg_on))   allocate(t_reg_on(n_particles, n_species))
     if (.not. allocated(nu_r))       allocate(nu_r(n_particles, n_species))
-    if (.not. allocated(trace_time)) allocate(trace_time(n_particles, n_species))
 
     tau_c      = 0.0_dp
     t_reg_on   = 0.0_dp
     nu_r       = 0.0_dp
-    trace_time = 0.0_dp
 
 end subroutine allocate_delta_f_per_particle
 
@@ -314,14 +343,14 @@ subroutine set_starting_positions_rmp()
 
     !compute starting conditions
     if (in%boole_point_source) then
-        if (grid_kind.eq.2) then
-            ! Barycenter of tetra 66417 (s,theta_SFL,phi) = (0.7486, 1.512, 0.995)
-            xmin = [205.071641_dp, 0.994838_dp, 31.737695_dp]
-            xmax = xmin
+        if (any(point_source_x /= 0.0_dp)) then
+            xmin = point_source_x
+        elseif (grid_kind.eq.2) then
+            xmin = [209.0_dp, 0.01_dp, 10.0_dp]
         elseif (grid_kind.eq.4) then
             xmin = [205.0_dp, 0.0_dp, 0.0_dp]
-            xmax = xmin
         endif
+        xmax = xmin
         if (coord_system.eq.2) print*, 'error: point source is only implemented for cylindrical coordinate system'
     else
         ! Set bounds for uniform sampling
@@ -398,13 +427,14 @@ subroutine set_rest_of_start_type_rmp()
         start%energy(1:in%num_particles:2,:) = start%energy(2:in%num_particles:2,:)
     endif
 
-    ! Diagnostic: when the orbit-q dump is on, force marker n=1 to be a
-    ! deeply-passing co-current particle (pitch ≈ +1) so its trajectory
-    ! follows a magnetic field line. Trapped/barely-passing markers give
-    ! poloidal-bounce dominated motion that cannot be used for q.
-    if (boole_dump_orbit_n1 .and. in%num_particles >= 1) then
+    ! Diagnostic override of marker n=1's pitch. Controlled by the
+    ! namelist flag boole_force_marker1_pitch and the value
+    ! marker1_pitch_value. Default OFF -- the normally sampled pitch is
+    ! kept. Useful for single-marker tests where a deterministic orbit
+    ! is wanted (e.g. pitch=1 for a pure field-line follower).
+    if (boole_force_marker1_pitch .and. in%num_particles >= 1) then
         do i_species = 1, in%n_species
-            start%pitch(1, i_species) = 1.0_dp
+            start%pitch(1, i_species) = marker1_pitch_value
         end do
     end if
 
@@ -486,8 +516,10 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     n_truly_lost    = 0
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, trace_time, moment_specs, ntetr, n_respawn_max, &
-    !$OMP&        boole_dump_orbit_n1, traj_dump_unit, orbit_dump_stride, traj_step_count) &
+    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, moment_specs, ntetr, n_respawn_max, &
+    !$OMP&        boole_dump_orbit_n1, traj_dump_unit, orbit_dump_stride, traj_step_count, &
+    !$OMP&        boole_dump_collisions_n1, coll_dump_unit, coll_dump_stride, &
+    !$OMP&        coll_event_count, coll_dt_sum, coll_dist_sum) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
     !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success) &
     !$OMP& FIRSTPRIVATE(thread_flag)
@@ -541,10 +573,11 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                 ! and the per-particle fold-in happens AFTER this loop.
                 call initialise_loop_variables(l, n, local_counter, particle_status, t, local_tetr_moments, x, vpar, vperp, species)
 
-                ! Initial trace-time bound. Overwritten on the first
-                ! orbit_timestep call from per-particle profile values when
-                ! boole_delta_f is on (and re-initialised on respawn since
-                ! particle_status%initialized was reset).
+                ! Total trace time is the global time_step for every
+                ! marker (single source of truth). The per-marker damping
+                ! rate nu_r is still local to each marker's spawn s; it
+                ! gets initialised lazily inside the first orbit_timestep
+                ! call.
                 trace_time_n = start%t(species)
 
                 i = 0
@@ -555,6 +588,23 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                     if (in%boole_collisions) then
                         call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species, iswmode_in=1)
                         t%step = t%step / start%v0(species)
+                        ! Collision-event diagnostics for marker n=1:
+                        ! accumulate counters on every event (so end-of-run
+                        ! stats are exact), but write coll_n1.dat only every
+                        ! coll_dump_stride-th event to keep file size sane.
+                        if (boole_dump_collisions_n1 .and. n == 1 .and. ind_tetr /= -1) then
+                            !$omp critical (coll_dump)
+                            coll_event_count = coll_event_count + 1
+                            coll_dt_sum      = coll_dt_sum   + t%step
+                            coll_dist_sum    = coll_dist_sum + sqrt(vpar**2 + vperp**2) * t%step
+                            if (coll_dump_unit /= 0 .and. mod(coll_event_count, max(coll_dump_stride,1)) == 0) then
+                                write(coll_dump_unit, '(i12, es16.8, i10, 3es16.8, 3es16.8, es16.8)') &
+                                    coll_event_count, t%confined, ind_tetr, &
+                                    x(1), x(2), x(3), vpar, vperp, &
+                                    sqrt(vpar**2 + vperp**2), t%step
+                            end if
+                            !$omp end critical (coll_dump)
+                        end if
                     else
                         t%step = trace_time_n - t%confined
                     endif
@@ -569,10 +619,6 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
 
                     t%confined = t%confined + t%step - t%remain
                     t_tot = t_tot + t%step - t%remain
-
-                    if (in%boole_delta_f .and. allocated(trace_time)) then
-                        if (trace_time(n, species) > 0.0_dp) trace_time_n = trace_time(n, species)
-                    end if
 
                     if (ind_tetr.eq.-1) exit
                 enddo
@@ -1057,7 +1103,6 @@ subroutine init_regularisation_for_particle(n, ind_tetr, x, vpar, vperp, species
     tau_c(n, species)      = tau_c_loc
     nu_r(n, species)       = nu_r_frac * nu_c
     t_reg_on(n, species)   = real(m_collision_times_reg_on, dp) * tau_c_loc
-    trace_time(n, species) = real(n_collision_times_trace,  dp) * tau_c_loc
 
 end subroutine init_regularisation_for_particle
 
