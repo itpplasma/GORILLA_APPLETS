@@ -481,6 +481,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
         add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
         initialise_seed_for_random_numbers_for_each_thread
+    use find_tetra_mod, only: find_tetra
 
     integer, intent(in)                               :: species
     integer, intent(in), optional                     :: n_particles_in
@@ -564,96 +565,90 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
 
             ! Per-particle accumulators that persist across respawn attempts.
             if (in%boole_delta_f) particle_tetr_moments = (0.0_dp, 0.0_dp)
-            t_actual_n     = 0.0_dp
-            i_total        = 0
             n_respawn_used = 0
 
-            ! Respawn-and-retry loop. The body executes once normally; on
-            ! kill it may re-execute with a freshly biased starting position
-            ! (delta-f only, up to n_respawn_max times). Deposits and
-            ! t_confined accumulate across attempts so a marker that took
-            ! several tries to find a stable orbit still contributes the
-            ! right time-averaged quantity at the end.
-            do
-                ! NOTE: initialise_loop_variables zeroes local_tetr_moments
-                ! when l==1 -- harmless here because in delta-f mode we
-                ! deposit into particle_tetr_moments, not local_tetr_moments,
-                ! and the per-particle fold-in happens AFTER this loop.
-                call initialise_loop_variables(l, n, local_counter, particle_status, t, local_tetr_moments, x, vpar, vperp, species)
+            ! One-shot init: place the marker, zero t%confined, zero the
+            ! delta-f weight (via particle_status%initialized = .false.
+            ! triggering the init block in orbit_timestep_rmp_response_currents).
+            call initialise_loop_variables(l, n, local_counter, particle_status, t, local_tetr_moments, x, vpar, vperp, species)
 
-                ! Total trace time is the global time_step for every
-                ! marker (single source of truth). The per-marker damping
-                ! rate nu_r is still local to each marker's spawn s; it
-                ! gets initialised lazily inside the first orbit_timestep
-                ! call.
-                trace_time_n = start%t(species)
+            ! Total trace time is the global time_step for every marker
+            ! (single source of truth). The per-marker damping rate nu_r
+            ! is still local to each marker's spawn s; it gets
+            ! initialised lazily inside the first orbit_timestep call,
+            ! and is REFRESHED at every respawn site below.
+            trace_time_n = start%t(species)
 
-                i = 0
+            i = 0
 
-                do while (t%confined.lt.trace_time_n)
-                    i = i + 1
+            do while (t%confined.lt.trace_time_n)
+                i = i + 1
 
-                    if (in%boole_collisions) then
-                        call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species, iswmode_in=1)
-                        t%step = t%step / start%v0(species)
-                        ! Collision-event diagnostics for marker n=1:
-                        ! accumulate counters on every event (so end-of-run
-                        ! stats are exact), but write coll_n1.dat only every
-                        ! coll_dump_stride-th event to keep file size sane.
-                        if (boole_dump_collisions_n1 .and. n == 1 .and. ind_tetr /= -1) then
-                            !$omp critical (coll_dump)
-                            coll_event_count = coll_event_count + 1
-                            coll_dt_sum      = coll_dt_sum   + t%step
-                            coll_dist_sum    = coll_dist_sum + sqrt(vpar**2 + vperp**2) * t%step
-                            if (coll_dump_unit /= 0 .and. mod(coll_event_count, max(coll_dump_stride,1)) == 0) then
-                                write(coll_dump_unit, '(i12, es16.8, i10, 3es16.8, 3es16.8, es16.8)') &
-                                    coll_event_count, t%confined, ind_tetr, &
-                                    x(1), x(2), x(3), vpar, vperp, &
-                                    sqrt(vpar**2 + vperp**2), t%step
-                            end if
-                            !$omp end critical (coll_dump)
+                if (in%boole_collisions) then
+                    call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species, iswmode_in=1)
+                    t%step = t%step / start%v0(species)
+                    ! Collision-event diagnostics for marker n=1:
+                    ! accumulate counters on every event (so end-of-run
+                    ! stats are exact), but write coll_n1.dat only every
+                    ! coll_dump_stride-th event to keep file size sane.
+                    if (boole_dump_collisions_n1 .and. n == 1 .and. ind_tetr /= -1) then
+                        !$omp critical (coll_dump)
+                        coll_event_count = coll_event_count + 1
+                        coll_dt_sum      = coll_dt_sum   + t%step
+                        coll_dist_sum    = coll_dist_sum + sqrt(vpar**2 + vperp**2) * t%step
+                        if (coll_dump_unit /= 0 .and. mod(coll_event_count, max(coll_dump_stride,1)) == 0) then
+                            write(coll_dump_unit, '(i12, es16.8, i10, 3es16.8, 3es16.8, es16.8)') &
+                                coll_event_count, t%confined, ind_tetr, &
+                                x(1), x(2), x(3), vpar, vperp, &
+                                sqrt(vpar**2 + vperp**2), t%step
                         end if
-                    else
-                        t%step = trace_time_n - t%confined
-                    endif
-
-                    if (in%boole_delta_f) then
-                        call orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                                                  particle_tetr_moments, local_counter, species, trace_time_n)
-                    else
-                        call orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                                                  local_tetr_moments, local_counter, species, trace_time_n)
+                        !$omp end critical (coll_dump)
                     end if
+                else
+                    t%step = trace_time_n - t%confined
+                endif
 
-                    t%confined = t%confined + t%step - t%remain
-                    t_tot = t_tot + t%step - t%remain
-
-                    if (ind_tetr.eq.-1) exit
-                enddo
-
-                i_total    = i_total    + i
-                t_actual_n = t_actual_n + t%confined
-
-                ! Did the marker complete its trace (or run out of trace
-                ! time naturally)? If so, we are done.
-                if (ind_tetr /= -1) exit
-
-                ! Killed. Decide whether to respawn or accept the loss.
-                if (.not. in%boole_delta_f .or. n_respawn_used >= n_respawn_max) then
-                    call handle_lost_particles(local_counter, particle_status%lost)
-                    n_truly_lost = n_truly_lost + 1
-                    exit
+                if (in%boole_delta_f) then
+                    call orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
+                                                              particle_tetr_moments, local_counter, species, trace_time_n)
+                else
+                    call orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
+                                                              local_tetr_moments, local_counter, species, trace_time_n)
                 end if
 
-                call respawn_particle_in_window(n, species, respawn_success)
-                if (.not. respawn_success) then
-                    call handle_lost_particles(local_counter, particle_status%lost)
-                    n_truly_lost = n_truly_lost + 1
-                    exit
+                t%confined = t%confined + t%step - t%remain
+                t_tot = t_tot + t%step - t%remain
+
+                if (ind_tetr == -1) then
+                    ! Soft respawn: redraw only the spatial position. Keep
+                    ! t%confined, weights%w, vpar, vperp, and the running
+                    ! deposit. Refresh nu_r/tau_c at the new local s.
+                    ! Tried hard reset (w=0 on respawn) -- concentrates the
+                    ! (0,0) Fourier residual at the resonance shell, ~3x
+                    ! worse than soft. Soft is the only sensible option.
+                    if (.not. in%boole_delta_f .or. n_respawn_used >= n_respawn_max) exit
+                    call respawn_particle_in_window(n, species, respawn_success)
+                    if (.not. respawn_success) exit
+                    x = start%x(:, n, species)
+                    call find_tetra(x, vpar, vperp, ind_tetr, iface)
+                    if (ind_tetr == -1) exit
+                    call init_regularisation_for_particle(n, ind_tetr, x, vpar, vperp, species)
+                    particle_status%lost = .false.
+                    particle_status%exit = .false.
+                    ! particle_status%initialized stays .true. so the
+                    ! delta-f weight is NOT zeroed here.
+                    n_respawn_used  = n_respawn_used  + 1
+                    n_respawn_total = n_respawn_total + 1
                 end if
-                n_respawn_used  = n_respawn_used  + 1
-                n_respawn_total = n_respawn_total + 1
             enddo
+
+            i_total    = i
+            t_actual_n = t%confined
+
+            if (ind_tetr == -1 .and. t%confined < trace_time_n) then
+                call handle_lost_particles(local_counter, particle_status%lost)
+                n_truly_lost = n_truly_lost + 1
+            end if
 
             ! Per-particle time average using the SUM of t_confined over all
             ! attempts (= the actual integration time we have data for).
