@@ -1,5 +1,12 @@
 # Ornstein–Uhlenbeck collision operator on v_∥
 
+> **Status:** superseded by
+> [`2026-05-15-ou-collision-operator-euler-design.md`](2026-05-15-ou-collision-operator-euler-design.md)
+> (Euler–Maruyama form with uniform ξ, chosen on 2026-05-15). The exact-OU
+> formulation below is kept for reference; the per-step update is what
+> changed, the rest of the design (placement, plumbing, validation,
+> rollback) carries over largely unchanged.
+
 **Date:** 2026-05-08
 **Branch:** `screening-current` (GORILLA_APPLETS)
 **Scope:** Add an OU collision operator that updates the parallel velocity v_∥
