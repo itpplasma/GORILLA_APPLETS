@@ -160,6 +160,11 @@ subroutine read_rmp_response_currents_inp_into_type
                boole_eliminate_particles_outside_flux, boole_delta_f
     integer :: i_integrator_type, seed_option, n_species
     real(dp) :: flux_threshold_for_elimination
+    ! Collision-operator mode for carry_out_collisions:
+    !   1 = full Coulomb (stost iswmode=1, current default)
+    !   5 = Euler-Maruyama Ornstein-Uhlenbeck step on v_par (stost iswmode=5)
+    ! Default 1 keeps legacy runs byte-identical.
+    integer :: i_collision_mode = 1
 
     integer :: s_inp_unit
 
@@ -183,7 +188,7 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_stratify_theta, boole_stratify_phi, &
     & boole_dump_orbit_n1, orbit_dump_stride, trapping_filter_mode, &
     & point_source_x, boole_force_marker1_pitch, marker1_pitch_value, &
-    & boole_dump_collisions_n1, coll_dump_stride
+    & boole_dump_collisions_n1, coll_dump_stride, i_collision_mode
 
     open(newunit = s_inp_unit, file='rmp_response_currents.inp', status='unknown')
     read(s_inp_unit,nml=rmp_response_currents_nml)
@@ -197,6 +202,7 @@ subroutine read_rmp_response_currents_inp_into_type
     in%boole_point_source = boole_point_source
     in%boole_collisions = boole_collisions
     in%boole_precalc_collisions = boole_precalc_collisions
+    in%i_collision_mode = i_collision_mode
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
     ! Sanity-fix e_cutoff_factor if user passed a non-positive value.
     if (e_cutoff_factor <= 0.0_dp) e_cutoff_factor = 5.0_dp
@@ -585,7 +591,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                 i = i + 1
 
                 if (in%boole_collisions) then
-                    call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species, iswmode_in=1)
+                    call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species, iswmode_in=in%i_collision_mode)
                     t%step = t%step / start%v0(species)
                     ! Collision-event diagnostics for marker n=1:
                     ! accumulate counters on every event (so end-of-run

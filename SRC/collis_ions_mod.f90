@@ -186,6 +186,7 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
 !               2 - energy scattering and drag only
 !               3 - drag only
 !               4 - pitch-angle scattering only
+!               5 - Euler-Maruyama OU step on v_par (v_perp unchanged)
 !  ierr     - error code:
 !               0 - good,
 !               1 - bad argument (pitch |z(5)| > 1 ),
@@ -230,6 +231,42 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
       dtau = min(dtau*(q/z(4))**2,tau,upper_limit)
     endif
   endif
+
+  ! iswmode = 5: Euler-Maruyama Ornstein-Uhlenbeck step on the parallel
+  ! velocity only.  v_perp_norm = z(4)*sqrt(1-z(5)^2) stays untouched.
+  ! See docs/plans/2026-05-15-ou-collision-operator-euler-design.md.
+  if (iswmode.eq.5) then
+    block
+      real(dp) :: vpar_norm, vperp_norm, nu_step, sigma_eq2, xi_ou
+      integer  :: i_bg
+      i_bg = n
+      vpar_norm  = z(4) * z(5)
+      vperp_norm = z(4) * sqrt(max(0.0_dp, 1.0_dp - z(5)*z(5)))
+      nu_step    = 2.0_dp * dhh
+      if (nu_step .le. 0.0_dp) return
+      if (enrat(i_bg) .gt. 0.0_dp) then
+        sigma_eq2 = 0.5_dp / enrat(i_bg)
+      else
+        sigma_eq2 = 0.5_dp
+      end if
+      if (present(randnum)) then
+        ur = randnum(3)
+      else
+        call getran(0, ur)
+      end if
+      xi_ou     = dble(ur)
+      vpar_norm = vpar_norm &
+                + sqrt(2.0_dp * nu_step * sigma_eq2 * dtau) * xi_ou &
+                - vpar_norm * nu_step * dtau
+      z(4) = sqrt(vpar_norm*vpar_norm + vperp_norm*vperp_norm)
+      z(5) = vpar_norm / z(4)
+      if (z(4).lt.pmin) then
+        ierr = ierr + 10
+        z(4) = pmin + abs(pmin - z(4))
+      end if
+    end block
+    return
+  end if
 
   if(iswmode.eq.1.or.iswmode.eq.4) then
     alam=z(5)
