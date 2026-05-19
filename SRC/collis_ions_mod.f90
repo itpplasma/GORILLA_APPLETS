@@ -235,6 +235,16 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
   ! iswmode = 5: Euler-Maruyama Ornstein-Uhlenbeck step on the parallel
   ! velocity only.  v_perp_norm = z(4)*sqrt(1-z(5)^2) stays untouched.
   ! See docs/plans/2026-05-15-ou-collision-operator-euler-design.md.
+  !
+  ! Collision frequency: NRL perpendicular velocity-velocity diffusion rate
+  !   ν_⊥(v) = 2 ν_0(v) [ (1 − 1/(2x))·ψ(x) + ψ'(x) ],  x = v²/v_T,β²
+  ! Using onseff's dh(y) = NRL_bracket(y²)/y with y = xbeta = p·velrat, and
+  ! efcolf(i) = (1/2)·ν_0,i(v0)·velrat(i)/v0 from collis_init, the per-species
+  ! contribution simplifies to 4·v0·dh·efcolf/p² = 4·v0·dhh_vec(i), so in
+  ! code units (rate / v0) the total is exactly 4·dhh — independent of
+  ! marker speed and species mix.  This is 2× the Lorentz deflection rate
+  ! ν_D = 2·dhh because ν_⊥ = 2·ν_D when measured as d⟨v_⊥²⟩/dt / v² (the
+  ! ℓ=2 Legendre mode of cos²θ decays at 3ν_D, contributing 2ν_D to sin²θ).
   if (iswmode.eq.5) then
     block
       real(dp) :: vpar_norm, vperp_norm, nu_step, sigma_eq2, xi_ou
@@ -242,7 +252,7 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
       i_bg = n
       vpar_norm  = z(4) * z(5)
       vperp_norm = z(4) * sqrt(max(0.0_dp, 1.0_dp - z(5)*z(5)))
-      nu_step    = 2.0_dp * dhh
+      nu_step    = 4.0_dp * dhh
       if (nu_step .le. 0.0_dp) return
       if (enrat(i_bg) .gt. 0.0_dp) then
         sigma_eq2 = 0.5_dp / enrat(i_bg)
