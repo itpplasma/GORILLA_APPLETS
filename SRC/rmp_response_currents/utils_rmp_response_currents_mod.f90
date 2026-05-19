@@ -1036,7 +1036,11 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
     z_cell = x - tetra_physics(ind_tetr)%x1
 
     s_loc = eval_s_local(ind_tetr, x)
-    theta_loc = verts_sthetaphi(2, tetra_grid(ind_tetr)%ind_knot(1))
+    ! theta_SFL interpolated at the marker position via barycentric weights
+    ! over the 4 tetra vertices. Previously we used only the first vertex,
+    ! which biased the helical phase factor by up to one tetra in theta and
+    ! produced a +(few)e-3 outward shift of the resonance peak in s.
+    theta_loc = eval_theta_sfl_local(ind_tetr, x)
 
     if (coord_system .eq. 1) then
         phi_loc = x(2)
@@ -1157,6 +1161,53 @@ real(dp) function eval_s_local(ind_tetr, x) result(s_loc)
     s_loc = max(0.0_dp, min(1.0_dp, s_loc))
 
 end function eval_s_local
+
+! ====================================================================
+! theta_SFL at the marker's cylindrical position x via barycentric
+! interpolation over the 4 tetra vertices. Replaces the previous
+! "first vertex" lookup which biased the helical phase factor in
+! eval_wdot_s by up to one tetra-width in theta and produced a small
+! outward shift of the resonance peak in s. Falls back to the first
+! vertex value if the linear solve is degenerate.
+! ====================================================================
+real(dp) function eval_theta_sfl_local(ind_tetr, x) result(theta_loc)
+
+    use tetra_grid_mod, only: tetra_grid, verts_rphiz, verts_sthetaphi
+    use constants, only: pi
+
+    integer,  intent(in) :: ind_tetr
+    real(dp), intent(in) :: x(3)
+
+    integer  :: i, vidx, ipiv(4), ierr
+    real(dp) :: M(4,4), b(4,1), V_th(4), span
+
+    do i = 1, 4
+        vidx = tetra_grid(ind_tetr)%ind_knot(i)
+        M(1:3, i) = verts_rphiz(:, vidx)
+        M(4,   i) = 1.0_dp
+        V_th(i)   = verts_sthetaphi(2, vidx)
+    end do
+    b(1:3, 1) = x
+    b(4,   1) = 1.0_dp
+
+    call dgesv(4, 1, M, 4, ipiv, b, 4, ierr)
+    if (ierr /= 0) then
+        theta_loc = V_th(1)
+        return
+    end if
+
+    ! Unwrap theta across the 2pi seam if the tetra straddles it.
+    span = maxval(V_th) - minval(V_th)
+    if (span > pi) then
+        do i = 1, 4
+            if (V_th(i) < pi) V_th(i) = V_th(i) + 2.0_dp * pi
+        end do
+    end if
+
+    theta_loc = sum(b(:, 1) * V_th)
+    theta_loc = modulo(theta_loc, 2.0_dp * pi)
+
+end function eval_theta_sfl_local
 
 ! ====================================================================
 ! Total physical volume of the spawn region (the part of the mesh whose
@@ -1630,9 +1681,10 @@ subroutine dump_start_positions(filename, species)
             call find_tetra(x, 0.0_dp, 0.0_dp, ind_tetr, iface)
             if (ind_tetr /= -1) then
                 s_loc = eval_s_local(ind_tetr, x)
-                ! theta_SFL approximated from first vertex of the tetra (same
-                ! convention used by the wdot evaluator).
-                theta_loc = verts_sthetaphi(2, tetra_grid(ind_tetr)%ind_knot(1))
+                ! theta_SFL via barycentric interpolation at the marker's
+                ! cylindrical position over the 4 tetra vertices (same
+                ! convention as eval_wdot_s).
+                theta_loc = eval_theta_sfl_local(ind_tetr, x)
                 z_cell = x - tetra_physics(ind_tetr)%x1
                 B_start = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z_cell)
             end if
