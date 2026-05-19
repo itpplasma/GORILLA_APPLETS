@@ -152,6 +152,7 @@ subroutine read_rmp_response_currents_inp_into_type
     use gorilla_applets_types_mod, only: in
 
     real(dp) :: time_step, energy_eV, n_particles, density
+    real(dp) :: anomalous_diffusion_coefficient
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
                boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
@@ -188,7 +189,11 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_stratify_theta, boole_stratify_phi, &
     & boole_dump_orbit_n1, orbit_dump_stride, trapping_filter_mode, &
     & point_source_x, boole_force_marker1_pitch, marker1_pitch_value, &
-    & boole_dump_collisions_n1, coll_dump_stride, i_collision_mode
+    & boole_dump_collisions_n1, coll_dump_stride, i_collision_mode, &
+    & anomalous_diffusion_coefficient
+
+    ! Default: no anomalous transport (D_anom = 0 disables the kick).
+    anomalous_diffusion_coefficient = 0.0_dp
 
     open(newunit = s_inp_unit, file='rmp_response_currents.inp', status='unknown')
     read(s_inp_unit,nml=rmp_response_currents_nml)
@@ -227,6 +232,7 @@ subroutine read_rmp_response_currents_inp_into_type
     in%boole_eliminate_particles_outside_flux = boole_eliminate_particles_outside_flux
     in%flux_threshold_for_elimination = flux_threshold_for_elimination
     in%boole_delta_f = boole_delta_f
+    in%anomalous_diffusion_coefficient = anomalous_diffusion_coefficient
 
 end subroutine read_rmp_response_currents_inp_into_type
 
@@ -488,6 +494,9 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
         add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
         initialise_seed_for_random_numbers_for_each_thread
     use find_tetra_mod, only: find_tetra
+    ! Anomalous-transport kick: re-use the existing applet's perpendicular
+    ! random-walk displacement. Enabled when in%anomalous_diffusion_coefficient > 0.
+    use anomalous_transport_displacement_mod, only: anomalous_transport_displacement
 
     integer, intent(in)                               :: species
     integer, intent(in), optional                     :: n_particles_in
@@ -624,6 +633,18 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
 
                 t%confined = t%confined + t%step - t%remain
                 t_tot = t_tot + t%step - t%remain
+
+                ! Anomalous-transport kick (perpendicular random walk + correction
+                ! velocity), re-used from anomalous_transport_displacement_mod.
+                ! Disabled when in%anomalous_diffusion_coefficient <= 0. The weight
+                ! weights%w(n, species) is intentionally NOT reset here -- the
+                ! marker carries its coherent weight to the displaced location,
+                ! where wdot_s at the new (s, theta, phi) drives the subsequent
+                ! evolution. This matches the soft-respawn convention used for
+                ! out-of-domain re-entries.
+                if (in%anomalous_diffusion_coefficient > 0.0_dp .and. ind_tetr /= -1) then
+                    call anomalous_transport_displacement(x, ind_tetr, iface, t%step, vpar, vperp)
+                end if
 
                 if (ind_tetr == -1) then
                     ! Soft respawn: redraw only the spatial position. Keep
