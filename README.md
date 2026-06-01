@@ -92,6 +92,13 @@ For the visualization of the output of these three examples, appropriate plottin
 ### REVERSIBILITY_TEST
 * 
 
+### MONO_ENERGETIC_TRANSPORT
+Mono-energetic radial transport coefficient D11, scanned over the
+normalized collisionality nu*, on the bundled AUG #26884 equilibrium.
+This run takes two passes (flux-tube volume, then the nu* scan);
+`EXAMPLES/MONO_ENERGETIC_TRANSPORT/run.sh` does both. See that folder's
+`README.md` for the workflow and the NEO-2 comparison.
+
 
 ### Generation of input files and plotting in MATLAB and Python
 A detailed explanation of all examples (1-7) including the generation of the appropriate input files (including the example folders in `EXAMPLES/MATLAB_RUN` and `EXAMPLES/PYTHON_RUN`) and plotting of the results with MATLAB and Python can be found in the folders `MATLAB` and `PYTHON`, respectively.
