@@ -4,6 +4,11 @@ module collis_ions
 
 implicit none
 
+! Global multiplicative scaling on the collisional rates (dpp, dhh, fpeff) used
+! in stost. Default 1.0 (no change). Set at runtime from the namelist to
+! benchmark against external collision-frequency conventions (e.g. KIM nu_e).
+real(dp), public :: nu_scale_factor = 1.0_dp
+
 contains
 !
 !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -175,7 +180,7 @@ end subroutine lambda_alpha_beta
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
+subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override)
 !
 !  z(1:5)   - phase space coordinates: z(1:3) - spatial position,
 !                                      z(4)   - normalized velocity module
@@ -206,6 +211,11 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
   real(dp), dimension(:), allocatable :: dpp_vec,dhh_vec,fpeff_vec
   real(dp), optional :: tau
   real(dp), dimension(3), intent(in), optional :: randnum
+  ! Optional caller-supplied override for the OU step rate, in code units
+  ! (1/length). When present, iswmode=5 uses nu_step = nu_override * nu_scale_factor
+  ! instead of nu_step = 4*dhh. Used to drive the OU operator with an external
+  ! collision frequency table (e.g. KIM's nue.dat splined as nu_e(s)).
+  real(dp), optional, intent(in) :: nu_override
   real(dp) :: z4_save
 
   epsilon = 0.1
@@ -219,9 +229,9 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
   p=z(4)
   call coleff(efcolf,velrat,enrat,p,dpp_vec,dhh_vec,fpeff_vec)
 
-  dpp = sum(dpp_vec)
-  dhh = sum(dhh_vec)
-  fpeff = sum(fpeff_vec)
+  dpp   = sum(dpp_vec)   * nu_scale_factor
+  dhh   = sum(dhh_vec)   * nu_scale_factor
+  fpeff = sum(fpeff_vec) * nu_scale_factor
 
   ierr=0
 
@@ -252,7 +262,13 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
       i_bg = n
       vpar_norm  = z(4) * z(5)
       vperp_norm = z(4) * sqrt(max(0.0_dp, 1.0_dp - z(5)*z(5)))
-      nu_step    = 4.0_dp * dhh
+      if (present(nu_override)) then
+        ! Caller provides nu in code units (1/length); apply the same
+        ! nu_scale_factor that dhh-derived rates get above.
+        nu_step  = nu_override * nu_scale_factor
+      else
+        nu_step  = 4.0_dp * dhh
+      end if
       if (nu_step .le. 0.0_dp) return
       if (enrat(i_bg) .gt. 0.0_dp) then
         sigma_eq2 = 0.5_dp / enrat(i_bg)

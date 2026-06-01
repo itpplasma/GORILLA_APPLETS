@@ -32,8 +32,9 @@ subroutine calc_rmp_response_currents
         boole_dump_orbit_n1, traj_dump_unit, traj_step_count, &
         boole_dump_collisions_n1, coll_dump_unit, coll_event_count, &
         coll_dt_sum, coll_dist_sum, &
+        boole_use_kim_nu, kim_nu_file, &
         compute_spawn_volume, filter_markers_by_trapping, trapping_filter_mode
-    use profile_data_mod, only: load_profiles
+    use profile_data_mod, only: load_profiles, load_kim_nu
     use perturbation_field_mod, only: init_constant_perturbation, load_perturbation_field, boole_skip_phase
 
     call set_seed_for_random_numbers
@@ -57,6 +58,13 @@ subroutine calc_rmp_response_currents
     ! delta-f weight evolution (Albert 2016, Eq. 4).
     if (in%boole_delta_f) then
         call load_profiles(trim(profile_dir), trim(equil_mapping_file))
+        if (boole_use_kim_nu) then
+            if (len_trim(kim_nu_file) == 0) then
+                print *, 'ERROR: boole_use_kim_nu=.true. but kim_nu_file is empty'
+                stop
+            end if
+            call load_kim_nu(trim(kim_nu_file))
+        end if
         if (boole_constant_delta_B_r) then
             call init_constant_perturbation(delta_B_r_const, pert_m_fourier, pert_n_fourier)
             boole_skip_phase = boole_skip_phase_for_test

@@ -26,6 +26,7 @@ module profile_data_mod
     public :: eval_q, get_psi_tor_edge
     public :: eval_s_from_psi_pol, eval_ds_dreff
     public :: profile_values_t
+    public :: load_kim_nu, eval_kim_nu, kim_nu_loaded
 
     ! Result type returned by eval_profiles
     type :: profile_values_t
@@ -72,6 +73,13 @@ module profile_data_mod
     integer :: ns_psipol = 0
 
     logical :: profiles_loaded = .false.
+
+    ! External collision-frequency table from KIM (or compatible cylindrical
+    ! code). File format: two columns (r_eff [cm], nu_e [1/s]).  Splined onto
+    ! the same s_grid as the other profiles; queried by the OU collision
+    ! operator when boole_use_kim_nu is set in the RMP namelist.
+    logical :: kim_nu_loaded = .false.
+    real(dp), allocatable :: kim_nu_spl(:), kim_nu_dd(:)
 
 contains
 
@@ -261,11 +269,97 @@ subroutine cleanup_profiles()
     if (allocated(psi_pol_sorted))   deallocate(psi_pol_sorted)
     if (allocated(s_of_psi_pol_spl)) deallocate(s_of_psi_pol_spl)
     if (allocated(s_of_psi_pol_dd))  deallocate(s_of_psi_pol_dd)
+    if (allocated(kim_nu_spl)) deallocate(kim_nu_spl)
+    if (allocated(kim_nu_dd))  deallocate(kim_nu_dd)
+    kim_nu_loaded = .false.
     psi_tor_edge_stored = 0.0_dp
     ns_psipol = 0
     profiles_loaded = .false.
 
 end subroutine cleanup_profiles
+
+! ============================================================
+! Load KIM (or compatible cylindrical-code) collision-frequency table
+! and spline it as nu_e(s).  File format: two columns, (r_eff [cm],
+! nu_e [1/s]).  The r_eff values are linearly interpolated onto the
+! s_grid via the existing r_eff(s) mapping from flux_functions.dat.
+!
+! NOTE on radial convention: the file's r-column is treated as
+! GORILLA's r_eff (area-radius from SYNCH).  KIM/KAMEL natively uses a
+! toroidal-flux radius r_f = sqrt(2 Phi_tor / B_tor) which differs from
+! GORILLA's area-radius by ~1-2 cm at the AUG plasma edge.  For nu_e
+! profiles that vary smoothly with r this introduces a small (~few %)
+! error in nu(s) at the resonance -- acceptable for sensitivity testing.
+! For high-precision benchmarks the file should be regenerated with r
+! converted to GORILLA's area-radius convention up front.
+! ============================================================
+subroutine load_kim_nu(filename)
+
+    character(len=*), intent(in) :: filename
+    real(dp), allocatable :: nu_mapped(:)
+
+    if (.not. profiles_loaded) then
+        print *, 'ERROR: load_kim_nu called before load_profiles'
+        stop
+    end if
+    if (kim_nu_loaded) return
+
+    allocate(nu_mapped(ns))
+    call read_and_map_profile(filename, r_eff_spl, ns, nu_mapped)
+    allocate(kim_nu_spl(ns), kim_nu_dd(ns))
+    kim_nu_spl = nu_mapped
+    call spline_natural(ns, s_grid, kim_nu_spl, kim_nu_dd)
+    deallocate(nu_mapped)
+    kim_nu_loaded = .true.
+
+    print *, '  KIM collision freq loaded from: ', trim(filename)
+    print *, '  nu_e(s=0)    = ', kim_nu_spl(1),  ' 1/s'
+    print *, '  nu_e(s~q=3)  = ', eval_kim_nu(0.7438_dp), ' 1/s'
+    print *, '  nu_e(s=1)    = ', kim_nu_spl(ns), ' 1/s'
+
+end subroutine load_kim_nu
+
+! ============================================================
+! Evaluate the splined nu_e(s) [1/s].  Clamps at the s_grid endpoints.
+! Returns 0 if the table has not been loaded -- callers should test
+! kim_nu_loaded before treating the result as physically meaningful.
+! ============================================================
+real(dp) function eval_kim_nu(s_val) result(nu_val)
+
+    real(dp), intent(in) :: s_val
+    integer :: i_lo, i_hi, i_mid
+    real(dp) :: h, a, b
+
+    if (.not. kim_nu_loaded) then
+        nu_val = 0.0_dp
+        return
+    end if
+
+    if (s_val <= s_grid(1)) then
+        nu_val = kim_nu_spl(1)
+        return
+    elseif (s_val >= s_grid(ns)) then
+        nu_val = kim_nu_spl(ns)
+        return
+    end if
+
+    i_lo = 1; i_hi = ns
+    do while (i_hi - i_lo > 1)
+        i_mid = (i_lo + i_hi) / 2
+        if (s_grid(i_mid) > s_val) then
+            i_hi = i_mid
+        else
+            i_lo = i_mid
+        end if
+    end do
+
+    h = s_grid(i_hi) - s_grid(i_lo)
+    a = (s_grid(i_hi) - s_val) / h
+    b = (s_val - s_grid(i_lo)) / h
+    nu_val = a*kim_nu_spl(i_lo) + b*kim_nu_spl(i_hi) &
+           + ((a**3 - a)*kim_nu_dd(i_lo) + (b**3 - b)*kim_nu_dd(i_hi)) * h**2 / 6.0_dp
+
+end function eval_kim_nu
 
 ! ============================================================
 ! Accessors: safety factor q(s) and psi_tor_edge, used by callers

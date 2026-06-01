@@ -30,6 +30,16 @@ module utils_rmp_response_currents_mod
     integer,            public :: m_collision_times_reg_on = 3
     ! Coulomb logarithm for the local collision frequency.
     real(dp),           public :: coulomb_log              = 17.0_dp
+    ! Multiplicative scaling on the collisional rates (dpp, dhh, fpeff) used
+    ! inside stost. Used to benchmark against external collision-frequency
+    ! conventions (e.g. KIM nu_e). Default 1.0 = no change.
+    real(dp),           public :: nu_scale_factor          = 1.0_dp
+    ! Use an external collision frequency table for the OU operator
+    ! (iswmode=5). When enabled, stost gets nu_step from the splined
+    ! nu_e(s) loaded from kim_nu_file instead of 4*dhh.  FP runs are
+    ! unaffected (the override only triggers in the iswmode=5 branch).
+    logical,            public :: boole_use_kim_nu         = .false.
+    character(len=256), public :: kim_nu_file              = ''
 
     ! Diagnostic: when true, bypass the delta-f weight evolution entirely
     ! and hold w(t) = 1 (real, constant) for the whole trace. Useful for
@@ -150,6 +160,7 @@ contains
 subroutine read_rmp_response_currents_inp_into_type
 
     use gorilla_applets_types_mod, only: in
+    use collis_ions,               only: collis_nu_scale_factor => nu_scale_factor
 
     real(dp) :: time_step, energy_eV, n_particles, density
     real(dp) :: anomalous_diffusion_coefficient
@@ -182,7 +193,8 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f, &
     & profile_dir, equil_mapping_file, boole_constant_delta_B_r, delta_B_r_const, &
     & pert_m_fourier, pert_n_fourier, delta_B_r_file, species_for_delta_f, &
-    & nu_r_frac, m_collision_times_reg_on, coulomb_log, &
+    & nu_r_frac, m_collision_times_reg_on, coulomb_log, nu_scale_factor, &
+    & boole_use_kim_nu, kim_nu_file, &
     & boole_constant_unit_weight, &
     & boole_compute_n_modes_dft, s_outer_cut, boole_skip_phase_for_test, &
     & s_inner_sample, s_outer_sample, n_respawn_max, boole_equidistant_s_sampling, &
@@ -233,6 +245,11 @@ subroutine read_rmp_response_currents_inp_into_type
     in%flux_threshold_for_elimination = flux_threshold_for_elimination
     in%boole_delta_f = boole_delta_f
     in%anomalous_diffusion_coefficient = anomalous_diffusion_coefficient
+
+    ! Propagate nu_scale_factor to collis_ions module variable used inside stost.
+    collis_nu_scale_factor = nu_scale_factor
+
+    print '(a, f10.4)', ' nu_scale_factor (stost rate multiplier) = ', collis_nu_scale_factor
 
 end subroutine read_rmp_response_currents_inp_into_type
 
@@ -1119,7 +1136,8 @@ subroutine init_regularisation_for_particle(n, ind_tetr, x, vpar, vperp, species
 
     use gorilla_applets_types_mod, only: start
     use constants, only: pi, ev2erg
-    use profile_data_mod, only: eval_profiles, profile_values_t
+    use profile_data_mod, only: eval_profiles, profile_values_t, &
+                               kim_nu_loaded, eval_kim_nu
 
     integer,  intent(in) :: n, ind_tetr, species
     real(dp), intent(in) :: x(3), vpar, vperp
@@ -1128,21 +1146,28 @@ subroutine init_regularisation_for_particle(n, ind_tetr, x, vpar, vperp, species
     type(profile_values_t) :: pv
 
     s_loc = eval_s_local(ind_tetr, x)
-    call eval_profiles(s_loc, pv)
 
-    mass   = start%particle_mass(species)
-    charge = start%particle_charge(species)
-    n_loc  = max(pv%n_e, 1.0_dp)
-    if (charge > 0.0_dp) then
-        T_loc_erg = max(pv%Ti, 1.0_dp) * ev2erg
+    if (kim_nu_loaded) then
+        ! Use KIM's tabulated nu_e(s) so the regularisation rate is
+        ! consistent with the OU step's collisional decorrelation rate.
+        nu_c = eval_kim_nu(s_loc)
     else
-        T_loc_erg = max(pv%Te, 1.0_dp) * ev2erg
-    end if
+        call eval_profiles(s_loc, pv)
 
-    ! Spitzer-like collision frequency in CGS:
-    !   nu_c = 4 pi n q^4 ln_Lambda / (sqrt(m) (2 T)^{3/2}).
-    nu_c = 4.0_dp * pi * n_loc * charge**4 * coulomb_log &
-         / (sqrt(mass) * (2.0_dp * T_loc_erg)**1.5_dp)
+        mass   = start%particle_mass(species)
+        charge = start%particle_charge(species)
+        n_loc  = max(pv%n_e, 1.0_dp)
+        if (charge > 0.0_dp) then
+            T_loc_erg = max(pv%Ti, 1.0_dp) * ev2erg
+        else
+            T_loc_erg = max(pv%Te, 1.0_dp) * ev2erg
+        end if
+
+        ! Spitzer-like collision frequency in CGS:
+        !   nu_c = 4 pi n q^4 ln_Lambda / (sqrt(m) (2 T)^{3/2}).
+        nu_c = 4.0_dp * pi * n_loc * charge**4 * coulomb_log &
+             / (sqrt(mass) * (2.0_dp * T_loc_erg)**1.5_dp)
+    end if
     if (nu_c <= 0.0_dp) nu_c = 1.0_dp
     tau_c_loc = 1.0_dp / nu_c
 
