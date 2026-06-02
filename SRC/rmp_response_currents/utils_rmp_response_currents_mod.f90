@@ -757,7 +757,7 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
     type(counter_t), intent(inout)               :: local_counter
     real(dp), intent(in)                         :: t_tot
 
-    real(dp), dimension(3)                       :: z_save, x_new
+    real(dp), dimension(3)                       :: z_save, x_new, x_pre_push
     real(dp)                                     :: t_pass, perpinv, rand_frac
     logical                                      :: boole_t_finished, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
@@ -834,6 +834,7 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         endif
 
         ind_tetr_save = ind_tetr
+        x_pre_push = x
 
         select case(ipusher)
             case(1)
@@ -850,8 +851,15 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         ! Delta-f weight evolution (Albert 2016, Eq. 4) with linear
         ! regularisation switched on after t_reg_on. Updates weights%w
         ! in place using the exact ODE integrator over the dwell time.
-        if (in%boole_delta_f .and. ind_tetr /= -1) then
-            call update_delta_f_weight(n, ind_tetr, x, vpar, vperp, t_pass, t, species)
+        ! Midpoint quadrature in cell ind_tetr_save: wdot_s is evaluated
+        ! at the spatial midpoint of (x_pre_push, x_post_push), using the
+        ! tetra_physics of the cell the marker just traversed. Previously
+        ! we evaluated at x_post_push with the NEW cell's physics — a
+        ! left-Riemann sample at the wrong boundary.
+        if (in%boole_delta_f .and. ind_tetr_save /= -1) then
+            call update_delta_f_weight(n, ind_tetr_save, &
+                                       0.5_dp * (x_pre_push + x), &
+                                       vpar, vperp, t_pass, t, species)
         endif
 
         call update_local_tetr_moments(local_tetr_moments, ind_tetr_save, n, optional_quantities, species)
