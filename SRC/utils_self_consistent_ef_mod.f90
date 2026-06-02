@@ -318,7 +318,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
             call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species,boole_diffusion_coefficient)
             if (present(local_source_weight)) then
                 local_source_weight(get_flux_shell_index(ind_tetr)) = local_source_weight(get_flux_shell_index(ind_tetr)) + &
-                    start%weight(n, species)
+                    weights%w(n, species)
             end if
         endif
         if ((.not.in%boole_static_ne).and.(species.eq.2)) then
@@ -410,13 +410,13 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities,species)
         if (present(local_shell_time)) then
             local_shell_time(get_flux_shell_index(ind_tetr_save)) = local_shell_time(get_flux_shell_index(ind_tetr_save)) + &
-                start%weight(n, species) * t_pass
+                weights%w(n, species) * t_pass
         end if
         if ((grid_kind.eq.2).or.(grid_kind.eq.3)) then
             if (present(local_boundary_weighted_flux)) then
-                call compute_radial_fluxes(ind_tetr_save, ind_tetr, x, start%weight(n, species), local_boundary_weighted_flux)
+                call compute_radial_fluxes(ind_tetr_save, ind_tetr, x, weights%w(n, species), local_boundary_weighted_flux)
             else
-                call compute_radial_fluxes(ind_tetr_save, ind_tetr, x, start%weight(n, species))
+                call compute_radial_fluxes(ind_tetr_save, ind_tetr, x, weights%w(n, species))
             end if
         endif
 
@@ -1000,10 +1000,10 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
         weights%w(n,species) = weights%w(n,species)*(1.0_dp-0.9_dp*x(1))
     endif
     if (in%boole_custom_source_profile) then
-        start%weight(n,species) = start%weight(n,species) * &
+        weights%w(n,species) = weights%w(n,species) * &
             exp(-0.5_dp * ((x(1) - in%source_profile_reference_s) / max(in%source_profile_width, 1.0d-12))**2)
     elseif (abs(in%density_log_gradient_per_s) > 0.0_dp) then
-        start%weight(n,species) = start%weight(n,species) * &
+        weights%w(n,species) = weights%w(n,species) * &
             exp(in%density_log_gradient_per_s * (x(1) - in%density_profile_reference_s))
     endif
 

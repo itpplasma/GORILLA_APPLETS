@@ -27,7 +27,7 @@ subroutine run_gorilla_mc_global_transport_fit(control, result)
     use global_transport_fit_types_mod, only: global_transport_experiment_t, global_transport_fit_control_t, &
         global_transport_fit_result_t, global_transport_quality_t
     use gorilla_applets_settings_mod, only: i_option
-    use gorilla_applets_types_mod, only: in, s
+    use gorilla_applets_types_mod, only: in, s, weights
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
     use transport_benchmark_utils_mod, only: prepare_minimal_transport_output, set_active_species_parameters
     use utils_data_pre_and_post_processing_mod, only: get_ipert, set_seed_for_random_numbers
@@ -273,7 +273,7 @@ subroutine run_electron_source_experiment_batch(source_gradient, source_referenc
         print *, 'source_width = ', source_width
         stop
     end if
-    initial_weight_sum = sum(start%weight(:, 1))
+    initial_weight_sum = sum(weights%w(:, 1))
     call prepare_next_round_of_parallelised_particle_pushing(1)
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(1)
     call parallelised_particle_pushing(species=1, j=1, boole_diffusion_coefficient=.false., n_particles_in=in%num_particles, &
@@ -283,9 +283,9 @@ subroutine run_electron_source_experiment_batch(source_gradient, source_referenc
         print *, 'source_reference_s = ', source_reference_s
         print *, 'source_width = ', source_width
         print *, 'initial_weight_sum = ', initial_weight_sum
-        print *, 'sum_start_weight = ', sum(start%weight(:, 1))
-        print *, 'min_start_weight = ', minval(start%weight(:, 1))
-        print *, 'max_start_weight = ', maxval(start%weight(:, 1))
+        print *, 'sum_start_weight = ', sum(weights%w(:, 1))
+        print *, 'min_start_weight = ', minval(weights%w(:, 1))
+        print *, 'max_start_weight = ', maxval(weights%w(:, 1))
         print *, 'lost_particles = ', samples%lost_particles
         print *, 'mean_tracing_time = ', samples%mean_tracing_time
         stop

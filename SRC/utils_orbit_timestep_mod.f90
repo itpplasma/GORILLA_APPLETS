@@ -118,7 +118,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     if (present(species_in)) species = species_in
 
     !This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by
-    !only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine
+    !only including it here, it is possible to estimate the order of magnitude of weights%w before entering this routine
     !(this is necessary for the energy and momentum conserving collision operator)
     if (.not. in%boole_monoenergetic) weights%w(n,species) =  weights%w(n,species)*in%energy_eV*ev2erg
 
