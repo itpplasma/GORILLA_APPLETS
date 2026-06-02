@@ -713,34 +713,18 @@ end subroutine update_scan_variable
 subroutine rebuild_grid_and_physics()
 !
 ! Rebuilds the tetrahedral grid and associated physics after changing grid parameters.
-! First deallocates existing arrays, then rebuilds everything.
 !
-    use tetra_grid_mod, only: make_tetra_grid, verts_rphiz, deallocate_tetra_grid
-    use tetra_physics_mod, only: make_tetra_physics, deallocate_tetra_physics
-    use tetra_physics_poly_precomp_mod, only: make_precomp_poly, deallocate_precomp_poly
+    use tetra_grid_mod, only: make_tetra_grid, verts_rphiz
+    use tetra_physics_mod, only: make_tetra_physics
+    use tetra_physics_poly_precomp_mod, only: make_precomp_poly
     use gorilla_settings_mod, only: coord_system, boole_grid_for_find_tetra
     use field_mod, only: ipert
-    use find_tetra_mod, only: grid_for_find_tetra, deallocate_find_tetra_arrays
-    use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals, deallocate_sqrt_g
-    use utils_data_pre_and_post_processing_mod, only: calc_poloidal_flux, deallocate_output, &
-        set_moment_specifications, initialise_output, deallocate_collision_arrays, &
+    use find_tetra_mod, only: grid_for_find_tetra
+    use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
+    use utils_data_pre_and_post_processing_mod, only: calc_poloidal_flux, &
+        set_moment_specifications, initialise_output, &
         calc_collision_coefficients_for_all_tetrahedra
-    use magdata_in_symfluxcoordinates_mod, only: deallocate_magdata_in_symfluxcoord
     use gorilla_applets_types_mod, only: in
-
-    print*, 'Deallocating existing grid arrays...'
-
-    ! Deallocate collision arrays if collisions are enabled
-    if (in%boole_collisions) call deallocate_collision_arrays()
-
-    ! Deallocate in reverse order of allocation
-    call deallocate_sqrt_g()
-    call deallocate_output()
-    call deallocate_find_tetra_arrays()
-    call deallocate_precomp_poly()
-    call deallocate_tetra_physics()
-    call deallocate_tetra_grid()
-    call deallocate_magdata_in_symfluxcoord()
 
     print*, 'Rebuilding tetrahedral grid...'
     call make_tetra_grid()

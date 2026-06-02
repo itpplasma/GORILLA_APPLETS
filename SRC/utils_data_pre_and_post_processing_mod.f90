@@ -66,9 +66,12 @@ subroutine initialise_output
     use tetra_grid_settings_mod, only: grid_size
     
     integer :: n_prisms
-    
+
+    !Free any pre-existing output arrays so a fresh build can proceed without external bookkeeping.
+    call deallocate_output
+
     n_prisms = ntetr/3
-    
+
     allocate(output%prism_volumes(n_prisms))
     allocate(output%refined_prism_volumes(n_prisms))
     allocate(output%electric_potential(n_prisms))
@@ -489,17 +492,20 @@ subroutine set_c
     use tetra_grid_mod, only: ntetr
     use constants, only: amp, ame
 
+    !Free any pre-existing collision arrays so a fresh build can proceed without external bookkeeping.
+    call deallocate_collision_arrays
+
     c%n = 2 !number of background species
-    if (.not.allocated(c%dens_mat))   allocate(c%dens_mat(c%n,ntetr))
-    if (.not.allocated(c%temp_mat))   allocate(c%temp_mat(c%n,ntetr))
-    if (.not.allocated(c%vpar_mat))   allocate(c%vpar_mat(c%n,ntetr))
-    if (.not.allocated(c%efcolf_mat)) allocate(c%efcolf_mat(c%n,ntetr))
-    if (.not.allocated(c%velrat_mat)) allocate(c%velrat_mat(c%n,ntetr))
-    if (.not.allocated(c%enrat_mat))  allocate(c%enrat_mat(c%n,ntetr))
-    if (.not.allocated(c%mass))       allocate(c%mass(c%n))
-    if (.not.allocated(c%charge_num)) allocate(c%charge_num(c%n))
-    if (.not.allocated(c%dens))       allocate(c%dens(c%n))
-    if (.not.allocated(c%temp))       allocate(c%temp(c%n))
+    allocate(c%dens_mat(c%n,ntetr))
+    allocate(c%temp_mat(c%n,ntetr))
+    allocate(c%vpar_mat(c%n,ntetr))
+    allocate(c%efcolf_mat(c%n,ntetr))
+    allocate(c%velrat_mat(c%n,ntetr))
+    allocate(c%enrat_mat(c%n,ntetr))
+    allocate(c%mass(c%n))
+    allocate(c%charge_num(c%n))
+    allocate(c%dens(c%n))
+    allocate(c%temp(c%n))
 
     c%mass = 0
     c%charge_num = 0
