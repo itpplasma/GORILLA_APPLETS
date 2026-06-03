@@ -26,6 +26,9 @@ subroutine calc_square_root_g
 
     integer :: ind_tetr
 
+    !Free any pre-existing sqrt_g array so a fresh build can proceed without external bookkeeping.
+    call deallocate_sqrt_g
+
     allocate(sqrt_g(ntetr,7))
     !compare first 6 entries with chapter 4.5 of master thesis from Jonatan Schatzlmayr, entry 7 is the radius (old metric determinant)
 
