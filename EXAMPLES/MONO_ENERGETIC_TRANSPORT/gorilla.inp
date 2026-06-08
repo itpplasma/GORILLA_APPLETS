@@ -127,8 +127,12 @@
 !------------------------------------------------------------------------------------------------------------!
 !
  !Switches to calculate optional quantities
- boole_time_Hamiltonian = .true. ,
- boole_gyrophase = .true. ,
+ !The mono-energetic transport calculation only reads the flux label, so these
+ !stay off. orbit_timestep_gorilla calls pusher_tetra_poly without the optional
+ !optional_quantities argument; requesting them here dereferences an absent
+ !argument in the core pusher and crashes.
+ boole_time_Hamiltonian = .false. ,
+ boole_gyrophase = .false. ,
  boole_vpar_int = .false. ,
  boole_vpar2_int = .false. ,
 !
