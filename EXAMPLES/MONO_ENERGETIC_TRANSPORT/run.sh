@@ -35,7 +35,14 @@ done
 cp gorilla_applets.inp "$run/gorilla_applets.inp"
 cd "$run"
 
-set_option() { sed -i -E "s/^( *i_option *=).*/\1 $1 ,/" gorilla_applets.inp; }
+# Portable in-place edit: GNU `sed -i -E` and BSD `sed -i '' -E` are
+# incompatible, so write to a temp file and move it back instead.
+set_option() {
+    local tmp
+    tmp="$(mktemp)"
+    sed -E "s/^( *i_option *=).*/\1 $1 ,/" gorilla_applets.inp > "$tmp"
+    mv "$tmp" gorilla_applets.inp
+}
 
 echo "== pass 1: flux-tube volume (i_option=1) =="
 set_option 1
