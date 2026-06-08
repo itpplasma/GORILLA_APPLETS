@@ -904,7 +904,7 @@ end subroutine orbit_timestep_rmp_response_currents
 subroutine calc_particle_weights_and_jperp_rmp_response_currents(n, z_save, vpar, vperp, ind_tetr, species_in)
 
     use gorilla_applets_types_mod, only: in, flux, start, weights, g
-    use tetra_physics_mod, only: tetra_physics
+    use tetra_physics_mod, only: tetra_physics, metric_determinant
     use constants, only: ev2erg, pi
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
@@ -963,6 +963,12 @@ subroutine calc_particle_weights_and_jperp_rmp_response_currents(n, z_save, vpar
     if (in%boole_refined_sqrt_g) then
         J_x = (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
             & (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
+    else if (coord_system == 2) then
+        ! Symmetry-flux coordinates: the spatial Jacobian is sqrt(g), NOT the
+        ! cylindrical 'R = r + x1(1)' formula below. Use the analytic metric
+        ! determinant (clean and finite for grid_kind=5; the refined sqrt_g
+        ! formula above can hit a curlA-based NaN in degenerate seam tetras).
+        J_x = metric_determinant(ind_tetr, z_save + tetra_physics(ind_tetr)%x1)
     else
         J_x = r + tetra_physics(ind_tetr)%x1(1)
     endif
@@ -1233,6 +1239,7 @@ end function eval_s_local
 real(dp) function eval_theta_sfl_local(ind_tetr, x) result(theta_loc)
 
     use tetra_grid_mod, only: tetra_grid, verts_rphiz, verts_sthetaphi
+    use tetra_physics_mod, only: coord_system
     use constants, only: pi
 
     integer,  intent(in) :: ind_tetr
@@ -1240,6 +1247,12 @@ real(dp) function eval_theta_sfl_local(ind_tetr, x) result(theta_loc)
 
     integer  :: i, vidx, ipiv(4), ierr
     real(dp) :: M(4,4), b(4,1), V_th(4), span
+
+    ! In SFL coordinates (coord_system==2), theta is the native x(2) coordinate.
+    if (coord_system == 2) then
+        theta_loc = modulo(x(2), 2.0_dp*pi)
+        return
+    end if
 
     do i = 1, 4
         vidx = tetra_grid(ind_tetr)%ind_knot(i)
@@ -1401,6 +1414,7 @@ subroutine bias_starting_positions_to_s_window()
 
     use gorilla_applets_types_mod, only: in, start, g
     use tetra_physics_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
     use find_tetra_mod, only: find_tetra
     use constants, only: pi
 
@@ -1434,7 +1448,15 @@ subroutine bias_starting_positions_to_s_window()
             ! Redraw.
             do n_tries = 1, max_tries
                 call random_number(u)
-                if (coord_system .eq. 1) then
+                if (coord_system .eq. 1 .and. grid_kind .eq. 5) then
+                    ! Analytic-circ: draw directly inside the annulus.
+                    call draw_annulus_rphiz_analytic(s_inner_sample, s_outer_sample, u, x)
+                    call find_tetra(x, 0.0_dp, 0.0_dp, ind_tetr, iface)
+                    if (ind_tetr == -1) cycle
+                    start%x(:, n, species) = x
+                    n_replaced = n_replaced + 1
+                    exit
+                else if (coord_system .eq. 1) then
                     x(1) = x_amin + u(1) * (x_amax - x_amin)   ! R
                     x(2) = u(2) * 2.0_dp * pi                  ! phi
                     x(3) = x_cmin + u(3) * (x_cmax - x_cmin)   ! Z
@@ -1480,7 +1502,8 @@ end subroutine bias_starting_positions_to_s_window
 subroutine spawn_equidistant_in_s(species, n_spawned)
 
     use gorilla_applets_types_mod, only: in, start, g
-    use tetra_grid_settings_mod, only: sfc_s_min, sfc_s_max, grid_size, n_extra_rings
+    use tetra_grid_settings_mod, only: sfc_s_min, sfc_s_max, grid_size, n_extra_rings, &
+                                       grid_kind, R0_analytic_circ, a_analytic_circ
     use tetra_physics_mod, only: coord_system
     use find_tetra_mod, only: find_tetra
     use magdata_in_symfluxcoordinates_mod, only: magdata_in_symfluxcoord_ext
@@ -1502,6 +1525,8 @@ subroutine spawn_equidistant_in_s(species, n_spawned)
     real(dp) :: s_second_ring
     real(dp), allocatable :: s_edges(:)
     logical  :: placed
+    ! Analytic circular tokamak (grid_kind=5) closed-form (s,theta)->(R,Z) map.
+    real(dp) :: s_edge_ac, rho_loc
     ! Dummy outputs from magdata_in_symfluxcoord_ext (we only need R, Z).
     real(dp) :: psi_d, q_d, dq_ds_d, sqrtg_d, bmod_d, dbmod_dt_d
     real(dp) :: dR_ds_d, dR_dt_d, dZ_ds_d, dZ_dt_d
@@ -1605,13 +1630,27 @@ subroutine spawn_equidistant_in_s(species, n_spawned)
                 end if
 
                 if (coord_system == 1) then
-                    ! Symflux -> cylindrical via the equilibrium mapping.
-                    ! psi_d is overwritten as output when inp_label=1.
-                    psi_d = 0.0_dp
-                    call magdata_in_symfluxcoord_ext(1, s_target, psi_d, theta_loc, &
-                                                     q_d, dq_ds_d, sqrtg_d, bmod_d, dbmod_dt_d, &
-                                                     R_loc, dR_ds_d, dR_dt_d, &
-                                                     Z_loc, dZ_ds_d, dZ_dt_d)
+                    if (grid_kind == 5) then
+                        ! Analytic circular tokamak: closed-form (s,theta_SFL)->(R,Z).
+                        ! magdata_in_symfluxcoord_ext is EFIT-only (its splines are
+                        ! never loaded for grid_kind=5), so we map directly with the
+                        ! same geometry the grid builder uses (tetra_grid_mod case(5)):
+                        !   s_edge = R0 - sqrt(R0^2 - a^2);  rho = sqrt(R0^2 - (R0 - s*s_edge)^2)
+                        s_edge_ac = R0_analytic_circ &
+                                  - sqrt(R0_analytic_circ**2 - a_analytic_circ**2)
+                        rho_loc = sqrt(R0_analytic_circ**2 &
+                                     - (R0_analytic_circ - s_target*s_edge_ac)**2)
+                        R_loc = R0_analytic_circ + rho_loc * cos(theta_loc)
+                        Z_loc = rho_loc * sin(theta_loc)
+                    else
+                        ! Symflux -> cylindrical via the equilibrium mapping.
+                        ! psi_d is overwritten as output when inp_label=1.
+                        psi_d = 0.0_dp
+                        call magdata_in_symfluxcoord_ext(1, s_target, psi_d, theta_loc, &
+                                                         q_d, dq_ds_d, sqrtg_d, bmod_d, dbmod_dt_d, &
+                                                         R_loc, dR_ds_d, dR_dt_d, &
+                                                         Z_loc, dZ_ds_d, dZ_dt_d)
+                    end if
                     x(1) = R_loc
                     x(2) = phi_loc
                     x(3) = Z_loc
@@ -1652,6 +1691,40 @@ subroutine spawn_equidistant_in_s(species, n_spawned)
 end subroutine spawn_equidistant_in_s
 
 ! ====================================================================
+! Analytic circular tokamak (grid_kind=5) direct draw of a cylindrical
+! (R, phi, Z) position inside the resonance annulus s in [s_lo, s_hi].
+! Given three uniform deviates u(1:3), maps (s,theta,phi) -> (R,phi,Z) via
+! the closed-form geometry. rho is drawn with pdf ~ rho (rho^2 uniform) so
+! the sample is uniform in poloidal AREA within the ring -- identical to the
+! distribution the (R,Z)-box rejection sampler produced, but with ~100%
+! acceptance instead of ~1% (the ring is a thin sliver of the full poloidal
+! bounding box). This restricts respawned markers to the thin resonance
+! annulus and removes the marker losses caused by rejection-sampling misses.
+! ====================================================================
+subroutine draw_annulus_rphiz_analytic(s_lo, s_hi, u, x)
+
+    use tetra_grid_settings_mod, only: R0_analytic_circ, a_analytic_circ, n_field_periods
+    use constants, only: pi
+
+    real(dp), intent(in)  :: s_lo, s_hi, u(3)
+    real(dp), intent(out) :: x(3)
+    real(dp) :: s_edge, rho_lo, rho_hi, rho_s, theta_s
+
+    s_edge = R0_analytic_circ - sqrt(R0_analytic_circ**2 - a_analytic_circ**2)
+    rho_lo = sqrt(R0_analytic_circ**2 - (R0_analytic_circ - s_lo*s_edge)**2)
+    rho_hi = sqrt(R0_analytic_circ**2 - (R0_analytic_circ - s_hi*s_edge)**2)
+    rho_s   = sqrt(rho_lo**2 + u(1)*(rho_hi**2 - rho_lo**2))   ! uniform in area
+    theta_s = u(2) * 2.0_dp * pi                     ! poloidal: always full [0,2*pi]
+    x(1) = R0_analytic_circ + rho_s * cos(theta_s)   ! R
+    ! Toroidal: sample only the modelled field period [0, 2*pi/n_field_periods]
+    ! so respawned/spawned markers land inside the wedge mesh (n_field_periods=N).
+    ! n_field_periods = 1 -> full torus -> exact no-op.
+    x(2) = u(3) * 2.0_dp * pi / dble(n_field_periods) ! phi
+    x(3) = rho_s * sin(theta_s)                      ! Z
+
+end subroutine draw_annulus_rphiz_analytic
+
+! ====================================================================
 ! Single-particle respawn within the bias window intersected with the
 ! computational-domain cut. Used to redraw start%x(:,n,species) when a
 ! marker exits the domain mid-trace, so it can be re-traced from a fresh
@@ -1663,6 +1736,7 @@ subroutine respawn_particle_in_window(n, species, success)
 
     use gorilla_applets_types_mod, only: start, g
     use tetra_physics_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
     use find_tetra_mod, only: find_tetra
     use constants, only: pi
 
@@ -1687,7 +1761,16 @@ subroutine respawn_particle_in_window(n, species, success)
 
     do n_tries = 1, max_tries
         call random_number(u)
-        if (coord_system .eq. 1) then
+        if (coord_system .eq. 1 .and. grid_kind .eq. 5) then
+            ! Analytic-circ: draw directly inside the annulus (s in [s_lo,s_hi]
+            ! guaranteed by construction), so no s-rejection is needed.
+            call draw_annulus_rphiz_analytic(s_lo, s_hi, u, x)
+            call find_tetra(x, 0.0_dp, 0.0_dp, ind_tetr, iface)
+            if (ind_tetr == -1) cycle   ! rare find_tetra miss at a cell edge
+            start%x(:, n, species) = x
+            success = .true.
+            return
+        else if (coord_system .eq. 1) then
             x(1) = x_amin + u(1) * (x_amax - x_amin)   ! R
             x(2) = u(2) * 2.0_dp * pi                  ! phi
             x(3) = x_cmin + u(3) * (x_cmax - x_cmin)   ! Z
