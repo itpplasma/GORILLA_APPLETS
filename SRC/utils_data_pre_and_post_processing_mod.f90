@@ -399,8 +399,9 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
 
     c%temp_mat = in%energy_eV
-    if (i_option.eq.12) c%temp_mat(2,:) = s%temperature
-    c%dens_mat = in%density
+    if (i_option.eq.12) c%temp_mat(c%n, :) = s%temperature
+    ! Ion densities only; electron density is set below via quasi-neutrality.
+    c%dens_mat(1:c%n-1, :) = in%density
 
     if (boole_T_and_n_from_files) call get_T_and_n_from_files
 
@@ -442,6 +443,8 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
         c%dens_mat(:,1+i:ntetr:3) = c%dens_mat(:,1:ntetr:3)
     enddo
 
+    ! Enforce quasi-neutrality: electron density = sum of Z_i * n_i over ion species.
+    c%dens_mat(c%n, :) = matmul(c%charge_num(1:c%n-1), c%dens_mat(1:c%n-1, :))
 
     if (.not.in%boole_preserve_energy_and_momentum_during_collisions) then
         do i = 1, ntetr
@@ -488,34 +491,31 @@ end subroutine deallocate_collision_arrays
 
 subroutine set_c
 
-    use gorilla_applets_types_mod, only: c
+    use gorilla_applets_types_mod, only: c, in
     use tetra_grid_mod, only: ntetr
     use constants, only: amp, ame
 
-    !Free any pre-existing collision arrays so a fresh build can proceed without external bookkeeping.
-    call deallocate_collision_arrays
+    c%n = in%n_background_species
 
-    c%n = 2 !number of background species
-    allocate(c%dens_mat(c%n,ntetr))
-    allocate(c%temp_mat(c%n,ntetr))
-    allocate(c%vpar_mat(c%n,ntetr))
-    allocate(c%efcolf_mat(c%n,ntetr))
-    allocate(c%velrat_mat(c%n,ntetr))
-    allocate(c%enrat_mat(c%n,ntetr))
+    !Free any pre-existing collision arrays so a fresh build can proceed without external bookkeeping.
+    call deallocate_collision_arrays()
+
+    allocate(c%dens_mat(c%n, ntetr))
+    allocate(c%temp_mat(c%n, ntetr))
+    allocate(c%vpar_mat(c%n, ntetr))
+    allocate(c%efcolf_mat(c%n, ntetr))
+    allocate(c%velrat_mat(c%n, ntetr))
+    allocate(c%enrat_mat(c%n, ntetr))
     allocate(c%mass(c%n))
     allocate(c%charge_num(c%n))
     allocate(c%dens(c%n))
     allocate(c%temp(c%n))
 
-    c%mass = 0
-    c%charge_num = 0
-    c%mass(1) = 2*amp
+    c%mass(1:c%n-1) = 2.0_dp * amp
     c%mass(c%n) = ame
-    !c%mass(2) = 3*amp
-    c%charge_num(1) = 1.0d0
-    !c%charge_num(2) = 2
-    c%charge_num(c%n) = -1.0d0
-    c%vpar_mat = 0 !ask Sergei when this will be needed!!!
+    c%charge_num(1:c%n-1) = 1.0_dp
+    c%charge_num(c%n) = -1.0_dp
+    c%vpar_mat = 0.0_dp
 
 end subroutine set_c
 
@@ -528,16 +528,16 @@ subroutine get_T_and_n_from_files
     integer :: Te_unit, Ti_unit, ne_unit, i
     
     open(newunit = Te_unit, file = 'background/Te_d.dat')
-    read(Te_unit,'(e16.9)') (c%temp_mat(2,i),i=1,ntetr/grid_size(2),3)
+    read(Te_unit,'(e16.9)') (c%temp_mat(c%n, i), i=1, ntetr/grid_size(2), 3)
     close(Te_unit)
-    
+
     open(newunit = Ti_unit, file = 'background/Ti_d.dat')
-    read(Ti_unit,'(e16.9)') (c%temp_mat(1,i),i=1,ntetr/grid_size(2),3)
+    read(Ti_unit,'(e16.9)') (c%temp_mat(1, i), i=1, ntetr/grid_size(2), 3)
     close(Ti_unit)
-    
+
     open(newunit = ne_unit, file = 'background/ne_d.dat')
-    read(ne_unit,'(e16.9)') (c%dens_mat(1,i),i=1,ntetr/grid_size(2),3)
-    c%dens_mat(2,:) = c%dens_mat(1,:)
+    read(ne_unit,'(e16.9)') (c%dens_mat(1, i), i=1, ntetr/grid_size(2), 3)
+    c%dens_mat(c%n, :) = c%dens_mat(1, :)
     close(ne_unit)
 
 end subroutine get_T_and_n_from_files

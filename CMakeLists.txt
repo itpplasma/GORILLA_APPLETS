@@ -55,8 +55,15 @@ find_package(netCDF REQUIRED)
 add_compile_options(-g -fbacktrace -ffpe-trap=zero,overflow,invalid -fbounds-check -fopenmp)
 add_link_options(-g -fbacktrace -ffpe-trap=zero,overflow,invalid -fbounds-check -fopenmp)
 
+if(APPLE)
+  add_link_options(-L/opt/local/lib)
+endif()
+
+enable_testing()
+
 add_subdirectory(SRC)
 add_subdirectory(SRC_CORE)
+add_subdirectory(TESTS)
 
 add_executable(gorilla_applets_main.x
   SRC/gorilla_applets_main.f90
