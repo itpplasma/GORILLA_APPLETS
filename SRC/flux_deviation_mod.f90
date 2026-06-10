@@ -115,6 +115,7 @@
 !
             integer :: i,j,k,l,n,o,nskip,ierr,iface,ind_tetr,iper
             integer :: counter_tetrahedron_passes, counter_lost_particles,counter_mappings
+            integer :: n_surviving
             logical :: boole_t_finished
             logical, dimension(:), allocatable :: lost_particles
             double precision, dimension(:,:), allocatable :: psi_mat,psi_vec,delta_psi_mat,delta_psi_vec
@@ -568,9 +569,11 @@
 !
                 !Delta Psi averaged over all particles
                 delta_psi_average(1,:) = sum(delta_psi_mat,DIM=1)
+                if(n_particles-counter_lost_particles > 0) then
                 do i = 1,n_time_steps
                 delta_psi_average(1,i)  = delta_psi_average(1,i)/(n_particles-counter_lost_particles)
                 enddo
+                endif
 !
                 !Delta Psi Squared averaged over all particles
                 delta_psi_mat = delta_psi_mat**2 !attention: Same variable is used
@@ -592,22 +595,28 @@
 !
             endif
 !
-            !Compute momenta
-            do i = 1,n_time_steps
-                trend_delta_psi2_average(1,i) =  i*t_step
-                delta_psi2_average(1,i) = delta_psi2_average(1,i)/(n_particles-counter_lost_particles)
-                trend_delta_psi2_average(2,i) =  delta_psi2_average(1,i)
+            !Number of particles that stayed inside the computation domain
+            n_surviving = n_particles - counter_lost_particles
 !
-                delta_psi4_average(1,i)  = delta_psi4_average(1,i)/(n_particles-counter_lost_particles)
-                trend_std_delta_psi2_average(1,i) = i*t_step
-                trend_std_delta_psi2_average(2,i) = sqrt(delta_psi4_average(1,i) &
-                                                    & - delta_psi2_average(1,i)**2)/sqrt(dble(n_particles))
-!
-                if( (idiffcoef_output.eq.2).or.(idiffcoef_output.eq.3) ) then
-                    write(file_id_psi2,*) trend_delta_psi2_average(1,i),trend_delta_psi2_average(2,i)
-                    write(file_id_std_psi2,*) trend_std_delta_psi2_average(1,i),trend_std_delta_psi2_average(2,i)
-                endif
-            enddo
+            !Compute momenta. With no surviving particle the ensemble average is
+            !undefined, so skip it (and the fit below) instead of dividing by zero.
+            if(n_surviving > 0) then
+                do i = 1,n_time_steps
+                    trend_delta_psi2_average(1,i) =  i*t_step
+                    delta_psi2_average(1,i) = delta_psi2_average(1,i)/n_surviving
+                    trend_delta_psi2_average(2,i) =  delta_psi2_average(1,i)
+    !
+                    delta_psi4_average(1,i)  = delta_psi4_average(1,i)/n_surviving
+                    trend_std_delta_psi2_average(1,i) = i*t_step
+                    trend_std_delta_psi2_average(2,i) = sqrt(delta_psi4_average(1,i) &
+                                                        & - delta_psi2_average(1,i)**2)/sqrt(dble(n_particles))
+    !
+                    if( (idiffcoef_output.eq.2).or.(idiffcoef_output.eq.3) ) then
+                        write(file_id_psi2,*) trend_delta_psi2_average(1,i),trend_delta_psi2_average(2,i)
+                        write(file_id_std_psi2,*) trend_std_delta_psi2_average(1,i),trend_std_delta_psi2_average(2,i)
+                    endif
+                enddo
+            endif
 
             ! Write an zero line at the end of the calculation for one collisionality
             if( (idiffcoef_output.eq.2).or.(idiffcoef_output.eq.3) ) then
@@ -627,16 +636,23 @@
 !
             if( (idiffcoef_output.eq.1).or.(idiffcoef_output.eq.3) ) then
 !
-                ! Starting index (Throw away first 20 percent of values)
-                i = ceiling(dble(n_time_steps)*0.2d0)
+                if(n_surviving > 0) then
+                    ! Starting index (Throw away first 20 percent of values)
+                    i = ceiling(dble(n_time_steps)*0.2d0)
 !
-                call llsq (n_time_steps-i+1 , trend_delta_psi2_average(1,i:n_time_steps) , &
-                           &  trend_delta_psi2_average(2,i:n_time_steps) ,diff_coef,off_set )
-                diff_coef = diff_coef/2.d0
+                    call llsq (n_time_steps-i+1 , trend_delta_psi2_average(1,i:n_time_steps) , &
+                               &  trend_delta_psi2_average(2,i:n_time_steps) ,diff_coef,off_set )
+                    diff_coef = diff_coef/2.d0
 !
-                call llsq (n_time_steps-i+1 , trend_std_delta_psi2_average(1,i:n_time_steps) , &
-                           &  trend_std_delta_psi2_average(2,i:n_time_steps) ,std_diff_coef,off_set )
-                std_diff_coef = std_diff_coef/2.d0
+                    call llsq (n_time_steps-i+1 , trend_std_delta_psi2_average(1,i:n_time_steps) , &
+                               &  trend_std_delta_psi2_average(2,i:n_time_steps) ,std_diff_coef,off_set )
+                    std_diff_coef = std_diff_coef/2.d0
+                else
+                    !All particles left the domain: no diffusion estimate available
+                    print *, 'WARNING: all particles lost, skipping this collisionality'
+                    diff_coef = 0.d0
+                    std_diff_coef = 0.d0
+                endif
 !
                 !Write output depending, if nu_star is present
                 if(present(nu_star)) then
