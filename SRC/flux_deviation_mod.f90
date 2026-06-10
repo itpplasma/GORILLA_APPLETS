@@ -601,21 +601,21 @@
             !Compute momenta. With no surviving particle the ensemble average is
             !undefined, so skip it (and the fit below) instead of dividing by zero.
             if(n_surviving > 0) then
-            do i = 1,n_time_steps
-                trend_delta_psi2_average(1,i) =  i*t_step
-                delta_psi2_average(1,i) = delta_psi2_average(1,i)/n_surviving
-                trend_delta_psi2_average(2,i) =  delta_psi2_average(1,i)
-!
-                delta_psi4_average(1,i)  = delta_psi4_average(1,i)/n_surviving
-                trend_std_delta_psi2_average(1,i) = i*t_step
-                trend_std_delta_psi2_average(2,i) = sqrt(delta_psi4_average(1,i) &
-                                                    & - delta_psi2_average(1,i)**2)/sqrt(dble(n_particles))
-!
-                if( (idiffcoef_output.eq.2).or.(idiffcoef_output.eq.3) ) then
-                    write(file_id_psi2,*) trend_delta_psi2_average(1,i),trend_delta_psi2_average(2,i)
-                    write(file_id_std_psi2,*) trend_std_delta_psi2_average(1,i),trend_std_delta_psi2_average(2,i)
-                endif
-            enddo
+                do i = 1,n_time_steps
+                    trend_delta_psi2_average(1,i) =  i*t_step
+                    delta_psi2_average(1,i) = delta_psi2_average(1,i)/n_surviving
+                    trend_delta_psi2_average(2,i) =  delta_psi2_average(1,i)
+    !
+                    delta_psi4_average(1,i)  = delta_psi4_average(1,i)/n_surviving
+                    trend_std_delta_psi2_average(1,i) = i*t_step
+                    trend_std_delta_psi2_average(2,i) = sqrt(delta_psi4_average(1,i) &
+                                                        & - delta_psi2_average(1,i)**2)/sqrt(dble(n_particles))
+    !
+                    if( (idiffcoef_output.eq.2).or.(idiffcoef_output.eq.3) ) then
+                        write(file_id_psi2,*) trend_delta_psi2_average(1,i),trend_delta_psi2_average(2,i)
+                        write(file_id_std_psi2,*) trend_std_delta_psi2_average(1,i),trend_std_delta_psi2_average(2,i)
+                    endif
+                enddo
             endif
 
             ! Write an zero line at the end of the calculation for one collisionality
