@@ -66,9 +66,12 @@ subroutine initialise_output
     use tetra_grid_settings_mod, only: grid_size
     
     integer :: n_prisms
-    
+
+    !Free any pre-existing output arrays so a fresh build can proceed without external bookkeeping.
+    call deallocate_output
+
     n_prisms = ntetr/3
-    
+
     allocate(output%prism_volumes(n_prisms))
     allocate(output%refined_prism_volumes(n_prisms))
     allocate(output%electric_potential(n_prisms))
@@ -527,8 +530,10 @@ subroutine set_c
     else
         c%n = 2
     end if
-
+    
+    !Free any pre-existing collision arrays so a fresh build can proceed without external bookkeeping.
     call deallocate_collision_arrays()
+    
     allocate(c%dens_mat(c%n, ntetr))
     allocate(c%temp_mat(c%n, ntetr))
     allocate(c%vpar_mat(c%n, ntetr))
