@@ -131,6 +131,7 @@ module gorilla_applets_types_mod
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
     integer  :: n_mappings_ignored !Used in divertor_heat_loads
     real(dp) :: lambda !Used in divertor_heat_loads
+    integer  :: n_background_species = 2
     end type input_t
 
     type(input_t) :: in

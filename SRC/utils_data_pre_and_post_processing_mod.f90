@@ -400,7 +400,8 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
     c%temp_mat = in%energy_eV
     if (i_option.eq.12) c%temp_mat(c%n, :) = s%temperature
-    c%dens_mat = in%density
+    ! Ion densities only; electron density is set below via quasi-neutrality.
+    c%dens_mat(1:c%n-1, :) = in%density
 
     if (boole_T_and_n_from_files) call get_T_and_n_from_files
 
@@ -442,6 +443,8 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
         c%dens_mat(:,1+i:ntetr:3) = c%dens_mat(:,1:ntetr:3)
     enddo
 
+    ! Enforce quasi-neutrality: electron density = sum of Z_i * n_i over ion species.
+    c%dens_mat(c%n, :) = matmul(c%charge_num(1:c%n-1), c%dens_mat(1:c%n-1, :))
 
     if (.not.in%boole_preserve_energy_and_momentum_during_collisions) then
         do i = 1, ntetr
@@ -488,11 +491,11 @@ end subroutine deallocate_collision_arrays
 
 subroutine set_c
 
-    use gorilla_applets_types_mod, only: c
+    use gorilla_applets_types_mod, only: c, in
     use tetra_grid_mod, only: ntetr
     use constants, only: amp, ame
 
-    c%n = 2
+    c%n = in%n_background_species
 
     !Free any pre-existing collision arrays so a fresh build can proceed without external bookkeeping.
     call deallocate_collision_arrays()
@@ -508,11 +511,9 @@ subroutine set_c
     allocate(c%dens(c%n))
     allocate(c%temp(c%n))
 
-    c%mass = 0.0_dp
-    c%charge_num = 0.0_dp
-    c%mass(1) = 2.0_dp * amp
+    c%mass(1:c%n-1) = 2.0_dp * amp
     c%mass(c%n) = ame
-    c%charge_num(1) = 1.0_dp
+    c%charge_num(1:c%n-1) = 1.0_dp
     c%charge_num(c%n) = -1.0_dp
     c%vpar_mat = 0.0_dp
 
