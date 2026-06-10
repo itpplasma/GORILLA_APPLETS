@@ -402,13 +402,6 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     if (i_option.eq.12) c%temp_mat(c%n, :) = s%temperature
     c%dens_mat = in%density
 
-    if (in%boole_custom_background .and. allocated(in%background_density_cm3)) then
-        do j = 1, c%n
-            c%dens_mat(j, :) = in%background_density_cm3(j)
-            c%temp_mat(j, :) = in%background_temperature_eV(j)
-        end do
-    end if
-
     if (boole_T_and_n_from_files) call get_T_and_n_from_files
 
     ! Apply linear density and/or temperature profiles based on input settings
@@ -493,47 +486,17 @@ subroutine deallocate_collision_arrays
 
 end subroutine deallocate_collision_arrays
 
-subroutine set_custom_background(n, densities, temperatures, masses, charges)
-
-    use gorilla_applets_types_mod, only: in
-
-    integer, intent(in) :: n
-    real(dp), dimension(n), intent(in) :: densities
-    real(dp), dimension(n), intent(in) :: temperatures
-    real(dp), dimension(n), intent(in) :: masses
-    real(dp), dimension(n), intent(in) :: charges
-
-    in%boole_custom_background = .true.
-    if (allocated(in%background_density_cm3)) deallocate(in%background_density_cm3)
-    if (allocated(in%background_temperature_eV)) deallocate(in%background_temperature_eV)
-    if (allocated(in%background_mass)) deallocate(in%background_mass)
-    if (allocated(in%background_charge_num)) deallocate(in%background_charge_num)
-    allocate(in%background_density_cm3(n))
-    allocate(in%background_temperature_eV(n))
-    allocate(in%background_mass(n))
-    allocate(in%background_charge_num(n))
-    in%background_density_cm3 = densities
-    in%background_temperature_eV = temperatures
-    in%background_mass = masses
-    in%background_charge_num = charges
-
-end subroutine set_custom_background
-
 subroutine set_c
 
-    use gorilla_applets_types_mod, only: c, in
+    use gorilla_applets_types_mod, only: c
     use tetra_grid_mod, only: ntetr
     use constants, only: amp, ame
 
-    if (in%boole_custom_background .and. allocated(in%background_mass)) then
-        c%n = size(in%background_mass)
-    else
-        c%n = 2
-    end if
-    
+    c%n = 2
+
     !Free any pre-existing collision arrays so a fresh build can proceed without external bookkeeping.
     call deallocate_collision_arrays()
-    
+
     allocate(c%dens_mat(c%n, ntetr))
     allocate(c%temp_mat(c%n, ntetr))
     allocate(c%vpar_mat(c%n, ntetr))
@@ -545,17 +508,12 @@ subroutine set_c
     allocate(c%dens(c%n))
     allocate(c%temp(c%n))
 
-    if (in%boole_custom_background .and. allocated(in%background_mass)) then
-        c%mass = in%background_mass
-        c%charge_num = in%background_charge_num
-    else
-        c%mass = 0.0_dp
-        c%charge_num = 0.0_dp
-        c%mass(1) = 2.0_dp * amp
-        c%mass(c%n) = ame
-        c%charge_num(1) = 1.0_dp
-        c%charge_num(c%n) = -1.0_dp
-    end if
+    c%mass = 0.0_dp
+    c%charge_num = 0.0_dp
+    c%mass(1) = 2.0_dp * amp
+    c%mass(c%n) = ame
+    c%charge_num(1) = 1.0_dp
+    c%charge_num(c%n) = -1.0_dp
     c%vpar_mat = 0.0_dp
 
 end subroutine set_c
