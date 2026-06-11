@@ -23,9 +23,11 @@
 !            
         subroutine load_gorilla_applets_inp()
 !
-            open(unit=11, file='gorilla_applets.inp', status='unknown')
-            read(11,nml=GORILLA_APPLETS_NML)
-            close(11)
+            integer :: inp_unit
+!
+            open(newunit=inp_unit, file='gorilla_applets.inp', status='unknown')
+            read(inp_unit,nml=GORILLA_APPLETS_NML)
+            close(inp_unit)
 
             print *,'GORILLA_APPLETS: Loaded input data from input file'
 !            

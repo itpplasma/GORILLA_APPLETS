@@ -22,7 +22,7 @@ module poincare_invariances_mod
         implicit none
 !
         integer :: n_orbits, i,j,k,l, i_integrator_type, n_steps, counter_particles, file_id_orbit_position,n_orbit_positions
-        integer :: delta_orbit_position, file_id_orbit_cyl
+        integer :: delta_orbit_position, file_id_orbit_cyl, pi_unit
         double precision :: s_0, theta_0, phi_0, pitchpar_0
         double precision, dimension(:), allocatable :: alpha_0_vec
         double precision :: J_perp, t_total, vmod, bmod, delta_theta, delta_phi,perpinv,perpinv2
@@ -74,9 +74,9 @@ print *, ''
 !
         select case(i_integrator_type)
             case(1)
-                open(2,file='results/poincare_invariance_gorilla_n_1E7_e_var_jperp_var_dtdtau_ham_O4.dat')
+                open(newunit=pi_unit,file='results/poincare_invariance_gorilla_n_1E7_e_var_jperp_var_dtdtau_ham_O4.dat')
             case(2)
-                open(2,file='results/poincare_invariance_direct_1E-08_ns_s3.dat')
+                open(newunit=pi_unit,file='results/poincare_invariance_direct_1E-08_ns_s3.dat')
         end select
 !
         !File ID for orbit position
@@ -349,10 +349,10 @@ print *, ''
 !
         !Write first Poincaré invariance
         do j = 1,n_steps+1
-            write(2,*) j,first_poincare_invariance(j),gyro_term(j)
+            write(pi_unit,*) j,first_poincare_invariance(j),gyro_term(j)
         enddo
 !
-        close(2)
+        close(pi_unit)
 !
 !
 !
