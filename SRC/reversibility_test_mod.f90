@@ -52,9 +52,11 @@ module reversibility_test_load_mod
 
     subroutine load_reversibility_test_inp()
 !
-            open(unit=10, file='reversibility_test.inp', status='unknown')
-            read(10,nml=reversibility_test_nml)
-            close(10)
+            integer :: inp_unit
+!
+            open(newunit=inp_unit, file='reversibility_test.inp', status='unknown')
+            read(inp_unit,nml=reversibility_test_nml)
+            close(inp_unit)
 !
     end subroutine load_reversibility_test_inp
 
@@ -259,8 +261,7 @@ module reversibility_test_mod
 
         delta_snapshot = n_steps/n_snapshots
         !File ID for orbit position
-        file_id_reversibility_test = 100
-        open(file_id_reversibility_test,file=filename_reversibility_test)
+        open(newunit=file_id_reversibility_test,file=filename_reversibility_test)
         !Write orbit positions
         do l = 1, n_snapshots
             j = 1 + (l-1)*delta_snapshot
@@ -282,8 +283,7 @@ module reversibility_test_mod
         close(file_id_reversibility_test)
 !
         !File ID for orbit position backwards
-        file_id_reversibility_test_back = 200
-        open(file_id_reversibility_test_back,file=filename_reversibility_test_back)
+        open(newunit=file_id_reversibility_test_back,file=filename_reversibility_test_back)
         !Write orbit positions
         do l = 1, n_snapshots
             !We save the backwards integrated quantities in reversed order to be comparable to forward integrated ones
@@ -630,7 +630,7 @@ if(boole_diag_reversibility_test) stop
         double precision, dimension(:), allocatable         :: rand_noise_vec
         integer, dimension(:), allocatable                   :: seed
         double precision, dimension(:), allocatable         :: rd_seed
-        integer                                             :: n
+        integer                                             :: n, seed_unit
 !
         allocate(rand_noise_vec(n_orbits+1),get_rand_noise_vec(n_orbits+1))
 !
@@ -644,16 +644,16 @@ if(boole_diag_reversibility_test) stop
                 call random_number(rd_seed)
                 seed = int(rd_seed*10.d0)
                 deallocate(rd_seed)
-                open(85,file='seed.inp')
-                write(85,*) n
-                write(85,*) seed
-                close(85)
+                open(newunit=seed_unit,file='seed.inp')
+                write(seed_unit,*) n
+                write(seed_unit,*) seed
+                close(seed_unit)
             case(2) !Load seed
-                open(unit = 85, file='seed.inp', status='old',action = 'read')
-                read(85,*) n
+                open(newunit = seed_unit, file='seed.inp', status='old',action = 'read')
+                read(seed_unit,*) n
                 allocate(seed(n))
-                read(85,*) seed
-                close(85)
+                read(seed_unit,*) seed
+                close(seed_unit)
         end select
 !
         CALL RANDOM_SEED (PUT=seed)

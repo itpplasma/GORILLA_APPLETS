@@ -23,7 +23,7 @@
             integer(kind=8),intent(in) :: n_time_steps
             integer,dimension(:), allocatable :: seed
             double precision, dimension(:), allocatable :: rd_seed
-            integer :: j,n
+            integer :: j,n,seed_unit
 !
             allocate(rd_start_position(n_particles))
             allocate(rd_start_pitchpar(n_particles))
@@ -45,16 +45,16 @@
                     seed = int(rd_seed*10.d0)
                     deallocate(rd_seed)
 !
-                    open(85,file='seed.inp')
-                    write(85,*) n
-                    write(85,*) seed
-                    close(85)
+                    open(newunit=seed_unit,file='seed.inp')
+                    write(seed_unit,*) n
+                    write(seed_unit,*) seed
+                    close(seed_unit)
                 case(2) !Load seed
-                    open(unit = 85, file='seed.inp', status='old',action = 'read')
-                    read(85,*) n
+                    open(newunit = seed_unit, file='seed.inp', status='old',action = 'read')
+                    read(seed_unit,*) n
                     allocate(seed(n))
-                    read(85,*) seed
-                    close(85)
+                    read(seed_unit,*) seed
+                    close(seed_unit)
             end select
 !
             CALL RANDOM_SEED (PUT=seed)
@@ -115,7 +115,7 @@
 !
             integer :: i,j,k,l,n,o,nskip,ierr,iface,ind_tetr,iper
             integer :: counter_tetrahedron_passes, counter_lost_particles,counter_mappings
-            integer :: n_surviving
+            integer :: n_surviving, n_lost_unit
             logical :: boole_t_finished
             logical, dimension(:), allocatable :: lost_particles
             double precision, dimension(:,:), allocatable :: psi_mat,psi_vec,delta_psi_mat,delta_psi_vec
@@ -627,9 +627,9 @@
 !
             print *, 'Number of lost particles in Monte Carlo simulation', counter_lost_particles
 !
-            open(unit=202,file='n_lost_particles.dat',status='unknown')
-            write(202,*) counter_lost_particles
-            close(202)
+            open(newunit=n_lost_unit,file='n_lost_particles.dat',status='unknown')
+            write(n_lost_unit,*) counter_lost_particles
+            close(n_lost_unit)
 !
 !------------------------------------------------------------------------------------------------------------!
 !-------------- Computation of transport diffusion coefficient by linear least squares fit ------------------!

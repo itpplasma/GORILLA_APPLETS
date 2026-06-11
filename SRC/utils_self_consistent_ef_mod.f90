@@ -1315,9 +1315,7 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
         !         write(23,*) start%energy(i,2)
         !     enddo
         ! close(23)
-        open(71)
         call parallelised_particle_pushing(species = 2,j = 1,boole_diffusion_coefficient = .true.,n_particles_in=s%n_particles)
-        close(71)
 
 
 
@@ -1400,11 +1398,11 @@ subroutine calc_electron_diffusion_coefficients !call this before the first ion 
         dc%grad_B(ns) = (dc%B(ns+1)-dc%B(ns))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
     enddo
 
-    open(23,file = 'A_and_B.dat')
+    open(newunit=file_id,file = 'A_and_B.dat')
     do i = 1,grid_size(1)+1
-        write(23,*) dc%A(i), dc%B(i)
+        write(file_id,*) dc%A(i), dc%B(i)
     enddo
-    close(23)
+    close(file_id)
 
 end subroutine calc_electron_diffusion_coefficients
 
@@ -1417,6 +1415,7 @@ subroutine calc_electron_density_via_random_walk(iteration_step) !call this afte
 
     real(dp) :: delta_x, delta_t, xi, A, B, cell_size, B_fit, A_fit, p
     integer :: i, ns, k, num_steps_min, count_lost_particles, num_particles, particle_multiplication, iteration_step
+    integer :: density_unit
     real(dp), dimension(:), allocatable :: electron_density, electron_prism_densities
     real(dp), dimension(:), allocatable :: position, weight, exit_time
     type(time_t) :: t
@@ -1516,11 +1515,11 @@ count_lost_particles = 0
                                                         count_lost_particles,'out of', num_particles, &
                                                         'electrons left the computation domain'
 
-    open(10)
+    open(newunit=density_unit,file='electron_density.dat')
     do ns = 1, grid_size(1)
-        write(10,*) sfc_s_min + (1.0_dp - sfc_s_min) * (ns - 0.5_dp) / (grid_size(1)+1), electron_density(ns)
+        write(density_unit,*) sfc_s_min + (1.0_dp - sfc_s_min) * (ns - 0.5_dp) / (grid_size(1)+1), electron_density(ns)
     enddo
-    close(10)
+    close(density_unit)
 
     do i = 1,grid_size(1)
         electron_density(i) = electron_density(i)/(ep%s_shell_volumes(i)*t%step*num_particles)

@@ -42,9 +42,11 @@
 !            
         subroutine load_mono_energetic_transp_coef_inp()
 !
-            open(unit=11, file='mono_energetic_transp_coef.inp', status='unknown')
-            read(11,nml=TRANSPCOEFNML)
-            close(11)
+            integer :: inp_unit
+!
+            open(newunit=inp_unit, file='mono_energetic_transp_coef.inp', status='unknown')
+            read(inp_unit,nml=TRANSPCOEFNML)
+            close(inp_unit)
 
             print *,'Mono-energetic transport coefficient: Loaded input data from input file'
 !            

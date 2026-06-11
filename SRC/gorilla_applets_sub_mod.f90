@@ -108,24 +108,19 @@
 !
             !Initialize GORILLA with electrostatic potential in accordance with Mach number for mono-energetic transport coefficient
             call initialize_mono_energetic_transp_coef()
-
-            !File ids for squared deviaton, standard deviation and diffusion coefficient
-            file_id_psi2 = 14
-            file_id_std_psi2 = 15
-            file_id_transp_diff_coef = 16
 !
             !nu_star = [(2.d0**i, i=nu_start,(nu_start-(n_nu_scans+1)), -1)] ! nu_star = \frac{R_0 \nu_c}{\iota v_{mod}}
 !
             select case(idiffcoef_output)
                 case(1)
-                    open(file_id_transp_diff_coef,file=filename_transp_diff_coef)
+                    open(newunit=file_id_transp_diff_coef,file=filename_transp_diff_coef)
                 case(2)
-                    open(file_id_psi2,file=filename_delta_s_squared)
-                    open(file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
+                    open(newunit=file_id_psi2,file=filename_delta_s_squared)
+                    open(newunit=file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
                 case(3)
-                    open(file_id_transp_diff_coef,file=filename_transp_diff_coef)
-                    open(file_id_psi2,file=filename_delta_s_squared)
-                    open(file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
+                    open(newunit=file_id_transp_diff_coef,file=filename_transp_diff_coef)
+                    open(newunit=file_id_psi2,file=filename_delta_s_squared)
+                    open(newunit=file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
             end select
 !
             print *, 'Mono-energetic radial transport coefficient:'
@@ -198,22 +193,17 @@
 !
             !Initialize GORILLA with electrostatic potential in accordance with Mach number for mono-energetic transport coefficient
             call initialize_mono_energetic_transp_coef()
-
-            !File ids for squared deviaton, standard deviation and diffusion coefficient
-            file_id_psi2 = 14
-            file_id_std_psi2 = 15
-            file_id_transp_diff_coef = 16
 !
             select case(idiffcoef_output)
                 case(1)
-                    open(file_id_transp_diff_coef,file=filename_transp_diff_coef)
+                    open(newunit=file_id_transp_diff_coef,file=filename_transp_diff_coef)
                 case(2)
-                    open(file_id_psi2,file=filename_delta_s_squared)
-                    open(file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
+                    open(newunit=file_id_psi2,file=filename_delta_s_squared)
+                    open(newunit=file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
                 case(3)
-                    open(file_id_transp_diff_coef,file=filename_transp_diff_coef)
-                    open(file_id_psi2,file=filename_delta_s_squared)
-                    open(file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
+                    open(newunit=file_id_transp_diff_coef,file=filename_transp_diff_coef)
+                    open(newunit=file_id_psi2,file=filename_delta_s_squared)
+                    open(newunit=file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
             end select
 !
             print *, 'Mono-energetic radial transport coefficient - Scan over normalized collisionality:'
@@ -308,25 +298,20 @@
             !Compute velocity module from kinetic energy dependent on particle species
             vmod=sqrt(2.d0*energy_eV*ev2erg/particle_mass)
 !
-            !file id for squared deviaton
-            file_id_psi2 = 14
-            file_id_std_psi2 = 15
-            file_id_transp_diff_coef = 16
-!
             print *, 'Numerical radial transport diffusion coefficient:'
             print *, ''
             print *, 'Number of particles', n_particles
 !
             select case(idiffcoef_output)
                 case(1)
-                    open(file_id_transp_diff_coef,file=filename_numerical_diff_coef)
+                    open(newunit=file_id_transp_diff_coef,file=filename_numerical_diff_coef)
                 case(2)
-                    open(file_id_psi2,file=filename_delta_s_squared)
-                    open(file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
+                    open(newunit=file_id_psi2,file=filename_delta_s_squared)
+                    open(newunit=file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
                 case(3)
-                    open(file_id_transp_diff_coef,file=filename_numerical_diff_coef)
-                    open(file_id_psi2,file=filename_delta_s_squared)
-                    open(file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
+                    open(newunit=file_id_transp_diff_coef,file=filename_numerical_diff_coef)
+                    open(newunit=file_id_psi2,file=filename_delta_s_squared)
+                    open(newunit=file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
             end select
 !
             !Define step size
