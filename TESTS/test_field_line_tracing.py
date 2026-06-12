@@ -80,14 +80,11 @@ field_line_tracing["field_line_tracing_nml"]["n_particles"] = 3
 field_line_tracing["field_line_tracing_nml"]["boole_poincare_plot"] = False
 field_line_tracing["field_line_tracing_nml"]["boole_divertor_intersection"] = False
 field_line_tracing["field_line_tracing_nml"]["boole_point_source"] = False
-field_line_tracing["field_line_tracing_nml"]["boole_collisions"] = False
-field_line_tracing["field_line_tracing_nml"]["boole_precalc_collisions"] = False
 field_line_tracing["field_line_tracing_nml"]["boole_refined_sqrt_g"] = True
 field_line_tracing["field_line_tracing_nml"]["boole_monoenergetic"] = True
 field_line_tracing["field_line_tracing_nml"]["boole_linear_density_simulation"] = False
 field_line_tracing["field_line_tracing_nml"]["boole_linear_temperature_simulation"] = False
 field_line_tracing["field_line_tracing_nml"]["seed_option"] = 2
-field_line_tracing["field_line_tracing_nml"]["density"] = 1.0
 
 # Deterministic seed for reproducible CI output
 (WORK_DIR / "seed.inp").write_text("8\n  1 2 3 4 5 6 7 8\n")
