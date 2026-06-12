@@ -20,36 +20,33 @@ module pusher_tetra_field_lines_mod
     integer                             :: iface_init
     integer, public, protected          :: ind_tetr
     integer, public, protected          :: sign_rhs
-    double precision                    :: vmod0
-    double precision, public, protected :: perpinv,dt_dtau_const,bmod0
+    double precision, public, protected :: dt_dtau_const
     double precision                    :: t_remain
     double precision, dimension(3)      :: x_init
     double precision, dimension(4), public, protected :: z_init
-    double precision                    :: k1, k3
 !
-    !$OMP THREADPRIVATE(ind_tetr,iface_init,perpinv,dt_dtau_const,bmod0,t_remain,x_init,  &
-    !$OMP& z_init,k1,k3,vmod0,sign_rhs)
-! 
+    !$OMP THREADPRIVATE(ind_tetr,iface_init,dt_dtau_const,t_remain,x_init,  &
+    !$OMP& z_init,sign_rhs)
+!
     public :: pusher_tetra_field_lines,analytic_integration
 !  
     contains
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-        subroutine initialize_pusher_tetra_poly(ind_tetr_inout,x,iface,vpar,t_remain_in)
+        subroutine initialize_pusher_tetra_field_lines(ind_tetr_inout,x,iface,vpar,t_remain_in)
 !
             use tetra_physics_mod, only: tetra_physics, sign_sqg
-            use supporting_functions_mod, only: bmod_func, phi_elec_func, v2_E_mod_func
 !
             implicit none
 !
             integer, intent(in)                        :: ind_tetr_inout,iface
             double precision, intent(in)               :: vpar
             double precision, dimension(3), intent(in) :: x
-            double precision                           :: vperp2,vpar2,t_remain_in,phi_elec
+            double precision, intent(in)               :: t_remain_in
 !
             t_remain = t_remain_in
-!    
+!
             ind_tetr=ind_tetr_inout           !Save the index of the tetrahedron locally
 !
             !Sign of the right hand side of ODE - ensures that tau is ALWAYS positive inside the algorithm
@@ -70,32 +67,17 @@ module pusher_tetra_field_lines_mod
 !
             !Multiply with sign of rhs - ensures that tau is ALWAYS positive inside the algorithm
             dt_dtau_const = dt_dtau_const*dble(sign_rhs)
-!    
-            !Module of B at the entry point of the particle
-            bmod0 = bmod_func(z_init(1:3),ind_tetr) !tetra_physics(ind_tetr)%bmod1+sum(tetra_physics(ind_tetr)%gb*z_init(1:3))
 !
-            !Phi at the entry point of the particle
-            phi_elec = phi_elec_func(z_init(1:3),ind_tetr)   !tetra_physics(ind_tetr)%Phi1+sum(tetra_physics(ind_tetr)%gPhi*z_init(1:3))
-!
-            !Auxiliary quantities (unused by the field-line pusher itself, kept for diagnostics)
-            vperp2 = -2.d0*perpinv*bmod0
-            vpar2 = vpar**2
-            vmod0 = sqrt(vpar2+vperp2)
-!
-            k1 = vperp2+vpar2+2.d0*perpinv*tetra_physics(ind_tetr)%bmod1
-            k3 = tetra_physics(ind_tetr)%Phi1-phi_elec
-!
-        end subroutine initialize_pusher_tetra_poly
+        end subroutine initialize_pusher_tetra_field_lines
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
         subroutine pusher_tetra_field_lines(ind_tetr_inout,iface,x,vpar,z_save,t_remain_in,t_pass, &
                         & boole_t_finished,iper_phi)
 !
-            use tetra_physics_mod, only: tetra_physics,particle_charge,particle_mass
+            use tetra_physics_mod, only: tetra_physics
             use gorilla_diag_mod,  only: diag_pusher_tetry_poly
             use pusher_tetra_func_mod, only: pusher_handover2neighbour
-            use gorilla_settings_mod, only: boole_guess, boole_adaptive_time_steps
 !
             implicit none
 !
@@ -111,15 +93,13 @@ module pusher_tetra_field_lines_mod
             integer,intent(out)                                   :: iper_phi
 !
             logical, dimension(4)                                 :: boole_faces
-            integer                                               :: i,j,k
-            double precision, dimension(4)                        :: z,z_dummy
+            integer                                               :: i
+            double precision, dimension(4)                        :: z
             integer                                               :: iface_new
-            double precision                                      :: tau,vperp2,tau_save,tau_max, energy_init,energy_current
+            double precision                                      :: tau
             logical                                               :: boole_analytical_approx,boole_face_correct
-            integer                                               :: i_step_root
-            double precision                                      :: t_remain_new
 !
-            call initialize_pusher_tetra_poly(ind_tetr_inout,x,iface,vpar,t_remain_in)
+            call initialize_pusher_tetra_field_lines(ind_tetr_inout,x,iface,vpar,t_remain_in)
 !
             !Initial computation values
             z = z_init
