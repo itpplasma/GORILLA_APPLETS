@@ -27,6 +27,7 @@ module profile_data_mod
     public :: eval_s_from_psi_pol, eval_ds_dreff
     public :: profile_values_t
     public :: load_kim_nu, eval_kim_nu, kim_nu_loaded
+    public :: load_da_profile, eval_da_profile, da_profile_loaded
 
     ! Result type returned by eval_profiles
     type :: profile_values_t
@@ -80,6 +81,11 @@ module profile_data_mod
     ! operator when boole_use_kim_nu is set in the RMP namelist.
     logical :: kim_nu_loaded = .false.
     real(dp), allocatable :: kim_nu_spl(:), kim_nu_dd(:)
+
+    ! Anomalous diffusion coefficient D_a(r_eff) [cm^2/s] from KAMEL BALANCE
+    ! or compatible two-column (r_eff [cm], D_a [cm^2/s]) file.
+    logical :: da_profile_loaded = .false.
+    real(dp), allocatable :: da_spl(:), da_dd(:)
 
 contains
 
@@ -272,6 +278,9 @@ subroutine cleanup_profiles()
     if (allocated(kim_nu_spl)) deallocate(kim_nu_spl)
     if (allocated(kim_nu_dd))  deallocate(kim_nu_dd)
     kim_nu_loaded = .false.
+    if (allocated(da_spl)) deallocate(da_spl)
+    if (allocated(da_dd))  deallocate(da_dd)
+    da_profile_loaded = .false.
     psi_tor_edge_stored = 0.0_dp
     ns_psipol = 0
     profiles_loaded = .false.
@@ -360,6 +369,81 @@ real(dp) function eval_kim_nu(s_val) result(nu_val)
            + ((a**3 - a)*kim_nu_dd(i_lo) + (b**3 - b)*kim_nu_dd(i_hi)) * h**2 / 6.0_dp
 
 end function eval_kim_nu
+
+! ============================================================
+! Load anomalous diffusion coefficient profile D_a(r_eff) [cm^2/s].
+! File format: two columns (r_eff [cm], D_a [cm^2/s]).
+! Splined onto the s_grid via the r_eff(s) mapping from flux_functions.dat.
+! The same radial-convention caveat as load_kim_nu applies: the r column
+! is treated as GORILLA's area-radius r_eff.
+! ============================================================
+subroutine load_da_profile(filename)
+
+    character(len=*), intent(in) :: filename
+    real(dp), allocatable :: da_mapped(:)
+
+    if (.not. profiles_loaded) then
+        print *, 'ERROR: load_da_profile called before load_profiles'
+        stop
+    end if
+    if (da_profile_loaded) return
+
+    allocate(da_mapped(ns))
+    call read_and_map_profile(filename, r_eff_spl, ns, da_mapped)
+    allocate(da_spl(ns), da_dd(ns))
+    da_spl = da_mapped
+    call spline_natural(ns, s_grid, da_spl, da_dd)
+    deallocate(da_mapped)
+    da_profile_loaded = .true.
+
+    print *, '  D_a profile loaded from: ', trim(filename)
+    print *, '  D_a(s=0)   = ', da_spl(1),  ' cm^2/s'
+    print *, '  D_a(s~q=3) = ', eval_da_profile(0.7438_dp), ' cm^2/s'
+    print *, '  D_a(s=1)   = ', da_spl(ns), ' cm^2/s'
+
+end subroutine load_da_profile
+
+! ============================================================
+! Evaluate the splined D_a(s) [cm^2/s].  Clamps at endpoints.
+! Returns 0 if the profile has not been loaded.
+! ============================================================
+real(dp) function eval_da_profile(s_val) result(da_val)
+
+    real(dp), intent(in) :: s_val
+    integer :: i_lo, i_hi, i_mid
+    real(dp) :: h, a, b
+
+    if (.not. da_profile_loaded) then
+        da_val = 0.0_dp
+        return
+    end if
+
+    if (s_val <= s_grid(1)) then
+        da_val = max(0.0_dp, da_spl(1))
+        return
+    elseif (s_val >= s_grid(ns)) then
+        da_val = max(0.0_dp, da_spl(ns))
+        return
+    end if
+
+    i_lo = 1; i_hi = ns
+    do while (i_hi - i_lo > 1)
+        i_mid = (i_lo + i_hi) / 2
+        if (s_grid(i_mid) > s_val) then
+            i_hi = i_mid
+        else
+            i_lo = i_mid
+        end if
+    end do
+
+    h = s_grid(i_hi) - s_grid(i_lo)
+    a = (s_grid(i_hi) - s_val) / h
+    b = (s_val - s_grid(i_lo)) / h
+    da_val = a*da_spl(i_lo) + b*da_spl(i_hi) &
+           + ((a**3 - a)*da_dd(i_lo) + (b**3 - b)*da_dd(i_hi)) * h**2 / 6.0_dp
+    da_val = max(0.0_dp, da_val)
+
+end function eval_da_profile
 
 ! ============================================================
 ! Accessors: safety factor q(s) and psi_tor_edge, used by callers

@@ -15,7 +15,7 @@ module anomalous_transport_displacement_mod
 
 contains
 
-subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp)
+subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp, d_local)
 !
 ! Computes the displacement vector for anomalous transport and applies it.
 !
@@ -37,6 +37,10 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp)
 !   dt        - Time step
 !   vpar      - Parallel velocity (for edge disambiguation after displacement)
 !   vperp     - Perpendicular velocity (for edge disambiguation after displacement)
+! Optional Input:
+!   d_local   - Local D_a [cm^2/s] override (thread-private for OMP safety).
+!               When present and > 0, supersedes in%anomalous_diffusion_coefficient.
+!               Use this when D_a is radially varying (profile mode).
 !
     use tetra_physics_mod, only: tetra_physics,isinside
     use collis_ions, only: getran
@@ -48,6 +52,7 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp)
     real(dp), dimension(3), intent(inout) :: x
     integer, intent(inout)                :: ind_tetr, iface
     real(dp), intent(in)                  :: dt, vpar, vperp
+    real(dp), intent(in), optional        :: d_local
 
     real(dp), dimension(3) :: displacement, xi, V_c, x_new, x_save, displacement_towards_axis
 
@@ -55,10 +60,18 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp)
     real(dp), dimension(3,3) :: alpha_perp_mat
     real(dp), dimension(3) :: h_contra, x_local
     real(dp) :: R_local, sqrt_2dt, dist_to_axis, displacement_magnitude
+    real(dp) :: D_eff
     logical :: boole_lost_inside
     type(counter_t) :: dummy_counter
     real(dp) :: vpar_dummy, vperp_dummy
     integer :: ind_tetr_save, iface_save
+
+    ! Resolve effective D_a: profile-supplied value takes precedence.
+    if (present(d_local) .and. d_local > 0.0_dp) then
+        D_eff = d_local
+    else
+        D_eff = in%anomalous_diffusion_coefficient
+    end if
 
     ! Compute position relative to first vertex
     x_local = x - tetra_physics(ind_tetr)%x1
@@ -73,10 +86,10 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp)
     h_contra(3) =  tetra_physics(ind_tetr)%h3_1 + dot_product(tetra_physics(ind_tetr)%gh3, x_local)
 
     ! Compute Cholesky decomposition of the diffusion tensor
-    call compute_diffusion_cholesky(h_contra, R_local, in%anomalous_diffusion_coefficient, alpha_perp_mat)
+    call compute_diffusion_cholesky(h_contra, R_local, D_eff, alpha_perp_mat)
 
     ! Compute correction velocity
-    call compute_correction_velocity(ind_tetr, h_contra, R_local, in%anomalous_diffusion_coefficient, V_c)
+    call compute_correction_velocity(ind_tetr, h_contra, R_local, D_eff, V_c)
 
     ! Generate random numbers with zero mean and unit variance
     call getran(0, xi(1))

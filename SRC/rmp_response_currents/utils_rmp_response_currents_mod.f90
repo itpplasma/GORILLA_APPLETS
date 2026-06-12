@@ -41,6 +41,17 @@ module utils_rmp_response_currents_mod
     logical,            public :: boole_use_kim_nu         = .false.
     character(len=256), public :: kim_nu_file              = ''
 
+    ! Radially-varying anomalous diffusion D_a(r_eff) profile.
+    ! When da_profile_file is non-empty, the profile is loaded and the
+    ! per-marker D_a at each step is evaluated from the spline instead of
+    ! using the scalar in%anomalous_diffusion_coefficient.
+    ! da_scale_factor multiplies the profile values (use for sensitivity scans).
+    ! To enable the profile kick, set anomalous_diffusion_coefficient > 0
+    ! in the namelist (acts as a master enable; its exact value is ignored
+    ! once da_profile_file is non-empty) OR the profile gate supersedes it.
+    character(len=256), public :: da_profile_file          = ''
+    real(dp),           public :: da_scale_factor          = 1.0_dp
+
     ! Diagnostic: when true, bypass the delta-f weight evolution entirely
     ! and hold w(t) = 1 (real, constant) for the whole trace. Useful for
     ! tracer-style runs where each marker should deposit its raw v_par
@@ -195,6 +206,7 @@ subroutine read_rmp_response_currents_inp_into_type
     & pert_m_fourier, pert_n_fourier, delta_B_r_file, species_for_delta_f, &
     & nu_r_frac, m_collision_times_reg_on, coulomb_log, nu_scale_factor, &
     & boole_use_kim_nu, kim_nu_file, &
+    & da_profile_file, da_scale_factor, &
     & boole_constant_unit_weight, &
     & boole_compute_n_modes_dft, s_outer_cut, boole_skip_phase_for_test, &
     & s_inner_sample, s_outer_sample, n_respawn_max, boole_equidistant_s_sampling, &
@@ -420,6 +432,7 @@ subroutine set_rest_of_start_type_rmp()
     use constants, only: echarge, ame, clight
     use constants, only: ev2erg
     use marker_distribution_mod, only: pdf_flat, init_distribution_1d, sample_array_1d
+    use profile_data_mod, only: load_da_profile
 
     integer :: i_species
 
@@ -499,6 +512,11 @@ subroutine set_rest_of_start_type_rmp()
         close(u)
     end block
 
+    ! Load radially-varying D_a(r_eff) profile if requested.
+    if (len_trim(da_profile_file) > 0) then
+        call load_da_profile(trim(da_profile_file))
+    end if
+
 end subroutine set_rest_of_start_type_rmp
 
 ! ====================================================================
@@ -512,8 +530,10 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
         initialise_seed_for_random_numbers_for_each_thread
     use find_tetra_mod, only: find_tetra
     ! Anomalous-transport kick: re-use the existing applet's perpendicular
-    ! random-walk displacement. Enabled when in%anomalous_diffusion_coefficient > 0.
+    ! random-walk displacement. Enabled when in%anomalous_diffusion_coefficient > 0
+    ! or da_profile_file is loaded.
     use anomalous_transport_displacement_mod, only: anomalous_transport_displacement
+    use profile_data_mod, only: da_profile_loaded, eval_da_profile
 
     integer, intent(in)                               :: species
     integer, intent(in), optional                     :: n_particles_in
@@ -535,6 +555,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     ! short trace time, which is statistically equivalent to its share of a
     ! full trace (rather than being suppressed by the full intended T_n).
     complex(dp), dimension(:,:), allocatable          :: particle_tetr_moments
+    real(dp)                                          :: da_local
     logical                                           :: thread_flag = .true.
     logical                                           :: respawn_success
 
@@ -560,9 +581,10 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, moment_specs, ntetr, n_respawn_max, &
     !$OMP&        boole_dump_orbit_n1, traj_dump_unit, orbit_dump_stride, traj_step_count, &
     !$OMP&        boole_dump_collisions_n1, coll_dump_unit, coll_dump_stride, &
-    !$OMP&        coll_event_count, coll_dt_sum, coll_dist_sum) &
+    !$OMP&        coll_event_count, coll_dt_sum, coll_dist_sum, &
+    !$OMP&        da_profile_loaded, da_scale_factor) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
-    !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success) &
+    !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local) &
     !$OMP& FIRSTPRIVATE(thread_flag)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
@@ -653,14 +675,20 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
 
                 ! Anomalous-transport kick (perpendicular random walk + correction
                 ! velocity), re-used from anomalous_transport_displacement_mod.
-                ! Disabled when in%anomalous_diffusion_coefficient <= 0. The weight
+                ! Disabled when neither the scalar nor a profile is active. The weight
                 ! weights%w(n, species) is intentionally NOT reset here -- the
                 ! marker carries its coherent weight to the displaced location,
                 ! where wdot_s at the new (s, theta, phi) drives the subsequent
                 ! evolution. This matches the soft-respawn convention used for
                 ! out-of-domain re-entries.
-                if (in%anomalous_diffusion_coefficient > 0.0_dp .and. ind_tetr /= -1) then
-                    call anomalous_transport_displacement(x, ind_tetr, iface, t%step, vpar, vperp)
+                if ((in%anomalous_diffusion_coefficient > 0.0_dp .or. da_profile_loaded) &
+                    .and. ind_tetr /= -1) then
+                    if (da_profile_loaded) then
+                        da_local = eval_da_profile(eval_s_local(ind_tetr, x)) * da_scale_factor
+                        call anomalous_transport_displacement(x, ind_tetr, iface, t%step, vpar, vperp, da_local)
+                    else
+                        call anomalous_transport_displacement(x, ind_tetr, iface, t%step, vpar, vperp)
+                    end if
                 end if
 
                 if (ind_tetr == -1) then
