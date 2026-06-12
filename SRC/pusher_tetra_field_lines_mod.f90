@@ -55,13 +55,14 @@ module pusher_tetra_field_lines_mod
             !Sign of the right hand side of ODE - ensures that tau is ALWAYS positive inside the algorithm
             sign_rhs = sign_sqg * int(sign(1.d0,t_remain))
 !
-            z_init(1:3)=x-tetra_physics(ind_tetr)%x1       !x is the entry point of the particle into the tetrahedron in (R,phi,z)-coordinates
+            !z_init(1:3): position relative to the 1st vertex of the tetrahedron (new origin)
+            !x is the entry point of the particle into the tetrahedron in (R,phi,z)-coordinates
+            z_init(1:3)=x-tetra_physics(ind_tetr)%x1
 !
-            z_init(4)=vpar                         !Transform to z_init: 1st vertex of tetrahdron is new origin
+            z_init(4)=vpar
 !
             !Save initial orbit parameters
             x_init = x
-!             vperp_init = vperp
             iface_init = iface
 !
             !Tetrahedron constants
@@ -76,11 +77,9 @@ module pusher_tetra_field_lines_mod
             !Phi at the entry point of the particle
             phi_elec = phi_elec_func(z_init(1:3),ind_tetr)   !tetra_physics(ind_tetr)%Phi1+sum(tetra_physics(ind_tetr)%gPhi*z_init(1:3))
 !
-            !Auxiliary quantities
+            !Auxiliary quantities (unused by the field-line pusher itself, kept for diagnostics)
             vperp2 = -2.d0*perpinv*bmod0
             vpar2 = vpar**2
-            !This is the total speed viewed in the MOVING FRAME of ExB drift (here it only acts as a coefficient for the EOM-set)
-            !For physical estimates v_E is considered seperately anyway
             vmod0 = sqrt(vpar2+vperp2)
 !
             k1 = vperp2+vpar2+2.d0*perpinv*tetra_physics(ind_tetr)%bmod1
@@ -149,10 +148,10 @@ endif
             boole_faces = .true.
 !
             !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            !!!!!!!!!!!!!!!!!!!!FIRST ATTEMPT WITH SECOND ORDER GUESS!!!!!!!!!!!!!!!!!!!!
+            !!!!!!!!!!!!!!!!!!!!!!!!!!!PUSH TO EXIT FACE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
-            !Analytical calculation of orbit parameter to guess exit face and estimate of tau
+            !Analytical (linear) solve for exit face and tau
             call analytic_approx(boole_faces,z,iface_new,tau,boole_analytical_approx)
 !
 if(diag_pusher_tetry_poly) print *, 'boole_analytical_approx',boole_analytical_approx
@@ -176,7 +175,7 @@ if(diag_pusher_tetry_poly) print *, 'Error in predicted integrator: Analytic app
             endif !boole face correct
 !
             !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            !!!!!!!!!!!!!!!!!!!!!!!!!!END OF FIRST ATTEMPT!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            !!!!!!!!!!!!!!!!!!!!!!!!END OF PUSH TO EXIT FACE!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
 if(diag_pusher_tetry_poly) then
@@ -208,7 +207,7 @@ if(diag_pusher_tetry_poly) print *, 't_pass',t_pass
             if(abs(t_pass).ge.abs(t_remain)) then
 !
             !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            !!!!!!!SECOND ATTEMPT IF PARTICLE DOES NOT LEAVE CELL IN REMAINING TIME!!!!!!!
+            !!!!!!!FALLBACK: PARTICLE DOES NOT LEAVE CELL IN REMAINING TIME!!!!!!!!!!!!!!
             !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
                 !Set z back to z_init
@@ -248,7 +247,7 @@ if(diag_pusher_tetry_poly) print *, 'tau until t finished',tau
                 endif
 !
             !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            !!!!!!!!!!!!END OF SECOND ATTEMPT IF PARTICLE DOES NOT LEAVE CELL!!!!!!!!!!!!
+            !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!END OF FALLBACK!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
             !Normal orbit that passes the whole tetrahedron
