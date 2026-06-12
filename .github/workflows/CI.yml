@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+
+    env:
+      FC: gfortran
+
+    steps:
+      - name: Checkout GORILLA_APPLETS
+        uses: actions/checkout@v6
+        with:
+          path: GORILLA_APPLETS
+
+      - name: Checkout GORILLA (core dependency)
+        uses: actions/checkout@v6
+        with:
+          repository: itpplasma/GORILLA
+          path: GORILLA
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran liblapack-dev libnetcdff-dev ninja-build cmake
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install f90nml
+
+      - name: Build
+        working-directory: GORILLA_APPLETS
+        run: make
+
+      - name: Test
+        working-directory: GORILLA_APPLETS
+        run: make test
