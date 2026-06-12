@@ -57,6 +57,7 @@ subroutine calc_field_lines
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g
+    use utils_data_pre_and_post_processing_mod, only: get_ipert
 
     double precision, dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
                                                      velrat_mat, enrat_mat, dens_mat_tetr, temp_mat_tetr
@@ -70,7 +71,7 @@ subroutine calc_field_lines
     double precision :: m0,z0
     double precision, dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background,mass,charge_num,dens,temp
     type(counter_t) :: counter, local_counter
-    integer :: ipert_unit, Te_unit, Ti_unit, ne_unit
+    integer :: Te_unit, Ti_unit, ne_unit
 
     !Load input for boltzmann computation
     call read_field_line_tracing_inp()
@@ -79,10 +80,7 @@ subroutine calc_field_lines
     n_start = 1
     n_end = num_particles
 
-
-    open(newunit = ipert_unit, file='field_divB0.inp')
-    read(ipert_unit,*) ipert        ! 0=eq only, 1=vac, 2=vac+plas no derivatives,
-    close(ipert_unit)
+    call get_ipert()
 
     !Initialize GORILLA
     call initialize_gorilla(i_option,ipert)
@@ -528,27 +526,6 @@ subroutine calc_plane_intersection(x_save,x,z_plane)
 
 end subroutine calc_plane_intersection
 
-subroutine cyl_to_cart(xcyl,xcart)
-
-    double precision, dimension(3), intent(in) :: xcyl
-    double precision, dimension(3), intent(out) :: xcart
-
-    xcart(1) = xcyl(1)*cos(xcyl(2))
-    xcart(2) = xcyl(1)*sin(xcyl(2))
-    xcart(3) = xcyl(3)
-
-end subroutine cyl_to_cart
-
-subroutine cart_to_cyl(xcart,xcyl)
-
-    double precision, dimension(3), intent(in) :: xcart
-    double precision, dimension(3), intent(out) :: xcyl
-
-    xcyl(1) = hypot(xcart(1),xcart(2))
-    xcyl(2) = atan2(xcart(2),xcart(1))
-    xcyl(3) = xcart(3)
-end subroutine cart_to_cyl
-
 subroutine set_counters_zero(local_counter)
 
     type(counter_t), intent(inout) :: local_counter
@@ -616,6 +593,7 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     use find_tetra_mod, only: find_tetra
     use tetra_grid_settings_mod, only: grid_kind
     use tetra_physics_mod, only: coord_system
+    use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers
 
     double precision, intent(in)                                   :: v0
     double precision, dimension(:,:), allocatable, intent(out)     :: start_pos_pitch_mat
@@ -625,20 +603,10 @@ subroutine calc_starting_conditions(v0,start_pos_pitch_mat)
     double precision, dimension(:), allocatable                    :: rand_matrix2
     integer                                                        :: i
     double precision, dimension(3)                                 :: x
-    integer                                                        :: ind_tetr_out,iface, seed_inp_unit
+    integer                                                        :: ind_tetr_out,iface
 
-!!!!comment out the following section to make starting conditions really random!!!
-
-    integer,dimension(:), allocatable                              :: seed
-    integer                                                        :: n
-
-    open(newunit = seed_inp_unit, file='seed.inp', status='old',action = 'read')
-    read(seed_inp_unit,*) n
-    allocate(seed(n))
-    read(seed_inp_unit,*) seed
-    close(seed_inp_unit)
-    CALL RANDOM_SEED (PUT=seed)
-    deallocate(seed)
+!!!!comment out the following call to make starting conditions really random!!!
+    call set_seed_for_random_numbers
 
     allocate(start_pos_pitch_mat(5,num_particles))
     allocate(rand_vector(num_particles))
