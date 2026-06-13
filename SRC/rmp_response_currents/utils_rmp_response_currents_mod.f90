@@ -556,6 +556,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     ! full trace (rather than being suppressed by the full intended T_n).
     complex(dp), dimension(:,:), allocatable          :: particle_tetr_moments
     real(dp)                                          :: da_local
+    integer                                           :: n_da_sub, i_da_sub
     logical                                           :: thread_flag = .true.
     logical                                           :: respawn_success
 
@@ -584,7 +585,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP&        coll_event_count, coll_dt_sum, coll_dist_sum, &
     !$OMP&        da_profile_loaded, da_scale_factor) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
-    !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local) &
+    !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local, n_da_sub, i_da_sub) &
     !$OMP& FIRSTPRIVATE(thread_flag)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
@@ -685,9 +686,21 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                     .and. ind_tetr /= -1) then
                     if (da_profile_loaded) then
                         da_local = eval_da_profile(eval_s_local(ind_tetr, x)) * da_scale_factor
-                        call anomalous_transport_displacement(x, ind_tetr, iface, t%step, vpar, vperp, da_local)
                     else
-                        call anomalous_transport_displacement(x, ind_tetr, iface, t%step, vpar, vperp)
+                        da_local = in%anomalous_diffusion_coefficient
+                    end if
+                    if (da_local > 0.0_dp) then
+                        ! Sub-step when a single orbit step would displace > epsilon=0.1 cm.
+                        ! n_da_sub is chosen so each sub-step displacement <= epsilon.
+                        ! t%step is partitioned evenly so total diffusion per orbit step
+                        ! = sqrt(2*D*t%step) regardless of n_da_sub.
+                        n_da_sub = max(1, nint(2.0_dp * da_local * t%step / 1.0d-2))
+                        t%step_anomalous_transport = t%step / real(n_da_sub, dp)
+                        do i_da_sub = 1, n_da_sub
+                            call anomalous_transport_displacement(x, ind_tetr, iface, &
+                                t%step_anomalous_transport, vpar, vperp, da_local)
+                            if (ind_tetr == -1) exit
+                        end do
                     end if
                 end if
 
@@ -837,9 +850,16 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
                     x_new = 3*(/g%raxis, x(2), g%zaxis/) - 2*x
                     vperp = vperp_func(z_save, perpinv, ind_tetr_save)
                     call find_tetra(x_new, vpar, vperp, ind_tetr, iface)
-                    x = x_new
-                    if (ind_tetr.eq.-1) then
-                        print*, "ATTENTION: particle pushing across the hole surrounding the magnetic axis was unsuccessful"
+                    if (ind_tetr.ne.-1) then
+                        x = x_new
+                    else
+                        ! Axis reflection failed (reflected Z outside mesh — marker near X-point).
+                        ! Restore to pre-push position and consume the time step so the orbit
+                        ! loop exits cleanly without triggering a respawn.
+                        x = x_pre_push
+                        ind_tetr = ind_tetr_save
+                        t%remain = 0.0_dp
+                        boole_t_finished = .true.
                         exit
                     endif
                 else
