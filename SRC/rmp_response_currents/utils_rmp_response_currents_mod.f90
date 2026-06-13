@@ -858,13 +858,8 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
                     if (ind_tetr.ne.-1) then
                         x = x_new
                     else
-                        ! Axis reflection failed (reflected Z outside mesh — marker near X-point).
-                        ! Restore to pre-push position and consume the time step so the orbit
-                        ! loop exits cleanly without triggering a respawn.
-                        x = x_pre_push
-                        ind_tetr = ind_tetr_save
-                        t%remain = 0.0_dp
-                        boole_t_finished = .true.
+                        ! Axis reflection failed (reflected position outside mesh).
+                        ! Exit with ind_tetr=-1 so the outer loop can respawn the marker.
                         exit
                     endif
                 else
