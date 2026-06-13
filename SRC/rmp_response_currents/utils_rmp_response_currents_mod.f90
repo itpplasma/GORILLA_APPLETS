@@ -840,6 +840,11 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
     boole_t_finished = .false.
     local_counter%tetr_pushings = local_counter%tetr_pushings - 1
 
+    ! Safe defaults so axis-recovery can read these on the very first iteration
+    ! even if ind_tetr is already -1 when orbit_timestep is entered.
+    x_pre_push = x
+    ind_tetr_save = ind_tetr
+
     do
         local_counter%tetr_pushings = local_counter%tetr_pushings + 1
 
