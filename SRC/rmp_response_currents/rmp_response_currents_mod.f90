@@ -27,6 +27,7 @@ subroutine calc_rmp_response_currents
         calc_starting_conditions_rmp_response_currents, &
         profile_dir, equil_mapping_file, boole_constant_delta_B_r, delta_B_r_const, &
         pert_m_fourier, pert_n_fourier, delta_B_r_file, boole_skip_phase_for_test, &
+        boole_step_delta_B_r, step_center_reff, step_halfwidth_reff, &
         bias_starting_positions_to_s_window, dump_start_positions, &
         spawn_equidistant_in_s, boole_equidistant_s_sampling, &
         boole_dump_orbit_n1, traj_dump_unit, traj_step_count, &
@@ -35,7 +36,8 @@ subroutine calc_rmp_response_currents
         boole_use_kim_nu, kim_nu_file, &
         compute_spawn_volume, filter_markers_by_trapping, trapping_filter_mode
     use profile_data_mod, only: load_profiles, load_kim_nu
-    use perturbation_field_mod, only: init_constant_perturbation, load_perturbation_field, boole_skip_phase
+    use perturbation_field_mod, only: init_constant_perturbation, load_perturbation_field, &
+                                      init_step_perturbation, boole_skip_phase
 
     call set_seed_for_random_numbers
     call read_rmp_response_currents_inp_into_type
@@ -65,7 +67,11 @@ subroutine calc_rmp_response_currents
             end if
             call load_kim_nu(trim(kim_nu_file))
         end if
-        if (boole_constant_delta_B_r) then
+        if (boole_step_delta_B_r) then
+            call init_step_perturbation(step_center_reff, step_halfwidth_reff, &
+                                        delta_B_r_const, pert_m_fourier, pert_n_fourier, &
+                                        trim(equil_mapping_file))
+        else if (boole_constant_delta_B_r) then
             call init_constant_perturbation(delta_B_r_const, pert_m_fourier, pert_n_fourier)
             boole_skip_phase = boole_skip_phase_for_test
         else

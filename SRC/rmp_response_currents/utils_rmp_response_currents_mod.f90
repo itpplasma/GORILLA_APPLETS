@@ -14,6 +14,13 @@ module utils_rmp_response_currents_mod
     integer,            public :: pert_m_fourier       = 0
     integer,            public :: pert_n_fourier       = 0
     character(len=512), public :: delta_B_r_file     = ''
+    ! Step-function Br mode: Br = delta_B_r_const in [centre-hw, centre+hw], 0 outside.
+    ! step_center_reff and step_halfwidth_reff are in r_eff [cm].
+    ! r_eff is the toroidal-flux-based effective radius (NOT the geometric minor
+    ! radius r_geom).  Read r_eff from flux_functions.dat col1 (0-indexed).
+    logical,  public :: boole_step_delta_B_r   = .false.
+    real(dp), public :: step_center_reff       = 0.0_dp  ! r_eff [cm] — NOT r_geom
+    real(dp), public :: step_halfwidth_reff    = 0.0_dp  ! r_eff [cm] — NOT r_geom
     integer,            public :: species_for_delta_f  = 1
     ! Diagnostic: if .true., skip the exp(i*(m theta + n phi)) factor in
     ! the constant-amplitude perturbation and return delta_B_r_const as
@@ -203,7 +210,8 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, &
     & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f, &
     & profile_dir, equil_mapping_file, boole_constant_delta_B_r, delta_B_r_const, &
-    & pert_m_fourier, pert_n_fourier, delta_B_r_file, species_for_delta_f, &
+    & pert_m_fourier, pert_n_fourier, delta_B_r_file, &
+    & boole_step_delta_B_r, step_center_reff, step_halfwidth_reff, species_for_delta_f, &
     & nu_r_frac, m_collision_times_reg_on, coulomb_log, nu_scale_factor, &
     & boole_use_kim_nu, kim_nu_file, &
     & da_profile_file, da_scale_factor, &
