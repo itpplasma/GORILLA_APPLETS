@@ -21,6 +21,14 @@ module utils_rmp_response_currents_mod
     logical,  public :: boole_step_delta_B_r   = .false.
     real(dp), public :: step_center_reff       = 0.0_dp  ! r_eff [cm] — NOT r_geom
     real(dp), public :: step_halfwidth_reff    = 0.0_dp  ! r_eff [cm] — NOT r_geom
+    ! Perturbed electrostatic E_perp from KIM (E_perp.dat).
+    ! boole_e_perp enables the c*dE^s/B0 term in wdot (Albert 2016 Eq.4,
+    ! extended to include E×B radial drift from the RMP electrostatic response).
+    ! e_perp_file must be KIM's E_perp.dat (4-column: r_eff[cm], Re, Im, |mag|).
+    ! Must be used together with one of the Br perturbation modes (shares m,n).
+    ! r_eff here is the toroidal-flux-based effective radius (NOT r_geom).
+    logical,            public :: boole_e_perp  = .false.
+    character(len=512), public :: e_perp_file   = ''   ! path to KIM E_perp.dat
     integer,            public :: species_for_delta_f  = 1
     ! Diagnostic: if .true., skip the exp(i*(m theta + n phi)) factor in
     ! the constant-amplitude perturbation and return delta_B_r_const as
@@ -217,6 +225,7 @@ subroutine read_rmp_response_currents_inp_into_type
     & da_profile_file, da_scale_factor, &
     & boole_constant_unit_weight, &
     & boole_compute_n_modes_dft, s_outer_cut, boole_skip_phase_for_test, &
+    & boole_e_perp, e_perp_file, &
     & s_inner_sample, s_outer_sample, n_respawn_max, boole_equidistant_s_sampling, &
     & boole_stratify_theta, boole_stratify_phi, &
     & boole_dump_orbit_n1, orbit_dump_stride, trapping_filter_mode, &
