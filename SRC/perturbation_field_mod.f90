@@ -229,6 +229,11 @@ subroutine init_step_perturbation(center_reff, halfwidth_reff, dB_const, &
     real(dp), allocatable :: r_equil(:), psi_tor_equil(:), s_equil(:)
     real(dp) :: psi_tor_edge, frac, r_lo, r_hi
 
+    if (halfwidth_reff <= 0.0_dp) then
+        print *, 'ERROR: step_halfwidth_reff must be > 0, got ', halfwidth_reff
+        stop
+    end if
+
     call read_equil_mapping_pert(equil_mapping_file, n_equil, r_equil, psi_tor_equil)
 
     psi_tor_edge = psi_tor_equil(n_equil)

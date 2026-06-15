@@ -71,6 +71,7 @@ subroutine calc_rmp_response_currents
             call init_step_perturbation(step_center_reff, step_halfwidth_reff, &
                                         delta_B_r_const, pert_m_fourier, pert_n_fourier, &
                                         trim(equil_mapping_file))
+            boole_skip_phase = boole_skip_phase_for_test
         else if (boole_constant_delta_B_r) then
             call init_constant_perturbation(delta_B_r_const, pert_m_fourier, pert_n_fourier)
             boole_skip_phase = boole_skip_phase_for_test
