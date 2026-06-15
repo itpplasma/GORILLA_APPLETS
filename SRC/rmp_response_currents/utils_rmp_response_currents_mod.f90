@@ -1140,9 +1140,9 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
     use gorilla_applets_types_mod, only: in, start
     use tetra_physics_mod, only: tetra_physics, coord_system
     use tetra_grid_mod, only: tetra_grid, verts_sthetaphi
-    use constants, only: ev2erg
+    use constants, only: ev2erg, clight
     use profile_data_mod, only: eval_profiles, profile_values_t
-    use perturbation_field_mod, only: eval_delta_B_s
+    use perturbation_field_mod, only: eval_delta_B_s, eval_delta_E_s
 
     integer,     intent(in)  :: ind_tetr, species
     real(dp),    intent(in)  :: x(3), vpar, vperp
@@ -1150,7 +1150,7 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
 
     real(dp)    :: z_cell(3), s_loc, theta_loc, phi_loc
     real(dp)    :: B0_loc
-    complex(dp) :: dB_s
+    complex(dp) :: dB_s, dE_s, v_rad
     real(dp)    :: v_sq, T_alpha_erg, A1, A2
     real(dp)    :: mass, charge
     type(profile_values_t) :: pv
@@ -1175,6 +1175,11 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
     if (B0_loc <= 0.0_dp) return
 
     call eval_delta_B_s(s_loc, theta_loc, phi_loc, dB_s)
+    v_rad = vpar * dB_s
+    if (boole_e_perp) then
+        call eval_delta_E_s(s_loc, theta_loc, phi_loc, dE_s)
+        v_rad = v_rad + clight * dE_s
+    end if
 
     call eval_profiles(s_loc, pv)
 
@@ -1199,8 +1204,8 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
         A2 = pv%dlnTe_ds
     end if
 
-    wdot_s = (-vpar * (A1 + A2 * mass * v_sq / (2.0_dp * T_alpha_erg))) &
-             * (dB_s / cmplx(B0_loc, 0.0_dp, kind=dp))
+    wdot_s = (-(A1 + A2 * mass * v_sq / (2.0_dp * T_alpha_erg))) &
+             * (v_rad / cmplx(B0_loc, 0.0_dp, kind=dp))
 
 end subroutine eval_wdot_s
 
