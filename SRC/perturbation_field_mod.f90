@@ -33,8 +33,8 @@ module perturbation_field_mod
 
     private
     public :: load_perturbation_field, init_constant_perturbation, &
-              init_step_perturbation, &
-              eval_delta_B_s, cleanup_perturbation_field
+              init_step_perturbation, load_eperp_field, &
+              eval_delta_B_s, eval_delta_E_s, cleanup_perturbation_field
     public :: pert_m_mode, pert_n_mode
 
     ! Mode numbers
@@ -61,6 +61,15 @@ module perturbation_field_mod
     logical  :: use_step_function = .false.
     real(dp) :: s_step_min = 0.0_dp
     real(dp) :: s_step_max = 1.0_dp
+
+    ! E_perp perturbation (KIM electrostatic field, statV/cm).
+    ! Loaded by load_eperp_field; evaluated by eval_delta_E_s.
+    ! Mode numbers are shared with the B-field perturbation (pert_m_mode/pert_n_mode).
+    logical  :: boole_eperp_loaded = .false.
+    integer  :: ns_eperp = 0
+    real(dp), allocatable :: s_eperp_grid(:)
+    real(dp), allocatable :: eperp_re_spl(:), eperp_re_dd(:)
+    real(dp), allocatable :: eperp_im_spl(:), eperp_im_dd(:)
 
     ! Diagnostic switch: if .true., skip the cos(m theta + n phi) factor
     ! and return dB_constant as a truly uniform (axisymmetric) value. Used
@@ -296,6 +305,152 @@ subroutine init_step_perturbation(center_reff, halfwidth_reff, dB_const, &
     deallocate(r_equil, psi_tor_equil, s_equil)
 
 end subroutine init_step_perturbation
+
+! ============================================================
+! Load E_perp perturbation field from KIM output file and
+! build cubic splines over s.
+!
+! File format (4 columns, KIM E_perp.dat convention):
+!   r_eff [cm]   Re(E_perp) [statV/cm]   Im(E_perp) [statV/cm]   |E_perp| (ignored)
+!
+! r_eff is the toroidal-flux-based effective radius (NOT r_geom).
+! Mode numbers (m, n) are reused from module state set by a prior
+! B-field init call (init_constant_perturbation, init_step_perturbation,
+! or load_perturbation_field).  Call this AFTER one of those.
+! ============================================================
+subroutine load_eperp_field(eperp_file, equil_mapping_file)
+
+    character(len=*), intent(in) :: eperp_file
+    character(len=*), intent(in) :: equil_mapping_file
+
+    integer :: n_equil, n_raw, iunit, ios, i, j
+    real(dp), allocatable :: r_equil(:), psi_tor_equil(:)
+    real(dp), allocatable :: r_raw(:), eperp_re_raw(:), eperp_im_raw(:)
+    character(len=512) :: line
+    real(dp) :: psi_tor_edge, frac, r_val, re_val, im_val, mag_val
+
+    print *, ''
+    print *, 'Loading E_perp perturbation field...'
+    print *, '  File: ', trim(eperp_file)
+    print *, '  Mode (shared with B-field): m = ', pert_m_mode, ', n = ', pert_n_mode
+
+    ! --- Load equil mapping for r_eff -> s conversion ---
+    call read_equil_mapping_pert(equil_mapping_file, n_equil, r_equil, psi_tor_equil)
+
+    psi_tor_edge = psi_tor_equil(n_equil)
+    ns_eperp = n_equil
+    allocate(s_eperp_grid(ns_eperp))
+    if (abs(psi_tor_edge) > 0.0_dp) then
+        s_eperp_grid = psi_tor_equil / psi_tor_edge
+    else
+        do i = 1, ns_eperp
+            s_eperp_grid(i) = real(i - 1, dp) / real(ns_eperp - 1, dp)
+        end do
+    end if
+    s_eperp_grid(1) = 0.0_dp
+    s_eperp_grid(ns_eperp) = 1.0_dp
+
+    ! --- Read E_perp file (4-column KIM format) ---
+    iunit = 46
+    open(unit=iunit, file=eperp_file, status='old', action='read', iostat=ios)
+    if (ios /= 0) then
+        print *, 'ERROR: Cannot open ', trim(eperp_file)
+        stop
+    end if
+
+    n_raw = 0
+    do
+        read(iunit, '(A)', iostat=ios) line
+        if (ios /= 0) exit
+        if (line(1:1) == '#' .or. len_trim(line) == 0) cycle
+        n_raw = n_raw + 1
+    end do
+    close(iunit)
+
+    allocate(r_raw(n_raw), eperp_re_raw(n_raw), eperp_im_raw(n_raw))
+
+    open(unit=iunit, file=eperp_file, status='old', action='read')
+    i = 0
+    do
+        read(iunit, '(A)', iostat=ios) line
+        if (ios /= 0) exit
+        if (line(1:1) == '#' .or. len_trim(line) == 0) cycle
+        i = i + 1
+        read(line, *) r_val, re_val, im_val, mag_val   ! col 4 (mag_val) is discarded
+        r_raw(i)        = r_val
+        eperp_re_raw(i) = re_val
+        eperp_im_raw(i) = im_val
+    end do
+    close(iunit)
+
+    print *, '  Loaded ', n_raw, ' data points'
+
+    ! --- Interpolate onto r_equil grid ---
+    allocate(eperp_re_spl(ns_eperp), eperp_re_dd(ns_eperp))
+    allocate(eperp_im_spl(ns_eperp), eperp_im_dd(ns_eperp))
+
+    do i = 1, ns_eperp
+        if (r_equil(i) <= r_raw(1)) then
+            eperp_re_spl(i) = eperp_re_raw(1)
+            eperp_im_spl(i) = eperp_im_raw(1)
+        else if (r_equil(i) >= r_raw(n_raw)) then
+            eperp_re_spl(i) = eperp_re_raw(n_raw)
+            eperp_im_spl(i) = eperp_im_raw(n_raw)
+        else
+            do j = 1, n_raw - 1
+                if (r_raw(j+1) >= r_equil(i)) exit
+            end do
+            frac = (r_equil(i) - r_raw(j)) / (r_raw(j+1) - r_raw(j))
+            eperp_re_spl(i) = eperp_re_raw(j) + frac * (eperp_re_raw(j+1) - eperp_re_raw(j))
+            eperp_im_spl(i) = eperp_im_raw(j) + frac * (eperp_im_raw(j+1) - eperp_im_raw(j))
+        end if
+    end do
+
+    ! --- Build cubic splines in s ---
+    call spline_natural_pert(ns_eperp, s_eperp_grid, eperp_re_spl, eperp_re_dd)
+    call spline_natural_pert(ns_eperp, s_eperp_grid, eperp_im_spl, eperp_im_dd)
+
+    boole_eperp_loaded = .true.
+
+    print *, '  E_perp splined on ', ns_eperp, ' s-grid points'
+    print *, '  |E_perp|(s=0) = ', &
+             sqrt(eperp_re_spl(1)**2 + eperp_im_spl(1)**2), ' statV/cm'
+    print *, ''
+
+    deallocate(r_equil, psi_tor_equil, r_raw, eperp_re_raw, eperp_im_raw)
+
+end subroutine load_eperp_field
+
+! ============================================================
+! Evaluate delta_E_perp at a particle position (s, theta, phi).
+!
+! Returns the complex E_perp amplitude including the helical phase:
+!   delta_E_perp(s, theta, phi) = E_perp_hat(s) * exp(i*(m*theta + n*phi))
+!
+! Returns zero if load_eperp_field has not been called.
+! ============================================================
+subroutine eval_delta_E_s(s_val, theta, phi, dE_s)
+
+    real(dp),    intent(in)  :: s_val, theta, phi
+    complex(dp), intent(out) :: dE_s
+
+    real(dp) :: s_clamped, eperp_re, eperp_im, phase, dummy
+    complex(dp), parameter :: i_imag = (0.0_dp, 1.0_dp)
+
+    if (.not. boole_eperp_loaded) then
+        dE_s = cmplx(0.0_dp, 0.0_dp, kind=dp)
+        return
+    end if
+
+    s_clamped = max(0.0_dp, min(1.0_dp, s_val))
+    phase = real(pert_m_mode, dp) * theta + real(pert_n_mode, dp) * phi
+
+    call splint_pert(ns_eperp, s_eperp_grid, eperp_re_spl, eperp_re_dd, s_clamped, eperp_re, dummy)
+    call splint_pert(ns_eperp, s_eperp_grid, eperp_im_spl, eperp_im_dd, s_clamped, eperp_im, dummy)
+
+    dE_s = cmplx(eperp_re, eperp_im, kind=dp) * exp(i_imag * phase)
+
+end subroutine eval_delta_E_s
 
 ! ============================================================
 ! Evaluate delta_B^s at a particle position (s, theta, phi).
