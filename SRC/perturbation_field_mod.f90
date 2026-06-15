@@ -73,7 +73,7 @@ subroutine load_perturbation_field(delta_B_file, equil_mapping_file, m_mode, n_m
     integer, intent(in) :: m_mode, n_mode
 
     integer :: n_equil, n_raw, iunit, ios, i, j
-    real(dp), allocatable :: r_equil(:), q_equil(:), psi_pol_equil(:), psi_tor_equil(:)
+    real(dp), allocatable :: r_equil(:), psi_tor_equil(:)
     real(dp), allocatable :: r_raw(:), dB_re_raw(:), dB_im_raw(:)
     character(len=512) :: line
     real(dp) :: psi_tor_edge, frac, r_val, re_val, im_val
@@ -167,8 +167,6 @@ subroutine load_perturbation_field(delta_B_file, equil_mapping_file, m_mode, n_m
     print *, ''
 
     deallocate(r_equil, psi_tor_equil, r_raw, dB_re_raw, dB_im_raw)
-    if (allocated(q_equil)) deallocate(q_equil)
-    if (allocated(psi_pol_equil)) deallocate(psi_pol_equil)
 
 end subroutine load_perturbation_field
 
@@ -289,6 +287,11 @@ subroutine read_equil_mapping_pert(filename, n, r_eff, psi_tor)
         n = n + 1
     end do
     close(iunit)
+
+    if (n == 0) then
+        print *, 'ERROR: no data rows found in equil_mapping_file: ', trim(filename)
+        stop
+    end if
 
     allocate(r_eff(n), psi_tor(n))
 
