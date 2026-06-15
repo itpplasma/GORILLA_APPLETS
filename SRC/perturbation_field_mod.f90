@@ -16,6 +16,15 @@
 !
 ! The r_eff -> s mapping uses the same equil_r_q_psi.dat as profile_data_mod.
 !
+!
+! Coordinate note: the r_eff coordinate used throughout this module is the
+! toroidal-flux-based effective minor radius, r_eff = sqrt(2*psi_tor/B_ref).
+! It is NOT the geometric minor radius r_geom (arithmetic mean of flux-surface
+! half-widths in the horizontal plane, ~50 cm at the AUG edge vs ~62 cm for
+! r_eff).  All input files and namelist parameters that accept r in [cm] use
+! r_eff unless explicitly stated otherwise.  The confusion between these two
+! led to a factor-of-2 amplitude bug (fixed 2026-05-19) -- do not swap them.
+!
 module perturbation_field_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
@@ -255,9 +264,15 @@ subroutine read_equil_mapping_pert(filename, n, r_eff, psi_tor)
     integer, intent(out) :: n
     real(dp), allocatable, intent(out) :: r_eff(:), psi_tor(:)
 
+    ! Reads flux_functions.dat (5 columns, 0-indexed):
+    !   col0: R_beg [cm]  (skipped)
+    !   col1: r_eff [cm]  -- toroidal-flux-based effective radius, NOT r_geom
+    !   col2: q_FL        (skipped)
+    !   col3: psi_pol     (skipped)
+    !   col4: psi_tor     [G cm^2]
     integer :: iunit, ios, i
     character(len=512) :: line
-    real(dp) :: r_val, q_val, psi_p, psi_t, dphidpsi, R_geo, vol
+    real(dp) :: c0, c1, c2, c3, c4
 
     iunit = 45
     open(unit=iunit, file=filename, status='old', action='read', iostat=ios)
@@ -270,7 +285,7 @@ subroutine read_equil_mapping_pert(filename, n, r_eff, psi_tor)
     do
         read(iunit, '(A)', iostat=ios) line
         if (ios /= 0) exit
-        if (line(1:2) == ' #' .or. len_trim(line) == 0) cycle
+        if (line(1:1) == '#' .or. line(1:2) == ' #' .or. len_trim(line) == 0) cycle
         n = n + 1
     end do
     close(iunit)
@@ -282,11 +297,11 @@ subroutine read_equil_mapping_pert(filename, n, r_eff, psi_tor)
     do
         read(iunit, '(A)', iostat=ios) line
         if (ios /= 0) exit
-        if (line(1:2) == ' #' .or. len_trim(line) == 0) cycle
+        if (line(1:1) == '#' .or. line(1:2) == ' #' .or. len_trim(line) == 0) cycle
         i = i + 1
-        read(line, *) r_val, q_val, psi_p, psi_t, dphidpsi, R_geo, vol
-        r_eff(i) = r_val
-        psi_tor(i) = psi_t
+        read(line, *) c0, c1, c2, c3, c4
+        r_eff(i)   = c1   ! r_eff [cm] — toroidal-flux radius, NOT r_geom
+        psi_tor(i) = c4   ! psi_tor [G cm^2]
     end do
     close(iunit)
 
