@@ -33,6 +33,7 @@ module perturbation_field_mod
 
     private
     public :: load_perturbation_field, init_constant_perturbation, &
+              init_step_perturbation, &
               eval_delta_B_s, cleanup_perturbation_field
     public :: pert_m_mode, pert_n_mode
 
@@ -54,6 +55,12 @@ module perturbation_field_mod
     ! Skips the radial spline and just returns dB_const at every s.
     logical :: use_constant_amplitude = .false.
     real(dp) :: dB_constant = 0.0_dp
+
+    ! Step-function mode: Br = dB_constant inside [s_step_min, s_step_max], 0 outside.
+    ! Activated by init_step_perturbation; s bounds are computed from r_eff inputs.
+    logical  :: use_step_function = .false.
+    real(dp) :: s_step_min = 0.0_dp
+    real(dp) :: s_step_max = 1.0_dp
 
     ! Diagnostic switch: if .true., skip the cos(m theta + n phi) factor
     ! and return dB_constant as a truly uniform (axisymmetric) value. Used
@@ -196,6 +203,94 @@ subroutine init_constant_perturbation(dB_const, m_mode, n_mode)
 end subroutine init_constant_perturbation
 
 ! ============================================================
+! Step-function-amplitude initialisation
+!
+! Sets up a step-function radial envelope:
+!   delta_B_r(s) = dB_const  if s_step_min <= s <= s_step_max
+!                = 0          otherwise
+!
+! center_reff and halfwidth_reff are in r_eff [cm].
+! r_eff is the TOROIDAL-FLUX-BASED effective radius r_eff = sqrt(2*psi_tor/B_ref).
+! It is NOT the geometric minor radius r_geom (~50 cm at AUG edge vs ~62 cm
+! for r_eff).  Use the value from flux_functions.dat col1 (0-indexed).
+!
+! The r_eff -> s conversion reads equil_mapping_file (flux_functions.dat).
+! ============================================================
+subroutine init_step_perturbation(center_reff, halfwidth_reff, dB_const, &
+                                  m_mode, n_mode, equil_mapping_file)
+
+    real(dp),         intent(in) :: center_reff      ! r_eff [cm] — NOT r_geom
+    real(dp),         intent(in) :: halfwidth_reff   ! r_eff [cm] — NOT r_geom
+    real(dp),         intent(in) :: dB_const
+    integer,          intent(in) :: m_mode, n_mode
+    character(len=*), intent(in) :: equil_mapping_file
+
+    integer  :: n_equil, i, i_lo, i_hi
+    real(dp), allocatable :: r_equil(:), psi_tor_equil(:), s_equil(:)
+    real(dp) :: psi_tor_edge, frac
+
+    call read_equil_mapping_pert(equil_mapping_file, n_equil, r_equil, psi_tor_equil)
+
+    psi_tor_edge = psi_tor_equil(n_equil)
+    allocate(s_equil(n_equil))
+    if (abs(psi_tor_edge) > 0.0_dp) then
+        s_equil = psi_tor_equil / psi_tor_edge
+    else
+        do i = 1, n_equil
+            s_equil(i) = real(i-1, dp) / real(n_equil-1, dp)
+        end do
+    end if
+    s_equil(1) = 0.0_dp
+    s_equil(n_equil) = 1.0_dp
+
+    ! Convert center_reff - halfwidth_reff -> s_step_min
+    i_lo = 1
+    do i = 1, n_equil - 1
+        if (r_equil(i+1) >= center_reff - halfwidth_reff) exit
+        i_lo = i
+    end do
+    frac = 0.0_dp
+    if (r_equil(i_lo+1) > r_equil(i_lo)) &
+        frac = (center_reff - halfwidth_reff - r_equil(i_lo)) / &
+               (r_equil(i_lo+1) - r_equil(i_lo))
+    s_step_min = s_equil(i_lo) + frac * (s_equil(i_lo+1) - s_equil(i_lo))
+    s_step_min = max(0.0_dp, s_step_min)
+
+    ! Convert center_reff + halfwidth_reff -> s_step_max
+    i_hi = 1
+    do i = 1, n_equil - 1
+        if (r_equil(i+1) >= center_reff + halfwidth_reff) exit
+        i_hi = i
+    end do
+    frac = 0.0_dp
+    if (r_equil(i_hi+1) > r_equil(i_hi)) &
+        frac = (center_reff + halfwidth_reff - r_equil(i_hi)) / &
+               (r_equil(i_hi+1) - r_equil(i_hi))
+    s_step_max = s_equil(i_hi) + frac * (s_equil(i_hi+1) - s_equil(i_hi))
+    s_step_max = min(1.0_dp, s_step_max)
+
+    use_constant_amplitude = .true.
+    use_step_function      = .true.
+    dB_constant   = dB_const
+    pert_m_mode   = m_mode
+    pert_n_mode   = n_mode
+    perturbation_loaded = .true.
+
+    print *, ''
+    print *, 'Perturbation field: step-function mode'
+    print *, '  dB_const        = ', dB_const, ' Gauss'
+    print *, '  centre  r_eff   = ', center_reff,   ' cm  (NOT r_geom)'
+    print *, '  halfwidth r_eff = ', halfwidth_reff, ' cm  (NOT r_geom)'
+    print *, '  s_step_min      = ', s_step_min
+    print *, '  s_step_max      = ', s_step_max
+    print *, '  Mode: m = ', m_mode, ', n = ', n_mode
+    print *, ''
+
+    deallocate(r_equil, psi_tor_equil, s_equil)
+
+end subroutine init_step_perturbation
+
+! ============================================================
 ! Evaluate delta_B^s at a particle position (s, theta, phi).
 !
 ! The user-supplied input (dB_constant or the file-loaded amplitude)
@@ -220,6 +315,12 @@ subroutine eval_delta_B_s(s_val, theta, phi, dB_s)
     ds_dreff = eval_ds_dreff(s_val)
 
     if (use_constant_amplitude) then
+        if (use_step_function) then
+            if (s_val < s_step_min .or. s_val > s_step_max) then
+                dB_s = cmplx(0.0_dp, 0.0_dp, kind=dp)
+                return
+            end if
+        end if
         if (boole_skip_phase) then
             dB_s = cmplx(ds_dreff * dB_constant, 0.0_dp, kind=dp)
         else
@@ -250,6 +351,9 @@ subroutine cleanup_perturbation_field()
     perturbation_loaded = .false.
     use_constant_amplitude = .false.
     dB_constant = 0.0_dp
+    use_step_function = .false.
+    s_step_min = 0.0_dp
+    s_step_max = 1.0_dp
 
 end subroutine cleanup_perturbation_field
 
