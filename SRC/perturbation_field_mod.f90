@@ -327,7 +327,7 @@ subroutine load_eperp_field(eperp_file, equil_mapping_file)
     real(dp), allocatable :: r_equil(:), psi_tor_equil(:)
     real(dp), allocatable :: r_raw(:), eperp_re_raw(:), eperp_im_raw(:)
     character(len=512) :: line
-    real(dp) :: psi_tor_edge, frac, r_val, re_val, im_val, mag_val
+    real(dp) :: psi_tor_edge, frac
 
     print *, ''
     print *, 'Loading E_perp perturbation field...'
@@ -376,10 +376,7 @@ subroutine load_eperp_field(eperp_file, equil_mapping_file)
         if (ios /= 0) exit
         if (line(1:1) == '#' .or. len_trim(line) == 0) cycle
         i = i + 1
-        read(line, *) r_val, re_val, im_val, mag_val   ! col 4 (mag_val) is discarded
-        r_raw(i)        = r_val
-        eperp_re_raw(i) = re_val
-        eperp_im_raw(i) = im_val
+        read(line, *) r_raw(i), eperp_re_raw(i), eperp_im_raw(i)
     end do
     close(iunit)
 
