@@ -425,16 +425,18 @@ end subroutine load_eperp_field
 ! Evaluate delta_E_perp at a particle position (s, theta, phi).
 !
 ! Returns the complex E_perp amplitude including the helical phase:
-!   delta_E_perp(s, theta, phi) = E_perp_hat(s) * exp(i*(m*theta + n*phi))
+!   dE_s = (ds/dr_eff)(s) * E_perp_hat(s) * exp(i*(m*theta + n*phi))
 !
 ! Returns zero if load_eperp_field has not been called.
 ! ============================================================
 subroutine eval_delta_E_s(s_val, theta, phi, dE_s)
 
+    use profile_data_mod, only: eval_ds_dreff
+
     real(dp),    intent(in)  :: s_val, theta, phi
     complex(dp), intent(out) :: dE_s
 
-    real(dp) :: s_clamped, eperp_re, eperp_im, phase, dummy
+    real(dp) :: s_clamped, eperp_re, eperp_im, phase, dummy, ds_dreff
     complex(dp), parameter :: i_imag = (0.0_dp, 1.0_dp)
 
     if (.not. boole_eperp_loaded) then
@@ -444,11 +446,12 @@ subroutine eval_delta_E_s(s_val, theta, phi, dE_s)
 
     s_clamped = max(0.0_dp, min(1.0_dp, s_val))
     phase = real(pert_m_mode, dp) * theta + real(pert_n_mode, dp) * phi
+    ds_dreff = eval_ds_dreff(s_val)
 
     call splint_pert(ns_eperp, s_eperp_grid, eperp_re_spl, eperp_re_dd, s_clamped, eperp_re, dummy)
     call splint_pert(ns_eperp, s_eperp_grid, eperp_im_spl, eperp_im_dd, s_clamped, eperp_im, dummy)
 
-    dE_s = cmplx(eperp_re, eperp_im, kind=dp) * exp(i_imag * phase)
+    dE_s = ds_dreff * cmplx(eperp_re, eperp_im, kind=dp) * exp(i_imag * phase)
 
 end subroutine eval_delta_E_s
 
@@ -516,6 +519,13 @@ subroutine cleanup_perturbation_field()
     use_step_function = .false.
     s_step_min = 0.0_dp
     s_step_max = 1.0_dp
+    if (allocated(s_eperp_grid))  deallocate(s_eperp_grid)
+    if (allocated(eperp_re_spl))  deallocate(eperp_re_spl)
+    if (allocated(eperp_re_dd))   deallocate(eperp_re_dd)
+    if (allocated(eperp_im_spl))  deallocate(eperp_im_spl)
+    if (allocated(eperp_im_dd))   deallocate(eperp_im_dd)
+    boole_eperp_loaded = .false.
+    ns_eperp = 0
 
 end subroutine cleanup_perturbation_field
 
