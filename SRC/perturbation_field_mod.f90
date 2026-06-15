@@ -225,9 +225,9 @@ subroutine init_step_perturbation(center_reff, halfwidth_reff, dB_const, &
     integer,          intent(in) :: m_mode, n_mode
     character(len=*), intent(in) :: equil_mapping_file
 
-    integer  :: n_equil, i, i_lo, i_hi
+    integer  :: n_equil, i
     real(dp), allocatable :: r_equil(:), psi_tor_equil(:), s_equil(:)
-    real(dp) :: psi_tor_edge, frac
+    real(dp) :: psi_tor_edge, frac, r_lo, r_hi
 
     call read_equil_mapping_pert(equil_mapping_file, n_equil, r_equil, psi_tor_equil)
 
@@ -244,30 +244,32 @@ subroutine init_step_perturbation(center_reff, halfwidth_reff, dB_const, &
     s_equil(n_equil) = 1.0_dp
 
     ! Convert center_reff - halfwidth_reff -> s_step_min
-    i_lo = 1
-    do i = 1, n_equil - 1
-        if (r_equil(i+1) >= center_reff - halfwidth_reff) exit
-        i_lo = i
-    end do
-    frac = 0.0_dp
-    if (r_equil(i_lo+1) > r_equil(i_lo)) &
-        frac = (center_reff - halfwidth_reff - r_equil(i_lo)) / &
-               (r_equil(i_lo+1) - r_equil(i_lo))
-    s_step_min = s_equil(i_lo) + frac * (s_equil(i_lo+1) - s_equil(i_lo))
-    s_step_min = max(0.0_dp, s_step_min)
+    r_lo = center_reff - halfwidth_reff
+    if (r_lo <= r_equil(1)) then
+        s_step_min = 0.0_dp
+    else if (r_lo >= r_equil(n_equil)) then
+        s_step_min = 1.0_dp
+    else
+        do i = 1, n_equil - 1
+            if (r_equil(i+1) >= r_lo) exit
+        end do
+        frac = (r_lo - r_equil(i)) / (r_equil(i+1) - r_equil(i))
+        s_step_min = s_equil(i) + frac * (s_equil(i+1) - s_equil(i))
+    end if
 
     ! Convert center_reff + halfwidth_reff -> s_step_max
-    i_hi = 1
-    do i = 1, n_equil - 1
-        if (r_equil(i+1) >= center_reff + halfwidth_reff) exit
-        i_hi = i
-    end do
-    frac = 0.0_dp
-    if (r_equil(i_hi+1) > r_equil(i_hi)) &
-        frac = (center_reff + halfwidth_reff - r_equil(i_hi)) / &
-               (r_equil(i_hi+1) - r_equil(i_hi))
-    s_step_max = s_equil(i_hi) + frac * (s_equil(i_hi+1) - s_equil(i_hi))
-    s_step_max = min(1.0_dp, s_step_max)
+    r_hi = center_reff + halfwidth_reff
+    if (r_hi <= r_equil(1)) then
+        s_step_max = 0.0_dp
+    else if (r_hi >= r_equil(n_equil)) then
+        s_step_max = 1.0_dp
+    else
+        do i = 1, n_equil - 1
+            if (r_equil(i+1) >= r_hi) exit
+        end do
+        frac = (r_hi - r_equil(i)) / (r_equil(i+1) - r_equil(i))
+        s_step_max = s_equil(i) + frac * (s_equil(i+1) - s_equil(i))
+    end if
 
     use_constant_amplitude = .true.
     use_step_function      = .true.
