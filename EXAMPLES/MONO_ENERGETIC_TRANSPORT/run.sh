@@ -61,3 +61,5 @@ echo
 echo "done. results in $(pwd):"
 echo "  nustar_diffcoef_std.dat   transport coefficient D11 vs nu*"
 echo "  psi2.dat, std_psi2.dat    (Delta s)^2 trends used for the fit"
+echo
+echo "to plot: python3 ../plot.py   (writes PNGs to $(pwd)/plots/)"
