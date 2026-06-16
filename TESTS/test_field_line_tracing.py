@@ -89,24 +89,10 @@ field_line_tracing["field_line_tracing_nml"]["seed_option"] = 2
 # Deterministic seed for reproducible CI output
 (WORK_DIR / "seed.inp").write_text("8\n  1 2 3 4 5 6 7 8\n")
 
-# Minimal field_divB0.inp: ipert = 0 (axisymmetric equilibrium only, no perturbation data)
-# gfile, convexfile and iaxieq are overridden from tetra_grid_settings_mod, so their
+# Axisymmetric equilibrium only (ipert = 0 in the upstream blueprint); gfile,
+# convexfile and iaxieq are overridden from tetra_grid_settings_mod, so their
 # values are read into a dummy and ignored.
-(WORK_DIR / "field_divB0.inp").write_text(
-    "0                                 ipert\n"
-    "1                                 iequil\n"
-    "0.0                               ampl\n"
-    "0 0                               ntor\n"
-    "0.99                              cutoff\n"
-    "4                                 icftype\n"
-    "'unused'                          gfile\n"
-    "'unused'                          pfile\n"
-    "'unused'                          convexfile\n"
-    "'unused'                          fluxdatapath\n"
-    "0                                 window R\n"
-    "0                                 window Z\n"
-    "0                                 iaxieq\n"
-)
+shutil.copy(GORILLA_ROOT / "INPUT" / "field_divB0.inp", WORK_DIR / "field_divB0.inp")
 
 # Symlink the bundled ASDEX g-file + convex wall into the work dir
 (WORK_DIR / "DATA").mkdir()
