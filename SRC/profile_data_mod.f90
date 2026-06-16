@@ -28,6 +28,7 @@ module profile_data_mod
     public :: profile_values_t
     public :: load_kim_nu, eval_kim_nu, kim_nu_loaded
     public :: load_da_profile, eval_da_profile, da_profile_loaded
+    public :: boole_kim_reff_coords, kim_b_ref
 
     ! Result type returned by eval_profiles
     type :: profile_values_t
@@ -62,7 +63,22 @@ module profile_data_mod
     ! r_eff(s) spline built from flux_functions.dat (column "r" in cm).
     ! Used by eval_ds_dreff to convert delta_B_r (input as Gauss) to the
     ! contravariant component delta_B^s = (ds/dr_eff) * delta_B_r [Gauss/cm].
+    ! NOTE: despite the name, flux_functions col1 is the GEOMETRIC minor radius
+    ! r_geom, not the toroidal-flux radius (verified 2026-06-16); see below.
     real(dp), allocatable :: r_eff_spl(:), r_eff_dd(:)
+
+    ! KIM/KAMEL cylindrical-code radial-coordinate alignment (2026-06-16).
+    ! KIM tabulates its radial inputs (kim_nu, E_perp, file dB, Da) on the
+    ! TOROIDAL-FLUX radius r_eff = sqrt(2*psi_tor/B_ref), which differs from
+    ! GORILLA's r_geom (flux_functions col1) by ~1.4 cm at the AUG q=3.5 edge.
+    ! When boole_kim_reff_coords is set, those files' r-columns are mapped via
+    ! r_efftrue_spl(s) = sqrt(2*s*|psi_tor_edge|/kim_b_ref) instead of r_eff_spl,
+    ! so KIM resonant features land on the matching GORILLA flux surface.
+    ! kim_b_ref = |B_tor| is read from btor_rbig.dat at load_profiles.
+    ! Default .false. => legacy behaviour (r-column treated as r_geom).
+    logical  :: boole_kim_reff_coords = .false.
+    real(dp) :: kim_b_ref = 0.0_dp
+    real(dp), allocatable :: r_efftrue_spl(:), r_efftrue_dd(:)
 
     ! Map psi_pol -> s_true = psi_tor/psi_tor_edge so that an arbitrary
     ! poloidal-flux value (e.g. tetra_physics(...)%Aphi1 + gAphi . z_cell
@@ -145,6 +161,27 @@ subroutine load_profiles(profile_dir, equil_mapping_file)
     allocate(r_eff_spl(ns), r_eff_dd(ns))
     r_eff_spl = r_equil
     call spline_natural(ns, s_grid, r_eff_spl, r_eff_dd)
+
+    ! Build the toroidal-flux radius r_eff(s) = sqrt(2*psi_tor(s)/B_ref) used to
+    ! map KIM-coordinate inputs when boole_kim_reff_coords is set.  B_ref is the
+    ! reference toroidal field |B_tor| from btor_rbig.dat (col1, Gauss).  Built
+    ! unconditionally (cheap); only consulted by the KIM loaders when the flag
+    ! is on, so legacy runs are unaffected.
+    call read_btor_rbig_bref(kim_b_ref)
+    allocate(r_efftrue_spl(ns), r_efftrue_dd(ns))
+    if (kim_b_ref > 0.0_dp) then
+        do i = 1, ns
+            r_efftrue_spl(i) = sqrt(2.0_dp * s_grid(i) * abs(psi_tor_edge) / kim_b_ref)
+        end do
+    else
+        r_efftrue_spl = r_eff_spl   ! fallback: no btor_rbig => behave as legacy
+    end if
+    call spline_natural(ns, s_grid, r_efftrue_spl, r_efftrue_dd)
+    if (boole_kim_reff_coords) then
+        print *, '  KIM r_eff-coord alignment ON: B_ref = ', kim_b_ref, ' G'
+        print *, '    r_efftrue(s=1) = ', r_efftrue_spl(ns), ' cm (vs r_geom ', &
+                 r_eff_spl(ns), ')'
+    end if
 
     ! Map psi_pol -> true s so the applet can convert local poloidal
     ! flux (from Aphi1 + gAphi . z_cell) to physical s for profile
@@ -255,6 +292,34 @@ subroutine eval_profiles(s_val, pv)
 end subroutine eval_profiles
 
 ! ============================================================
+! Read the reference toroidal field |B_tor| [Gauss] from btor_rbig.dat
+! (two numbers on one line: B_tor [Gauss], R_big [cm]).  Used to build the
+! KIM toroidal-flux radius r_eff = sqrt(2*psi_tor/B_ref).  Returns 0 if the
+! file is absent or unreadable (callers then fall back to legacy r_geom).
+! ============================================================
+subroutine read_btor_rbig_bref(b_ref)
+
+    real(dp), intent(out) :: b_ref
+    integer  :: iunit, ios
+    real(dp) :: btor, rbig
+
+    b_ref = 0.0_dp
+    open(newunit=iunit, file='btor_rbig.dat', status='old', action='read', iostat=ios)
+    if (ios /= 0) then
+        print *, '  NOTE: btor_rbig.dat not found; KIM r_eff alignment unavailable.'
+        return
+    end if
+    read(iunit, *, iostat=ios) btor, rbig
+    close(iunit)
+    if (ios /= 0) then
+        print *, '  WARNING: could not parse btor_rbig.dat; B_ref left at 0.'
+        return
+    end if
+    b_ref = abs(btor)
+
+end subroutine read_btor_rbig_bref
+
+! ============================================================
 ! Cleanup allocated memory
 ! ============================================================
 subroutine cleanup_profiles()
@@ -272,6 +337,8 @@ subroutine cleanup_profiles()
     if (allocated(q_dd))    deallocate(q_dd)
     if (allocated(r_eff_spl)) deallocate(r_eff_spl)
     if (allocated(r_eff_dd))  deallocate(r_eff_dd)
+    if (allocated(r_efftrue_spl)) deallocate(r_efftrue_spl)
+    if (allocated(r_efftrue_dd))  deallocate(r_efftrue_dd)
     if (allocated(psi_pol_sorted))   deallocate(psi_pol_sorted)
     if (allocated(s_of_psi_pol_spl)) deallocate(s_of_psi_pol_spl)
     if (allocated(s_of_psi_pol_dd))  deallocate(s_of_psi_pol_dd)
@@ -314,7 +381,11 @@ subroutine load_kim_nu(filename)
     if (kim_nu_loaded) return
 
     allocate(nu_mapped(ns))
-    call read_and_map_profile(filename, r_eff_spl, ns, nu_mapped)
+    if (boole_kim_reff_coords) then
+        call read_and_map_profile(filename, r_efftrue_spl, ns, nu_mapped)
+    else
+        call read_and_map_profile(filename, r_eff_spl, ns, nu_mapped)
+    end if
     allocate(kim_nu_spl(ns), kim_nu_dd(ns))
     kim_nu_spl = nu_mapped
     call spline_natural(ns, s_grid, kim_nu_spl, kim_nu_dd)
@@ -389,7 +460,11 @@ subroutine load_da_profile(filename)
     if (da_profile_loaded) return
 
     allocate(da_mapped(ns))
-    call read_and_map_profile(filename, r_eff_spl, ns, da_mapped)
+    if (boole_kim_reff_coords) then
+        call read_and_map_profile(filename, r_efftrue_spl, ns, da_mapped)
+    else
+        call read_and_map_profile(filename, r_eff_spl, ns, da_mapped)
+    end if
     allocate(da_spl(ns), da_dd(ns))
     da_spl = da_mapped
     call spline_natural(ns, s_grid, da_spl, da_dd)

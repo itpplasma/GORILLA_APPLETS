@@ -84,12 +84,14 @@ contains
 ! ============================================================
 subroutine load_perturbation_field(delta_B_file, equil_mapping_file, m_mode, n_mode)
 
+    use profile_data_mod, only: kim_b_ref, boole_kim_reff_coords
+
     character(len=*), intent(in) :: delta_B_file
     character(len=*), intent(in) :: equil_mapping_file
     integer, intent(in) :: m_mode, n_mode
 
     integer :: n_equil, n_raw, iunit, ios, i, j
-    real(dp), allocatable :: r_equil(:), psi_tor_equil(:)
+    real(dp), allocatable :: r_equil(:), psi_tor_equil(:), r_map(:)
     real(dp), allocatable :: r_raw(:), dB_re_raw(:), dB_im_raw(:)
     character(len=512) :: line
     real(dp) :: psi_tor_edge, frac, r_val, re_val, im_val
@@ -151,26 +153,38 @@ subroutine load_perturbation_field(delta_B_file, equil_mapping_file, m_mode, n_m
 
     print *, '  Loaded ', n_raw, ' data points'
 
-    ! --- Interpolate onto r_equil grid ---
+    ! --- Interpolate onto the GORILLA grid ---
+    ! r_map(i) is the radius at grid point i that the FILE's r-column is matched
+    ! against.  Legacy: r_geom (flux_functions col1).  KIM r_eff alignment:
+    ! r_eff = sqrt(2*psi_tor/B_ref), so a KIM-coordinate file lands on the
+    ! matching flux surface (see profile_data_mod note).
+    allocate(r_map(n_equil))
+    if (boole_kim_reff_coords .and. kim_b_ref > 0.0_dp) then
+        r_map = sqrt(2.0_dp * abs(psi_tor_equil) / kim_b_ref)
+    else
+        r_map = r_equil
+    end if
+
     allocate(dB_re_spl(ns_pert), dB_re_dd(ns_pert))
     allocate(dB_im_spl(ns_pert), dB_im_dd(ns_pert))
 
     do i = 1, ns_pert
-        if (r_equil(i) <= r_raw(1)) then
+        if (r_map(i) <= r_raw(1)) then
             dB_re_spl(i) = dB_re_raw(1)
             dB_im_spl(i) = dB_im_raw(1)
-        else if (r_equil(i) >= r_raw(n_raw)) then
+        else if (r_map(i) >= r_raw(n_raw)) then
             dB_re_spl(i) = dB_re_raw(n_raw)
             dB_im_spl(i) = dB_im_raw(n_raw)
         else
             do j = 1, n_raw - 1
-                if (r_raw(j+1) >= r_equil(i)) exit
+                if (r_raw(j+1) >= r_map(i)) exit
             end do
-            frac = (r_equil(i) - r_raw(j)) / (r_raw(j+1) - r_raw(j))
+            frac = (r_map(i) - r_raw(j)) / (r_raw(j+1) - r_raw(j))
             dB_re_spl(i) = dB_re_raw(j) + frac * (dB_re_raw(j+1) - dB_re_raw(j))
             dB_im_spl(i) = dB_im_raw(j) + frac * (dB_im_raw(j+1) - dB_im_raw(j))
         end if
     end do
+    deallocate(r_map)
 
     ! --- Build cubic splines in s ---
     call spline_natural_pert(ns_pert, s_pert_grid, dB_re_spl, dB_re_dd)
@@ -320,11 +334,13 @@ end subroutine init_step_perturbation
 ! ============================================================
 subroutine load_eperp_field(eperp_file, equil_mapping_file)
 
+    use profile_data_mod, only: kim_b_ref, boole_kim_reff_coords
+
     character(len=*), intent(in) :: eperp_file
     character(len=*), intent(in) :: equil_mapping_file
 
     integer :: n_equil, n_raw, iunit, ios, i, j
-    real(dp), allocatable :: r_equil(:), psi_tor_equil(:)
+    real(dp), allocatable :: r_equil(:), psi_tor_equil(:), r_map(:)
     real(dp), allocatable :: r_raw(:), eperp_re_raw(:), eperp_im_raw(:)
     character(len=512) :: line
     real(dp) :: psi_tor_edge, frac
@@ -382,26 +398,36 @@ subroutine load_eperp_field(eperp_file, equil_mapping_file)
 
     print *, '  Loaded ', n_raw, ' data points'
 
-    ! --- Interpolate onto r_equil grid ---
+    ! --- Interpolate onto the GORILLA grid ---
+    ! KIM's E_perp.dat r-column is the toroidal-flux radius r_eff; match it
+    ! against r_eff(s)=sqrt(2*psi_tor/B_ref) when alignment is on, else r_geom.
+    allocate(r_map(n_equil))
+    if (boole_kim_reff_coords .and. kim_b_ref > 0.0_dp) then
+        r_map = sqrt(2.0_dp * abs(psi_tor_equil) / kim_b_ref)
+    else
+        r_map = r_equil
+    end if
+
     allocate(eperp_re_spl(ns_eperp), eperp_re_dd(ns_eperp))
     allocate(eperp_im_spl(ns_eperp), eperp_im_dd(ns_eperp))
 
     do i = 1, ns_eperp
-        if (r_equil(i) <= r_raw(1)) then
+        if (r_map(i) <= r_raw(1)) then
             eperp_re_spl(i) = eperp_re_raw(1)
             eperp_im_spl(i) = eperp_im_raw(1)
-        else if (r_equil(i) >= r_raw(n_raw)) then
+        else if (r_map(i) >= r_raw(n_raw)) then
             eperp_re_spl(i) = eperp_re_raw(n_raw)
             eperp_im_spl(i) = eperp_im_raw(n_raw)
         else
             do j = 1, n_raw - 1
-                if (r_raw(j+1) >= r_equil(i)) exit
+                if (r_raw(j+1) >= r_map(i)) exit
             end do
-            frac = (r_equil(i) - r_raw(j)) / (r_raw(j+1) - r_raw(j))
+            frac = (r_map(i) - r_raw(j)) / (r_raw(j+1) - r_raw(j))
             eperp_re_spl(i) = eperp_re_raw(j) + frac * (eperp_re_raw(j+1) - eperp_re_raw(j))
             eperp_im_spl(i) = eperp_im_raw(j) + frac * (eperp_im_raw(j+1) - eperp_im_raw(j))
         end if
     end do
+    deallocate(r_map)
 
     ! --- Build cubic splines in s ---
     call spline_natural_pert(ns_eperp, s_eperp_grid, eperp_re_spl, eperp_re_dd)

@@ -1,6 +1,9 @@
 module utils_rmp_response_currents_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
+    ! Canonical KIM r_eff-alignment flag lives in profile_data_mod; use-associate
+    ! it here so the namelist reads straight into the single source of truth.
+    use profile_data_mod, only: boole_kim_reff_coords
 
     implicit none
 
@@ -222,6 +225,7 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_step_delta_B_r, step_center_reff, step_halfwidth_reff, species_for_delta_f, &
     & nu_r_frac, m_collision_times_reg_on, coulomb_log, nu_scale_factor, &
     & boole_use_kim_nu, kim_nu_file, &
+    & boole_kim_reff_coords, &
     & da_profile_file, da_scale_factor, &
     & boole_constant_unit_weight, &
     & boole_compute_n_modes_dft, s_outer_cut, boole_skip_phase_for_test, &
