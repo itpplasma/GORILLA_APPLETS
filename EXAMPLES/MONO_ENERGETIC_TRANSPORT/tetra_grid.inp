@@ -6,9 +6,9 @@
  !Grid Size
  !Rectangular: nR, Field-aligned: ns
  n1 = 30 ,
- !Rectangular: nphi, Field-aligned: nphi                  			
+ !Rectangular: nphi, Field-aligned: nphi
  n2 = 30 ,
- !Rectangular: nZ, Field-aligned: ntheta                          		
+ !Rectangular: nZ, Field-aligned: ntheta
  n3 = 30 ,
 !
  !Grid kind
@@ -16,7 +16,7 @@
  !2 ... field-aligned grid for axisymmetric EFIT data (g-file)
  !3 ... field-aligned grid for non-axisymmetric VMEC (netcdf)
  !4 ... SOLEDGE3X_EIRENE grid
- grid_kind = 2 ,
+ grid_kind = 3 ,
 !
  !MHD equilibrium filename
  g_file_filename = 'MHD_EQUILIBRIA/g_file_for_test' ,
@@ -36,7 +36,7 @@
  n_field_periods_manual =  1 ,
 !
  !Symmetry Flux Coordinates Annulus (Minimal value for flux coordinates s)
- sfc_s_min = 1.d-3 ,
+ sfc_s_min = 1.d-1 ,
 !
  !Option for $\theta$-variable being used in grid
  ! 1 ... theta scaling in symmetry flux coordinates
