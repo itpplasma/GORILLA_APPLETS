@@ -21,3 +21,16 @@ GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
 GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/alpha_lifetime_work"
 )
+
+add_test(
+    NAME field_line_tracing
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_field_line_tracing.py
+)
+set_tests_properties(field_line_tracing PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
+GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/field_line_tracing_work"
+)
