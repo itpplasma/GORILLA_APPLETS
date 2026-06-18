@@ -45,4 +45,4 @@ jobs:
 
       - name: Test
         working-directory: GORILLA_APPLETS
-        run: make test
+        run: ctest --test-dir BUILD --output-on-failure
