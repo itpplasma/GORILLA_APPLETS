@@ -17,6 +17,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ci_utils import StageTimer, compare_numeric_file
+
 try:
     import f90nml
 except ImportError:
@@ -36,6 +39,7 @@ BINARY = env_path("GORILLA_APPLETS_BIN")
 WORK_DIR = env_path("WORK_DIR")
 
 ASDEX_DIR = APPLETS_ROOT / "INPUT" / "data_files" / "DATA" / "ASDEX"
+REFERENCE_DIR = APPLETS_ROOT / "TESTS" / "REFERENCE" / "field_line_tracing"
 
 # Fresh work dir for every test run
 if WORK_DIR.exists():
@@ -104,14 +108,17 @@ tetra_grid.write(str(WORK_DIR / "tetra_grid.inp"), force=True)
 gorilla_applets.write(str(WORK_DIR / "gorilla_applets.inp"), force=True)
 field_line_tracing.write(str(WORK_DIR / "field_line_tracing.inp"), force=True)
 
+timer = StageTimer("field_line_tracing", output_path=WORK_DIR / "timings.json")
+
 print("=== field line tracing: i_option=10 ===", flush=True)
-result = subprocess.run(
-    [str(BINARY)],
-    cwd=WORK_DIR,
-    capture_output=True,
-    text=True,
-    check=False,
-)
+with timer.time("field_line_tracing"):
+    result = subprocess.run(
+        [str(BINARY)],
+        cwd=WORK_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 print(result.stdout)
 if result.stderr:
     print(result.stderr, file=sys.stderr)
@@ -123,4 +130,14 @@ expected_marker = "Number of lost particles"
 if expected_marker not in result.stdout:
     sys.exit(f"FAIL: expected '{expected_marker}' in stdout but it was missing")
 
-print(f"PASS: field line tracing completed and summary marker found")
+# Quantitative comparison: fort.75 holds one row per traced field line.
+# Row order depends on OMP scheduling so sort before comparing.
+compare_numeric_file(
+    WORK_DIR / "fort.75",
+    REFERENCE_DIR / "fort.75",
+    rtol=1.0e-10,
+    atol=1.0e-14,
+    sort_lines=True,
+)
+
+print(f"PASS: field line tracing completed and output matches reference")
