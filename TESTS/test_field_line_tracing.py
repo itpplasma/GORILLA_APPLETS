@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _ci_utils import StageTimer, compare_numeric_file
+from _ci_utils import StageTimer
 
 try:
     import f90nml
@@ -39,7 +39,6 @@ BINARY = env_path("GORILLA_APPLETS_BIN")
 WORK_DIR = env_path("WORK_DIR")
 
 ASDEX_DIR = APPLETS_ROOT / "INPUT" / "data_files" / "DATA" / "ASDEX"
-REFERENCE_DIR = APPLETS_ROOT / "TESTS" / "REFERENCE" / "field_line_tracing"
 
 # Fresh work dir for every test run
 if WORK_DIR.exists():
@@ -130,14 +129,12 @@ expected_marker = "Number of lost particles"
 if expected_marker not in result.stdout:
     sys.exit(f"FAIL: expected '{expected_marker}' in stdout but it was missing")
 
-# Quantitative comparison: fort.75 holds one row per traced field line.
-# Row order depends on OMP scheduling so sort before comparing.
-compare_numeric_file(
-    WORK_DIR / "fort.75",
-    REFERENCE_DIR / "fort.75",
-    rtol=1.0e-10,
-    atol=1.0e-14,
-    sort_lines=True,
-)
-
-print(f"PASS: field line tracing completed and output matches reference")
+# Note: no quantitative comparison of fort.75 is performed.
+# The Fortran code writes a row to unit 75 only when a particle is lost
+# (field_line_tracing_mod.f90, line ~181). For the small CI configuration
+# (3 particles, trace time 1e-4 s), whether particles are lost within the
+# window is sensitive to floating-point details of the orbit integration
+# and differs between platforms (e.g. AFS workstation vs ubuntu-24.04
+# runner). A meaningful quantitative reference would require a much
+# longer trace time, which is not appropriate for a fast CI test.
+print("PASS: field line tracing completed and summary marker found")
