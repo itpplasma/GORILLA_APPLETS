@@ -1,6 +1,10 @@
 # Prerequisites
 *.d
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Compiled Object files
 *.slo
 *.lo
