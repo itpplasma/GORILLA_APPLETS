@@ -1,0 +1,112 @@
+name: Performance comparison
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  perf:
+    runs-on: ubuntu-24.04
+
+    env:
+      FC: gfortran
+      RUNS: 3
+
+    steps:
+      - name: Checkout candidate (PR head)
+        uses: actions/checkout@v6
+        with:
+          path: candidate
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Checkout baseline (PR base)
+        uses: actions/checkout@v6
+        with:
+          path: baseline
+          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+
+      - name: Checkout GORILLA (core dependency)
+        uses: actions/checkout@v6
+        with:
+          repository: itpplasma/GORILLA
+          path: GORILLA
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran liblapack-dev libnetcdff-dev ninja-build cmake
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install f90nml
+
+      # Use the candidate's TESTS/ tree for both runs so that the benchmark
+      # exercises the same drivers, references and tolerances on both sides.
+      # Without this, the baseline might lack the new timing infrastructure
+      # and produce no JSON to compare.
+      - name: Sync TESTS/ from candidate into baseline
+        run: |
+          rm -rf baseline/TESTS
+          cp -r candidate/TESTS baseline/TESTS
+
+      - name: Build candidate
+        working-directory: candidate
+        run: make
+
+      - name: Build baseline
+        working-directory: baseline
+        run: make
+
+      - name: Benchmark candidate (best of $RUNS)
+        working-directory: candidate
+        run: |
+          mkdir -p ../perf-results/candidate
+          for i in $(seq 1 "$RUNS"); do
+            echo "::group::candidate run $i"
+            # Run tests; ignore failures so we still capture timings for
+            # regressions that affect physics but not run-to-completion.
+            ctest --test-dir BUILD --output-on-failure || true
+            for f in BUILD/TESTS/*/timings.json; do
+              [ -f "$f" ] || continue
+              name=$(basename "$(dirname "$f")" _work)
+              cp "$f" "../perf-results/candidate/${name}.run${i}.json"
+            done
+            echo "::endgroup::"
+          done
+
+      - name: Benchmark baseline (best of $RUNS)
+        working-directory: baseline
+        run: |
+          mkdir -p ../perf-results/baseline
+          for i in $(seq 1 "$RUNS"); do
+            echo "::group::baseline run $i"
+            ctest --test-dir BUILD --output-on-failure || true
+            for f in BUILD/TESTS/*/timings.json; do
+              [ -f "$f" ] || continue
+              name=$(basename "$(dirname "$f")" _work)
+              cp "$f" "../perf-results/baseline/${name}.run${i}.json"
+            done
+            echo "::endgroup::"
+          done
+
+      - name: Compare timings
+        id: compare
+        run: |
+          python3 candidate/TESTS/scripts/compare_timings.py \
+            perf-results/baseline perf-results/candidate \
+            --warn 20 --fail 50 \
+            --summary perf-results/report.md
+          cat perf-results/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload perf artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results
+          path: perf-results/
