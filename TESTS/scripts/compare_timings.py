@@ -14,12 +14,8 @@ any stage exceeds the --fail percentage slowdown.
 """
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
-
-
-RUN_SUFFIX_RE = re.compile(r"\.run\d+$")
 
 
 def load_best(directory: Path) -> dict[str, dict[str, float]]:
