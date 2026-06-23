@@ -17,7 +17,7 @@ build: configure
 	cmake --build $(BUILD_DIR) --config $(CONFIG)
 
 test: build
-	cd $(BUILD_DIR) && ctest
+	cd $(BUILD_DIR) && ctest --output-on-failure
 
 doc: configure
 	cmake --build --preset default --target doc
