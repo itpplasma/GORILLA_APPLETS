@@ -17,6 +17,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ci_utils import StageTimer
+
 try:
     import f90nml
 except ImportError:
@@ -104,14 +107,17 @@ tetra_grid.write(str(WORK_DIR / "tetra_grid.inp"), force=True)
 gorilla_applets.write(str(WORK_DIR / "gorilla_applets.inp"), force=True)
 field_line_tracing.write(str(WORK_DIR / "field_line_tracing.inp"), force=True)
 
+timer = StageTimer("field_line_tracing", output_path=WORK_DIR / "timings.json")
+
 print("=== field line tracing: i_option=10 ===", flush=True)
-result = subprocess.run(
-    [str(BINARY)],
-    cwd=WORK_DIR,
-    capture_output=True,
-    text=True,
-    check=False,
-)
+with timer.time("field_line_tracing"):
+    result = subprocess.run(
+        [str(BINARY)],
+        cwd=WORK_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 print(result.stdout)
 if result.stderr:
     print(result.stderr, file=sys.stderr)
@@ -123,4 +129,12 @@ expected_marker = "Number of lost particles"
 if expected_marker not in result.stdout:
     sys.exit(f"FAIL: expected '{expected_marker}' in stdout but it was missing")
 
-print(f"PASS: field line tracing completed and summary marker found")
+# Note: no quantitative comparison of fort.75 is performed.
+# The Fortran code writes a row to unit 75 only when a particle is lost
+# (field_line_tracing_mod.f90, line ~181). For the small CI configuration
+# (3 particles, trace time 1e-4 s), whether particles are lost within the
+# window is sensitive to floating-point details of the orbit integration
+# and differs between platforms (e.g. AFS workstation vs ubuntu-24.04
+# runner). A meaningful quantitative reference would require a much
+# longer trace time, which is not appropriate for a fast CI test.
+print("PASS: field line tracing completed and summary marker found")

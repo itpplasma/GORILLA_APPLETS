@@ -1,6 +1,10 @@
 # Prerequisites
 *.d
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Compiled Object files
 *.slo
 *.lo
@@ -41,6 +45,10 @@ out.*
 *.png
 *out
 *.nc
+
+# Committed CI reference data: keep tracked despite the *.dat / fort.* rules
+!TESTS/REFERENCE/**/*.dat
+!TESTS/REFERENCE/**/fort.*
 
 # macOS
 .DS*
