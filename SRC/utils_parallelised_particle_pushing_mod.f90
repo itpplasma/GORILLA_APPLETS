@@ -8,16 +8,17 @@ contains
 
 subroutine print_progress(num_particles,kpart,n)
 
+    integer, parameter :: n_critical = 100
     integer :: num_particles, kpart, n
     logical :: print_progress_for_every_particle = .false.
 
-    if ((.not.print_progress_for_every_particle).and.(num_particles.gt.10)) then
-        if (modulo(kpart,int(num_particles/100)).eq.0) then
+    if ((.not.print_progress_for_every_particle).and.(num_particles.gt.n_critical)) then
+        if (modulo(kpart,int(num_particles/n_critical)).eq.0) then
             print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
         endif
     else
         print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
-    endif    
+    endif
 
 end subroutine print_progress
 

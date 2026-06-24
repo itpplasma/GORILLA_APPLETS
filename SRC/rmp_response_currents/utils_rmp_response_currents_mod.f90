@@ -24,14 +24,18 @@ module utils_rmp_response_currents_mod
     logical,  public :: boole_step_delta_B_r   = .false.
     real(dp), public :: step_center_reff       = 0.0_dp  ! r_eff [cm] — NOT r_geom
     real(dp), public :: step_halfwidth_reff    = 0.0_dp  ! r_eff [cm] — NOT r_geom
-    ! Perturbed electrostatic E_perp from KIM (E_perp.dat).
-    ! boole_e_perp enables the c*dE^s/B0 term in wdot (Albert 2016 Eq.4,
-    ! extended to include E×B radial drift from the RMP electrostatic response).
-    ! e_perp_file must be KIM's E_perp.dat (4-column: r_eff[cm], Re, Im, |mag|).
-    ! Must be used together with one of the Br perturbation modes (shares m,n).
-    ! r_eff here is the toroidal-flux-based effective radius (NOT r_geom).
+    ! Aligned-potential ansatz: include the E_align x B radial drift from
+    ! projecting Phi_0(s) onto the resonant (m,n) helix as an effective
+    ! parallel velocity in eval_wdot_s. Re-uses (m,n) from the Br block.
+    ! See memo_HC_and_RMP_ext.pdf, Appendix A; TODO replace with a
+    ! published reference once available.
     logical,            public :: boole_e_perp  = .false.
-    character(len=512), public :: e_perp_file   = ''   ! path to KIM E_perp.dat
+    character(len=512), public :: e_perp_file   = ''   ! reserved (unused)
+
+    ! Floor for |iota*m + n| in the aligned-potential denominator. Anything
+    ! smaller is replaced by sign(eps_denom_align, denom) to keep wdot finite
+    ! through the resonance (where the aligned ansatz formally diverges).
+    real(dp), parameter :: eps_denom_align = 1.0e-6_dp
     integer,            public :: species_for_delta_f  = 1
     ! Diagnostic: if .true., skip the exp(i*(m theta + n phi)) factor in
     ! the constant-amplitude perturbation and return delta_B_r_const as
@@ -1145,8 +1149,9 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
     use tetra_physics_mod, only: tetra_physics, coord_system
     use tetra_grid_mod, only: tetra_grid, verts_sthetaphi
     use constants, only: ev2erg, clight
-    use profile_data_mod, only: eval_profiles, profile_values_t
-    use perturbation_field_mod, only: eval_delta_B_s, eval_delta_E_s
+    use profile_data_mod, only: eval_profiles, profile_values_t, &
+                                get_psi_tor_edge, eval_q
+    use perturbation_field_mod, only: eval_delta_B_s
 
     integer,     intent(in)  :: ind_tetr, species
     real(dp),    intent(in)  :: x(3), vpar, vperp
@@ -1154,9 +1159,12 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
 
     real(dp)    :: z_cell(3), s_loc, theta_loc, phi_loc
     real(dp)    :: B0_loc
-    complex(dp) :: dB_s, dE_s, v_rad
+    complex(dp) :: dB_s
     real(dp)    :: v_sq, T_alpha_erg, A1, A2
     real(dp)    :: mass, charge
+    real(dp)    :: v_par_eff, v_E_align
+    real(dp)    :: iota_loc, denom, m_pert, n_pert
+    real(dp)    :: psi_tor_edge, B_theta_cov, B_phi_cov
     type(profile_values_t) :: pv
 
     wdot_s = (0.0_dp, 0.0_dp)
@@ -1178,14 +1186,28 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
     B0_loc = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z_cell)
     if (B0_loc <= 0.0_dp) return
 
-    call eval_delta_B_s(s_loc, theta_loc, phi_loc, dB_s)
-    v_rad = vpar * dB_s
-    if (boole_e_perp) then
-        call eval_delta_E_s(s_loc, theta_loc, phi_loc, dE_s)
-        v_rad = v_rad + clight * dE_s
-    end if
-
     call eval_profiles(s_loc, pv)
+
+    call eval_delta_B_s(s_loc, theta_loc, phi_loc, dB_s)
+
+    ! v_par_eff = v_parallel + V_{E,align}, where V_{E,align} is the ExB
+    ! radial drift from the aligned-potential ansatz
+    ! Phi_align = -(Phi0'(s)/psi_tor_edge) * (m B_phi - n B_theta)/(iota m + n)
+    ! (psi_tor'(s) = psi_tor_edge since s = psi_tor/psi_tor_edge).
+    v_par_eff = vpar
+    if (boole_e_perp) then
+        psi_tor_edge = get_psi_tor_edge()
+        iota_loc     = 1.0_dp / eval_q(s_loc)
+        m_pert       = real(pert_m_fourier, dp)
+        n_pert       = real(pert_n_fourier, dp)
+        denom        = iota_loc * m_pert + n_pert
+        if (abs(denom) < eps_denom_align) denom = sign(eps_denom_align, denom)
+        call eval_B_cov_sfl(ind_tetr, z_cell, s_loc, theta_loc, B0_loc, &
+                            B_theta_cov, B_phi_cov)
+        v_E_align = (clight / B0_loc) * (pv%dPhi0_ds / psi_tor_edge) &
+                    * (m_pert * B_phi_cov - n_pert * B_theta_cov) / denom
+        v_par_eff = v_par_eff + v_E_align
+    end if
 
     mass   = start%particle_mass(species)
     charge = start%particle_charge(species)
@@ -1209,7 +1231,8 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
     end if
 
     wdot_s = (-(A1 + A2 * mass * v_sq / (2.0_dp * T_alpha_erg))) &
-             * (v_rad / cmplx(B0_loc, 0.0_dp, kind=dp))
+             * (cmplx(v_par_eff, 0.0_dp, kind=dp) * dB_s &
+                / cmplx(B0_loc, 0.0_dp, kind=dp))
 
 end subroutine eval_wdot_s
 
@@ -1355,6 +1378,75 @@ real(dp) function eval_theta_sfl_local(ind_tetr, x) result(theta_loc)
     theta_loc = modulo(theta_loc, 2.0_dp * pi)
 
 end function eval_theta_sfl_local
+
+! ====================================================================
+! Covariant SFL components B_{0,theta} and B_{0,phi} of the equilibrium
+! magnetic field at the marker location. In coord_system==2 (symflux)
+! GORILLA's h2,h3 already encode the covariant SFL components (after
+! multiplying by B0), so the per-tetra linear interpolant gives them
+! directly. In coord_system==1 (cylindrical), h2_1*B0 is the covariant
+! phi-component (axisymmetric coincidence between cylindrical and SFL),
+! but the SFL theta-component needs the jacobian columns dR/dtheta,
+! dZ/dtheta: B_theta^cov = B_R dR/dtheta + B_Z dZ/dtheta. We get those
+! either from the analytic-circular closed form (grid_kind==5) or from
+! magdata_in_symfluxcoord_ext (EFIT, grid_kind in {1,2,3,4}).
+! ====================================================================
+subroutine eval_B_cov_sfl(ind_tetr, z_cell, s_loc, theta_loc, B0_loc, &
+                         B_theta_cov, B_phi_cov)
+
+    use tetra_physics_mod, only: tetra_physics, coord_system
+    use tetra_grid_settings_mod, only: grid_kind, R0_analytic_circ, a_analytic_circ
+    use magdata_in_symfluxcoordinates_mod, only: magdata_in_symfluxcoord_ext
+
+    integer,  intent(in)  :: ind_tetr
+    real(dp), intent(in)  :: z_cell(3), s_loc, theta_loc, B0_loc
+    real(dp), intent(out) :: B_theta_cov, B_phi_cov
+
+    real(dp) :: h2_loc, h3_loc
+    real(dp) :: B_R_cov, B_Z_cov, dR_dtheta, dZ_dtheta
+    real(dp) :: s_edge_ac, rho_loc
+    real(dp) :: psi_d, q_d, dq_ds_d, sqrtg_d, bmod_d, dbmod_dt_d
+    real(dp) :: R_d, dR_ds_d, Z_d, dZ_ds_d
+
+    h2_loc = tetra_physics(ind_tetr)%h2_1 + sum(tetra_physics(ind_tetr)%gh2 * z_cell)
+    h3_loc = tetra_physics(ind_tetr)%h3_1 + sum(tetra_physics(ind_tetr)%gh3 * z_cell)
+
+    if (coord_system == 2) then
+        B_theta_cov = h2_loc * B0_loc
+        B_phi_cov   = h3_loc * B0_loc
+        return
+    end if
+
+    ! coord_system == 1: cylindrical. In axisymmetric equilibria
+    ! B_phi^{cov,SFL} = B_phi^{cov,cyl} = h2_1*B0 (up to interpolation).
+    ! B_R^{cov,cyl} = h_R B0, B_Z^{cov,cyl} = h_Z B0 with h_R = h1_loc and
+    ! h_Z = h3_loc; we then convert via the jacobian columns dR/dtheta and
+    ! dZ/dtheta to get B_theta^{cov,SFL}.
+    B_phi_cov = h2_loc * B0_loc
+    B_R_cov   = (tetra_physics(ind_tetr)%h1_1 &
+               + sum(tetra_physics(ind_tetr)%gh1 * z_cell)) * B0_loc
+    B_Z_cov   = h3_loc * B0_loc
+
+    if (grid_kind == 5) then
+        ! Analytic-circular tokamak: same parametrisation as the grid
+        ! builder and the spawner branch above.
+        s_edge_ac = R0_analytic_circ &
+                  - sqrt(R0_analytic_circ**2 - a_analytic_circ**2)
+        rho_loc   = sqrt(R0_analytic_circ**2 &
+                  - (R0_analytic_circ - s_loc*s_edge_ac)**2)
+        dR_dtheta = -rho_loc * sin(theta_loc)
+        dZ_dtheta =  rho_loc * cos(theta_loc)
+    else
+        psi_d = 0.0_dp
+        call magdata_in_symfluxcoord_ext(1, s_loc, psi_d, theta_loc, &
+                                         q_d, dq_ds_d, sqrtg_d, bmod_d, dbmod_dt_d, &
+                                         R_d, dR_ds_d, dR_dtheta, &
+                                         Z_d, dZ_ds_d, dZ_dtheta)
+    end if
+
+    B_theta_cov = B_R_cov * dR_dtheta + B_Z_cov * dZ_dtheta
+
+end subroutine eval_B_cov_sfl
 
 ! ====================================================================
 ! Total physical volume of the spawn region (the part of the mesh whose
