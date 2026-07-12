@@ -93,6 +93,7 @@ module gorilla_applets_types_mod
     real(dp) :: n_particles
     real(dp) :: density
     real(dp) :: linear_density_zero = 1.1_dp
+    real(dp) :: delta_f_fade_fraction = 1.0_dp/3.0_dp
     logical  :: boole_squared_moments
     logical  :: boole_point_source
     logical  :: boole_collisions

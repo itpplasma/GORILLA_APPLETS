@@ -26,6 +26,7 @@ subroutine read_helical_core_inp_into_type
 
     real(dp) :: time_step, energy_eV, n_particles, density
     real(dp) :: linear_density_zero
+    real(dp) :: delta_f_fade_fraction
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
                boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
@@ -44,20 +45,26 @@ subroutine read_helical_core_inp_into_type
     & seed_option, boole_write_vertex_indices, boole_write_vertex_coordinates, boole_write_prism_volumes, &
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, &
-    & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f
+    & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, &
+    & boole_delta_f, delta_f_fade_fraction
 
     linear_density_zero = 1.1_dp
+    delta_f_fade_fraction = 1.0_dp/3.0_dp
     open(newunit = s_inp_unit, file='helical_core.inp', status='unknown')
     read(s_inp_unit,nml=helical_core_nml)
     close(s_inp_unit)
     if (linear_density_zero <= 1.0_dp) &
         error stop 'helical_core: linear_density_zero must exceed 1'
+    if (delta_f_fade_fraction <= 0.0_dp &
+        .or. delta_f_fade_fraction > 1.0_dp) &
+        error stop 'helical_core: delta_f_fade_fraction must be in (0,1]'
 
     in%time_step = time_step
     in%energy_eV = energy_eV
     in%n_particles = n_particles
     in%density = density
     in%linear_density_zero = linear_density_zero
+    in%delta_f_fade_fraction = delta_f_fade_fraction
     in%boole_squared_moments = boole_squared_moments
     in%boole_point_source = boole_point_source
     in%boole_collisions = boole_collisions
@@ -501,22 +508,20 @@ subroutine apply_weight_fading(n, species, t, t_tot)
 ! weights%w = weights%original * 0.5*(1 + cos(pi*(t - t_tot*(1-alpha))/(t_tot*alpha)))
 ! This smoothly fades from original weight at t=t_tot*(1-alpha) to 0 at t=t_tot.
 !
-    use gorilla_applets_types_mod, only: weights, time_t
-    use constants, only: pi
+    use gorilla_applets_types_mod, only: in, weights, time_t
+    use helical_core_fading_mod, only: delta_f_fade_factor
 
     integer, intent(in)       :: n, species
     type(time_t), intent(in)  :: t
     real(dp), intent(in)      :: t_tot
 
-    real(dp) :: t_current, fade_factor, t_fade_start
-    real(dp) :: alpha = 1.0_dp / 3.0_dp  ! Fraction of tracing time over which fading occurs
+    real(dp) :: t_current, fade_factor
 
     ! Compute current time after this push: t%confined + (t%step - t%remain)
     t_current = t%confined + t%step - t%remain
-    t_fade_start = t_tot * (1.0_dp - alpha)
-
-    if (t_current > t_fade_start) then
-        fade_factor = 0.5_dp * (1.0_dp + cos(pi * (t_current - t_fade_start) / (t_tot * alpha)))
+    fade_factor = delta_f_fade_factor(t_current, t_tot, &
+        in%delta_f_fade_fraction)
+    if (fade_factor < 1.0_dp) then
         weights%w(n, species) = weights%original(n, species) * fade_factor
     endif
 

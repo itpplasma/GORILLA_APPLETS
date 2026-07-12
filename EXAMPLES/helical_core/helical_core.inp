@@ -54,6 +54,9 @@
   !Use delta-f method for particle weights
   boole_delta_f = .true.,
 !
+  !Fraction of the trace used to fade delta-f weights smoothly to zero
+  delta_f_fade_fraction = 0.3333333333333333d0,
+!
   !always initiate pairs of particles where both particles start at the same position but move
   !in opposite direction, this helps to reduce statistical noise
   boole_antithetic_variate = .true.,
