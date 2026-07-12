@@ -32,6 +32,9 @@
   !Simulated density of particles
   density = 3.0d13,
 !
+  !Normalized flux where the linear density extrapolates to zero; must exceed 1
+  linear_density_zero = 1.1d0,
+!
   !refined jacobian determinant
   boole_refined_sqrt_g = .true.,
 !

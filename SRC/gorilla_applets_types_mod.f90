@@ -92,6 +92,7 @@ module gorilla_applets_types_mod
     real(dp) :: energy_eV
     real(dp) :: n_particles
     real(dp) :: density
+    real(dp) :: linear_density_zero = 1.1_dp
     logical  :: boole_squared_moments
     logical  :: boole_point_source
     logical  :: boole_collisions

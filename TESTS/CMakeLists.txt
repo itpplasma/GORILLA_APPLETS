@@ -7,6 +7,14 @@ target_include_directories(test_multi_species_collision.x
 
 add_test(NAME multi_species_collision COMMAND test_multi_species_collision.x)
 
+add_executable(test_helical_core_profile.x
+    test_helical_core_profile.f90
+)
+target_link_libraries(test_helical_core_profile.x GORILLA_APPLETS)
+target_include_directories(test_helical_core_profile.x
+    PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+add_test(NAME helical_core_profile COMMAND test_helical_core_profile.x)
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_test(

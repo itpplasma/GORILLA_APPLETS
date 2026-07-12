@@ -25,6 +25,7 @@ subroutine read_helical_core_inp_into_type
     use gorilla_applets_types_mod, only: in
 
     real(dp) :: time_step, energy_eV, n_particles, density
+    real(dp) :: linear_density_zero
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
                boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
@@ -37,21 +38,26 @@ subroutine read_helical_core_inp_into_type
     integer :: s_inp_unit
 
     NAMELIST /helical_core_nml/ time_step, energy_eV, n_particles, boole_squared_moments, boole_point_source, &
-    & boole_collisions, boole_precalc_collisions, density, boole_refined_sqrt_g, boole_monoenergetic, &
+    & boole_collisions, boole_precalc_collisions, density, linear_density_zero, &
+    & boole_refined_sqrt_g, boole_monoenergetic, &
     & boole_linear_density_simulation, boole_antithetic_variate, boole_linear_temperature_simulation, i_integrator_type, &
     & seed_option, boole_write_vertex_indices, boole_write_vertex_coordinates, boole_write_prism_volumes, &
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, &
     & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f
 
+    linear_density_zero = 1.1_dp
     open(newunit = s_inp_unit, file='helical_core.inp', status='unknown')
     read(s_inp_unit,nml=helical_core_nml)
     close(s_inp_unit)
+    if (linear_density_zero <= 1.0_dp) &
+        error stop 'helical_core: linear_density_zero must exceed 1'
 
     in%time_step = time_step
     in%energy_eV = energy_eV
     in%n_particles = n_particles
     in%density = density
+    in%linear_density_zero = linear_density_zero
     in%boole_squared_moments = boole_squared_moments
     in%boole_point_source = boole_point_source
     in%boole_collisions = boole_collisions
@@ -472,23 +478,19 @@ subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
 !
 ! Sets particle weights for the delta-f method.
 !
-    use gorilla_applets_types_mod, only: start, in, g, weights
-    use tetra_physics_mod, only: tetra_physics
-    use volume_integrals_and_sqrt_g_mod, only: sqrt_g
-    use supporting_functions_mod, only: bmod_func
-    use constants, only: pi
+    use gorilla_applets_types_mod, only: in, weights
+    use helical_core_profile_mod, only: delta_f_density_weight
 
     integer, intent(in) :: n, ind_tetr, species
     real(dp), dimension(3), intent(in) :: z_save
     real(dp), intent(in) :: vpar, vperp
 
-    real(dp) :: v_r, base_weight, r, z
+    real(dp) :: v_r
 
     call calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
 
-    !So far, we work with densities that decline like (1.1_dp - s_value)/1.1_dp, so -v^r\partial f/\partial r turns into
-    !-v^r*1.0_dp/1.1_dp(-f)=v_r*f/1.1_dp
-    weights%w(n,species) = weights%w(n,species) * v_r /1.1_dp!vpar
+    weights%w(n, species) = delta_f_density_weight(weights%w(n, species), &
+        v_r, in%linear_density_zero)
 
 end subroutine adapt_weights_delta_f
 
@@ -534,6 +536,7 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     use gorilla_settings_mod, only: coord_system
     use tetra_grid_settings_mod, only: grid_kind
     use marker_distribution_mod, only: evaluate_distribution_3d, evaluate_distribution_1d, pdf_boltzmann
+    use helical_core_profile_mod, only: linear_density_factor
 
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
@@ -596,8 +599,8 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     endif
 
     if ((.not.in%boole_delta_f).and.(in%boole_linear_density_simulation)) then
-        ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
-        density = density*(1.1_dp - s_value)/1.1_dp
+        density = density*linear_density_factor(s_value, &
+            in%linear_density_zero)
     endif
 
     pdf_gyroangle = 1/(2*pi)
