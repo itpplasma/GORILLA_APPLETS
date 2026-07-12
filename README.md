@@ -24,6 +24,8 @@ Selected at runtime via `gorilla_applets_nml/i_option` in `gorilla_applets.inp`:
 | 10 | Field-line tracing |
 | 11 | Divertor heat loads |
 | 12 | Self-consistent electric field |
+| 13 | Anomalous transport |
+| 14 | Helical core particle tracing |
 
 ## Building
 
