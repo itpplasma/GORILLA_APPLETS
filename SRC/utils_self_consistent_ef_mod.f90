@@ -70,10 +70,20 @@ subroutine read_self_consistent_electric_field_inp_into_type
 
     if (in%dynamic_density_time_factor.le.0.0_dp) &
         error stop 'dynamic_density_time_factor must be positive'
+    if (.not.supported_potential_update_dimension(in%update_dimension)) &
+        error stop 'only one-dimensional electric-potential updates are implemented'
 
     print *,'GORILLA_APPLETS: Loaded input data from self_consistent_ef.inp'
 
 end subroutine read_self_consistent_electric_field_inp_into_type
+
+elemental pure logical function supported_potential_update_dimension(update_dimension)
+
+    integer, intent(in) :: update_dimension
+
+    supported_potential_update_dimension = update_dimension.eq.1
+
+end function supported_potential_update_dimension
 
 elemental pure function charge_density_to_potential(rho, energy_eV, density, &
         boole_static_ne, dynamic_density_time_factor) result(phi)

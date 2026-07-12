@@ -40,7 +40,6 @@
 !
   !type of electric potential update
   !1 ... 1D 
-  !3 ... 3D 
   update_dimension = 1
 !
   !Simulated density of particles

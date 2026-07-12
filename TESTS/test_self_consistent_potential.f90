@@ -1,11 +1,17 @@
 program test_self_consistent_potential
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use constants, only: echarge, ev2erg
-    use utils_self_consistent_ef_mod, only: charge_density_to_potential
+    use utils_self_consistent_ef_mod, only: charge_density_to_potential, &
+        supported_potential_update_dimension
 
     implicit none
 
     real(dp) :: expected
+
+    if (.not.supported_potential_update_dimension(1)) &
+        error stop 'one-dimensional potential update was rejected'
+    if (supported_potential_update_dimension(3)) &
+        error stop 'unimplemented three-dimensional potential update was accepted'
 
     expected = 2.0_dp*3.5e3_dp*ev2erg/(echarge**2*4.0_dp)
     if (abs(charge_density_to_potential(2.0_dp, 3.5e3_dp, 4.0_dp, &
