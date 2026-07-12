@@ -60,3 +60,17 @@ GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
 GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/helical_core_work"
 )
+
+add_test(
+    NAME helical_core_rectangular
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_helical_core.py
+)
+set_tests_properties(helical_core_rectangular PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
+GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/helical_core_rectangular_work;\
+HELICAL_CORE_GRID_KIND=1"
+)

@@ -6,12 +6,10 @@ Reads GORILLA-core blueprints from ../GORILLA/INPUT/ and applet blueprints
 from GORILLA_APPLETS/INPUT/, sets every key the test depends on explicitly,
 then invokes the binary with i_option = 14 (helical core particle tracing).
 
-The test uses the shared field-aligned EFIT test equilibrium
-(grid_kind = 2 with MHD_EQUILIBRIA/g_file_for_test and the SYNCH preload),
-the configuration the shipped example runs; the rectangular EFIT grid
-aborts inside the option-14 volume integrals. It covers the option-14
-execution path, not helical-core physics: the perturbation stays off,
-matching the shipped example.
+The test uses the shared EFIT test equilibrium. HELICAL_CORE_GRID_KIND selects
+the field-aligned or rectangular mesh. It covers the option-14 execution path,
+not helical-core physics: the perturbation stays off, matching the shipped
+example.
 
 Paths are passed in by TESTS/CMakeLists.txt via environment variables.
 """
@@ -38,6 +36,7 @@ APPLETS_ROOT = env_path("APPLETS_ROOT")
 GORILLA_ROOT = env_path("GORILLA_ROOT")
 BINARY = env_path("GORILLA_APPLETS_BIN")
 WORK_DIR = env_path("WORK_DIR")
+GRID_KIND = int(os.environ.get("HELICAL_CORE_GRID_KIND", "2"))
 
 # Fresh work dir for every test run
 if WORK_DIR.exists():
@@ -63,8 +62,8 @@ gorilla["gorillanml"]["boole_guess"] = True
 gorilla["gorillanml"]["boole_grid_for_find_tetra"] = False
 gorilla["gorillanml"]["boole_adaptive_time_steps"] = False
 
-# Tetrahedral grid: field-aligned EFIT as in the shipped example, small
-tetra_grid["tetra_grid_nml"]["grid_kind"] = 2        # field-aligned EFIT
+# Tetrahedral grid: shared EFIT, small enough for CI
+tetra_grid["tetra_grid_nml"]["grid_kind"] = GRID_KIND
 tetra_grid["tetra_grid_nml"]["n1"] = 20
 tetra_grid["tetra_grid_nml"]["n2"] = 30
 tetra_grid["tetra_grid_nml"]["n3"] = 50
