@@ -53,6 +53,7 @@ module gorilla_applets_types_mod
     type counter_t
     integer :: lost_particles = 0
     integer :: lost_inside = 0
+    integer :: lost_outer = 0
     integer :: tetr_pushings = 0
     integer :: phi_0_mappings = 0
     integer :: integration_steps = 0

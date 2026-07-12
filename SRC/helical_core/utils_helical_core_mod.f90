@@ -246,7 +246,7 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
     real(dp), intent(in)                         :: t_tot
 
     real(dp), dimension(3)                       :: z_save, x_new
-    real(dp)                                     :: t_pass, perpinv, rand_frac
+    real(dp)                                     :: t_pass, perpinv
     logical                                      :: boole_t_finished, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
     type(optional_quantities_type)               :: optional_quantities
@@ -291,20 +291,8 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
                         !print*, "particle pushing across the hole surrounding the magnetic axis was successful"
                     endif
                 else
-                    ! Particle left at the outer boundary - displace toward the magnetic axis
-                    ! Keep phi unchanged, move R and Z toward axis by random fraction (0 to 1%) of distance
-                    call random_number(rand_frac)
-                    rand_frac = 0.01_dp * rand_frac  ! 0 to 1% of distance to axis
-                    x_new(1) = x(1) + rand_frac * (g%raxis - x(1))
-                    x_new(2) = x(2)  ! phi unchanged
-                    x_new(3) = x(3) + rand_frac * (g%zaxis - x(3))
-                    vperp = vperp_func(z_save, perpinv, ind_tetr_save)
-                    call find_tetra(x_new, vpar, vperp, ind_tetr, iface)
-                    if (ind_tetr.ne.-1) then
-                        x = x_new
-                    else
-                        exit
-                    endif
+                    local_counter%lost_outer = 1
+                    exit
                 endif
             else
                 exit
