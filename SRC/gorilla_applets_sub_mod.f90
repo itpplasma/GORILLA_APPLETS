@@ -105,11 +105,13 @@
             integer                                     :: file_id_psi2,file_id_std_psi2,file_id_transp_diff_coef
             integer(kind=8)                             :: n_time_steps
             double precision                            :: tau_bounce,coll_freq,tau_collision,t_step
+            double precision                            :: q_saf
 !
             !Initialize GORILLA with electrostatic potential in accordance with Mach number for mono-energetic transport coefficient
             call initialize_mono_energetic_transp_coef()
 !
-            !nu_star = [(2.d0**i, i=nu_start,(nu_start-(n_nu_scans+1)), -1)] ! nu_star = \frac{R_0 \nu_c}{\iota v_{mod}}
+            call get_local_safety_factor(q_saf)
+            print *, 'Safety factor used for bounce/collision times', q_saf
 !
             select case(idiffcoef_output)
                 case(1)
@@ -132,8 +134,9 @@
             select case(grid_kind)
                 case(1,2)
                     !Define bounce time for Tokamak
-                    tau_bounce = 2.d0*pi*mag_axis_R0/vmod*2.d0  !q=2
-                    tau_collision = mag_axis_R0*2.d0/(vmod*nu_star)
+                    !With the local q this is nu_star = R_0 nu_c q / v_mod = R_0 nu_c / (iota v_mod)
+                    tau_bounce = 2.d0*pi*mag_axis_R0/vmod*q_saf
+                    tau_collision = mag_axis_R0*q_saf/(vmod*nu_star)
                 case(3)
                     !Define bounce time for Stellarator
                     tau_bounce = 2.d0*pi*mag_axis_R0/vmod/n_field_periods
@@ -190,9 +193,14 @@
             integer                                     :: i,file_id_psi2,file_id_std_psi2,file_id_transp_diff_coef
             integer(kind=8)                             :: n_time_steps
             double precision                            :: tau_bounce,coll_freq,tau_collision,t_step, nu_star
+            double precision                            :: q_saf
 !
             !Initialize GORILLA with electrostatic potential in accordance with Mach number for mono-energetic transport coefficient
             call initialize_mono_energetic_transp_coef()
+!
+            !q is a flux function, so one evaluation ahead of the nu* loop is enough.
+            call get_local_safety_factor(q_saf)
+            print *, 'Safety factor used for bounce/collision times', q_saf
 !
             select case(idiffcoef_output)
                 case(1)
@@ -224,8 +232,8 @@
                 select case(grid_kind)
                     case(1,2)
                         !Define bounce time for Tokamak
-                        tau_bounce = 2.d0*pi*mag_axis_R0/vmod*2.d0  !q=2
-                        tau_collision = mag_axis_R0*2.d0/(vmod*nu_star)
+                        tau_bounce = 2.d0*pi*mag_axis_R0/vmod*q_saf
+                        tau_collision = mag_axis_R0*q_saf/(vmod*nu_star)
                     case(3)
                         !Define bounce time for Stellarator
                         tau_bounce = 2.d0*pi*mag_axis_R0/vmod/n_field_periods
@@ -340,5 +348,52 @@
             end select
 !
         end subroutine calc_numerical_diff_coef
+!
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
+        !Safety factor at the flux surface the markers start on, for the tokamak bounce and
+        !collision times. q is a flux function, so the poloidal angle handed to
+        !magdata_in_symfluxcoord_ext does not enter the result. The symmetry-flux data that routine
+        !interpolates is splined by load_magdata_in_symfluxcoord, which tetra_grid_mod calls for the
+        !EFIT field-aligned grid (grid_kind = 2) only; every other grid has no such data and keeps
+        !the historical hardcoded q = 2. Must not be called before
+        !initialize_mono_energetic_transp_coef, which is what loads pos_fluxtv_mat.
+        subroutine get_local_safety_factor(q_saf)
+!
+            use tetra_physics_mod, only: coord_system
+            use tetra_grid_settings_mod, only: grid_kind
+            use fluxtv_mod, only: pos_fluxtv_mat
+            use magdata_in_symfluxcoordinates_mod, only: magdata_in_symfluxcoord_ext
+!
+            implicit none
+!
+            double precision, intent(out)               :: q_saf
+            double precision                            :: s_start,theta_start
+            !Outputs of magdata_in_symfluxcoord_ext that are not needed here
+            double precision                            :: psi_pol,dq_ds,sqrtg,bmod,dbmod_dtheta
+            double precision                            :: R,dR_ds,dR_dtheta,Z,dZ_ds,dZ_dtheta
+!
+            q_saf = 2.d0
+!
+            if(grid_kind.ne.2) return
+!
+            if(coord_system.ne.2) then
+                !Recovering s from cylindrical (R,phi,Z) is not implemented here.
+                print *, 'WARNING: coord_system /= 2, cannot look up the local safety factor.'
+                print *, '         Falling back to the hardcoded q = 2 for the bounce and'
+                print *, '         collision times. Set coord_system = 2 to use the real q(s).'
+                return
+            endif
+!
+            !coord_system = 2 -> pos_fluxtv_mat holds (s,theta,phi), so column 1 is s.
+            !s and theta are inout in magdata_in_symfluxcoord_ext, hence the local copies.
+            s_start = pos_fluxtv_mat(1,1)
+            theta_start = 0.d0
+!
+            call magdata_in_symfluxcoord_ext(1,s_start,psi_pol,theta_start,q_saf,dq_ds, &
+                                         sqrtg,bmod,dbmod_dtheta,R,dR_ds,dR_dtheta,       &
+                                         Z,dZ_ds,dZ_dtheta)
+!
+        end subroutine get_local_safety_factor
 !
     end module gorilla_applets_sub_mod
