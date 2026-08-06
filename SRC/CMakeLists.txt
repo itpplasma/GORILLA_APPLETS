@@ -1,5 +1,8 @@
 add_library(GORILLA_APPLETS STATIC
   alpha_lifetime_gorilla_mod.f90
+  transport/rng_stream_mod.f90
+  transport/conservative_tallies_mod.f90
+  transport/marker_transport_mod.f90
   boltzmann_mod.f90
   gorilla_applets_types_mod.f90
   collis_ions_mod.f90

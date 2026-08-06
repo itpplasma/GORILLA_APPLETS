@@ -7,6 +7,15 @@ target_include_directories(test_multi_species_collision.x
 
 add_test(NAME multi_species_collision COMMAND test_multi_species_collision.x)
 
+add_executable(test_marker_transport.x
+    test_marker_transport.f90
+)
+target_link_libraries(test_marker_transport.x GORILLA_APPLETS)
+target_include_directories(test_marker_transport.x
+    PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+
+add_test(NAME marker_transport COMMAND test_marker_transport.x)
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_test(

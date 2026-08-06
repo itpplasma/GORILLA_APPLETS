@@ -57,6 +57,31 @@ The working directory needs the following inputs (blueprints under [INPUT/](INPU
 
 The runnable scenarios in [EXAMPLES/](EXAMPLES/) show the full setup per application; each folder contains its input files, MHD equilibrium symlinks, and a MATLAB or Python plotting script for the output.
 
+## Reusable Marker-Transport Library (`SRC/transport/`)
+
+Extracted from the applet modes, the `SRC/transport/` library provides reusable,
+application-agnostic marker-transport services so edge applications can couple
+collision/process callbacks and conservative tallies to GORILLA without driving
+`gorilla_applets_main.x` or sharing application globals.
+
+Modules:
+
+- `rng_stream_mod.f90` — per-marker deterministic RNG streams (splitmix64),
+  reproducible from a `(base_seed, stream_index)` pair; identical streams are
+  produced regardless of OpenMP thread count (stream identity).
+- `marker_transport_mod.f90` — marker `ensemble_t`, generic `advance_ensemble`
+  driver that advances an ensemble through a supplied GORILLA-compatible stepper
+  (`step_signature_t`) with an optional process callback (`process_signature_t`),
+  per-marker weights, explicit termination-event outputs, and an OMP-parallel
+  marker loop partitioned by independent per-marker streams.
+- `conservative_tallies_mod.f90` — cell/surface tallies (density, momentum,
+  energy; time-weighted raw accumulation with normalization metadata) plus a
+  `conservation_ledger_t` tracking weight/momentum/energy conservation via
+  cell/surface deposits, losses and residuals.
+
+The migrated `alpha_lifetime_gorilla_mod.f90` (compatibility client) uses the
+library for `i_integrator_type=1`; it reproduces its deterministic seeded output.
+
 ## Testing
 
 Continuous integration runs out of [TESTS/](TESTS/) via CTest:
