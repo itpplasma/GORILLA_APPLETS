@@ -10,6 +10,9 @@
 !      conservation ledger.
 !   3. A synthetic process transfers a known amount into cell and surface
 !      ledgers (exact, integer arithmetic).
+!   3b. Process deposits land in separate integrated-unit cell ledgers and
+!      never pollute the time-weighted tallies that normalize() averages
+!      (a 1.0 deposit over a dt=0.01 step must not be normalized 100x big).
 !   4. Thread-count changes preserve statistical stream identity: the same
 !      ensemble run with 1 and 8 OpenMP threads yields bit-identical marker
 !      states because work is partitioned per marker stream.
@@ -39,6 +42,9 @@ program test_marker_transport
 
     !--- 3. Synthetic process -> known cell / surface ledger transfers --------
     call test_synthetic_transfers(n_fail)
+
+    !--- 3b. Process deposits use separate integrated-unit ledgers ------------
+    call test_deposit_units(n_fail)
 
     !--- 4. Thread-count invariance of stream identity ------------------------
     call test_thread_invariance(n_fail)
@@ -214,6 +220,64 @@ contains
             write(output_unit, '(A,I0)') '  ok: recorded ', NSTEPS-1, ' surface crossings'
         endif
     end subroutine test_synthetic_transfers
+
+!===============================================================================
+! 3b. Process deposits are integrated amounts -> dedicated *_deposit ledgers.
+!===============================================================================
+    subroutine test_deposit_units(n_fail)
+        integer, intent(inout) :: n_fail
+        type(ensemble_t) :: ens
+        type(tallies_t)  :: tallies
+        type(transport_config_t) :: cfg
+        type(termination_event_t), allocatable :: evts(:)
+        integer, parameter :: NSTEPS = 100
+        real(dp), parameter :: DT = 0.01_dp
+        ! Deposit 1.0 weight every step into cell 2; the marker (straight
+        ! stepper) never leaves cell 1, so cell 2 has zero residence.
+        real(dp) :: exp_cell = 50.0_dp
+
+        call ens%init(1, 456_int64)
+        ens%markers(1)%x      = [0.0_dp, 0.0_dp, 0.0_dp]
+        ens%markers(1)%vpar   = 1.0_dp
+        ens%markers(1)%vperp  = 1.0_dp
+        ens%markers(1)%weight = 1.0e6_dp
+        ens%markers(1)%cell   = 1
+        ens%markers(1)%iface  = 0
+        ens%markers(1)%active = .true.
+
+        call tallies%cells%init(10)
+        call tallies%surfaces%init(10)
+        call tallies%cells%norm%init(1.0_dp, DT*NSTEPS, 1)
+
+        allocate(evts(1))
+        cfg%n_steps = NSTEPS
+        cfg%dt      = DT
+        call advance_ensemble(ens, straight_stepper, synthetic_process, tallies, cfg, evts)
+
+        ! The deposit must be stored as an integrated amount, exactly 50u.
+        if (tallies%cells%density_deposit(2) /= exp_cell) then
+            n_fail = n_fail + 1
+            write(output_unit, '(A,ES12.4,A,ES12.4)') '  FAIL: cell density_deposit=', &
+                tallies%cells%density_deposit(2), ' expected ', exp_cell
+        else
+            write(output_unit, '(A)') '  ok: 50u landed in separate density_deposit ledger'
+        endif
+        ! It must NOT leak into the time-weighted residence array...
+        if (tallies%cells%density_raw(2) /= 0.0_dp) then
+            n_fail = n_fail + 1
+            write(output_unit, '(A,ES12.4)') '  FAIL: deposit leaked into time-weighted density_raw(2) =', &
+                tallies%cells%density_raw(2)
+        endif
+        ! ...nor into the normalized time-averaged moment (would be 100x big).
+        call tallies%cells%normalize()
+        if (tallies%cells%density(2) /= 0.0_dp) then
+            n_fail = n_fail + 1
+            write(output_unit, '(A,ES12.4)') '  FAIL: deposit corrupted normalized density(2) =', &
+                tallies%cells%density(2)
+        else
+            write(output_unit, '(A)') '  ok: normalized density(2) unaffected by the deposit (no unit mixing)'
+        endif
+    end subroutine test_deposit_units
 
 !===============================================================================
 ! 4. Thread-count changes preserve statistical stream identity.

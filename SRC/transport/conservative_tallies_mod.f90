@@ -15,6 +15,10 @@
 ! Raw accumulations are time-weighted (accumulated value * dt), which is the
 ! natural form for orbit integration.  A call to normalize() converts them to
 ! time-averaged, optionally volume-normalized densities using the metadata.
+!
+! Process deposits (explicit source/sink amounts) are integrated quantities,
+! not time-weighted residence, so they are accumulated in dedicated per-cell
+! *_deposit ledgers and exposed separately from the time-averaged moments.
 !===============================================================================
 module conservative_tallies_mod
 
@@ -52,12 +56,15 @@ module conservative_tallies_mod
 !-------------------------------------------------------------------------------
     type :: cell_tally_t
         integer  :: n_cells = 0
-        real(dp), allocatable :: density_raw(:)    ! weight * dt
-        real(dp), allocatable :: momentum_raw(:)   ! weight * vpar * dt
-        real(dp), allocatable :: energy_raw(:)     ! weight * 0.5 v^2 * dt
-        real(dp), allocatable :: density(:)        ! normalized
-        real(dp), allocatable :: momentum(:)       ! normalized
-        real(dp), allocatable :: energy(:)         ! normalized
+        real(dp), allocatable :: density_raw(:)    ! weight * dt      (time-weighted)
+        real(dp), allocatable :: momentum_raw(:)   ! weight * vpar * dt (time-weighted)
+        real(dp), allocatable :: energy_raw(:)     ! weight * 0.5 v^2 * dt (time-weighted)
+        real(dp), allocatable :: density_deposit(:)   ! integrated weight   deposited by processes
+        real(dp), allocatable :: momentum_deposit(:)  ! integrated momentum deposited by processes
+        real(dp), allocatable :: energy_deposit(:)    ! integrated energy   deposited by processes
+        real(dp), allocatable :: density(:)        ! normalized residence
+        real(dp), allocatable :: momentum(:)       ! normalized residence
+        real(dp), allocatable :: energy(:)         ! normalized residence
         type(tally_norm_t) :: norm
         logical :: initialized = .false.
     contains
@@ -159,6 +166,9 @@ contains
         if (allocated(self%density_raw))  deallocate(self%density_raw)
         if (allocated(self%momentum_raw)) deallocate(self%momentum_raw)
         if (allocated(self%energy_raw))   deallocate(self%energy_raw)
+        if (allocated(self%density_deposit))  deallocate(self%density_deposit)
+        if (allocated(self%momentum_deposit)) deallocate(self%momentum_deposit)
+        if (allocated(self%energy_deposit))   deallocate(self%energy_deposit)
         if (allocated(self%density))      deallocate(self%density)
         if (allocated(self%momentum))     deallocate(self%momentum)
         if (allocated(self%energy))       deallocate(self%energy)
@@ -166,12 +176,18 @@ contains
         allocate(self%density_raw(n_cells))
         allocate(self%momentum_raw(n_cells))
         allocate(self%energy_raw(n_cells))
+        allocate(self%density_deposit(n_cells))
+        allocate(self%momentum_deposit(n_cells))
+        allocate(self%energy_deposit(n_cells))
         allocate(self%density(n_cells))
         allocate(self%momentum(n_cells))
         allocate(self%energy(n_cells))
         self%density_raw  = 0.0_dp
         self%momentum_raw = 0.0_dp
         self%energy_raw   = 0.0_dp
+        self%density_deposit  = 0.0_dp
+        self%momentum_deposit = 0.0_dp
+        self%energy_deposit   = 0.0_dp
         self%density      = 0.0_dp
         self%momentum     = 0.0_dp
         self%energy       = 0.0_dp
@@ -184,6 +200,9 @@ contains
         self%density_raw  = 0.0_dp
         self%momentum_raw = 0.0_dp
         self%energy_raw   = 0.0_dp
+        self%density_deposit  = 0.0_dp
+        self%momentum_deposit = 0.0_dp
+        self%energy_deposit   = 0.0_dp
         self%density      = 0.0_dp
         self%momentum     = 0.0_dp
         self%energy       = 0.0_dp
@@ -228,12 +247,15 @@ contains
         real(dp), intent(in) :: amount(3)   ! weight, momentum, energy
 
         if (cell < 1 .or. cell > self%n_cells) return
+        ! Process deposits are integrated amounts (not time-weighted), so they
+        ! are accumulated in the dedicated deposit ledgers, never mixed into
+        ! the time-weighted residence arrays that normalize() averages.
         !$omp atomic
-        self%density_raw(cell) = self%density_raw(cell) + amount(TALLY_WEIGHT)
+        self%density_deposit(cell) = self%density_deposit(cell) + amount(TALLY_WEIGHT)
         !$omp atomic
-        self%momentum_raw(cell) = self%momentum_raw(cell) + amount(TALLY_MOMENTUM)
+        self%momentum_deposit(cell) = self%momentum_deposit(cell) + amount(TALLY_MOMENTUM)
         !$omp atomic
-        self%energy_raw(cell) = self%energy_raw(cell) + amount(TALLY_ENERGY)
+        self%energy_deposit(cell) = self%energy_deposit(cell) + amount(TALLY_ENERGY)
     end subroutine cell_tally_record_deposit
 
 !-------------------------------------------------------------------------------
@@ -245,7 +267,10 @@ contains
         real(dp) :: norm_factor
 
         if (.not. self%initialized) return
-        ! Time average: divide by (marker weight * total time).
+        ! Time average of the residence raw arrays only: divide by
+        ! (marker weight * total time).  Process deposits are integrated
+        ! amounts stored separately in the *_deposit ledgers and are not
+        ! folded into these time-averaged moments.
         norm_factor = self%norm%marker_weight * self%norm%total_time
         if (norm_factor <= 0.0_dp) norm_factor = 1.0_dp
         do i = 1, self%n_cells
