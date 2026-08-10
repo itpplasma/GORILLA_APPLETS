@@ -18,6 +18,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ci_utils import StageTimer, compare_numeric_file
+
 try:
     import f90nml
 except ImportError:
@@ -37,6 +40,7 @@ BINARY = env_path("GORILLA_APPLETS_BIN")
 WORK_DIR = env_path("WORK_DIR")
 
 MHD_DIR = APPLETS_ROOT / "EXAMPLES" / "ALPHA_LIFETIME" / "MHD_EQUILIBRIA"
+REFERENCE_DIR = APPLETS_ROOT / "TESTS" / "REFERENCE" / "alpha_lifetime"
 
 # Fresh work dir for every test run
 if WORK_DIR.exists():
@@ -85,7 +89,12 @@ gorilla_applets["gorilla_applets_nml"]["t_step_fluxtv"] = 1.0e-3
 gorilla_applets["gorilla_applets_nml"]["nt_steps_fluxtv"] = 200
 gorilla_applets["gorilla_applets_nml"]["energy_ev_fluxtv"] = 3.0e3
 
-# Alpha lifetime tracing
+# Alpha lifetime tracing. Parameters are deliberately kept small so the
+# polynomial pusher stays within its stable range (larger `time_step`
+# triggers platform-dependent "trouble shooting" bailouts and makes the
+# per-particle `t_confined` output chaotic across compilers/LAPACK). This
+# is a correctness test; perf sensitivity of the pusher is left to tests
+# without a quantitative reference.
 alpha_lifetime["alpha_lifetimenml"]["time_step"] = 1.0e-5
 alpha_lifetime["alpha_lifetimenml"]["energy_ev"] = 3.5e6
 alpha_lifetime["alpha_lifetimenml"]["n_particles"] = 10
@@ -106,19 +115,23 @@ tetra_grid.write(str(WORK_DIR / "tetra_grid.inp"), force=True)
 alpha_lifetime.write(str(WORK_DIR / "alpha_lifetime.inp"), force=True)
 
 
+timer = StageTimer("alpha_lifetime", output_path=WORK_DIR / "timings.json")
+
+
 def run_stage(i_option: int, label: str) -> None:
     gorilla_applets["gorilla_applets_nml"]["i_option"] = i_option
     gorilla_applets.write(str(WORK_DIR / "gorilla_applets.inp"), force=True)
     print(f"=== {label}: i_option={i_option} ===", flush=True)
-    subprocess.run([str(BINARY)], cwd=WORK_DIR, check=True)
+    with timer.time(label):
+        subprocess.run([str(BINARY)], cwd=WORK_DIR, check=True)
 
 
-run_stage(1, "fluxtube precomputation")
+run_stage(1, "fluxtube_precomputation")
 flux_file = WORK_DIR / "fluxtubevolume.dat"
 if not flux_file.exists() or flux_file.stat().st_size == 0:
     sys.exit(f"FAIL: {flux_file} not produced by stage 1")
 
-run_stage(5, "alpha lifetime tracing")
+run_stage(5, "alpha_lifetime_tracing")
 out_file = WORK_DIR / "alpha_lifetime_gorilla.dat"
 if not out_file.exists() or out_file.stat().st_size == 0:
     sys.exit(f"FAIL: {out_file} not produced by stage 2")
@@ -128,5 +141,23 @@ with out_file.open() as fh:
 expected = int(alpha_lifetime["alpha_lifetimenml"]["n_particles"])
 if n_lines != expected:
     sys.exit(f"FAIL: expected {expected} confinement times, got {n_lines}")
+
+# Quantitative comparison against committed reference.
+# fluxtubevolume.dat is deterministic geometry: tight tolerance.
+compare_numeric_file(
+    flux_file,
+    REFERENCE_DIR / "fluxtubevolume.dat",
+    rtol=1.0e-12,
+    atol=1.0e-14,
+)
+# alpha_lifetime_gorilla.dat row order depends on OMP scheduling
+# (writes are inside an !$omp critical region) so sort before comparing.
+compare_numeric_file(
+    out_file,
+    REFERENCE_DIR / "alpha_lifetime_gorilla.dat",
+    rtol=1.0e-10,
+    atol=1.0e-14,
+    sort_lines=True,
+)
 
 print(f"PASS: {n_lines} confinement times written to {out_file.name}")
