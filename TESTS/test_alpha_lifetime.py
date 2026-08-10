@@ -89,10 +89,13 @@ gorilla_applets["gorilla_applets_nml"]["t_step_fluxtv"] = 1.0e-3
 gorilla_applets["gorilla_applets_nml"]["nt_steps_fluxtv"] = 200
 gorilla_applets["gorilla_applets_nml"]["energy_ev_fluxtv"] = 3.0e3
 
-# Alpha lifetime tracing
-alpha_lifetime["alpha_lifetimenml"]["time_step"] = 1.0e-5
+# Alpha lifetime tracing. `time_step` and `n_particles` are sized so the
+# tracing loop dominates the per-invocation setup cost (grid build, MHD
+# equilibrium load, binary startup); otherwise a slowdown in the pusher
+# would be diluted below the perf gate.
+alpha_lifetime["alpha_lifetimenml"]["time_step"] = 3.0e-2
 alpha_lifetime["alpha_lifetimenml"]["energy_ev"] = 3.5e6
-alpha_lifetime["alpha_lifetimenml"]["n_particles"] = 10
+alpha_lifetime["alpha_lifetimenml"]["n_particles"] = 1000
 alpha_lifetime["alpha_lifetimenml"]["i_integrator_type"] = 1
 alpha_lifetime["alpha_lifetimenml"]["seed_option"] = 2
 alpha_lifetime["alpha_lifetimenml"]["boole_random_precalc"] = True

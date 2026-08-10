@@ -98,7 +98,7 @@ jobs:
       - name: Compare timings
         id: compare
         run: |
-          python3 candidate/TESTS/scripts/compare_timings.py \
+          python3 candidate/TESTS/compare_timings.py \
             perf-results/baseline perf-results/candidate \
             --warn 20 --fail 50 \
             --summary perf-results/report.md

@@ -76,10 +76,13 @@ tetra_grid["tetra_grid_nml"]["convex_wall_filename"] = "DATA/ASDEX/convexwall.da
 # Applets dispatcher
 gorilla_applets["gorilla_applets_nml"]["i_option"] = 10
 
-# Field line tracing: cheap, no poincare/divertor/collisions
-field_line_tracing["field_line_tracing_nml"]["time_step"] = 1.0e-4
+# Field line tracing. `time_step` and `n_particles` are sized so the tracing
+# loop dominates the per-invocation setup cost (grid build, MHD equilibrium
+# load, binary startup); otherwise a slowdown in the pusher would be diluted
+# below the perf gate. No poincare/divertor/collisions here.
+field_line_tracing["field_line_tracing_nml"]["time_step"] = 1.0e-1
 field_line_tracing["field_line_tracing_nml"]["energy_ev"] = 3.5e3
-field_line_tracing["field_line_tracing_nml"]["n_particles"] = 3
+field_line_tracing["field_line_tracing_nml"]["n_particles"] = 1000
 field_line_tracing["field_line_tracing_nml"]["boole_poincare_plot"] = False
 field_line_tracing["field_line_tracing_nml"]["boole_divertor_intersection"] = False
 field_line_tracing["field_line_tracing_nml"]["boole_point_source"] = False
