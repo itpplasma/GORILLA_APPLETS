@@ -375,7 +375,20 @@
 !
             q_saf = 2.d0
 !
-            if(grid_kind.ne.2) return
+            select case(grid_kind)
+                case(2)
+                    !Continue below and look up the real q(s).
+                case(1)
+                    !q_saf feeds the case(1,2) bounce/collision times, so a silent fallback
+                    !to q = 2 would quietly change the user's physics: warn.
+                    print *, 'WARNING: grid_kind = 1, cannot look up the local safety factor.'
+                    print *, '         Falling back to the hardcoded q = 2 for the bounce and'
+                    print *, '         collision times. Use grid_kind = 2 to use the real q(s).'
+                    return
+                case default
+                    !grid_kind = 3 does not use q_saf downstream, so the fallback is silent.
+                    return
+            end select
 !
             if(coord_system.ne.2) then
                 !Recovering s from cylindrical (R,phi,Z) is not implemented here.
