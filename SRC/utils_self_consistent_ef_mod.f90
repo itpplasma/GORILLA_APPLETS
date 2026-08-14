@@ -11,6 +11,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     use gorilla_applets_types_mod, only: in
 
     real(dp) :: time_step,energy_eV,n_particles, density
+    real(dp) :: dynamic_density_time_factor = 10.0_dp
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
                boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
@@ -28,7 +29,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_electric_potential_updates, update_dimension, &
-    & n_species, boole_static_ne
+    & n_species, boole_static_ne, dynamic_density_time_factor
 
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
     read(s_inp_unit,nml=self_consistent_ef_nml)
@@ -65,10 +66,29 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%update_dimension = update_dimension
     in%n_species = n_species
     in%boole_static_ne = boole_static_ne
+    in%dynamic_density_time_factor = dynamic_density_time_factor
+
+    if (in%dynamic_density_time_factor.le.0.0_dp) &
+        error stop 'dynamic_density_time_factor must be positive'
 
     print *,'GORILLA_APPLETS: Loaded input data from self_consistent_ef.inp'
 
 end subroutine read_self_consistent_electric_field_inp_into_type
+
+elemental pure function charge_density_to_potential(rho, energy_eV, density, &
+        boole_static_ne, dynamic_density_time_factor) result(phi)
+
+    use constants, only: echarge, ev2erg
+
+    real(dp), intent(in) :: rho, energy_eV, density
+    logical, intent(in) :: boole_static_ne
+    real(dp), intent(in) :: dynamic_density_time_factor
+    real(dp) :: phi
+
+    phi = rho*energy_eV*ev2erg/(echarge**2*density)
+    if (.not.boole_static_ne) phi = phi*dynamic_density_time_factor
+
+end function charge_density_to_potential
 
 subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n_particles_in)
 
@@ -468,10 +488,7 @@ end subroutine perform_electric_potential_update
 subroutine calc_phi_elec_from_rho(i)
 
     use gorilla_applets_types_mod, only: in, ep, start, output
-    use constants, only: ev2erg, eps, echarge
-
     integer, intent(in) :: i
-    real(dp) :: factor, factor_from_tracing_time
 
     ep%rho_prism = 0
     ep%rho_flux_layer = 0
@@ -488,33 +505,9 @@ subroutine calc_phi_elec_from_rho(i)
         call calc_average_charge_density_per_flux_layer(i)
         call calc_rho_on_vertices
 
-        ! if (i.eq.1) ep%mean_abs_rho_at_first_update = sum(abs(ep%rho_vert))/size(ep%rho_vert)
-
-        ! if (ep%mean_abs_rho_at_first_update.gt.eps**2) then
-        !     factor = in%energy_eV*ev2erg/echarge/ep%mean_abs_rho_at_first_update
-        ! else
-        !     factor = 1.0_dp
-        ! endif
-
-        
-        factor = in%energy_eV*ev2erg/(echarge**2*in%density)!T/(n_0*e^2)= 4*pi*r_D^2
-
-        !decrease factor in case very few particles are simulated
-        !if (in%n_particles.lt.100.0_dp) factor = factor*in%n_particles/100.0_dp
-
-        
-        ep%phi_elec_from_rho =  ep%rho_vert*factor
-
-        factor_from_tracing_time = 10.0_dp
-        !tracing time is about 25 transport times, since densities are normalised by tracing time but particles only stay inside the 
-        !computation domain for about the transport time, this factor is compensated here (with some safety margin)
-        if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho*factor_from_tracing_time
-        
-        !if (i.gt.0) ep%phi_elec_from_rho = ep%phi_elec_from_rho/sqrt(dble(i))
-
-        ! ep%phi_elec_from_rho = ep%phi_elec_from_rho*(3.5d3*1.6022d-12/4.8032d-10)/maxval(abs(ep%phi_elec_from_rho))
-        ! if (i.gt.1) ep%phi_elec_from_rho=0
-        ! print*, 'maximum phi is', maxval(ep%phi_elec_from_rho), 'minimum phi is', minval(ep%phi_elec_from_rho)
+        ep%phi_elec_from_rho = charge_density_to_potential(ep%rho_vert, &
+            in%energy_eV, in%density, in%boole_static_ne, &
+            in%dynamic_density_time_factor)
         
     endif
 

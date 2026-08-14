@@ -17,6 +17,9 @@
   !Keep electron density constant
   boole_static_ne = .false. ,
 !
+  !Compensation for finite residence time when electron density evolves
+  dynamic_density_time_factor = 10.0d0,
+!
   !Compute squares of moments 
   boole_squared_moments = .false.,
 !
