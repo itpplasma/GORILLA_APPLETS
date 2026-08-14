@@ -18,6 +18,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ci_utils import StageTimer, compare_numeric_file
+
 try:
     import f90nml
 except ImportError:
@@ -37,6 +40,7 @@ BINARY = env_path("GORILLA_APPLETS_BIN")
 WORK_DIR = env_path("WORK_DIR")
 
 MHD_DIR = GORILLA_ROOT / "MHD_EQUILIBRIA"
+REFERENCE_DIR = APPLETS_ROOT / "TESTS" / "REFERENCE" / "mono_energetic_transport"
 
 # Fresh work dir for every test run
 if WORK_DIR.exists():
@@ -111,19 +115,23 @@ tetra_grid.write(str(WORK_DIR / "tetra_grid.inp"), force=True)
 mono.write(str(WORK_DIR / "mono_energetic_transp_coef.inp"), force=True)
 
 
+timer = StageTimer("mono_energetic_transport", output_path=WORK_DIR / "timings.json")
+
+
 def run_stage(i_option: int, label: str) -> None:
     gorilla_applets["gorilla_applets_nml"]["i_option"] = i_option
     gorilla_applets.write(str(WORK_DIR / "gorilla_applets.inp"), force=True)
     print(f"=== {label}: i_option={i_option} ===", flush=True)
-    subprocess.run([str(BINARY)], cwd=WORK_DIR, check=True)
+    with timer.time(label):
+        subprocess.run([str(BINARY)], cwd=WORK_DIR, check=True)
 
 
-run_stage(1, "fluxtube precomputation")
+run_stage(1, "fluxtube_precomputation")
 flux_file = WORK_DIR / "fluxtubevolume.dat"
 if not flux_file.exists() or flux_file.stat().st_size == 0:
     sys.exit(f"FAIL: {flux_file} not produced by stage 1")
 
-run_stage(2, "single nu* transport coefficient")
+run_stage(2, "transport_coefficient")
 out_file = WORK_DIR / "nustar_diffcoef_std.dat"
 if not out_file.exists() or out_file.stat().st_size == 0:
     sys.exit(f"FAIL: {out_file} not produced by stage 2")
@@ -133,4 +141,29 @@ with out_file.open() as fh:
 if len(rows) != 1 or len(rows[0]) != 3:
     sys.exit(f"FAIL: expected one row of three numbers, got {rows}")
 nu_star, d11, sigma = (float(x) for x in rows[0])
-print(f"PASS: nu*={nu_star:g}  D11={d11:g}  sigma={sigma:g}")
+print(f"OBSERVED: nu*={nu_star:g}  D11={d11:g}  sigma={sigma:g}")
+
+# Quantitative comparison against committed reference.
+# Fluxtube geometry is deterministic: tight tolerance.
+compare_numeric_file(
+    flux_file,
+    REFERENCE_DIR / "fluxtubevolume.dat",
+    rtol=1.0e-12,
+    atol=1.0e-14,
+)
+# D11 and sigma are reduction sums under OpenMP; floating-point order can
+# differ by a few ULP. Use a relaxed relative tolerance.
+compare_numeric_file(
+    out_file,
+    REFERENCE_DIR / "nustar_diffcoef_std.dat",
+    rtol=1.0e-8,
+    atol=1.0e-14,
+)
+compare_numeric_file(
+    WORK_DIR / "n_lost_particles.dat",
+    REFERENCE_DIR / "n_lost_particles.dat",
+    rtol=0.0,
+    atol=0.0,
+)
+
+print(f"PASS: nu*={nu_star:g}  D11={d11:g}  sigma={sigma:g} (matches reference)")
