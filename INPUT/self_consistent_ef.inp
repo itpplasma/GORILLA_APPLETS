@@ -80,5 +80,13 @@
   boole_write_moments = .true. ,
   boole_write_fourier_moments = .true. ,
   boole_write_exit_data = .true. ,
-  boole_write_grid_data = .true.
+  boole_write_grid_data = .true. ,
+!
+  !Per-species (1 = ion, 2 = electron) honest particle push (.true.) vs. random-walk substitute (.false.)
+  boole_honest_tracing(1) = .true. ,
+  boole_honest_tracing(2) = .true. ,
+!
+  !Per-species recompute of diffusion coefficients (.true.) or reuse cached A_and_B_species<species>.dat (.false.)
+  boole_recompute_D(1) = .true. ,
+  boole_recompute_D(2) = .true.
 /

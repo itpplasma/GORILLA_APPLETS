@@ -28,7 +28,7 @@ add_library(GORILLA_APPLETS STATIC
   self_consistent_electric_field/utils_scef_particle_init_mod.f90
   self_consistent_electric_field/utils_scef_particle_pushing_mod.f90
   self_consistent_electric_field/utils_scef_electric_potential_mod.f90
-  self_consistent_electric_field/utils_scef_electron_diffusion_mod.f90
+  self_consistent_electric_field/utils_scef_diffusion_mod.f90
   anomalous_transport/anomalous_transport_displacement_mod.f90
   anomalous_transport/utils_anomalous_transport_mod.f90
   anomalous_transport/anomalous_transport_mod.f90

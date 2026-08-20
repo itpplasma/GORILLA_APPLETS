@@ -29,12 +29,11 @@ subroutine calc_self_consistent_electric_field
     use utils_scef_particle_pushing_mod, only: parallelised_particle_pushing
     use utils_scef_electric_potential_mod, only: allocate_electric_potential_type, perform_electric_potential_update, &
     associate_flux_labels_with_tetrahedra_and_vertices, calc_s_shell_volumes
-    use utils_scef_electron_diffusion_mod, only: calc_electron_diffusion_coefficients, calc_electron_density_via_random_walk
+    use utils_scef_diffusion_mod, only: calc_diffusion_coefficients, calc_density_via_random_walk
     use gorilla_applets_types_mod, only: output, ep, s
     use tetra_physics_mod, only: particle_mass
 
     integer :: i, species
-    logical :: boole_honest_electrons = .false.
 
     call set_seed_for_random_numbers
     call read_self_consistent_electric_field_inp_into_type
@@ -56,7 +55,15 @@ subroutine calc_self_consistent_electric_field
     call give_file_names
     call unlink_files
     call print_errors_for_bad_inputs
-    if (in%boole_static_ne) call calc_starting_conditions    
+    if (in%boole_static_ne) call calc_starting_conditions
+
+    !Prep diffusion coefficients once per species that will use the random walk.
+    !Skipping this step reuses the cached A_and_B_species<species>.dat if present.
+    do species = 1,2
+        if ((.not.in%boole_honest_tracing(species)).and.in%boole_recompute_D(species)) then
+            call calc_diffusion_coefficients(species)
+        endif
+    enddo
 
     !call perform_electric_potential_update(0)
     do i = 1, max(in%n_electric_potential_updates,1)
@@ -65,9 +72,8 @@ subroutine calc_self_consistent_electric_field
         do species = 1,2 !trace electrons and ions
             if ((species.eq.2).and.(in%boole_static_ne)) cycle
             call prepare_next_round_of_parallelised_particle_pushing(species)
-            if ((species.eq.2).and.(.not.boole_honest_electrons)) then
-                !if (i.eq.2) call calc_electron_diffusion_coefficients
-                call calc_electron_density_via_random_walk(i)
+            if (.not.in%boole_honest_tracing(species)) then
+                call calc_density_via_random_walk(species, i)
             else
                 if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
                 call parallelised_particle_pushing(species,i,boole_diffusion_coefficient=.false.)

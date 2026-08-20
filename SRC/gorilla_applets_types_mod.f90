@@ -132,6 +132,8 @@ module gorilla_applets_types_mod
     integer  :: n_mappings_ignored !Used in divertor_heat_loads
     real(dp) :: lambda !Used in divertor_heat_loads
     integer  :: n_background_species = 2
+    logical  :: boole_honest_tracing(2) !used in self consistent electric field: honest push (T) vs. random walk (F) per species
+    logical  :: boole_recompute_D(2)    !used in self consistent electric field: recompute D per species (T) or reuse cached A_and_B_<species>.dat (F)
     end type input_t
 
     type(input_t) :: in
@@ -153,7 +155,7 @@ module gorilla_applets_types_mod
     character(len=100) :: exit_data
     character(len=100) :: grid_data
     character(len=100) :: electric_field
-    character(len=100) :: electron_density
+    character(len=100) :: density(2)   ! (species) — per-species RW density output
     character(len=100) :: pushing_problems
     end type filenames_t
 
@@ -219,15 +221,15 @@ module gorilla_applets_types_mod
 
     type(delta_s_delta_s_squared_t) :: s
 
-    type diffusion_coefficients 
-    real(dp), dimension(:), allocatable :: A
-    real(dp), dimension(:), allocatable :: A_from_first_run
-    real(dp), dimension(:), allocatable :: B
-    real(dp), dimension(:), allocatable :: grad_A
-    real(dp), dimension(:), allocatable :: grad_B
-    real(dp), dimension(:), allocatable :: s_vertices
-    real(dp), dimension(4)              :: polynomial_coefficients_for_B
-    real(dp), dimension(3)              :: polynomial_coefficients_for_A
+    type diffusion_coefficients
+    real(dp), dimension(:,:), allocatable :: A                ! (grid_size+1, species)
+    real(dp), dimension(:,:), allocatable :: A_from_first_run ! (grid_size+1, species)
+    real(dp), dimension(:,:), allocatable :: B                ! (grid_size+1, species)
+    real(dp), dimension(:,:), allocatable :: grad_A           ! (grid_size,   species)
+    real(dp), dimension(:,:), allocatable :: grad_B           ! (grid_size,   species)
+    real(dp), dimension(:),   allocatable :: s_vertices       ! (grid_size+1)
+    real(dp), dimension(4,2)              :: polynomial_coefficients_for_B
+    real(dp), dimension(3,2)              :: polynomial_coefficients_for_A
     end type diffusion_coefficients
 
     type(diffusion_coefficients) dc

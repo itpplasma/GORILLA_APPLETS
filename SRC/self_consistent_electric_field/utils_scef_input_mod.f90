@@ -18,6 +18,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
                boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, boole_static_ne
     integer :: i_integrator_type, seed_option, n_electric_potential_updates, update_dimension, n_species
+    logical :: boole_honest_tracing(2), boole_recompute_D(2)
 
     integer :: s_inp_unit
 
@@ -28,7 +29,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_electric_potential_updates, update_dimension, &
-    & n_species, boole_static_ne
+    & n_species, boole_static_ne, boole_honest_tracing, boole_recompute_D
 
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
     read(s_inp_unit,nml=self_consistent_ef_nml)
@@ -65,6 +66,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%update_dimension = update_dimension
     in%n_species = n_species
     in%boole_static_ne = boole_static_ne
+    in%boole_honest_tracing = boole_honest_tracing
+    in%boole_recompute_D    = boole_recompute_D
 
     print *,'GORILLA_APPLETS: Loaded input data from self_consistent_ef.inp'
 
