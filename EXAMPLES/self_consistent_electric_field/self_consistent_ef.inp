@@ -3,7 +3,7 @@
 &self_consistent_ef_nml
 !
   !time for tracing particles
-  time_step = 1.0d-4 ,
+  time_step = 1.0d3 ,
 !
   !Kinetic energy of particles
   energy_eV = 3.5d3 ,

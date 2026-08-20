@@ -91,10 +91,15 @@ subroutine calc_phi_elec_from_rho(i)
 
         ep%phi_elec_from_rho =  ep%rho_vert*factor
 
-        factor_from_tracing_time = 10.0_dp
-        !tracing time is about 25 transport times, since densities are normalised by tracing time but particles only stay inside the
-        !computation domain for about the transport time, this factor is compensated here (with some safety margin)
-        if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho*factor_from_tracing_time
+        !Compensate for particles that leave the domain during tracing: densities are
+        !normalised by in%time_step but each particle only lives for its mean exit time.
+        !Take the longer of the two species' mean exit times so we do not over-compensate
+        !when one species has essentially all its particles lost early.
+        factor_from_tracing_time = 1.0_dp
+        if (max(ep%mean_exit_time(1), ep%mean_exit_time(2)) > 0.0_dp) then
+            factor_from_tracing_time = in%time_step  / max(ep%mean_exit_time(1), ep%mean_exit_time(2))
+        endif
+        if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho*factor_from_tracing_time/5.0_dp !factor 5.0_dp is a safety factor
 
         !if (i.gt.0) ep%phi_elec_from_rho = ep%phi_elec_from_rho/sqrt(dble(i))
 

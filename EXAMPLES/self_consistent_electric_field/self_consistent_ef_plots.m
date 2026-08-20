@@ -99,7 +99,7 @@ folder = [pwd,'/'];
 volumes = load([folder,'prism_volumes.dat']);
 
 N = 10;
-N_low = 10;
+N_low = 2;
 
 ns = 30;
 nphi = 30;
@@ -194,14 +194,14 @@ ylabel('potential')
 one_d = load([folder,'one_d_densities1.dat']);
 one_d_save = one_d;
 figure
-plot(one_d(:,2),'r')
+plot(one_d(:,2),'b')
 hold on
 plot(one_d(:,1),'r')
-for i = N_low:N
-    one_d = load([folder,'one_d_densities',num2str(i),'.dat']);
-    plot(one_d(:,1),'b')
-    plot(one_d(:,2),'m')
-end
+ for i = N_low:N
+     one_d = load([folder,'one_d_densities',num2str(i),'.dat']);
+     plot(one_d(:,1),'m')
+     plot(one_d(:,2),'k')
+ end
 %plot(f_b_plot(:,N-N_low+1),'r')
 hold off
 grid on

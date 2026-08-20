@@ -30,7 +30,7 @@ subroutine calc_self_consistent_electric_field
     use utils_scef_electric_potential_mod, only: allocate_electric_potential_type, perform_electric_potential_update, &
     associate_flux_labels_with_tetrahedra_and_vertices, calc_s_shell_volumes
     use utils_scef_diffusion_mod, only: calc_diffusion_coefficients, calc_density_via_random_walk
-    use gorilla_applets_types_mod, only: output, ep, s
+    use gorilla_applets_types_mod, only: output, ep, s, exit_data
     use tetra_physics_mod, only: particle_mass
 
     integer :: i, species
@@ -78,6 +78,7 @@ subroutine calc_self_consistent_electric_field
                 if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
                 call parallelised_particle_pushing(species,i,boole_diffusion_coefficient=.false.)
                 call normalise_prism_moments_and_prism_moments_squared(species)
+                ep%mean_exit_time(species) = sum(exit_data%t_confined(:, species))/in%num_particles
             endif
             ep%rho_prism = ep%rho_prism + real(output%prism_moments(1,:,species))*start%particle_charge(species)
         enddo

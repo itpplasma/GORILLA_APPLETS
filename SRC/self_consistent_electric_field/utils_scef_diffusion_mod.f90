@@ -214,13 +214,18 @@ subroutine calc_density_via_random_walk(species, iteration_step)
     use tetra_grid_settings_mod, only: grid_size, sfc_s_min
     use binsrc_mod, only: binsrc
     use tetra_grid_mod, only: ntetr, verts_sthetaphi
+    use tetra_physics_mod, only: tetra_physics
+    use find_tetra_mod, only: find_tetra
     use utils_scef_electric_potential_mod, only: fill_vector_parts_with_value
+    use utils_scef_particle_pushing_mod, only: calc_particle_weights_and_jperp
 
     integer, intent(in) :: species, iteration_step
 
     real(dp) :: delta_x, delta_t, xi, A, B, cell_size, B_fit, A_fit, p
     integer :: i, ns, k, num_steps_min, count_lost_particles, num_particles, particle_multiplication
-    integer :: density_unit
+    integer :: density_unit, n, ind_tetr, iface
+    real(dp), dimension(3) :: x_particle, z_save
+    real(dp) :: vpar_init, vperp_init
     real(dp), dimension(:), allocatable :: rw_density, rw_prism_densities
     real(dp), dimension(:), allocatable :: position, weight, exit_time
     type(time_t) :: t
@@ -236,6 +241,29 @@ subroutine calc_density_via_random_walk(species, iteration_step)
     allocate(position(num_particles))
     allocate(weight(num_particles))
     allocate(exit_time(num_particles))
+
+    !Physical weights: for ions apply the honest-tracing weight formula (sqrt(g)
+    !Jacobian + Maxwell-Boltzmann) at each start position via
+    !calc_particle_weights_and_jperp, exactly like the first orbit_timestep call
+    !would do. Electrons copy ion positions and weights, mirroring the copy the
+    !honest path does in orbit_timestep_gorilla_self_consistent_ef.
+    if (species .eq. 1) then
+        do n = 1, in%num_particles
+            x_particle = start%x(:, n, 1)
+            vpar_init = 0.0_dp
+            vperp_init = 0.0_dp
+            call find_tetra(x_particle, vpar_init, vperp_init, ind_tetr, iface)
+            if (ind_tetr .eq. -1) then
+                weights%w(n, 1) = 0.0_dp   !drop particles find_tetra can't locate, matches honest-tracing behaviour
+                cycle
+            endif
+            z_save = x_particle - tetra_physics(ind_tetr)%x1
+            call calc_particle_weights_and_jperp(n, z_save, vpar_init, vperp_init, ind_tetr, 1, .false.)
+        enddo
+    elseif ((species .eq. 2) .and. (.not. in%boole_static_ne)) then
+        start%x(:, :, 2) = start%x(:, :, 1)
+        weights%w(:, 2)  = weights%w(:, 1)
+    endif
 
     do i = 1,particle_multiplication
         position(i:num_particles:particle_multiplication) = start%x(1,:,species)
@@ -282,7 +310,7 @@ count_lost_particles = 0
                 B_fit = sum(dc%polynomial_coefficients_for_B(:, species) &
                             *(/1.0_dp,position(i),position(i)**2,0.0_dp/))
                 A_fit = sum(dc%polynomial_coefficients_for_A(:, species) &
-                            *(/1.0_dp,position(i),0.0_dp/))
+                            *(/1.0_dp,position(i),0.0_dp/)) !This is just B differentiated with respect to s
                 if (position(i).lt.dc%s_vertices(4)) then
                     p = (position(i) - sfc_s_min)/(dc%s_vertices(4) - sfc_s_min)
                     B = p*B_fit + (1-p)*B
@@ -341,8 +369,9 @@ count_lost_particles = 0
         output%prism_moments(1,i,species) = complex(rw_prism_densities(i), 0.0_dp)
     enddo
 
+    ep%mean_exit_time(species) = sum(exit_time)/num_particles
     print*, 'Total tracing time of species ', species, ' divided by number of particles is: ', &
-    sum(exit_time)/num_particles, 's'
+    ep%mean_exit_time(species), 's'
     !print*, 'exit times are : ', exit_data%t_confined(:,species)
 
 end subroutine calc_density_via_random_walk
@@ -403,15 +432,15 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
     call quadratic_fit(size(x), x, y, a0, a1, a2, success) ! Least-squares fit of y ≈ a2*x^2 + a1*x + a0
 
     dc%polynomial_coefficients_for_B(:, species) = (/a0,a1,a2,0.0_dp/)
-    dc%polynomial_coefficients_for_A(:, species) = (/a1,2*a2,0.0_dp/)
+    dc%polynomial_coefficients_for_A(:, species) = (/a1,2*a2,0.0_dp/) !this differentiates B with respect to s
 
 end subroutine get_diffusion_coefficient_data
 
 subroutine calc_convection_coefficient_from_electric_field(species, boole_use_fit_function)
 
     use tetra_physics_mod, only: tetra_physics
-    use constants, only: echarge, ev2erg
-    use gorilla_applets_types_mod, only: dc, in, s
+    use constants, only: ev2erg
+    use gorilla_applets_types_mod, only: dc, in, s, start
     use tetra_grid_settings_mod, only: grid_size
 
     integer, intent(in) :: species
@@ -428,14 +457,22 @@ subroutine calc_convection_coefficient_from_electric_field(species, boole_use_fi
             electric_field = -0.5_dp*(tetra_physics((i-2)*6*grid_size(2)+1)%gPhi(1) + &
                                       tetra_physics((i-1)*6*grid_size(2)+1)%gPhi(1))
         endif
-        dc%A(i, species) = -dc%B(i, species)*echarge*electric_field/(s%temperature*ev2erg)
+
+        dc%A(i, species) = dc%B(i, species)*start%particle_charge(species)*electric_field/(s%temperature*ev2erg)
         if (.not.boole_use_fit_function) dc%A(i, species) = dc%A(i, species) + dc%A_from_first_run(i, species)
     enddo
 
     do ns = 1,grid_size(1)
         dc%grad_A(ns, species) = (dc%A(ns+1, species)-dc%A(ns, species))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
-        dc%grad_B(ns, species) = (dc%B(ns+1, species)-dc%B(ns, species))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
     enddo
+
+    !DIAG: compare electric-field drift vs. Bohm-like drift from B fit at s=0.5
+    print*, 'DIAG species=', species, &
+            ' q=', start%particle_charge(species), &
+            ' dc%A(15)=', dc%A(15, species), &
+            ' A_fit(s=0.5)=', dc%polynomial_coefficients_for_A(1, species) &
+                              + dc%polynomial_coefficients_for_A(2, species)*0.5_dp, &
+            ' dc%B(15)=', dc%B(15, species)
 
 end subroutine calc_convection_coefficient_from_electric_field
 

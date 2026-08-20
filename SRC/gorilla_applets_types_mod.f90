@@ -201,6 +201,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: total_tracing_time
     real(dp), dimension(:), allocatable :: s_shell_volumes
     real(dp) :: mean_abs_rho_at_first_update
+    real(dp) :: mean_exit_time(2) = 0.0_dp  ! per species, set by RW routine and driver after honest push
     end type electric_potential_t
 
     type(electric_potential_t) :: ep
