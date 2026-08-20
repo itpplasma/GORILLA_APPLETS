@@ -24,7 +24,7 @@ add_library(GORILLA_APPLETS STATIC
   utils_orbit_timestep_mod.f90
   utils_parallelised_particle_pushing_mod.f90
   utils_write_data_to_files_mod.f90
-  utils_self_consistent_ef_mod.f90
+  self_consistent_electric_field/utils_self_consistent_ef_mod.f90
   anomalous_transport/anomalous_transport_displacement_mod.f90
   anomalous_transport/utils_anomalous_transport_mod.f90
   anomalous_transport/anomalous_transport_mod.f90
@@ -32,7 +32,7 @@ add_library(GORILLA_APPLETS STATIC
   helical_core/helical_core_mod.f90
   volume_integrals_and_sqrt_g_mod.f90
   zzg.f90
-  self_consistent_electric_field_mod.f90
+  self_consistent_electric_field/self_consistent_electric_field_mod.f90
   )
 target_link_libraries(GORILLA_APPLETS 
   GORILLA
