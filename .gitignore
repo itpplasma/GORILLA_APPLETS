@@ -96,3 +96,7 @@ EXAMPLES/PYTHON_RUN
 /RUN
 /SETUP_MONO
 /REVERSIBILITY_TEST
+
+# VS Code: personal settings stay local; keep only shared extension recommendations
+.vscode/*
+!.vscode/extensions.json
