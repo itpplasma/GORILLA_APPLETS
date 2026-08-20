@@ -1,0 +1,13 @@
+{
+  "source_dirs": [
+    "SRC",
+    "SRC_CORE"
+  ],
+  "include_dirs": [
+    "BUILD/SRC",
+    "BUILD/SRC_CORE"
+  ],
+  "pp_defs": {},
+  "incl_suffixes": [".f90", ".F90", ".f", ".F"],
+  "debug_log": false
+}
