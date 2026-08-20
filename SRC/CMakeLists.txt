@@ -24,7 +24,11 @@ add_library(GORILLA_APPLETS STATIC
   utils_orbit_timestep_mod.f90
   utils_parallelised_particle_pushing_mod.f90
   utils_write_data_to_files_mod.f90
-  self_consistent_electric_field/utils_self_consistent_ef_mod.f90
+  self_consistent_electric_field/utils_scef_input_mod.f90
+  self_consistent_electric_field/utils_scef_particle_init_mod.f90
+  self_consistent_electric_field/utils_scef_particle_pushing_mod.f90
+  self_consistent_electric_field/utils_scef_electric_potential_mod.f90
+  self_consistent_electric_field/utils_scef_electron_diffusion_mod.f90
   anomalous_transport/anomalous_transport_displacement_mod.f90
   anomalous_transport/utils_anomalous_transport_mod.f90
   anomalous_transport/anomalous_transport_mod.f90
