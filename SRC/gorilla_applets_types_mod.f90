@@ -152,6 +152,9 @@ module gorilla_applets_types_mod
     character(len=100) :: tetr_moments
     character(len=100) :: exit_data
     character(len=100) :: grid_data
+    character(len=100) :: electric_field
+    character(len=100) :: electron_density
+    character(len=100) :: pushing_problems
     end type filenames_t
 
     type(filenames_t) :: filenames

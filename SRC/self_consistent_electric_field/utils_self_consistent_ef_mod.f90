@@ -656,7 +656,7 @@ end subroutine calc_rho_on_vertices
 
 subroutine print_data(i)
 
-    use gorilla_applets_types_mod, only: c, output, grid_t, in, ep, exit_data, counter, s, one_d
+    use gorilla_applets_types_mod, only: c, output, grid_t, in, ep, exit_data, counter, s, one_d, filenames
     use tetra_physics_mod, only: phi_elec
     use tetra_grid_settings_mod, only: grid_size
     use tetra_physics_mod, only: tetra_physics
@@ -667,7 +667,7 @@ subroutine print_data(i)
                           filename_s, filename_1d
 
     if (i.eq.1) then
-        filename_ef = 'electric_field.dat'
+        filename_ef = filenames%electric_field
         open(newunit = ef_unit, file = filename_ef)
         do j = 1,grid_size(1)
             write(ef_unit,*) tetra_physics((j-1)*6*grid_size(2)+1)%Er_mod
@@ -875,6 +875,7 @@ end subroutine fill_vector_parts_with_value
 subroutine treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_tetr_save,z_save,x_save,x,vpar,vperp, &
                                                             perpinv,ind_tetr,vpar_save,vperp_save,vpar_init,vperp_init)
 
+    use gorilla_applets_types_mod, only: filenames
     use utils_orbit_timestep_mod, only: initialize_constants_of_motion
     use supporting_functions_mod, only: vperp_func
 
@@ -894,7 +895,7 @@ subroutine treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_
     print*, 'vpar/vpar_init, vperp/vperp_init = ', vpar/vpar_init, vperp/vperp_init
 
     !$omp critical
-    open(newunit = problem_unit, file = 'pushing_problems.dat', position = 'append')
+    open(newunit = problem_unit, file = filenames%pushing_problems, position = 'append')
     write(problem_unit,*) 'x_save, vpar_save, vperp_save = ', x_save, vpar_save, vperp_save
     write(problem_unit,*) 'x, vpar, vperp = ', x, vpar, vperp
     close(problem_unit)
@@ -1408,7 +1409,7 @@ end subroutine calc_electron_diffusion_coefficients
 
 subroutine calc_electron_density_via_random_walk(iteration_step) !call this after every ion pushing sequence
 
-    use gorilla_applets_types_mod, only: in, time_t, dc, ep, g, output, start, exit_data, weights
+    use gorilla_applets_types_mod, only: in, time_t, dc, ep, g, output, start, exit_data, weights, filenames
     use tetra_grid_settings_mod, only: grid_size, sfc_s_min
     use binsrc_mod, only: binsrc
     use tetra_grid_mod, only: ntetr, verts_sthetaphi
@@ -1515,7 +1516,7 @@ count_lost_particles = 0
                                                         count_lost_particles,'out of', num_particles, &
                                                         'electrons left the computation domain'
 
-    open(newunit=density_unit,file='electron_density.dat')
+    open(newunit=density_unit,file=filenames%electron_density)
     do ns = 1, grid_size(1)
         write(density_unit,*) sfc_s_min + (1.0_dp - sfc_s_min) * (ns - 0.5_dp) / (grid_size(1)+1), electron_density(ns)
     enddo
