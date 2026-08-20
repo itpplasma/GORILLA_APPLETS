@@ -1,4 +1,18 @@
 !
+!===============================================================================
+! alpha_lifetime_gorilla_mod.f90
+!
+! Compatibility client for the reusable marker-transport library
+! (SRC/transport).  This applet traces alpha-particle guiding-centre orbits and
+! records their confinement time.  The orbit integration itself is delegated
+! to GORILLA's characteristic-step stepper through the library's generic
+! advance_ensemble API; the module only owns the applet input parsing, the
+! start-state sampling and the output formatting.
+!
+! The i_integrator_type == 1 (GORILLA pusher) path is migrated to the library.
+! The type 0 (no orbit) and type 2 (canonical) paths are preserved as-is.
+!===============================================================================
+!
     module alpha_lifetime_gorilla_mod
 !
     implicit none
@@ -95,19 +109,49 @@
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
+!       Library stepper wrapper: adapts GORILLA's orbit_timestep_gorilla
+!       characteristic-step contract to the library step_signature_t.
+!
+        subroutine alpha_gorilla_step(x,vpar,vperp,dt,boole_initialized,cell,iface,t_remain,boole_lost)
+!
+            use orbit_timestep_gorilla_mod, only: orbit_timestep_gorilla
+            use, intrinsic :: iso_fortran_env, only: dp => real64
+!
+            implicit none
+!
+            real(dp), dimension(3), intent(inout) :: x
+            real(dp), intent(inout) :: vpar,vperp
+            real(dp), intent(in)    :: dt
+            logical,  intent(inout) :: boole_initialized
+            integer,  intent(inout) :: cell,iface
+            real(dp), intent(out)   :: t_remain
+            logical,  intent(out)   :: boole_lost
+!
+            t_remain = dt
+            call orbit_timestep_gorilla(x,vpar,vperp,dt,boole_initialized,cell,iface,t_remain)
+            boole_lost = (cell.eq.-1)
+!
+        end subroutine alpha_gorilla_step
+!
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
         subroutine calc_alpha_lifetime_gorilla()
 !
-            use orbit_timestep_gorilla_mod, only: initialize_gorilla,orbit_timestep_gorilla
+            use orbit_timestep_gorilla_mod, only: initialize_gorilla
             use constants, only: ev2erg, pi
             use tetra_physics_mod, only: particle_mass,cm_over_e,mag_axis_R0
             use fluxtv_mod, only: load_flux_tube_volume,pos_fluxtv_mat
-            !use omp_lib, only: omp_get_thread_num
             use parmot_mod, only: rmu,ro0
             use velo_mod, only: isw_field_type
-            use supporting_functions_mod, only: theta_sym_flux2theta_vmec,theta_vmec2theta_sym_flux
+            use supporting_functions_mod, only: theta_sym_flux2theta_vmec
             use tetra_grid_settings_mod, only: n_field_periods
+            use tetra_grid_mod, only: ntetr
             use binsrc_mod, only: binsrc
             use sub_alpha_lifetime_can_mod, only: orbit_timestep_can
+            use marker_transport_mod, only: ensemble_t,advance_ensemble,noop_process, &
+                & transport_config_t,termination_event_t,TERM_LOST
+            use conservative_tallies_mod, only: tallies_t
+            use, intrinsic :: iso_fortran_env, only: int64, dp => real64
 !
             implicit none
 !
@@ -116,14 +160,25 @@
             integer :: n_start, n_end, i_part, alpha_unit
             double precision, dimension(3) :: x_rand_beg,x
             double precision, dimension(:), allocatable :: xi
+            double precision, dimension(:), allocatable :: t_conf
             logical :: boole_initialized,boole_particle_lost
             double precision :: dtau, dphi,dtaumin
             double precision, dimension(5) :: z
+!
+            !Transport-library state
+            type(ensemble_t)              :: ens
+            type(tallies_t)               :: tallies
+            type(transport_config_t)      :: cfg
+            type(termination_event_t), allocatable :: evts(:)
+            real(dp), dimension(:), allocatable :: cell_volume
+            real(dp) :: init_weight, init_momentum, init_energy
 !
             !Load input for alpha lifetime computation
             call load_alpha_lifetime_inp()
 !
             allocate(xi(n_particles))
+            allocate(t_conf(n_particles))
+            t_conf = 0.d0
 !
             n_start = 1
             n_end = n_particles
@@ -182,116 +237,130 @@
                 !$omp end critical
             endif
 !
-            kpart = 0
             n_lost_particles = 0
 !
-            !$OMP PARALLEL DEFAULT(NONE) &
-            !$OMP& SHARED(n_particles,pos_fluxtv_mat,xi,n_lost_particles,kpart,vmod,time_step,i_integrator_type, &
-            !$OMP& dtau,dtaumin,rd_start_position,rd_start_pitchpar,boole_random_precalc,n_start,n_end,alpha_unit) &
-            !$OMP& PRIVATE(n,boole_particle_lost,i,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized, &
-            !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr,tau_out_can)
-            !$OMP DO
+            select case(i_integrator_type)
 !
-            !Loop over particles
-            do n = n_start,n_end !1,n_particles
+!===============================================================================
+! Migrated path (i_integrator_type == 1): GORILLA pusher through the library.
+!===============================================================================
+                case(1)
 !
-                !Counter for particles
-                !$omp critical
-                kpart = kpart+1
-                boole_particle_lost = .false.
-print *, kpart, ' / ', n_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
-                !$omp end critical
-
-                !Find random start indices that are distributed proportionally to the flux tube volume
-                call binsrc(pos_fluxtv_mat(:,4),1,size(pos_fluxtv_mat(:,4)),xi(n),i)
+                    !--- Build marker ensemble (start states sampled as before) ---
+                    call ens%init(n_particles, 0_int64)
 !
-                x_rand_beg = pos_fluxtv_mat(i,1:3)
+                    do n = n_start,n_end
+                        !Find random start indices that are distributed proportionally to the flux tube volume
+                        call binsrc(pos_fluxtv_mat(:,4),1,size(pos_fluxtv_mat(:,4)),xi(n),i)
 !
-                select case(i_integrator_type)
-                    case(1,0)
-                        x = x_rand_beg
-                    case(2)
+                        x_rand_beg = pos_fluxtv_mat(i,1:3)
+!
+                        ens%markers(n)%x = x_rand_beg
+!
+                        !Find random pitch parameter
+                        if(boole_random_precalc) then
+                            pitchpar = rd_start_pitchpar(n)
+                        else
+                            !$omp critical
+                                call random_number(pitchpar)
+                            !$omp end critical
+                        endif
+                        pitchpar = 2.d0*pitchpar - 1.d0
+!
+                        vpar = pitchpar * vmod
+                        vperp = sqrt(vmod**2-vpar**2)
+!
+                        ens%markers(n)%vpar  = vpar
+                        ens%markers(n)%vperp = vperp
+                        ens%markers(n)%pitch = pitchpar
+                        ens%markers(n)%weight = 1.d0
+                        ens%markers(n)%cell   = -1
+                        ens%markers(n)%iface  = -1
+                        ens%markers(n)%boole_initialized = .false.
+                        ens%markers(n)%active = .true.
+                    enddo
+!
+                    !--- Diagnostic tallies (cell/surface + conservation ledger) ---
+                    call tallies%cells%init(ntetr)
+                    call tallies%surfaces%init(ntetr)
+                    allocate(cell_volume(ntetr))
+                    cell_volume = 1.d0
+                    call tallies%cells%norm%init(1.d0, time_step, n_particles, cell_volume)
+                    call tallies%surfaces%norm%init(1.d0, time_step, n_particles)
+                    call ens%totals(init_weight, init_momentum, init_energy)
+                    call tallies%ledger%begin_from_totals(init_weight, init_momentum, init_energy)
+!
+!                   --- Configure and run the library transport ---
+                    allocate(evts(n_particles))
+                    cfg%n_steps = 1
+                    cfg%dt      = time_step
+                    cfg%boole_record_cell_tallies      = .true.
+                    cfg%boole_record_surface_crossings = .true.
+!
+                    call advance_ensemble(ens, alpha_gorilla_step, noop_process, &
+                                          tallies, cfg, evts)
+!
+                    !--- Collect confinement times and lost count ---
+                    do n = 1,n_particles
+                        t_conf(n) = ens%markers(n)%time
+                        if(evts(n)%occurred .and. evts(n)%event_type.eq.TERM_LOST) then
+                            n_lost_particles = n_lost_particles + 1
+                        endif
+                    enddo
+!
+                    !--- Write confinement times (deterministic marker order) ---
+                    do n = 1,n_particles
+                        write(alpha_unit,*) t_conf(n)
+                    enddo
+!
+                case(0)
+                    !No orbit computation: all particles confined for the full step
+                    do n = 1,n_particles
+                        t_conf(n) = time_step
+                        write(alpha_unit,*) t_conf(n)
+                    enddo
+!
+                case(2)
+!
+                    !Legacy canonical (direct) integrator path, preserved as-is.
+                    do n = n_start,n_end
+!
+                        !Find random start indices that are distributed proportionally to the flux tube volume
+                        call binsrc(pos_fluxtv_mat(:,4),1,size(pos_fluxtv_mat(:,4)),xi(n),i)
+!
+                        x_rand_beg = pos_fluxtv_mat(i,1:3)
+!
                         z(1) = x_rand_beg(1)
                         z(3) = x_rand_beg(3)
                         z(2) = theta_sym_flux2theta_vmec(z(1),x_rand_beg(2),z(3))  !Transform theta_symflux to theta_vmec
                         z(4) = 1.d0
-                end select
-
-                !Find random pitch parameter
-                if(boole_random_precalc) then
-                    pitchpar = rd_start_pitchpar(n)
-                else
-                    !$omp critical
-                        call random_number(pitchpar)
-                    !$omp end critical
-                endif
-                pitchpar = 2.d0*pitchpar - 1.d0
 !
-                !Particle velocities in accordance with integrator
-                select case(i_integrator_type)
-                    case(1,0)
-                        vpar = pitchpar * vmod
-                        vperp = sqrt(vmod**2-vpar**2)
-                    case(2)
-                        z(5) = pitchpar
-                end select
-!
-                !Orbit integration
-                select case(i_integrator_type)
-!
-                    case(0)
-                        !No orbit computation
-!
-                    case(1)
-                        boole_initialized = .false.
-                        call orbit_timestep_gorilla(x,vpar,vperp,time_step,boole_initialized,ind_tetr,iface,t_remain)
-!
-                        !Confinement time of alpha particle
-                        t_confined = time_step - t_remain
-!
-                        !Lost particle handling
-                        if(ind_tetr.eq.-1) then
+                        !Find random pitch parameter
+                        if(boole_random_precalc) then
+                            pitchpar = rd_start_pitchpar(n)
+                        else
                             !$omp critical
-                                n_lost_particles = n_lost_particles + 1
-                                boole_particle_lost = .true.
+                                call random_number(pitchpar)
                             !$omp end critical
                         endif
+                        pitchpar = 2.d0*pitchpar - 1.d0
+                        z(5) = pitchpar
 !
-                        !Write results in file
-                        !$omp critical
-                            !write(alpha_unit,*) n, boole_particle_lost , x_rand_beg ,pitchpar,x(1),t_confined
-                            write(alpha_unit,*) t_confined
-                        !$omp end critical
-!
-                    case(2)
                         ierr = 0
                         call orbit_timestep_can(z,dtau,dtaumin,ierr,tau_out_can)
 !
                         if(ierr.eq.1) then
-                            !$omp critical
-                                n_lost_particles = n_lost_particles + 1
-                                boole_particle_lost = .true.
-                            !$omp end critical
+                            n_lost_particles = n_lost_particles + 1
                         endif
 !
                         t_confined = -1.d0*tau_out_can/vmod
 !
-                        !Write results in file
-!                        !$omp critical
-!                            write(99,*) n, boole_particle_lost , x_rand_beg ,pitchpar,z(1),t_confined
-!                        !$omp end critical
+                    enddo
 !
-                end select
-!
-            enddo !n
-            !$OMP END DO
-            !$OMP END PARALLEL
+            end select
 !
             close(alpha_unit)
 print *, 'Number of lost particles',n_lost_particles
-!open(alpha_unit,file='confined_fraction.dat')
-!write(alpha_unit,*) 1.d0-dble(n_lost_particles)/dble(n_particles)
-!close(alpha_unit)
 !
             !Deallocate random numbers
             if(boole_random_precalc) then
