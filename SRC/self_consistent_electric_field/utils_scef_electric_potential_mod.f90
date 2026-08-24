@@ -319,16 +319,16 @@ subroutine print_data(i, source_step)
     write(id_unit,'(ES20.10E4)') real(output%prism_moments(1,:,1))
     close(id_unit)
 
-    filename_ed = 'exit_data_' // trim(tag) // '.dat'
-    call unlink(filename_ed)
-    open(newunit = ed_unit, file = filename_ed)
-    do j=1,in%num_particles
-        write(ed_unit,*) exit_data%t_confined(j,1), dble(exit_data%integration_step(j,1)), exit_data%x(:,j,1)
-    enddo
+    ! filename_ed = 'exit_data_' // trim(tag) // '.dat'
+    ! call unlink(filename_ed)
+    ! open(newunit = ed_unit, file = filename_ed)
     ! do j=1,in%num_particles
-    !     write(ed_unit,*) exit_data%t_confined(j,2), dble(exit_data%integration_step(j,2)), exit_data%x(:,j,2)
+    !     write(ed_unit,*) exit_data%t_confined(j,1), dble(exit_data%integration_step(j,1)), exit_data%x(:,j,1)
     ! enddo
-    close(ed_unit)
+    ! ! do j=1,in%num_particles
+    ! !     write(ed_unit,*) exit_data%t_confined(j,2), dble(exit_data%integration_step(j,2)), exit_data%x(:,j,2)
+    ! ! enddo
+    ! close(ed_unit)
 
 
 

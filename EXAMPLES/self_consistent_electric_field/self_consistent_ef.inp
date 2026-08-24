@@ -91,7 +91,7 @@
   boole_recompute_D(2) = .false. ,
 !
   !Outer source-tuning iterations (each does n_electric_potential_updates SCEF updates then updates the particle source)
-  n_source_updates = 5 ,
+  n_source_updates = 20 ,
 !
   !Write output files only on the last electric-potential update per source iteration
   reduced_output = .false. ,

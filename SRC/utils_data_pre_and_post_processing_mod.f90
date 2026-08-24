@@ -385,6 +385,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     integer :: species = 1
     real(dp) :: m0, z0, n0, s_value, v0
     logical :: boole_T_and_n_from_files = .false.
+    logical :: boole_analytic_temperature_profile = .true.
 
     if (present(species_in)) species = species_in
 
@@ -406,7 +407,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     if (boole_T_and_n_from_files) call get_T_and_n_from_files
 
     ! Apply linear density and/or temperature profiles based on input settings
-    if (in%boole_linear_density_simulation .or. in%boole_linear_temperature_simulation) then
+    if (in%boole_linear_density_simulation .or. in%boole_linear_temperature_simulation .or. boole_analytic_temperature_profile) then
         do i = 1, ntetr/grid_size(2), 3
             ! Compute s_value (normalized flux coordinate) for this tetrahedron
             if (coord_system == 2) then
@@ -430,6 +431,11 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
             ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
             if (in%boole_linear_temperature_simulation) then
                 c%temp_mat(:,i) = in%energy_eV * (1.1_dp - s_value) / 1.1_dp
+            endif
+
+            if (boole_analytic_temperature_profile) then
+                c%temp_mat(1,   i) = 1770.0_dp*(0.06_dp + 0.94_dp*(1.0_dp - s_value**2.9_dp)**2)
+                c%temp_mat(c%n, i) = c%temp_mat(1, i) + 3190.0_dp*(1.0_dp - s_value**2.1_dp)**5.4_dp
             endif
         enddo
     endif

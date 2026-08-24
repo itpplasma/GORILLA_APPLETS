@@ -147,14 +147,16 @@ subroutine update_particle_source
     !|n - n_target| / |n_target| residual.
 
     use gorilla_applets_types_mod, only: in, g, one_d, desired_density, particle_source
-    use tetra_grid_settings_mod, only: grid_size
+    use tetra_grid_settings_mod, only: grid_size, sfc_s_min
 
     integer :: k, ns_g
-    real(dp) :: alpha, ei_mismatch, target_mismatch, denom
+    real(dp) :: alpha, ei_mismatch, target_mismatch, denom, s_cutoff_low, s_cutoff_high
     real(dp), dimension(:), allocatable :: n_shell, n_vert, target_shell
 
     ns_g = grid_size(1)
     alpha = in%source_relaxation_factor
+    s_cutoff_low  = sfc_s_min + 0.1_dp*(1.0_dp - sfc_s_min)   !inner 10% of the domain is not tuned
+    s_cutoff_high = 1.0_dp    - 0.1_dp*(1.0_dp - sfc_s_min)   !outer 10% of the domain is not tuned: particles leave before the density can equilibrate there
 
     allocate(n_shell(ns_g), n_vert(ns_g+1), target_shell(ns_g))
 
@@ -166,8 +168,9 @@ subroutine update_particle_source
     enddo
     n_vert(ns_g+1) = n_shell(ns_g)
 
-    particle_source%value(:) = max(particle_source%value(:) &
-                             - alpha * (n_vert(:) - desired_density%value(:)), 0.0_dp)
+    where (g%s_vertices > s_cutoff_low .and. g%s_vertices < s_cutoff_high)
+        particle_source%value = particle_source%value - alpha*(n_vert - desired_density%value)
+    end where
 
 
     do k = 1, ns_g
