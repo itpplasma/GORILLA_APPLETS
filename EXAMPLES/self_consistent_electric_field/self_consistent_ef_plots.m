@@ -97,12 +97,12 @@ folder = [pwd,'/'];
 
 
 %Source-update iteration to plot (source_step index). Inner EP indices swept from N_low..N.
-source_step = 5;
+source_step = 15;
 N = 10;
 N_low = 10;
 %Number of source-update iterations to overlay in the source plot (matches n_source_updates in the .inp).
 %The source figure plots N_source + 1 curves: the initial source plus one per update.
-N_source = 5;
+N_source = 15;
 
 ns = 30;
 nphi = 30;
@@ -116,35 +116,9 @@ for j = 1:N-N_low+1
     potential_plot(:,j) = potential;
 end
 
-starting_potential = load([folder,'phi_elec_after_electric_potential_update_1_1.dat']);
+starting_potential = load([folder,'phi_elec_after_electric_potential_update_',num2str(source_step),'_1.dat']);
 start_potential_plot = starting_potential(1:30:31*30);%+starting_potential(31:30:30*31))/2;
 
-figure
-plot(start_potential_plot,'r')
-hold on
-plot(1,0)
-for i = 1:N-N_low+1
-    plot(potential_plot(:,i),'b')
-end
-hold off
-grid on
-ylabel('potential')
-%ylim([-60,40])
-
-
-one_d = load([folder,'one_d_densities',num2str(source_step),'_1.dat']);
-one_d_save = one_d;
-figure
-plot(one_d(:,2),'b')
-hold on
-plot(one_d(:,1),'r')
- for i = N_low:N
-     one_d = load([folder,'one_d_densities',num2str(source_step),'_',num2str(i),'.dat']);
-     plot(one_d(:,1),'m')
-     plot(one_d(:,2),'k')
- end
-hold off
-grid on
 
 figure
 colors = jet(N_source+1);
@@ -159,6 +133,42 @@ xlabel('s')
 ylabel('particle source')
 title('particle source across source-update iterations')
 legend('Location','best')
+
+s_data_vertices = data(:,1);
+s_data_layers = 0.5*(data(1:end-1,1) + data(2:end,1));
+
+figure
+plot(s_data_vertices,start_potential_plot,'r')
+hold on
+plot(1,0)
+for i = 1:N-N_low+1
+    plot(s_data_vertices,potential_plot(:,i),'b')
+end
+hold off
+grid on
+ylabel('potential')
+%ylim([-60,40])
+
+dens_E20 = 0.37d0*(0.74d0 + 0.26d0*(1.d0-s_data_layers.^2.5).^1.5 - 0.06d0*(1.d0-exp(-s_data_layers.^2*4.d0)));
+density_desired = dens_E20*1.d14;  % cm^{-3}
+
+
+one_d = load([folder,'one_d_densities',num2str(source_step),'_1.dat']);
+one_d_save = one_d;
+figure
+plot(s_data_layers,one_d(:,2),'b')
+hold on
+plot(s_data_layers,one_d(:,1),'r')
+plot(s_data_layers,density_desired,'g')
+ for i = N_low:N
+     one_d = load([folder,'one_d_densities',num2str(source_step),'_',num2str(i),'.dat']);
+     plot(s_data_layers,one_d(:,1),'m')
+     plot(s_data_layers,one_d(:,2),'k')
+ end
+hold off
+grid on
+
+
 
  %% quadratic fit for diffusion coefficient
 folder = [pwd,'/'];
