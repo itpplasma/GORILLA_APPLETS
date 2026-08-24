@@ -12,7 +12,6 @@ subroutine calc_diffusion_coefficients(species)
 
     use gorilla_applets_types_mod, only: in, dc, start, s, g, exit_data
     use tetra_grid_settings_mod, only: grid_size
-    use tetra_grid_mod, only: verts_sthetaphi
     use utils_data_pre_and_post_processing_mod, only: prepare_next_round_of_parallelised_particle_pushing, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, initialize_exit_data
     use llsq_mod, only: llsq
@@ -48,12 +47,10 @@ subroutine calc_diffusion_coefficients(species)
     call random_number(dummy)
 
     if (.not.allocated(rand_matrix)) allocate(rand_matrix(5,s%n_particles,1))
-    if (.not.allocated(dc%s_vertices)) allocate(dc%s_vertices(grid_size(1)+1))
     if (.not.allocated(dc%A)) allocate(dc%A(grid_size(1)+1, 2)) !diffusion coefficients on every flux layer including boundaries, per species
     if (.not.allocated(dc%B)) allocate(dc%B(grid_size(1)+1, 2))
     if (.not.allocated(dc%grad_A)) allocate(dc%grad_A(grid_size(1), 2))
     if (.not.allocated(dc%grad_B)) allocate(dc%grad_B(grid_size(1), 2))
-    dc%s_vertices = verts_sthetaphi(1, [(grid_size(3)*(ns-1)+1,ns=1,grid_size(1)+1)])
     s%k = 1000
     s%j = 100
     if (.not.allocated(s%delta_s)) allocate(s%delta_s(s%k))
@@ -83,7 +80,7 @@ subroutine calc_diffusion_coefficients(species)
 
 
         !Initiate particles of `species` at the different flux surfaces leaving out the boundaries
-        s%s0 = dc%s_vertices(ns)
+        s%s0 = g%s_vertices(ns)
         s%s0 = 0.5d0
 
         call RANDOM_NUMBER(rand_matrix)
@@ -179,11 +176,11 @@ subroutine calc_diffusion_coefficients(species)
     enddo
 
     !Extrapolate values to the boundaries
-    extrapolation_factor = (dc%s_vertices(2)-dc%s_vertices(1))/(dc%s_vertices(3)-dc%s_vertices(2))
+    extrapolation_factor = (g%s_vertices(2)-g%s_vertices(1))/(g%s_vertices(3)-g%s_vertices(2))
     dc%A(1, species) =     dc%A(2, species) + (dc%A(2, species)-dc%A(3, species))*extrapolation_factor
     dc%B(1, species) = max(dc%B(2, species) + (dc%B(2, species)-dc%B(3, species))*extrapolation_factor, 0.0_dp)
-    extrapolation_factor = (dc%s_vertices(grid_size(1)+1)-dc%s_vertices(grid_size(1)))/ &
-                           (dc%s_vertices(grid_size(1))-dc%s_vertices(grid_size(1)-1))
+    extrapolation_factor = (g%s_vertices(grid_size(1)+1)-g%s_vertices(grid_size(1)))/ &
+                           (g%s_vertices(grid_size(1))-g%s_vertices(grid_size(1)-1))
     dc%A(grid_size(1)+1, species) =     dc%A(grid_size(1), species) &
                                       + (dc%A(grid_size(1), species)-dc%A(grid_size(1)-1, species))*extrapolation_factor
     dc%B(grid_size(1)+1, species) = max(dc%B(grid_size(1), species) &
@@ -191,8 +188,8 @@ subroutine calc_diffusion_coefficients(species)
 
     !Calculate gradients
     do ns = 1,grid_size(1)
-        dc%grad_A(ns, species) = (dc%A(ns+1, species)-dc%A(ns, species))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
-        dc%grad_B(ns, species) = (dc%B(ns+1, species)-dc%B(ns, species))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
+        dc%grad_A(ns, species) = (dc%A(ns+1, species)-dc%A(ns, species))/(g%s_vertices(ns+1)-g%s_vertices(ns))
+        dc%grad_B(ns, species) = (dc%B(ns+1, species)-dc%B(ns, species))/(g%s_vertices(ns+1)-g%s_vertices(ns))
     enddo
 
     write(species_str, '(I0)') species
@@ -213,7 +210,7 @@ subroutine calc_density_via_random_walk(species, iteration_step)
     use gorilla_applets_types_mod, only: in, time_t, dc, ep, g, output, start, exit_data, weights, filenames
     use tetra_grid_settings_mod, only: grid_size, sfc_s_min
     use binsrc_mod, only: binsrc
-    use tetra_grid_mod, only: ntetr, verts_sthetaphi
+    use tetra_grid_mod, only: ntetr
     use tetra_physics_mod, only: tetra_physics
     use find_tetra_mod, only: find_tetra
     use utils_scef_electric_potential_mod, only: fill_vector_parts_with_value
@@ -276,8 +273,8 @@ subroutine calc_density_via_random_walk(species, iteration_step)
     ! allocate(dc%B(grid_size(1)+1)) !diffusion coefficients will be computed on every flux layer (including inner and outer boundaries)
     ! allocate(dc%grad_A(grid_size(1)))
     ! allocate(dc%grad_B(grid_size(1)))
-    ! allocate(dc%s_vertices(grid_size(1)+1))
-    ! dc%s_vertices = verts_sthetaphi(1, [(grid_size(3)*(ns-1)+1,ns=1,grid_size(1)+1)])
+    ! allocate(g%s_vertices(grid_size(1)+1))
+    ! g%s_vertices = verts_sthetaphi(1, [(grid_size(3)*(ns-1)+1,ns=1,grid_size(1)+1)])
     ! dc%A = 0.0_dp
     ! dc%B = 0.1_dp
     ! dc%grad_A = 0.0_dp
@@ -299,20 +296,20 @@ count_lost_particles = 0
         boole_lost = .false.
         do while ((t%confined.lt.t%step).and.(.not.boole_lost))
 
-            !binsrc finds k such that dc%s_vertices(k-1) < position(i) < dc%s_vertices(k)
-            call binsrc(dc%s_vertices,1,grid_size(1)+1,position(i),k)
+            !binsrc finds k such that g%s_vertices(k-1) < position(i) < g%s_vertices(k)
+            call binsrc(g%s_vertices,1,grid_size(1)+1,position(i),k)
             k = k-1
-            cell_size = dc%s_vertices(k+1) - dc%s_vertices(k)
-            A = dc%A(k, species) + dc%grad_A(k, species)*(position(i)-dc%s_vertices(k))
-            B = dc%B(k, species) + dc%grad_B(k, species)*(position(i)-dc%s_vertices(k))
+            cell_size = g%s_vertices(k+1) - g%s_vertices(k)
+            A = dc%A(k, species) + dc%grad_A(k, species)*(position(i)-g%s_vertices(k))
+            B = dc%B(k, species) + dc%grad_B(k, species)*(position(i)-g%s_vertices(k))
 
             if (boole_use_fit_function) then
                 B_fit = sum(dc%polynomial_coefficients_for_B(:, species) &
                             *(/1.0_dp,position(i),position(i)**2,0.0_dp/))
                 A_fit = sum(dc%polynomial_coefficients_for_A(:, species) &
                             *(/1.0_dp,position(i),0.0_dp/)) !This is just B differentiated with respect to s
-                if (position(i).lt.dc%s_vertices(4)) then
-                    p = (position(i) - sfc_s_min)/(dc%s_vertices(4) - sfc_s_min)
+                if (position(i).lt.g%s_vertices(4)) then
+                    p = (position(i) - sfc_s_min)/(g%s_vertices(4) - sfc_s_min)
                     B = p*B_fit + (1-p)*B
                     A = p*A_fit + (1-p)*B/position(i) + A
                 else
@@ -357,7 +354,7 @@ count_lost_particles = 0
     close(density_unit)
 
     do i = 1,grid_size(1)
-        rw_density(i) = rw_density(i)/(ep%s_shell_volumes(i)*t%step*num_particles)
+        rw_density(i) = rw_density(i)/(g%s_shell_volumes(i)*t%step*num_particles)
         call fill_vector_parts_with_value(rw_prism_densities, g%prisms_per_flux_tube(i,:), rw_density(i))
     enddo
 
@@ -378,9 +375,8 @@ end subroutine calc_density_via_random_walk
 
 subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
 
-    use gorilla_applets_types_mod, only: dc
+    use gorilla_applets_types_mod, only: dc, g
     use tetra_grid_settings_mod, only: grid_size
-    use tetra_grid_mod, only: verts_sthetaphi
     use utils_polyfit_mod, only: quadratic_fit
 
     integer, intent(in) :: species
@@ -398,7 +394,6 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
     if (.not.allocated(dc%B))                allocate(dc%B(grid_size(1)+1, 2))
     if (.not.allocated(dc%grad_A))           allocate(dc%grad_A(grid_size(1), 2))
     if (.not.allocated(dc%grad_B))           allocate(dc%grad_B(grid_size(1), 2))
-    if (.not.allocated(dc%s_vertices))       allocate(dc%s_vertices(grid_size(1)+1))
 
     write(species_str, '(I0)') species
     filename = 'A_and_B_species' // trim(species_str) // '.dat'
@@ -408,14 +403,12 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
     enddo
     close(id)
 
-    dc%s_vertices = verts_sthetaphi(1, [(grid_size(3)*(ns-1)+1,ns=1,grid_size(1)+1)])
-
     dc%A_from_first_run(:, species) = dc%A(:, species)
     if (boole_use_fit_function) dc%A(:, species) = 0.0_dp
 
     do ns = 1,grid_size(1)
-        dc%grad_A(ns, species) = (dc%A(ns+1, species)-dc%A(ns, species))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
-        dc%grad_B(ns, species) = (dc%B(ns+1, species)-dc%B(ns, species))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
+        dc%grad_A(ns, species) = (dc%A(ns+1, species)-dc%A(ns, species))/(g%s_vertices(ns+1)-g%s_vertices(ns))
+        dc%grad_B(ns, species) = (dc%B(ns+1, species)-dc%B(ns, species))/(g%s_vertices(ns+1)-g%s_vertices(ns))
     enddo
 
 
@@ -426,7 +419,7 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
     if (.not.allocated(x)) allocate(x(upper_bound-lower_bound+1))
     if (.not.allocated(y)) allocate(y(upper_bound-lower_bound+1))
 
-    x = dc%s_vertices(lower_bound:upper_bound)
+    x = g%s_vertices(lower_bound:upper_bound)
     y = dc%B(lower_bound:upper_bound, species)
 
     call quadratic_fit(size(x), x, y, a0, a1, a2, success) ! Least-squares fit of y ≈ a2*x^2 + a1*x + a0
@@ -440,7 +433,7 @@ subroutine calc_convection_coefficient_from_electric_field(species, boole_use_fi
 
     use tetra_physics_mod, only: tetra_physics
     use constants, only: ev2erg
-    use gorilla_applets_types_mod, only: dc, in, s, start
+    use gorilla_applets_types_mod, only: dc, in, s, start, g
     use tetra_grid_settings_mod, only: grid_size
 
     integer, intent(in) :: species
@@ -463,7 +456,7 @@ subroutine calc_convection_coefficient_from_electric_field(species, boole_use_fi
     enddo
 
     do ns = 1,grid_size(1)
-        dc%grad_A(ns, species) = (dc%A(ns+1, species)-dc%A(ns, species))/(dc%s_vertices(ns+1)-dc%s_vertices(ns))
+        dc%grad_A(ns, species) = (dc%A(ns+1, species)-dc%A(ns, species))/(g%s_vertices(ns+1)-g%s_vertices(ns))
     enddo
 
     !DIAG: compare electric-field drift vs. Bohm-like drift from B fit at s=0.5

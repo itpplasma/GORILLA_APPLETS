@@ -21,6 +21,17 @@ subroutine allocate_electric_potential_type
 
 end subroutine allocate_electric_potential_type
 
+subroutine initialize_flux_shell_grid
+
+    !One-time per-flux-shell grid setup: flux-topology mapping, s-vertex coordinates,
+    !and shell volumes. All three depend only on the tetrahedral grid.
+
+    call associate_flux_labels_with_tetrahedra_and_vertices
+    call calc_s_vertices
+    call calc_s_shell_volumes
+
+end subroutine initialize_flux_shell_grid
+
 subroutine perform_electric_potential_update(i)
 
     use gorilla_applets_types_mod, only: c, output, grid_t, in, ep, one_d
@@ -99,7 +110,7 @@ subroutine calc_phi_elec_from_rho(i)
         if (max(ep%mean_exit_time(1), ep%mean_exit_time(2)) > 0.0_dp) then
             factor_from_tracing_time = in%time_step  / max(ep%mean_exit_time(1), ep%mean_exit_time(2))
         endif
-        if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho*factor_from_tracing_time/5.0_dp !factor 5.0_dp is a safety factor
+        if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho*factor_from_tracing_time/3.0_dp !factor 3.0_dp is there to be on the safe side and avoid overshooting
 
         !if (i.gt.0) ep%phi_elec_from_rho = ep%phi_elec_from_rho/sqrt(dble(i))
 
@@ -151,7 +162,7 @@ subroutine calc_average_charge_density_per_flux_layer(i)
             electron_density_factor = 1.0d0
         else
             factor_from_ion_weights = sum(weights%w(:,1))/(in%num_particles*in%density*sum(output%prism_volumes(:)))
-            electron_density_factor = in%density/(sum(electron_densities*ep%s_shell_volumes)/sum(ep%s_shell_volumes))*&
+            electron_density_factor = in%density/(sum(electron_densities*g%s_shell_volumes)/sum(g%s_shell_volumes))*&
                                       factor_from_ion_weights
         endif
     endif
@@ -175,8 +186,8 @@ subroutine calc_average_charge_density_per_flux_layer(i)
                                                  !*ep%total_tracing_time(i)/(in%num_particles*in%time_step)
             endif
         enddo
-        ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns)/ep%s_shell_volumes(ns)
-        if (one_d%boole_print_densities) one_d%densities(ns,:) = one_d%densities(ns,:)/ep%s_shell_volumes(ns)
+        ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns)/g%s_shell_volumes(ns)
+        if (one_d%boole_print_densities) one_d%densities(ns,:) = one_d%densities(ns,:)/g%s_shell_volumes(ns)
     enddo
 
 end subroutine calc_average_charge_density_per_flux_layer
@@ -239,7 +250,7 @@ subroutine calc_rho_on_vertices
     !set rho on last flux surface
     value_to_be_set = rho_per_flux_surface(grid_size(1)) + (delta_s(grid_size(1))/delta_s(grid_size(1)-1))* &
                      (rho_per_flux_surface(grid_size(1))-rho_per_flux_surface(grid_size(1)-1))
-    if (.not.in%boole_static_ne) value_to_be_set = -sum(ep%rho_flux_layer*ep%s_shell_volumes)/sum(ep%s_shell_volumes)
+    if (.not.in%boole_static_ne) value_to_be_set = -sum(ep%rho_flux_layer*g%s_shell_volumes)/sum(g%s_shell_volumes)
     call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(grid_size(1)+1,:), value_to_be_set)
     rho_per_flux_surface(grid_size(1)+1) = value_to_be_set
 
@@ -377,23 +388,33 @@ subroutine associate_flux_labels_with_tetrahedra_and_vertices
 
 end subroutine associate_flux_labels_with_tetrahedra_and_vertices
 
-subroutine calc_s_shell_volumes
+subroutine calc_s_vertices
 
-    use gorilla_applets_types_mod, only:  g, output, ep
+    use gorilla_applets_types_mod, only: g
     use tetra_grid_mod, only: verts_sthetaphi
     use tetra_grid_settings_mod, only: grid_size
 
-    integer :: ns, j, ind_prism
-    real(dp) :: s
+    integer :: ns
 
-    allocate(ep%s_shell_volumes(grid_size(1)))
-    ep%s_shell_volumes = 0.0_dp
+    if (.not.allocated(g%s_vertices)) allocate(g%s_vertices(grid_size(1)+1))
+    g%s_vertices = verts_sthetaphi(1, [(grid_size(3)*(ns-1)+1, ns=1,grid_size(1)+1)])
+
+end subroutine calc_s_vertices
+
+subroutine calc_s_shell_volumes
+
+    use gorilla_applets_types_mod, only:  g, output
+    use tetra_grid_settings_mod, only: grid_size
+
+    integer :: ns, j, ind_prism
+
+    allocate(g%s_shell_volumes(grid_size(1)))
+    g%s_shell_volumes = 0.0_dp
 
     do ns = 1,grid_size(1)
-        s = (verts_sthetaphi(1, grid_size(3)*(ns-1)+1) + verts_sthetaphi(1,grid_size(3)*ns+1))/2.0_dp
         do j = 1, grid_size(2)*grid_size(3)*2
             ind_prism = g%prisms_per_flux_tube(ns,j)
-            ep%s_shell_volumes(ns) = ep%s_shell_volumes(ns) + output%prism_volumes(ind_prism)
+            g%s_shell_volumes(ns) = g%s_shell_volumes(ns) + output%prism_volumes(ind_prism)
         enddo
     enddo
 

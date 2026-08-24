@@ -188,6 +188,8 @@ module gorilla_applets_types_mod
     integer  :: ind_c
     integer, dimension(:,:), allocatable :: vertices_per_flux_surface !used in self_consistent_electric_field_mod
     integer, dimension(:,:), allocatable :: prisms_per_flux_tube !used in self_consistent_electric_field_mod
+    real(dp), dimension(:), allocatable :: s_vertices     ! (grid_size(1)+1) s-coordinate of each flux surface
+    real(dp), dimension(:), allocatable :: s_shell_volumes ! (grid_size(1))   volume of each flux shell
     end type grid_t
 
     type(grid_t) :: g
@@ -199,7 +201,6 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: phi_elec_from_rho
     real(dp), dimension(:), allocatable :: average_abs_phi_elec_from_rho
     real(dp), dimension(:), allocatable :: total_tracing_time
-    real(dp), dimension(:), allocatable :: s_shell_volumes
     real(dp) :: mean_abs_rho_at_first_update
     real(dp) :: mean_exit_time(2) = 0.0_dp  ! per species, set by RW routine and driver after honest push
     end type electric_potential_t
@@ -228,12 +229,18 @@ module gorilla_applets_types_mod
     real(dp), dimension(:,:), allocatable :: B                ! (grid_size+1, species)
     real(dp), dimension(:,:), allocatable :: grad_A           ! (grid_size,   species)
     real(dp), dimension(:,:), allocatable :: grad_B           ! (grid_size,   species)
-    real(dp), dimension(:),   allocatable :: s_vertices       ! (grid_size+1)
     real(dp), dimension(4,2)              :: polynomial_coefficients_for_B
     real(dp), dimension(3,2)              :: polynomial_coefficients_for_A
     end type diffusion_coefficients
 
     type(diffusion_coefficients) dc
+
+    type desired_density_t
+    real(dp), dimension(:), allocatable :: value ! (grid_size(1)+1) target electron/ion density at each s-vertex
+    real(dp), dimension(:), allocatable :: grad  ! (grid_size(1))   piecewise-constant d(value)/ds per flux shell
+    end type desired_density_t
+
+    type(desired_density_t) :: desired_density
 
     type one_d_t
     real(dp), dimension(:,:), allocatable :: densities

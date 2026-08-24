@@ -25,10 +25,10 @@ subroutine calc_self_consistent_electric_field
     find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution, &
     set_weights, prepare_next_round_of_parallelised_particle_pushing
     use utils_scef_input_mod, only: read_self_consistent_electric_field_inp_into_type, print_errors_for_bad_inputs
-    use utils_scef_particle_init_mod, only: calc_starting_conditions
+    use utils_scef_particle_init_mod, only: calc_starting_conditions, calc_desired_density_profile
     use utils_scef_particle_pushing_mod, only: parallelised_particle_pushing
     use utils_scef_electric_potential_mod, only: allocate_electric_potential_type, perform_electric_potential_update, &
-    associate_flux_labels_with_tetrahedra_and_vertices, calc_s_shell_volumes
+    initialize_flux_shell_grid
     use utils_scef_diffusion_mod, only: calc_diffusion_coefficients, calc_density_via_random_walk
     use gorilla_applets_types_mod, only: output, ep, s, exit_data
     use tetra_physics_mod, only: particle_mass
@@ -48,10 +48,10 @@ subroutine calc_self_consistent_electric_field
     !if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
 
     call initialize_exit_data
-    call associate_flux_labels_with_tetrahedra_and_vertices
+    call initialize_flux_shell_grid
+    call calc_desired_density_profile
     call calc_poloidal_flux(verts_sthetaphi)
     call allocate_electric_potential_type
-    call calc_s_shell_volumes
     call give_file_names
     call unlink_files
     call print_errors_for_bad_inputs

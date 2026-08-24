@@ -6,6 +6,40 @@ module utils_scef_particle_init_mod
 
 contains
 
+subroutine calc_desired_density_profile
+
+    !Fills desired_density%value on g%s_vertices and desired_density%grad on
+    !the flux shells connecting them. Profile expressed in rad = sqrt(s):
+    !  n(rad) = 0.37e14 * (0.74 + 0.26*(1 - rad^2.5)^1.5 - 0.06*(1 - exp(-4*rad^2)))  [cm^-3]
+
+    use gorilla_applets_types_mod, only: g, desired_density
+    use tetra_grid_settings_mod, only: grid_size
+
+    integer :: ns
+    real(dp) :: rad
+
+    if (.not.allocated(g%s_vertices)) then
+        print*, 'Error, calc_desired_density_profile called before g%s_vertices was populated.'
+        stop
+    endif
+
+    if (.not.allocated(desired_density%value)) allocate(desired_density%value(grid_size(1)+1))
+    if (.not.allocated(desired_density%grad))  allocate(desired_density%grad(grid_size(1)))
+
+    do ns = 1, grid_size(1)+1
+        rad = sqrt(max(g%s_vertices(ns), 0.0_dp))
+        desired_density%value(ns) = 0.37d14 * ( 0.74_dp                                     &
+                                              + 0.26_dp*(1.0_dp - rad**2.5_dp)**1.5_dp      &
+                                              - 0.06_dp*(1.0_dp - exp(-4.0_dp*rad**2)) )
+    enddo
+
+    do ns = 1, grid_size(1)
+        desired_density%grad(ns) = (desired_density%value(ns+1) - desired_density%value(ns)) &
+                                   /(g%s_vertices(ns+1) - g%s_vertices(ns))
+    enddo
+
+end subroutine calc_desired_density_profile
+
 subroutine calc_starting_conditions
 
     use gorilla_applets_types_mod, only: in, start
