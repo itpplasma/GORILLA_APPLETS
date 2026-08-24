@@ -77,7 +77,7 @@ ylabel('$\theta$ / cm','interpreter','latex')
 title('density')
 grid on
 colorbar
-clim([0,5e13])
+%clim([0,5e13])
 
 %% 1d plot
 clc
@@ -96,87 +96,28 @@ folder = '/temp/schatz_j/self_consistent_electric_field_runs/flat_source/2025.09
 folder = [pwd,'/'];
 
 
-volumes = load([folder,'prism_volumes.dat']);
-
+%Source-update iteration to plot (source_step index). Inner EP indices swept from N_low..N.
+source_step = 5;
 N = 10;
-N_low = 2;
+N_low = 10;
+%Number of source-update iterations to overlay in the source plot (matches n_source_updates in the .inp).
+%The source figure plots N_source + 1 curves: the initial source plus one per update.
+N_source = 5;
 
 ns = 30;
 nphi = 30;
 ntheta = 30;
-n_triangles = 30*30*2;
 
-one_d_plot = zeros(ns,N-N_low+1);
-potential_plot =  zeros(ns+1,N-N_low+1);
-f_b_plot = zeros(ns+1,N-N_low+1);
-echarge = 4.8032e-10;
-T = 3.5e3*1.6022e-12;
-
-s_shell_volumes = zeros(ns,1);
-for i = 1:ns
-    for j = 1:nphi
-        range_low  = (j-1)*ntheta*ns*2+(i-1)*2*ntheta+1;
-        range_high = (j-1)*ntheta*ns*2+ i   *2*ntheta;
-        s_shell_volumes(i) = s_shell_volumes(i) + sum(volumes(range_low:range_high));
-    end
-end
+potential_plot = zeros(ns+1,N-N_low+1);
 
 for j = 1:N-N_low+1
-    density = load([folder,'ion_densities_after_electric_potential_update_',num2str(N_low+j-1),'.dat']);
-    num_ions_plot = zeros(n_triangles,1);
-    for i = 1:nphi
-        range = 1+(i-1)*n_triangles:i*n_triangles;
-        num_ions_plot = num_ions_plot + density(range).*volumes(range);
-    end
-    for k = 1:ns
-        range = (k-1)*ntheta*2+1:k*ntheta*2;
-        one_d_plot(k,j) = sum(num_ions_plot(range))/s_shell_volumes(k);
-        %one_d_plot(k,j) = sum(num_ions_plot((k-1)*ntheta*2+1:k*ntheta*2))/(2*ntheta);
-    end
-    potential = load([folder,'phi_elec_after_electric_potential_update_',num2str(N_low+j-1),'.dat']);
+    potential = load([folder,'phi_elec_after_electric_potential_update_',num2str(source_step),'_',num2str(N_low+j-1),'.dat']);
     potential = potential(1:30:30*31);%+potential(31:30:30*31))/2;
-    f_b_plot(:,j) = exp(-echarge*potential/T)*3e13;
     potential_plot(:,j) = potential;
 end
 
-starting_potential =  load([folder,'phi_elec_after_electric_potential_update_1.dat']);
+starting_potential = load([folder,'phi_elec_after_electric_potential_update_1_1.dat']);
 start_potential_plot = starting_potential(1:30:31*30);%+starting_potential(31:30:30*31))/2;
-starting_distribution = load([folder,'ion_densities_after_electric_potential_update_1.dat']);
-start_2d = zeros(n_triangles,1);
-start_plot = zeros(ns,1);
-for i = 1:nphi
-    range = 1+(i-1)*n_triangles:i*n_triangles;
-    start_2d = start_2d + starting_distribution(range).*volumes(range);
-end
-for k = 1:ns
-    range = (k-1)*ntheta*2+1:k*ntheta*2;
-    start_plot(k) = sum(start_2d(range))/s_shell_volumes(k);
-    %start_plot(k) = sum(start_2d((k-1)*ntheta*2+1:k*ntheta*2))/(2*ntheta);
-end
-
-s = linspace(1e-4,1,31);
-s_center = (s(2:end)+s(1:end-1))/2;
-electron_density_factor = 1.8129425031187620;
-electron_density = (1-0.9*s_center)*1e13*electron_density_factor;
-electron_density = electron_density';
-
-%figure
-%plot(start_plot(:),'r')
-%hold on
-%plot(1,0)
-%for i = 1:N-N_low+1
-%    plot(one_d_plot(:,i),'b')
-%    %plot(f_b_plot(:,i),'b:')
-%end
-%%%plot(electron_density,'m')
-%hold off
-%grid on
-%ylabel('ion density')
-
-%average_electron_density = sum(electron_density.*s_shell_volumes)/sum(s_shell_volumes)
-%for i = 1:N-N_low+1
-%average_ion_density = sum(one_d_plot(:,i).*s_shell_volumes)/sum(s_shell_volumes)
-%end
 
 figure
 plot(start_potential_plot,'r')
@@ -191,20 +132,33 @@ ylabel('potential')
 %ylim([-60,40])
 
 
-one_d = load([folder,'one_d_densities1.dat']);
+one_d = load([folder,'one_d_densities',num2str(source_step),'_1.dat']);
 one_d_save = one_d;
 figure
 plot(one_d(:,2),'b')
 hold on
 plot(one_d(:,1),'r')
  for i = N_low:N
-     one_d = load([folder,'one_d_densities',num2str(i),'.dat']);
+     one_d = load([folder,'one_d_densities',num2str(source_step),'_',num2str(i),'.dat']);
      plot(one_d(:,1),'m')
      plot(one_d(:,2),'k')
  end
-%plot(f_b_plot(:,N-N_low+1),'r')
 hold off
 grid on
+
+figure
+colors = jet(N_source+1);
+hold on
+for k = 1:N_source+1
+    data = load([folder,'particle_source_',num2str(k),'.dat']);
+    plot(data(:,1), data(:,2), 'Color', colors(k,:), 'DisplayName', ['source\_step = ',num2str(k)])
+end
+hold off
+grid on
+xlabel('s')
+ylabel('particle source')
+title('particle source across source-update iterations')
+legend('Location','best')
 
  %% quadratic fit for diffusion coefficient
 folder = [pwd,'/'];
