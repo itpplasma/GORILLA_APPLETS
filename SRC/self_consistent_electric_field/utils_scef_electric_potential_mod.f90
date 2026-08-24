@@ -32,7 +32,7 @@ subroutine initialize_flux_shell_grid
 
 end subroutine initialize_flux_shell_grid
 
-subroutine perform_electric_potential_update(i)
+subroutine perform_electric_potential_update(i, source_step)
 
     use gorilla_applets_types_mod, only: c, output, grid_t, in, ep, one_d
     use gorilla_settings_mod, only: boole_time_Hamiltonian, coord_system
@@ -40,9 +40,10 @@ subroutine perform_electric_potential_update(i)
     use tetra_physics_mod, only: make_tetra_physics, phi_elec
     use field_mod, only: ipert
 
-    integer, intent(in) :: i
+    integer, intent(in) :: i, source_step
     real(dp) :: r=0.0_dp !under-relaxation factor
     logical :: boole_print_1d_data = .false.
+    logical :: boole_write_this_iteration
 
     if (boole_time_Hamiltonian.eqv..false.) then
         print*, "Error, variable 'boole_time_Hamiltonian' must be set to '.true.' for electric potential update to work"
@@ -58,7 +59,8 @@ subroutine perform_electric_potential_update(i)
     ! boole_keep_phi_elec=.true. prevents make_tetra_physics from overwriting phi_elec
     call make_tetra_physics(coord_system, ipert, boole_keep_phi_elec=.true.)
 
-    if (i.gt.0) call print_data(i)
+    boole_write_this_iteration = (.not.in%reduced_output) .or. (i.eq.max(in%n_electric_potential_updates,1))
+    if (i.gt.0 .and. boole_write_this_iteration) call print_data(i, source_step)
 
 end subroutine perform_electric_potential_update
 
@@ -68,7 +70,7 @@ subroutine calc_phi_elec_from_rho(i)
     use constants, only: ev2erg, eps, echarge
 
     integer, intent(in) :: i
-    real(dp) :: factor, factor_from_tracing_time
+    real(dp) :: factor
 
     ep%rho_prism = 0
     ep%rho_flux_layer = 0
@@ -102,15 +104,7 @@ subroutine calc_phi_elec_from_rho(i)
 
         ep%phi_elec_from_rho =  ep%rho_vert*factor
 
-        !Compensate for particles that leave the domain during tracing: densities are
-        !normalised by in%time_step but each particle only lives for its mean exit time.
-        !Take the longer of the two species' mean exit times so we do not over-compensate
-        !when one species has essentially all its particles lost early.
-        factor_from_tracing_time = 1.0_dp
-        if (max(ep%mean_exit_time(1), ep%mean_exit_time(2)) > 0.0_dp) then
-            factor_from_tracing_time = in%time_step  / max(ep%mean_exit_time(1), ep%mean_exit_time(2))
-        endif
-        if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho*factor_from_tracing_time/3.0_dp !factor 3.0_dp is there to be on the safe side and avoid overshooting
+        if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho/3.0_dp !factor 3.0_dp is there to be on the safe side and avoid overshooting
 
         !if (i.gt.0) ep%phi_elec_from_rho = ep%phi_elec_from_rho/sqrt(dble(i))
 
@@ -256,19 +250,20 @@ subroutine calc_rho_on_vertices
 
 end subroutine calc_rho_on_vertices
 
-subroutine print_data(i)
+subroutine print_data(i, source_step)
 
     use gorilla_applets_types_mod, only: c, output, grid_t, in, ep, exit_data, counter, s, one_d, filenames
     use tetra_physics_mod, only: phi_elec
     use tetra_grid_settings_mod, only: grid_size
     use tetra_physics_mod, only: tetra_physics
 
-    integer, intent(in) :: i
+    integer, intent(in) :: i, source_step
     integer :: ep_unit, ed_unit, pe_unit, id_unit, l_unit, ef_unit, s_unit, one_d_unit, j, species, k
-    character(len=100) :: filename_ep, filename_ed, i_str, filename_phi_elec, filename_ion_densities, filename_lost, filename_ef, &
+    character(len=100) :: filename_ep, filename_ed, tag, filename_phi_elec, filename_ion_densities, filename_lost, filename_ef, &
                           filename_s, filename_1d
+    character(len=32) :: i_str, source_step_str
 
-    if (i.eq.1) then
+    if (i.eq.1 .and. source_step.eq.1) then
         filename_ef = filenames%electric_field
         open(newunit = ef_unit, file = filename_ef)
         do j = 1,grid_size(1)
@@ -278,15 +273,17 @@ subroutine print_data(i)
     endif
 
     filename_lost = 'number_of_lost_particles.dat'
-    if (i.eq.1) call unlink(filename_lost)
+    if (i.eq.1 .and. source_step.eq.1) call unlink(filename_lost)
     open(newunit = l_unit, file = filename_lost,position = 'append')
-    write(l_unit,*) i, counter%lost_particles
+    write(l_unit,*) source_step, i, counter%lost_particles
     close(l_unit)
 
-    write(i_str, '(I0)') i  ! Convert integer to string without leading spaces
+    write(i_str, '(I0)') i
+    write(source_step_str, '(I0)') source_step
+    tag = trim(source_step_str) // '_' // trim(i_str)
 
     if (one_d%boole_print_densities.eqv..true.) then
-        filename_1d = 'one_d_densities' // trim(i_str) // '.dat'
+        filename_1d = 'one_d_densities' // trim(tag) // '.dat'
         call unlink(filename_1d)
         open(newunit = one_d_unit, file = filename_1d)
         do j = 1,grid_size(1)
@@ -295,13 +292,13 @@ subroutine print_data(i)
         close(one_d_unit)
     endif
 
-    filename_ep = 'rho_per_vertex_during_electric_potential_update_' // trim(i_str) // '.dat'
+    filename_ep = 'rho_per_vertex_during_electric_potential_update_' // trim(tag) // '.dat'
     call unlink(filename_ep)
     !open(newunit = ep_unit, file = filename_ep)
     !write(ep_unit,'(ES20.10E4)') ep%rho_vert
     !close(ep_unit)
 
-    ! filename_s = 's_statistics_after_electric_potential_update' // trim(i_str) // '.dat'
+    ! filename_s = 's_statistics_after_electric_potential_update' // trim(tag) // '.dat'
     ! call unlink(filename_s)
     ! k = size(s%time)
     ! open(newunit = s_unit, file = filename_s)
@@ -310,19 +307,19 @@ subroutine print_data(i)
     ! enddo
     ! close(s_unit)
 
-    filename_phi_elec = 'phi_elec_after_electric_potential_update_' // trim(i_str) // '.dat'
+    filename_phi_elec = 'phi_elec_after_electric_potential_update_' // trim(tag) // '.dat'
     call unlink(filename_phi_elec)
     open(newunit = pe_unit, file = filename_phi_elec)
     write(pe_unit,'(ES20.10E4)') phi_elec
     close(pe_unit)
 
-    filename_ion_densities = 'ion_densities_after_electric_potential_update_' // trim(i_str) // '.dat'
+    filename_ion_densities = 'ion_densities_after_electric_potential_update_' // trim(tag) // '.dat'
     call unlink(filename_ion_densities)
     open(newunit = id_unit, file = filename_ion_densities)
     write(id_unit,'(ES20.10E4)') real(output%prism_moments(1,:,1))
     close(id_unit)
 
-    filename_ed = 'exit_data_' // trim(i_str) // '.dat'
+    filename_ed = 'exit_data_' // trim(tag) // '.dat'
     call unlink(filename_ed)
     open(newunit = ed_unit, file = filename_ed)
     do j=1,in%num_particles
@@ -337,7 +334,7 @@ subroutine print_data(i)
 
     ep%average_abs_phi_elec_from_rho(i) = sum(abs(ep%phi_elec_from_rho))/size(ep%phi_elec_from_rho)
 
-    print*, "electric potential update ", i, " complete."
+    print*, "source iteration ", source_step, ", electric potential update ", i, " complete."
     print*, "Average abs(Delta Phi) is ", ep%average_abs_phi_elec_from_rho(i)
     print*, "Maximum abs(Delta Phi) is ", maxval(abs(ep%phi_elec_from_rho))
     print*, "Total tracing time is ", ep%total_tracing_time(i)

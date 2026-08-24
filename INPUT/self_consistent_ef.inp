@@ -88,5 +88,14 @@
 !
   !Per-species recompute of diffusion coefficients (.true.) or reuse cached A_and_B_species<species>.dat (.false.)
   boole_recompute_D(1) = .true. ,
-  boole_recompute_D(2) = .true.
+  boole_recompute_D(2) = .true. ,
+!
+  !Outer source-tuning iterations (each does n_electric_potential_updates SCEF updates then updates the particle source)
+  n_source_updates = 1 ,
+!
+  !Write output files only on the last electric-potential update per source iteration
+  reduced_output = .false. ,
+!
+  !Relaxation factor alpha in S_new = S - alpha*(n - n_target)*exit_time_correction (0 < alpha <= 1)
+  source_relaxation_factor = 1.0d0
 /

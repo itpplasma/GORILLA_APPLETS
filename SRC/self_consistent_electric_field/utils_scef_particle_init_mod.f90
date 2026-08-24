@@ -27,7 +27,7 @@ subroutine calc_desired_density_profile
     if (.not.allocated(desired_density%grad))  allocate(desired_density%grad(grid_size(1)))
 
     do ns = 1, grid_size(1)+1
-        rad = sqrt(max(g%s_vertices(ns), 0.0_dp))
+        rad = g%s_vertices(ns)!sqrt(max(g%s_vertices(ns), 0.0_dp))
         desired_density%value(ns) = 0.37d14 * ( 0.74_dp                                     &
                                               + 0.26_dp*(1.0_dp - rad**2.5_dp)**1.5_dp      &
                                               - 0.06_dp*(1.0_dp - exp(-4.0_dp*rad**2)) )
@@ -42,7 +42,7 @@ end subroutine calc_desired_density_profile
 
 subroutine calc_starting_conditions
 
-    use gorilla_applets_types_mod, only: in, start
+    use gorilla_applets_types_mod, only: in, start, particle_source
     use tetra_grid_settings_mod, only: sfc_s_min
 
     real(dp), dimension(:,:,:), allocatable                :: rand_matrix
@@ -55,8 +55,145 @@ subroutine calc_starting_conditions
     call set_particle_type_specifications
     call set_starting_positions(rand_matrix)!,s0=sfc_s_min*1.1_dp)
     call set_rest_of_individual_particle_specifications(rand_matrix)
+    if (allocated(particle_source%value)) call apply_particle_source_weights
 
 end subroutine calc_starting_conditions
+
+subroutine initialize_particle_source
+
+    !Allocate particle_source and initialise it to the desired density profile.
+    !Must be called after calc_desired_density_profile.
+
+    use gorilla_applets_types_mod, only: g, desired_density, particle_source
+    use tetra_grid_settings_mod, only: grid_size
+
+    integer :: k
+
+    if (.not.allocated(desired_density%value)) then
+        print*, 'Error: initialize_particle_source called before calc_desired_density_profile.'
+        stop
+    endif
+
+    if (.not.allocated(particle_source%value)) allocate(particle_source%value(grid_size(1)+1))
+    if (.not.allocated(particle_source%grad))  allocate(particle_source%grad(grid_size(1)))
+
+    particle_source%value(:) = desired_density%value(:)
+
+    do k = 1, grid_size(1)
+        particle_source%grad(k) = (particle_source%value(k+1) - particle_source%value(k)) &
+                                 /(g%s_vertices(k+1) - g%s_vertices(k))
+    enddo
+
+end subroutine initialize_particle_source
+
+subroutine apply_particle_source_weights
+
+    !Overwrite the uniform base weight set by set_weight with a per-marker weight
+    !proportional to the particle-source profile evaluated at each marker's s value.
+
+    use gorilla_applets_types_mod, only: in, start, weights, g, particle_source
+    use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods, grid_size
+    use constants, only: pi
+    use binsrc_mod, only: binsrc
+
+    integer :: n, species, k
+    real(dp) :: base, s_marker, source_val
+
+    base = (1.0_dp - sfc_s_min) * 4.0_dp * pi**2 / n_field_periods
+
+    do species = 1, in%n_species
+        do n = 1, in%num_particles
+            s_marker = start%x(1, n, species)
+            call binsrc(g%s_vertices, 1, grid_size(1)+1, s_marker, k)
+            k = k - 1
+            k = max(1, min(k, grid_size(1)))
+            source_val = particle_source%value(k) + particle_source%grad(k)*(s_marker - g%s_vertices(k))
+            weights%w(n, species) = source_val * base
+        enddo
+    enddo
+
+end subroutine apply_particle_source_weights
+
+subroutine write_particle_source(source_step)
+
+    !Write particle_source at all s-vertices to particle_source_<source_step>.dat.
+    !Two columns: s_vertex, source_value.
+
+    use gorilla_applets_types_mod, only: g, particle_source
+    use tetra_grid_settings_mod, only: grid_size
+
+    integer, intent(in) :: source_step
+    integer :: k, file_id
+    character(len=100) :: filename
+    character(len=32) :: source_step_str
+
+    write(source_step_str, '(I0)') source_step
+    filename = 'particle_source_' // trim(source_step_str) // '.dat'
+    call unlink(filename)
+    open(newunit = file_id, file = filename)
+    do k = 1, grid_size(1)+1
+        write(file_id,*) g%s_vertices(k), particle_source%value(k)
+    enddo
+    close(file_id)
+
+end subroutine write_particle_source
+
+subroutine update_particle_source
+
+    !Richardson step S := S - alpha * (n - n_target) using the last inner-iteration
+    !density in one_d%densities. Values live on s-vertices; the shell-averaged
+    !one_d%densities is projected to vertices by midpoint averaging (nearest-shell
+    !at the two boundaries). Logs the relative electron/ion mismatch and the
+    !|n - n_target| / |n_target| residual.
+
+    use gorilla_applets_types_mod, only: in, g, one_d, desired_density, particle_source
+    use tetra_grid_settings_mod, only: grid_size
+
+    integer :: k, ns_g
+    real(dp) :: alpha, ei_mismatch, target_mismatch, denom
+    real(dp), dimension(:), allocatable :: n_shell, n_vert, target_shell
+
+    ns_g = grid_size(1)
+    alpha = in%source_relaxation_factor
+
+    allocate(n_shell(ns_g), n_vert(ns_g+1), target_shell(ns_g))
+
+    n_shell(:) = 0.5_dp * (one_d%densities(:,1) + one_d%densities(:,2))
+
+    n_vert(1)        = n_shell(1)
+    do k = 2, ns_g
+        n_vert(k) = 0.5_dp * (n_shell(k-1) + n_shell(k))
+    enddo
+    n_vert(ns_g+1) = n_shell(ns_g)
+
+    particle_source%value(:) = max(particle_source%value(:) &
+                             - alpha * (n_vert(:) - desired_density%value(:)), 0.0_dp)
+
+
+    do k = 1, ns_g
+        particle_source%grad(k) = (particle_source%value(k+1) - particle_source%value(k)) &
+                                 /(g%s_vertices(k+1) - g%s_vertices(k))
+    enddo
+
+    denom = sum(0.5_dp*(one_d%densities(:,1) + one_d%densities(:,2)) * g%s_shell_volumes)
+    if (denom > 0.0_dp) then
+        ei_mismatch = sum(abs(one_d%densities(:,1) - one_d%densities(:,2)) * g%s_shell_volumes) / denom
+    else
+        ei_mismatch = 0.0_dp
+    endif
+
+    target_shell(:) = 0.5_dp*(desired_density%value(1:ns_g) + desired_density%value(2:ns_g+1))
+    denom = sum(target_shell * g%s_shell_volumes)
+    if (denom > 0.0_dp) then
+        target_mismatch = sum(abs(n_shell - target_shell) * g%s_shell_volumes) / denom
+    else
+        target_mismatch = 0.0_dp
+    endif
+
+    print*, 'source update: relative electron/ion density mismatch = ', ei_mismatch
+    print*, 'source update: relative |n - n_target| / |n_target|    = ', target_mismatch
+
+end subroutine update_particle_source
 
 subroutine allocate_start_type(n_particles_in)
 

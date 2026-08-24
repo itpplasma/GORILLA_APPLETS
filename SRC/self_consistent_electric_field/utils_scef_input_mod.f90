@@ -10,14 +10,14 @@ subroutine read_self_consistent_electric_field_inp_into_type
 
     use gorilla_applets_types_mod, only: in
 
-    real(dp) :: time_step,energy_eV,n_particles, density
+    real(dp) :: time_step,energy_eV,n_particles, density, source_relaxation_factor
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
                boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-               boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, boole_static_ne
-    integer :: i_integrator_type, seed_option, n_electric_potential_updates, update_dimension, n_species
+               boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, boole_static_ne, reduced_output
+    integer :: i_integrator_type, seed_option, n_electric_potential_updates, update_dimension, n_species, n_source_updates
     logical :: boole_honest_tracing(2), boole_recompute_D(2)
 
     integer :: s_inp_unit
@@ -29,7 +29,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_electric_potential_updates, update_dimension, &
-    & n_species, boole_static_ne, boole_honest_tracing, boole_recompute_D
+    & n_species, boole_static_ne, boole_honest_tracing, boole_recompute_D, n_source_updates, reduced_output, source_relaxation_factor
 
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
     read(s_inp_unit,nml=self_consistent_ef_nml)
@@ -68,6 +68,9 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%boole_static_ne = boole_static_ne
     in%boole_honest_tracing = boole_honest_tracing
     in%boole_recompute_D    = boole_recompute_D
+    in%n_source_updates         = n_source_updates
+    in%reduced_output           = reduced_output
+    in%source_relaxation_factor = source_relaxation_factor
 
     print *,'GORILLA_APPLETS: Loaded input data from self_consistent_ef.inp'
 

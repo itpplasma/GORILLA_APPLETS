@@ -343,6 +343,16 @@ count_lost_particles = 0
         exit_time(i) = t%confined
     enddo
 
+    !Scatter per-marker mean exit time back to exit_data%t_confined so the honest-tracing
+    !accumulator in calc_average_charge_density_per_flux_layer works for the RW path too.
+    !Each marker fans out to particle_multiplication trials; the mean over trials gives
+    !the expected confinement time for that marker, matching the per-particle semantics
+    !of the honest-tracing branch.
+    do n = 1, in%num_particles
+        exit_data%t_confined(n, species) = sum(exit_time((n-1)*particle_multiplication+1 : n*particle_multiplication)) &
+                                          /particle_multiplication
+    enddo
+
     if (count_lost_particles.lt.num_particles) print*, 'Warning: the tracing time (', t%step,'s) was so short that only ',&
                                                         count_lost_particles,'out of', num_particles, &
                                                         'particles of species ', species, ' left the computation domain'
@@ -458,14 +468,6 @@ subroutine calc_convection_coefficient_from_electric_field(species, boole_use_fi
     do ns = 1,grid_size(1)
         dc%grad_A(ns, species) = (dc%A(ns+1, species)-dc%A(ns, species))/(g%s_vertices(ns+1)-g%s_vertices(ns))
     enddo
-
-    !DIAG: compare electric-field drift vs. Bohm-like drift from B fit at s=0.5
-    print*, 'DIAG species=', species, &
-            ' q=', start%particle_charge(species), &
-            ' dc%A(15)=', dc%A(15, species), &
-            ' A_fit(s=0.5)=', dc%polynomial_coefficients_for_A(1, species) &
-                              + dc%polynomial_coefficients_for_A(2, species)*0.5_dp, &
-            ' dc%B(15)=', dc%B(15, species)
 
 end subroutine calc_convection_coefficient_from_electric_field
 

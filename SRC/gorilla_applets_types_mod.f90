@@ -134,6 +134,9 @@ module gorilla_applets_types_mod
     integer  :: n_background_species = 2
     logical  :: boole_honest_tracing(2) !used in self consistent electric field: honest push (T) vs. random walk (F) per species
     logical  :: boole_recompute_D(2)    !used in self consistent electric field: recompute D per species (T) or reuse cached A_and_B_<species>.dat (F)
+    integer  :: n_source_updates = 1                !used in self consistent electric field: outer source-tuning iterations
+    logical  :: reduced_output = .false.            !used in self consistent electric field: write files only on the last EP update per source iteration
+    real(dp) :: source_relaxation_factor = 1.0_dp   !used in self consistent electric field: alpha in S := S - alpha*(n - n_target)*factor_from_tracing_time
     end type input_t
 
     type(input_t) :: in
@@ -201,6 +204,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: phi_elec_from_rho
     real(dp), dimension(:), allocatable :: average_abs_phi_elec_from_rho
     real(dp), dimension(:), allocatable :: total_tracing_time
+    real(dp) :: exit_time_correction = 1.0_dp
     real(dp) :: mean_abs_rho_at_first_update
     real(dp) :: mean_exit_time(2) = 0.0_dp  ! per species, set by RW routine and driver after honest push
     end type electric_potential_t
@@ -241,6 +245,13 @@ module gorilla_applets_types_mod
     end type desired_density_t
 
     type(desired_density_t) :: desired_density
+
+    type particle_source_t
+    real(dp), dimension(:), allocatable :: value ! (grid_size(1)+1) particle source amplitude per s-vertex
+    real(dp), dimension(:), allocatable :: grad  ! (grid_size(1))   piecewise-constant d(value)/ds per flux shell
+    end type particle_source_t
+
+    type(particle_source_t) :: particle_source
 
     type one_d_t
     real(dp), dimension(:,:), allocatable :: densities
