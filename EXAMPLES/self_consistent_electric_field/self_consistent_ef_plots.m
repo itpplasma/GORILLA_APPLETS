@@ -111,13 +111,12 @@ ntheta = 30;
 potential_plot = zeros(ns+1,N-N_low+1);
 
 for j = 1:N-N_low+1
-    potential = load([folder,'phi_elec_after_electric_potential_update_',num2str(source_step),'_',num2str(N_low+j-1),'.dat']);
-    potential = potential(1:30:30*31);%+potential(31:30:30*31))/2;
+    potential = load([folder,'phi_elec_1d_',num2str(source_step),'_',num2str(N_low+j-1),'.dat']);
     potential_plot(:,j) = potential;
 end
 
-starting_potential = load([folder,'phi_elec_after_electric_potential_update_',num2str(source_step),'_1.dat']);
-start_potential_plot = starting_potential(1:30:31*30);%+starting_potential(31:30:30*31))/2;
+starting_potential = load([folder,'phi_elec_1d_',num2str(source_step),'_1.dat']);
+start_potential_plot = starting_potential;
 
 
 figure

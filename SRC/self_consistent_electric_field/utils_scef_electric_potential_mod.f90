@@ -252,16 +252,17 @@ end subroutine calc_rho_on_vertices
 
 subroutine print_data(i, source_step)
 
-    use gorilla_applets_types_mod, only: c, output, grid_t, in, ep, exit_data, counter, s, one_d, filenames
+    use gorilla_applets_types_mod, only: c, output, grid_t, in, ep, exit_data, counter, s, one_d, filenames, g
     use tetra_physics_mod, only: phi_elec
     use tetra_grid_settings_mod, only: grid_size
     use tetra_physics_mod, only: tetra_physics
 
     integer, intent(in) :: i, source_step
     integer :: ep_unit, ed_unit, pe_unit, id_unit, l_unit, ef_unit, s_unit, one_d_unit, j, species, k
-    character(len=100) :: filename_ep, filename_ed, tag, filename_phi_elec, filename_ion_densities, filename_lost, filename_ef, &
-                          filename_s, filename_1d
+    character(len=100) :: filename_ep, filename_ed, tag, filename_phi_elec, filename_phi_elec_1d, filename_ion_densities, &
+                          filename_lost, filename_ef, filename_s, filename_1d
     character(len=32) :: i_str, source_step_str
+    logical :: boole_1d_output = .true.
 
     if (i.eq.1 .and. source_step.eq.1) then
         filename_ef = filenames%electric_field
@@ -307,17 +308,27 @@ subroutine print_data(i, source_step)
     ! enddo
     ! close(s_unit)
 
-    filename_phi_elec = 'phi_elec_after_electric_potential_update_' // trim(tag) // '.dat'
-    call unlink(filename_phi_elec)
-    open(newunit = pe_unit, file = filename_phi_elec)
-    write(pe_unit,'(ES20.10E4)') phi_elec
+    filename_phi_elec_1d = 'phi_elec_1d_' // trim(tag) // '.dat'
+    call unlink(filename_phi_elec_1d)
+    open(newunit = pe_unit, file = filename_phi_elec_1d)
+    do k = 1, grid_size(1)+1
+        write(pe_unit,'(ES20.10E4)') phi_elec(g%vertices_per_flux_surface(k, 1))
+    enddo
     close(pe_unit)
 
-    filename_ion_densities = 'ion_densities_after_electric_potential_update_' // trim(tag) // '.dat'
-    call unlink(filename_ion_densities)
-    open(newunit = id_unit, file = filename_ion_densities)
-    write(id_unit,'(ES20.10E4)') real(output%prism_moments(1,:,1))
-    close(id_unit)
+    if (.not.boole_1d_output) then
+        filename_phi_elec = 'phi_elec_after_electric_potential_update_' // trim(tag) // '.dat'
+        call unlink(filename_phi_elec)
+        open(newunit = pe_unit, file = filename_phi_elec)
+        write(pe_unit,'(ES20.10E4)') phi_elec
+        close(pe_unit)
+
+        filename_ion_densities = 'ion_densities_after_electric_potential_update_' // trim(tag) // '.dat'
+        call unlink(filename_ion_densities)
+        open(newunit = id_unit, file = filename_ion_densities)
+        write(id_unit,'(ES20.10E4)') real(output%prism_moments(1,:,1))
+        close(id_unit)
+    endif
 
     ! filename_ed = 'exit_data_' // trim(tag) // '.dat'
     ! call unlink(filename_ed)
