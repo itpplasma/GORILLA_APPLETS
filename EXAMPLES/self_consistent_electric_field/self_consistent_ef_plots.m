@@ -97,12 +97,13 @@ folder = [pwd,'/'];
 
 
 %Source-update iteration to plot (source_step index). Inner EP indices swept from N_low..N.
-source_step = 15;
+source_step = 100;
 N = 10;
 N_low = 10;
 %Number of source-update iterations to overlay in the source plot (matches n_source_updates in the .inp).
 %The source figure plots N_source + 1 curves: the initial source plus one per update.
-N_source = 15;
+N_source = 100;
+N_source_low = 90;
 
 ns = 30;
 nphi = 30;
@@ -120,11 +121,11 @@ start_potential_plot = starting_potential;
 
 
 figure
-colors = jet(N_source+1);
+colors = jet(N_source-N_source_low+1);
 hold on
-for k = 1:N_source+1
+for k = N_source_low:N_source
     data = load([folder,'particle_source_',num2str(k),'.dat']);
-    plot(data(:,1), data(:,2), 'Color', colors(k,:), 'DisplayName', ['source\_step = ',num2str(k)])
+    plot(data(:,1), data(:,2), 'Color', colors(k-N_source_low+1,:), 'DisplayName', ['source\_step = ',num2str(k)])
 end
 hold off
 grid on
