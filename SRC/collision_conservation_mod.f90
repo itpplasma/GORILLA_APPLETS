@@ -25,9 +25,6 @@ subroutine update_background_reservoir(test_mass, background_mass, &
 
     if (test_mass <= 0.0_dp) error stop 'test_mass must be positive'
     if (background_mass <= 0.0_dp) error stop 'background_mass must be positive'
-    if (marker_to_background_ratio < 0.0_dp) &
-        error stop 'marker_to_background_ratio must be non-negative'
-
     background_vpar_old = background_vpar
     background_vpar = background_vpar_old - marker_to_background_ratio* &
         test_mass*delta_test_vpar/background_mass
