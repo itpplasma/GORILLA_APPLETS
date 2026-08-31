@@ -9,9 +9,28 @@
         double precision, dimension(:), allocatable     :: rd_start_pitchpar
         double precision, dimension(:,:), allocatable   :: rd_xi_collision
 !
-        public :: calc_flux_deviation
+        public :: calc_flux_deviation,accumulate_valid_moments
 !
     contains
+!
+        subroutine accumulate_valid_moments(delta_s_squared,valid_steps,sum_delta_s_squared, &
+                                            & sum_delta_s_fourth,n_contributors)
+!
+            implicit none
+!
+            double precision, dimension(:), intent(in) :: delta_s_squared
+            integer(kind=8), intent(in) :: valid_steps
+            double precision, dimension(:), intent(inout) :: sum_delta_s_squared,sum_delta_s_fourth
+            integer, dimension(:), intent(inout) :: n_contributors
+!
+            if(valid_steps <= 0) return
+            sum_delta_s_squared(1:valid_steps) = sum_delta_s_squared(1:valid_steps) &
+                                                  & + delta_s_squared(1:valid_steps)
+            sum_delta_s_fourth(1:valid_steps) = sum_delta_s_fourth(1:valid_steps) &
+                                                 & + delta_s_squared(1:valid_steps)**2
+            n_contributors(1:valid_steps) = n_contributors(1:valid_steps)+1
+!
+        end subroutine accumulate_valid_moments
 !
         subroutine calc_rand_numbers(n_particles,n_time_steps)
 !
@@ -116,11 +135,12 @@
 !
             integer :: i,j,k,l,n,o,nskip,ierr,iface,ind_tetr,iper
             integer :: counter_tetrahedron_passes, counter_lost_particles,counter_mappings
-            integer :: n_surviving, n_lost_unit
+            integer :: n_lost_unit
             logical :: boole_t_finished
             logical, dimension(:), allocatable :: lost_particles
             integer, dimension(:), allocatable :: lost_reason
             integer(kind=8), dimension(:), allocatable :: lost_step
+            integer, dimension(:), allocatable :: n_contributors
             double precision, dimension(:,:), allocatable :: lost_position
             double precision, dimension(:,:), allocatable :: psi_mat,psi_vec,delta_psi_mat,delta_psi_vec
             double precision, dimension(:,:), allocatable :: delta_psi_average,delta_psi2_average,delta_psi4_average,xi_collisions
@@ -140,6 +160,8 @@
             double precision :: dtau, dphi,dtaumin,tau_out_can
             double precision :: theta_symflux
             double precision :: diff_coef, std_diff_coef, off_set
+            double precision :: delta_psi
+            integer(kind=8) :: fit_start_step,fit_end_step,valid_steps
             integer :: kpart = 0 ! progress counter for particles
 !
 !------------------------------------------------------------------------------------------------------------!
@@ -189,6 +211,7 @@
             allocate(lost_particles(n_particles))
             allocate(lost_reason(n_particles),lost_step(n_particles))
             allocate(lost_position(3,n_particles))
+            allocate(n_contributors(n_time_steps))
 !
             !Initializations
             delta_psi_average = 0.d0
@@ -200,6 +223,7 @@
             lost_reason = 0
             lost_step = 0
             lost_position = 0.d0
+            n_contributors = 0
             counter_lost_particles = 0
 !
             !collisionality (Boozer & Kuo-Petravic 1981)
@@ -241,6 +265,7 @@
             !$OMP& SHARED(n_particles,pos_fluxtv_mat,xi,t_step,psi_mat,boole_random_precalc, &
             !$OMP& vmod,coord_system,n_time_steps,lost_particles,psitor_max,i_integrator_type,cm_over_e, &
             !$OMP& lost_reason,lost_step,lost_position, &
+            !$OMP& n_contributors, &
             !$OMP& boole_collisions,eps_collisions,rd_start_pitchpar,rd_xi_collision,num_vec,kpart,boole_psi_mat, &
             !$OMP& delta_psi2_average, delta_psi4_average,lambda_start,helical_pert_eps_Aphi,helical_pert_m_fourier, &
             !$OMP& helical_pert_n_fourier,boole_helical_pert) &
@@ -248,7 +273,8 @@
             !$OMP& counter_tetrahedron_passes,t_remain,dtau,dtaumin, &
             !$OMP& t_pass,boole_t_finished,iper,ierr, &
             !$OMP& ipert,bmod_multiplier,A_s,A_theta,A_phi,B_s,B_theta,B_phi,boole_initialized,dR_ds,dZ_ds,sqg, &
-            !$OMP& bmod,q,delta_A_amplitude,counter_mappings,vmod1,pitchpar,xi_collision,l,num_vec_size,tau_out_can)
+            !$OMP& bmod,q,delta_A_amplitude,counter_mappings,vmod1,pitchpar,xi_collision,l,num_vec_size,tau_out_can, &
+            !$OMP& valid_steps)
             !$OMP DO
 !
 !do o = 1,num_vec_size
@@ -534,28 +560,25 @@
 !
                 !Calculation of momenta of Delta Psi (t)
                 if(.not.boole_psi_mat) then
-                    if(lost_particles(n)) cycle !If particles is lost, don't add up to the moments
+                    valid_steps = n_time_steps
+                    if(lost_particles(n)) valid_steps = lost_step(n)-1
 !
-                    !Compute Delta Psi
-                    do i = 1,n_time_steps
-                        delta_psi_vec(1,i) = psi_vec(1,i+1) - psi_vec(1,1)
-                    enddo
+                    if(valid_steps > 0) then
+                        !Compute Delta Psi through the last successful orbit step.
+                        do i = 1,valid_steps
+                            delta_psi_vec(1,i) = psi_vec(1,i+1) - psi_vec(1,1)
+                        enddo
 !
-                    !Delta Psi squared
-                    delta_psi_vec = delta_psi_vec**2 !attention: Same variable is used
+                        !Delta Psi squared
+                        delta_psi_vec(1,1:valid_steps) = delta_psi_vec(1,1:valid_steps)**2
 !
-                    !Average Delta Psi Squared over all particles (only summation at this point)
-                    !$omp critical
-                    delta_psi2_average(1,:) = delta_psi2_average(1,:) + delta_psi_vec(1,:)
-                    !$omp end critical
-!
-                    !Delta Psi to the power of four
-                    delta_psi_vec = delta_psi_vec**2 !attention: Same variable is used
-
-                    !Average Delta Psi to the power of four over all particles (only summation at this point)
-                    !$omp critical
-                    delta_psi4_average(1,:) = delta_psi4_average(1,:) + delta_psi_vec(1,:)
-                    !$omp end critical
+                        !Accumulate moments only through the last successful orbit step.
+                        !$omp critical
+                        call accumulate_valid_moments(delta_psi_vec(1,:),valid_steps, &
+                                                      & delta_psi2_average(1,:),delta_psi4_average(1,:), &
+                                                      & n_contributors)
+                        !$omp end critical
+                    endif
 
                 endif
 !
@@ -568,71 +591,44 @@
 !------------------------------------------------------------------------------------------------------------!
 !-------------------------- Calculation of momenta of Delta Psi (t) - ensemble average ----------------------!
 !
+            do n = 1,n_particles
+                if(lost_particles(n)) counter_lost_particles = counter_lost_particles+1
+            enddo
+
             !If psi mat is stored
             if(boole_psi_mat) then
-                !Delta Psi as a function of time for every single particle
-                do i = 1,n_time_steps
-                    delta_psi_mat(:,i) = psi_mat(:,i+1) - psi_mat(:,1)
+                do n = 1,n_particles
+                    valid_steps = n_time_steps
+                    if(lost_particles(n)) valid_steps = lost_step(n)-1
+                    do i = 1,valid_steps
+                        delta_psi = psi_mat(n,i+1)-psi_mat(n,1)
+                        delta_psi_average(1,i) = delta_psi_average(1,i)+delta_psi
+                        delta_psi2_average(1,i) = delta_psi2_average(1,i)+delta_psi**2
+                        delta_psi4_average(1,i) = delta_psi4_average(1,i)+delta_psi**4
+                        n_contributors(i) = n_contributors(i)+1
+                    enddo
                 enddo
-!
-                !Exclude those particles, that have left the domain
-                do i = 1,n_particles
-                if(lost_particles(i)) then
-                    delta_psi_mat(i,:) = 0.d0
-                    counter_lost_particles = counter_lost_particles +1
-                endif
-                enddo
-!
-                !Delta Psi averaged over all particles
-                delta_psi_average(1,:) = sum(delta_psi_mat,DIM=1)
-                if(n_particles-counter_lost_particles > 0) then
-                do i = 1,n_time_steps
-                delta_psi_average(1,i)  = delta_psi_average(1,i)/(n_particles-counter_lost_particles)
-                enddo
-                endif
-!
-                !Delta Psi Squared averaged over all particles
-                delta_psi_mat = delta_psi_mat**2 !attention: Same variable is used
-                delta_psi2_average(1,:) = sum(delta_psi_mat,DIM=1)
-!
-                !Standard deviation of Delta Psi Squared
-                delta_psi_mat = delta_psi_mat**2
-                delta_psi4_average(1,:) = sum(delta_psi_mat,DIM=1)
-!
-            !If psi values are only stored for a single particle
-            else
-!
-                !Exclude those particles, that have left the domain
-                do i = 1,n_particles
-                    if(lost_particles(i)) then
-                        counter_lost_particles = counter_lost_particles +1
-                    endif
-                enddo
-!
             endif
 !
-            !Number of particles that stayed inside the computation domain
-            n_surviving = n_particles - counter_lost_particles
-!
-            !Compute momenta. With no surviving particle the ensemble average is
-            !undefined, so skip it (and the fit below) instead of dividing by zero.
-            if(n_surviving > 0) then
-                do i = 1,n_time_steps
+            !Compute moments with every trajectory retained through its last valid step.
+            do i = 1,n_time_steps
+                if(n_contributors(i) > 0) then
                     trend_delta_psi2_average(1,i) =  i*t_step
-                    delta_psi2_average(1,i) = delta_psi2_average(1,i)/n_surviving
+                    delta_psi2_average(1,i) = delta_psi2_average(1,i)/n_contributors(i)
                     trend_delta_psi2_average(2,i) =  delta_psi2_average(1,i)
     !
-                    delta_psi4_average(1,i)  = delta_psi4_average(1,i)/n_surviving
+                    delta_psi4_average(1,i)  = delta_psi4_average(1,i)/n_contributors(i)
                     trend_std_delta_psi2_average(1,i) = i*t_step
-                    trend_std_delta_psi2_average(2,i) = sqrt(delta_psi4_average(1,i) &
-                                                        & - delta_psi2_average(1,i)**2)/sqrt(dble(n_particles))
+                    trend_std_delta_psi2_average(2,i) = sqrt(max(0.d0,delta_psi4_average(1,i) &
+                                                        & - delta_psi2_average(1,i)**2)) &
+                                                        & /sqrt(dble(n_contributors(i)))
     !
                     if( (idiffcoef_output.eq.2).or.(idiffcoef_output.eq.3) ) then
                         write(file_id_psi2,*) trend_delta_psi2_average(1,i),trend_delta_psi2_average(2,i)
                         write(file_id_std_psi2,*) trend_std_delta_psi2_average(1,i),trend_std_delta_psi2_average(2,i)
                     endif
-                enddo
-            endif
+                endif
+            enddo
 
             ! Write an zero line at the end of the calculation for one collisionality
             if( (idiffcoef_output.eq.2).or.(idiffcoef_output.eq.3) ) then
@@ -671,20 +667,28 @@
 !
             if( (idiffcoef_output.eq.1).or.(idiffcoef_output.eq.3) ) then
 !
-                if(n_surviving > 0) then
-                    ! Starting index (Throw away first 20 percent of values)
-                    i = ceiling(dble(n_time_steps)*0.2d0)
+                fit_start_step = ceiling(dble(n_time_steps)*0.2d0)
+                fit_end_step = n_time_steps
+                do n = 1,n_particles
+                    if(.not.lost_particles(n)) cycle
+                    fit_end_step = min(fit_end_step,lost_step(n)-1)
+                enddo
+                if(fit_end_step >= fit_start_step+1) then
+                    if(fit_end_step < n_time_steps) then
+                        print *, 'MSD fit stops before first particle loss at step',fit_end_step+1
+                    endif
 !
-                    call llsq (n_time_steps-i+1 , trend_delta_psi2_average(1,i:n_time_steps) , &
-                               &  trend_delta_psi2_average(2,i:n_time_steps) ,diff_coef,off_set )
+                    call llsq (fit_end_step-fit_start_step+1, &
+                               & trend_delta_psi2_average(1,fit_start_step:fit_end_step), &
+                               & trend_delta_psi2_average(2,fit_start_step:fit_end_step),diff_coef,off_set)
                     diff_coef = diff_coef/2.d0
 !
-                    call llsq (n_time_steps-i+1 , trend_std_delta_psi2_average(1,i:n_time_steps) , &
-                               &  trend_std_delta_psi2_average(2,i:n_time_steps) ,std_diff_coef,off_set )
+                    call llsq (fit_end_step-fit_start_step+1, &
+                               & trend_std_delta_psi2_average(1,fit_start_step:fit_end_step), &
+                               & trend_std_delta_psi2_average(2,fit_start_step:fit_end_step),std_diff_coef,off_set)
                     std_diff_coef = std_diff_coef/2.d0
                 else
-                    !All particles left the domain: no diffusion estimate available
-                    print *, 'WARNING: all particles lost, skipping this collisionality'
+                    print *, 'WARNING: no loss-free MSD fitting interval after transient'
                     diff_coef = 0.d0
                     std_diff_coef = 0.d0
                 endif
@@ -702,6 +706,7 @@
 !
             deallocate(delta_psi_average,delta_psi2_average,delta_psi4_average,xi,lost_particles)
             deallocate(lost_reason,lost_step,lost_position)
+            deallocate(n_contributors)
             deallocate(trend_delta_psi2_average,trend_std_delta_psi2_average)
             if(boole_psi_mat) then
                 deallocate(psi_mat,delta_psi_mat)
