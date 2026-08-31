@@ -38,6 +38,18 @@ scan. Thread count follows `OMP_NUM_THREADS` (default: all cores).
 nu*, D11, and the standard deviation of the mean. Plot D11 over nu* and
 overlay the NEO-2 result for the same configuration.
 
+`loss_summary.dat` records `nu*`, the number of markers that left the
+tetrahedral domain, and the initial marker count for every scan point.
+`lost_particle_events.dat` records each exit's marker index, integrator
+reason, time step, physical time, and position. A nonzero loss fraction
+invalidates the default MSD fit because trajectories that leave the domain
+are excluded from the ensemble.
+
+`flight_time_multiplier` controls the orbit duration in units of
+`max(tau_collision, tau_bounce**2/tau_collision)` and defaults to 10. Check
+duration convergence and require negligible losses; a longer absorbing-domain
+run is not automatically a better local transport estimate.
+
 ## Input files
 
 | File | Role |

@@ -99,6 +99,7 @@ mono["transpcoefnml"]["idiffcoef_output"] = 1
 mono["transpcoefnml"]["filename_transp_diff_coef"] = "nustar_diffcoef_std.dat"
 mono["transpcoefnml"]["nu_star"] = 0.1
 mono["transpcoefnml"]["v_e"] = 0.0
+mono["transpcoefnml"]["flight_time_multiplier"] = 10.0
 
 # Deterministic seed for reproducible CI output
 (WORK_DIR / "seed.inp").write_text("8\n  1 2 3 4 5 6 7 8\n")
@@ -165,5 +166,19 @@ compare_numeric_file(
     rtol=0.0,
     atol=0.0,
 )
+
+with (WORK_DIR / "n_lost_particles.dat").open() as fh:
+    n_lost = int(fh.read())
+with (WORK_DIR / "loss_summary.dat").open() as fh:
+    loss_rows = [line.split() for line in fh if line.strip()]
+if len(loss_rows) != 1 or len(loss_rows[0]) != 3:
+    sys.exit(f"FAIL: unexpected loss summary: {loss_rows}")
+loss_nu_star, summary_lost, summary_total = loss_rows[0]
+if float(loss_nu_star) != nu_star or int(summary_lost) != n_lost or int(summary_total) != 3:
+    sys.exit(f"FAIL: inconsistent loss summary: {loss_rows[0]}")
+with (WORK_DIR / "lost_particle_events.dat").open() as fh:
+    event_rows = [line.split() for line in fh if line.strip()]
+if len(event_rows) != n_lost:
+    sys.exit(f"FAIL: expected {n_lost} loss events, got {len(event_rows)}")
 
 print(f"PASS: nu*={nu_star:g}  D11={d11:g}  sigma={sigma:g} (matches reference)")
