@@ -65,6 +65,7 @@ subroutine calc_helical_core
 
     if (in%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
     print*, 'Number of lost ions',counter%lost_particles
+    print*, 'Outer-boundary losses (field-aligned grids)',counter%lost_outer
     print*, 'average number of pushings = ', counter%tetr_pushings/in%n_particles
     print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/in%n_particles
     print*, 'average number of integration steps = ', counter%integration_steps/in%n_particles

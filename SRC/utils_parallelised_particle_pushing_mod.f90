@@ -118,6 +118,7 @@ subroutine set_counter_zero(counter)
     
     counter%lost_particles = 0
     counter%lost_inside = 0
+    counter%lost_outer = 0
     counter%tetr_pushings = 0
     counter%phi_0_mappings = 0
     counter%integration_steps = 0
@@ -132,6 +133,7 @@ subroutine add_local_counter_to_counter(local_counter)
     
     counter%lost_particles = counter%lost_particles + local_counter%lost_particles
     counter%lost_inside = counter%lost_inside + local_counter%lost_inside
+    counter%lost_outer = counter%lost_outer + local_counter%lost_outer
     counter%tetr_pushings = counter%tetr_pushings + local_counter%tetr_pushings
     counter%phi_0_mappings = counter%phi_0_mappings + local_counter%phi_0_mappings
     

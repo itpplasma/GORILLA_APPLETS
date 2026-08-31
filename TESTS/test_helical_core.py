@@ -134,5 +134,8 @@ if result.returncode != 0:
 expected_marker = "Number of lost ions"
 if expected_marker not in result.stdout:
     sys.exit(f"FAIL: expected '{expected_marker}' in stdout but it was missing")
+boundary_marker = "Outer-boundary losses (field-aligned grids)"
+if boundary_marker not in result.stdout:
+    sys.exit(f"FAIL: expected '{boundary_marker}' in stdout but it was missing")
 
-print("PASS: helical core tracing completed and summary marker found")
+print("PASS: helical core tracing completed and boundary summary found")
