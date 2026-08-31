@@ -7,6 +7,17 @@ target_include_directories(test_multi_species_collision.x
 
 add_test(NAME multi_species_collision COMMAND test_multi_species_collision.x)
 
+if(EXISTS "${CMAKE_SOURCE_DIR}/SRC/collision_conservation_mod.f90")
+    add_executable(test_collision_conservation.x
+        test_collision_conservation.f90
+    )
+    target_link_libraries(test_collision_conservation.x GORILLA_APPLETS)
+    target_include_directories(test_collision_conservation.x
+        PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+
+    add_test(NAME collision_conservation COMMAND test_collision_conservation.x)
+endif()
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_test(
