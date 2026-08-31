@@ -82,8 +82,8 @@
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
         subroutine calc_flux_deviation(n_particles,n_time_steps,t_step,vmod,boole_collisions,boole_random_precalc,coll_freq, &
-                            & file_id_transp_diff_coef,file_id_psi2,file_id_std_psi2,i_integrator_type,idiffcoef_output, &
-                            & nu_star)
+                                    & file_id_transp_diff_coef,file_id_psi2,file_id_std_psi2,i_integrator_type,idiffcoef_output, &
+                                    & nu_star,file_id_loss_events,file_id_loss_summary)
 !
             use omp_lib, only: omp_get_thread_num
             use fluxtv_mod, only: pos_fluxtv_mat
@@ -108,6 +108,7 @@
 !
             integer,intent(in) :: n_particles,file_id_psi2,file_id_std_psi2,i_integrator_type,file_id_transp_diff_coef
             integer,intent(in) :: idiffcoef_output
+            integer,intent(in),optional :: file_id_loss_events,file_id_loss_summary
             integer(kind=8),intent(in) :: n_time_steps
             double precision, intent(in) :: t_step,vmod,coll_freq
             logical, intent(in) :: boole_collisions,boole_random_precalc
@@ -118,6 +119,9 @@
             integer :: n_surviving, n_lost_unit
             logical :: boole_t_finished
             logical, dimension(:), allocatable :: lost_particles
+            integer, dimension(:), allocatable :: lost_reason
+            integer(kind=8), dimension(:), allocatable :: lost_step
+            double precision, dimension(:,:), allocatable :: lost_position
             double precision, dimension(:,:), allocatable :: psi_mat,psi_vec,delta_psi_mat,delta_psi_vec
             double precision, dimension(:,:), allocatable :: delta_psi_average,delta_psi2_average,delta_psi4_average,xi_collisions
             double precision, dimension(:,:), allocatable :: trend_delta_psi2_average,trend_std_delta_psi2_average
@@ -183,6 +187,8 @@
             allocate(trend_std_delta_psi2_average(2,n_time_steps))
             allocate(xi(n_particles))
             allocate(lost_particles(n_particles))
+            allocate(lost_reason(n_particles),lost_step(n_particles))
+            allocate(lost_position(3,n_particles))
 !
             !Initializations
             delta_psi_average = 0.d0
@@ -191,6 +197,9 @@
 !
             !Particles are lost in MC Simulation
             lost_particles = .false. !Standard false, if particles are lost: true.
+            lost_reason = 0
+            lost_step = 0
+            lost_position = 0.d0
             counter_lost_particles = 0
 !
             !collisionality (Boozer & Kuo-Petravic 1981)
@@ -231,6 +240,7 @@
             !$OMP PARALLEL DEFAULT(NONE) &
             !$OMP& SHARED(n_particles,pos_fluxtv_mat,xi,t_step,psi_mat,boole_random_precalc, &
             !$OMP& vmod,coord_system,n_time_steps,lost_particles,psitor_max,i_integrator_type,cm_over_e, &
+            !$OMP& lost_reason,lost_step,lost_position, &
             !$OMP& boole_collisions,eps_collisions,rd_start_pitchpar,rd_xi_collision,num_vec,kpart,boole_psi_mat, &
             !$OMP& delta_psi2_average, delta_psi4_average,lambda_start,helical_pert_eps_Aphi,helical_pert_m_fourier, &
             !$OMP& helical_pert_n_fourier,boole_helical_pert) &
@@ -425,6 +435,9 @@
                                 !print *,"Error in tetra_main_orb. Particle has left the domain at ind_tetr:",ind_tetr
                                 !print *,'Position of the particle',x_rand
                                 lost_particles(n) = .true.
+                                lost_reason(n) = 1
+                                lost_step(n) = k
+                                lost_position(:,n) = x_rand
                                 exit
                             endif
 !
@@ -464,6 +477,9 @@
 !
                             if(ierr.eq.1) then
                                 lost_particles(n) = .true.
+                                lost_reason(n) = 2
+                                lost_step(n) = k
+                                lost_position(:,n) = z(1:3)
                                 exit
                             endif
 !
@@ -626,6 +642,25 @@
 
 !
             print *, 'Number of lost particles in Monte Carlo simulation', counter_lost_particles
+            if(present(file_id_loss_summary)) then
+                if(present(nu_star)) then
+                    write(file_id_loss_summary,*) nu_star,counter_lost_particles,n_particles
+                else
+                    write(file_id_loss_summary,*) counter_lost_particles,n_particles
+                endif
+            endif
+            if(present(file_id_loss_events)) then
+                do n = 1,n_particles
+                    if(.not.lost_particles(n)) cycle
+                    if(present(nu_star)) then
+                        write(file_id_loss_events,*) nu_star,n,lost_reason(n),lost_step(n), &
+                                                    & lost_step(n)*t_step,lost_position(:,n)
+                    else
+                        write(file_id_loss_events,*) n,lost_reason(n),lost_step(n), &
+                                                    & lost_step(n)*t_step,lost_position(:,n)
+                    endif
+                enddo
+            endif
 !
             open(newunit=n_lost_unit,file='n_lost_particles.dat',status='unknown')
             write(n_lost_unit,*) counter_lost_particles
@@ -666,6 +701,7 @@
 !------------------------------------------------------------------------------------------------------------!
 !
             deallocate(delta_psi_average,delta_psi2_average,delta_psi4_average,xi,lost_particles)
+            deallocate(lost_reason,lost_step,lost_position)
             deallocate(trend_delta_psi2_average,trend_std_delta_psi2_average)
             if(boole_psi_mat) then
                 deallocate(psi_mat,delta_psi_mat)
