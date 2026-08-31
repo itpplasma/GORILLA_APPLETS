@@ -7,6 +7,16 @@ target_include_directories(test_multi_species_collision.x
 
 add_test(NAME multi_species_collision COMMAND test_multi_species_collision.x)
 
+if(EXISTS "${CMAKE_SOURCE_DIR}/SRC/helical_core/helical_core_boundary_mod.f90")
+    add_executable(test_helical_core_boundary.x
+        test_helical_core_boundary.f90
+    )
+    target_link_libraries(test_helical_core_boundary.x GORILLA_APPLETS)
+    target_include_directories(test_helical_core_boundary.x
+        PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+    add_test(NAME helical_core_boundary COMMAND test_helical_core_boundary.x)
+endif()
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_test(

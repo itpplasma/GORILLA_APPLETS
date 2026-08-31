@@ -221,6 +221,7 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
     use utils_orbit_timestep_mod, only: initialize_constants_of_motion, compute_radial_fluxes, &
         identify_particles_entering_annulus, update_local_tetr_moments
+    use helical_core_boundary_mod, only: boundary_absorb, boundary_action
 
     real(dp), dimension(3), intent(inout)        :: x
     real(dp), intent(inout)                      :: vpar, vperp
@@ -233,7 +234,7 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
     real(dp), intent(in)                         :: t_tot
 
     real(dp), dimension(3)                       :: z_save, x_new
-    real(dp)                                     :: t_pass, perpinv, rand_frac
+    real(dp)                                     :: t_pass, perpinv
     logical                                      :: boole_t_finished, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
     type(optional_quantities_type)               :: optional_quantities
@@ -265,7 +266,7 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
         if (ind_tetr.eq.-1) then
             if ((grid_kind.eq.2).or.(grid_kind.eq.3)) then
                 call identify_particles_entering_annulus(x, local_counter, boole_lost_inside)
-                if (boole_lost_inside) then
+                if (boundary_action(boole_lost_inside).ne.boundary_absorb) then
                     ! Particle is near the magnetic axis - reflect across it
                     x_new = 3*(/g%raxis, x(2), g%zaxis/) - 2*x
                     vperp = vperp_func(z_save, perpinv, ind_tetr_save)
@@ -278,20 +279,8 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
                         !print*, "particle pushing across the hole surrounding the magnetic axis was successful"
                     endif
                 else
-                    ! Particle left at the outer boundary - displace toward the magnetic axis
-                    ! Keep phi unchanged, move R and Z toward axis by random fraction (0 to 1%) of distance
-                    call random_number(rand_frac)
-                    rand_frac = 0.01_dp * rand_frac  ! 0 to 1% of distance to axis
-                    x_new(1) = x(1) + rand_frac * (g%raxis - x(1))
-                    x_new(2) = x(2)  ! phi unchanged
-                    x_new(3) = x(3) + rand_frac * (g%zaxis - x(3))
-                    vperp = vperp_func(z_save, perpinv, ind_tetr_save)
-                    call find_tetra(x_new, vpar, vperp, ind_tetr, iface)
-                    if (ind_tetr.ne.-1) then
-                        x = x_new
-                    else
-                        exit
-                    endif
+                    local_counter%lost_outer = 1
+                    exit
                 endif
             else
                 exit
