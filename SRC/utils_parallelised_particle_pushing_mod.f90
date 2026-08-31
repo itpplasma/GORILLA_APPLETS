@@ -176,8 +176,9 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     use gorilla_applets_types_mod, only: in, c, time_t, start, weights
     use collis_ions, only: stost
     use collis_ions, only: collis_init
+    use collision_conservation_mod, only: update_background_reservoir
     use tetra_physics_mod, only: particle_mass,particle_charge
-    use constants, only: echarge,amp
+    use constants, only: echarge, ev2erg
     use gorilla_applets_settings_mod, only: i_option
 
     integer, intent(in) :: i, n, species, iswmode
@@ -190,12 +191,10 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     real(dp), dimension(3) :: randnum
     real(dp), dimension(1) :: m, z, dens, temp, efcolf,velrat,enrat
     real(dp) :: vpar_background
-    real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar, vpar_mat_save, vpar_mat
+    real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar
     integer :: err, j, p
-    real(dp) ::  w_v, w_t, particle_to_background_coupling_strength, t_max
+    real(dp) :: marker_to_background_ratio, particle_to_background_coupling_strength, t_max
 
-    w_v = 1.0_dp
-    w_t = 1.0_dp
     particle_to_background_coupling_strength = 0.0001_dp
 
     do j = 1,c%n-1
@@ -238,15 +237,15 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         delta_vpar = vpar - vpar_save
         delta_epsilon = particle_mass/2*(vpar**2 + vperp**2 - vpar_save**2 - vperp_save**2)
 
-        vpar_mat_save = c%vpar_mat(j,ind_tetr)
-        
+        marker_to_background_ratio = c%weight_factor*weights%w(n,species)* &
+            particle_to_background_coupling_strength
+
         !$omp critical
-        c%vpar_mat(j,ind_tetr) = vpar_mat_save - &
-                            c%weight_factor*weights%w(n,species)*delta_vpar/w_v*particle_to_background_coupling_strength
-        vpar_mat = c%vpar_mat(j,ind_tetr)
-        c%temp_mat(j,ind_tetr) = c%temp_mat(j,ind_tetr) + particle_mass/3*(vpar_mat_save**2 - vpar_mat**2) - &
-                            2.0_dp/3.0_dp*c%weight_factor*weights%w(n,species)*delta_epsilon/w_t &
-                            *particle_to_background_coupling_strength
+        c%temp_mat(j,ind_tetr) = c%temp_mat(j,ind_tetr)*ev2erg
+        call update_background_reservoir(particle_mass, c%mass(j), &
+            marker_to_background_ratio, delta_vpar, delta_epsilon, &
+            c%vpar_mat(j,ind_tetr), c%temp_mat(j,ind_tetr))
+        c%temp_mat(j,ind_tetr) = c%temp_mat(j,ind_tetr)/ev2erg
         !$omp end critical
     enddo
 
