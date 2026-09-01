@@ -16,6 +16,15 @@ target_include_directories(test_transport_loss_moments.x
 
 add_test(NAME transport_loss_moments COMMAND test_transport_loss_moments.x)
 
+add_executable(test_transport_normalization.x
+    test_transport_normalization.f90
+)
+target_link_libraries(test_transport_normalization.x GORILLA_APPLETS)
+target_include_directories(test_transport_normalization.x
+    PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+
+add_test(NAME transport_normalization COMMAND test_transport_normalization.x)
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_test(
@@ -45,11 +54,11 @@ WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/field_line_tracing_work"
 )
 
 add_test(
-    NAME mono_energetic_transport
+    NAME mono_energetic_transport_slow
     COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/test_mono_energetic_transport.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_mono_energetic_transport_slow.py
 )
-set_tests_properties(mono_energetic_transport PROPERTIES
+set_tests_properties(mono_energetic_transport_slow PROPERTIES
     ENVIRONMENT
         "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
 GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\

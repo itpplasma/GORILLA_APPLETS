@@ -9,9 +9,21 @@
         double precision, dimension(:), allocatable     :: rd_start_pitchpar
         double precision, dimension(:,:), allocatable   :: rd_xi_collision
 !
-        public :: calc_flux_deviation,accumulate_valid_moments
+        public :: calc_flux_deviation,accumulate_valid_moments,lorentz_pitch_step
 !
     contains
+!
+        pure function lorentz_pitch_step(pitch,eps_collision,xi_sign) result(pitch_new)
+!
+            implicit none
+!
+            double precision, intent(in) :: pitch,eps_collision,xi_sign
+            double precision :: pitch_new
+!
+            pitch_new = pitch*(1.d0-eps_collision) &
+                        & + xi_sign*sqrt(max(0.d0,(1.d0-pitch**2)*eps_collision))
+!
+        end function lorentz_pitch_step
 !
         subroutine accumulate_valid_moments(delta_s_squared,valid_steps,sum_delta_s_squared, &
                                             & sum_delta_s_fourth,n_contributors)
@@ -34,7 +46,7 @@
 !
         subroutine calc_rand_numbers(n_particles,n_time_steps)
 !
-            use mono_energetic_transp_coef_settings_mod, only: seed_option
+            use mono_energetic_transp_coef_settings_mod, only: seed_option,random_seed_filename
 !
             implicit none
 !
@@ -64,12 +76,12 @@
                     seed = int(rd_seed*10.d0)
                     deallocate(rd_seed)
 !
-                    open(newunit=seed_unit,file='seed.inp')
+                    open(newunit=seed_unit,file=trim(random_seed_filename),status='replace')
                     write(seed_unit,*) n
                     write(seed_unit,*) seed
                     close(seed_unit)
                 case(2) !Load seed
-                    open(newunit = seed_unit, file='seed.inp', status='old',action = 'read')
+                    open(newunit=seed_unit,file=trim(random_seed_filename),status='old',action='read')
                     read(seed_unit,*) n
                     allocate(seed(n))
                     read(seed_unit,*) seed
@@ -102,7 +114,7 @@
 !
         subroutine calc_flux_deviation(n_particles,n_time_steps,t_step,vmod,boole_collisions,boole_random_precalc,coll_freq, &
                                     & file_id_transp_diff_coef,file_id_psi2,file_id_std_psi2,i_integrator_type,idiffcoef_output, &
-                                    & nu_star,file_id_loss_events,file_id_loss_summary)
+                                    & nu_star,file_id_loss_events,file_id_loss_summary,file_id_particle_histories)
 !
             use omp_lib, only: omp_get_thread_num
             use fluxtv_mod, only: pos_fluxtv_mat
@@ -127,7 +139,7 @@
 !
             integer,intent(in) :: n_particles,file_id_psi2,file_id_std_psi2,i_integrator_type,file_id_transp_diff_coef
             integer,intent(in) :: idiffcoef_output
-            integer,intent(in),optional :: file_id_loss_events,file_id_loss_summary
+            integer,intent(in),optional :: file_id_loss_events,file_id_loss_summary,file_id_particle_histories
             integer(kind=8),intent(in) :: n_time_steps
             double precision, intent(in) :: t_step,vmod,coll_freq
             logical, intent(in) :: boole_collisions,boole_random_precalc
@@ -541,7 +553,7 @@
                         else
                             xi_collision = -1.d0
                         endif
-                        pitchpar = pitchpar * (1.d0 - eps_collisions) + xi_collision * sqrt((1.d0-pitchpar**2)*eps_collisions)
+                        pitchpar = lorentz_pitch_step(pitchpar,eps_collisions,xi_collision)
 !
                         select case(i_integrator_type)
                             case(1,0)
@@ -655,6 +667,22 @@
                         write(file_id_loss_events,*) n,lost_reason(n),lost_step(n), &
                                                     & lost_step(n)*t_step,lost_position(:,n)
                     endif
+                enddo
+            endif
+            if(present(file_id_particle_histories)) then
+                if(.not.boole_psi_mat) then
+                    error stop 'particle history output requires boole_psi_mat'
+                endif
+                do n = 1,n_particles
+                    valid_steps = n_time_steps
+                    if(lost_particles(n)) valid_steps = lost_step(n)-1
+                    do i = 0,valid_steps
+                        if(present(nu_star)) then
+                            write(file_id_particle_histories,*) nu_star,n,i,i*t_step,psi_mat(n,i+1)
+                        else
+                            write(file_id_particle_histories,*) n,i,i*t_step,psi_mat(n,i+1)
+                        endif
+                    enddo
                 enddo
             endif
 !
