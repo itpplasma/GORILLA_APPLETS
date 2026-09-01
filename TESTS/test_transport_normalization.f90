@@ -3,7 +3,7 @@ program test_transport_normalization
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use flux_deviation_mod, only: lorentz_pitch_step
     use gorilla_applets_sub_mod, only: collision_frequency_from_nu_star, &
-        & nu_star_from_collision_frequency
+        & nu_star_from_collision_frequency,radial_metric_ds_dr
 
     implicit none
 
@@ -14,6 +14,7 @@ program test_transport_normalization
     real(dp), parameter :: pitch = 0.3_dp
     real(dp), parameter :: eps_collision = 0.02_dp
     real(dp) :: nu_collision,pitch_plus,pitch_minus,expected_second_moment
+    real(dp) :: ds_dr_positive,ds_dr_negative
 
     nu_collision = collision_frequency_from_nu_star(nu_star,major_radius,aiota,speed)
     if(abs(nu_collision-15151.515151515152_dp) > 1.0e-9_dp) then
@@ -22,6 +23,12 @@ program test_transport_normalization
     if(abs(nu_star_from_collision_frequency(nu_collision,major_radius,aiota,speed) &
         & - nu_star) > 1.0e-15_dp) then
         error stop 'nu-star conversion does not round trip'
+    endif
+
+    ds_dr_positive = radial_metric_ds_dr(0.49_dp,2.0e4_dp,3.5e7_dp)
+    ds_dr_negative = radial_metric_ds_dr(0.49_dp,2.0e4_dp,-3.5e7_dp)
+    if(ds_dr_positive <= 0.0_dp .or. ds_dr_positive /= ds_dr_negative) then
+        error stop 'radial metric must be positive and invariant to flux handedness'
     endif
 
     pitch_plus = lorentz_pitch_step(pitch,eps_collision,1.0_dp)

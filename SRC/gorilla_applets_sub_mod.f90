@@ -9,7 +9,8 @@
 !
         public                      :: initialize_mono_energetic_transp_coef,calc_mono_energetic_transp_coef, &
                                     & calc_numerical_diff_coef,calc_mono_energetic_transp_coef_nu_scan, &
-                                    & collision_frequency_from_nu_star,nu_star_from_collision_frequency
+                                    & collision_frequency_from_nu_star,nu_star_from_collision_frequency, &
+                                    & radial_metric_ds_dr
 !
     contains
 !
@@ -34,6 +35,19 @@
             nu_star = major_radius*nu_collision/(abs(aiota)*speed)
 !
         end function nu_star_from_collision_frequency
+!
+        pure function radial_metric_ds_dr(s,bmod,torflux_signed) result(ds_dr)
+!
+            use constants, only: pi
+!
+            implicit none
+!
+            double precision, intent(in) :: s,bmod,torflux_signed
+            double precision :: ds_dr
+!
+            ds_dr = 2.d0*sqrt(s)*sqrt(pi*bmod/abs(torflux_signed))
+!
+        end function radial_metric_ds_dr
 !
         subroutine initialize_mono_energetic_transp_coef()
 !
@@ -97,7 +111,7 @@
                print *, 'bmod',bmod00
 !
                !Explanation for ds_dr: r = sqrt(s) * sqrt(Psi_tor_a/(pi * B00))
-               ds_dr = 2.d0*sqrt(s)*sqrt(pi*bmod00/torflux)
+               ds_dr = radial_metric_ds_dr(s,bmod00,torflux)
 !
                !Set electrostatic potential to values such that normalized elecron drift velocity is reproduced
                eps_Phi = v_E*vmod*bmod00/(dA_theta_ds*ds_dr*clight)!
@@ -189,7 +203,8 @@
                                & * maxval([tau_collision,tau_bounce**2/tau_collision])/t_step)
 
             call write_transport_metadata_row(file_id_transport_metadata,nu_star,mag_axis_R0,aiota,q_saf, &
-                                               & vmod,coll_freq,t_step,n_time_steps,n_particles,seed_option)
+                                               & vmod,coll_freq,t_step,n_time_steps,n_particles,seed_option, &
+                                               & n_field_periods)
 
             print *, 'Number of time steps (measurements)',n_time_steps
 !
@@ -312,7 +327,8 @@
                                    & * maxval([tau_collision,tau_bounce**2/tau_collision])/t_step)
 
                 call write_transport_metadata_row(file_id_transport_metadata,nu_star,mag_axis_R0,aiota,q_saf, &
-                                                   & vmod,coll_freq,t_step,n_time_steps,n_particles,seed_option)
+                                                   & vmod,coll_freq,t_step,n_time_steps,n_particles,seed_option, &
+                                                   & n_field_periods)
 
                 print *, 'Number of time steps (measurements)',n_time_steps
                 print *, 'Total physical orbit flight time per particle',n_time_steps*t_step
@@ -496,22 +512,23 @@
             write(file_id,'(a)') '# nu_star_standard = R0 * nu_collision / (abs(iota) * speed)'
             write(file_id,'(a,a)') '# random_seed_filename = ',trim(seed_filename)
             write(file_id,'(a)') '# nu_star R0_cm iota q speed_cm_s nu_collision_s-1 '// &
-                                 & 'time_step_s n_steps n_particles seed_option'
+                                 & 'time_step_s n_steps n_particles seed_option n_field_periods'
 !
         end subroutine write_transport_metadata_header
 !
         subroutine write_transport_metadata_row(file_id,nu_star,major_radius,aiota,q_saf,speed, &
-                                                & nu_collision,time_step,n_steps,n_particles,seed_option)
+                                                & nu_collision,time_step,n_steps,n_particles,seed_option, &
+                                                & n_field_periods)
 !
             implicit none
 !
-            integer, intent(in) :: file_id,n_particles,seed_option
+            integer, intent(in) :: file_id,n_particles,seed_option,n_field_periods
             integer(kind=8), intent(in) :: n_steps
             double precision, intent(in) :: nu_star,major_radius,aiota,q_saf,speed
             double precision, intent(in) :: nu_collision,time_step
 !
             write(file_id,*) nu_star,major_radius,aiota,q_saf,speed,nu_collision,time_step, &
-                             & n_steps,n_particles,seed_option
+                             & n_steps,n_particles,seed_option,n_field_periods
 !
         end subroutine write_transport_metadata_row
 !
