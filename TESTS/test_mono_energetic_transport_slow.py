@@ -189,7 +189,7 @@ if len(event_rows) != n_lost:
 
 with (WORK_DIR / "transport_metadata.dat").open() as fh:
     metadata_rows = [line.split() for line in fh if line.strip() and not line.startswith("#")]
-if len(metadata_rows) != 1 or len(metadata_rows[0]) != 10:
+if len(metadata_rows) != 1 or len(metadata_rows[0]) != 11:
     sys.exit(f"FAIL: unexpected transport metadata: {metadata_rows}")
 meta = metadata_rows[0]
 meta_nu_star, radius, aiota, q_saf, speed, collision_frequency, time_step = (
@@ -202,6 +202,8 @@ if abs(reconstructed_nu_star - nu_star) > 1.0e-14:
     sys.exit("FAIL: metadata does not obey standard nu* normalization")
 if abs(q_saf * aiota - 1.0) > 1.0e-12:
     sys.exit("FAIL: metadata q and iota are not reciprocal")
+if int(meta[10]) != 5:
+    sys.exit("FAIL: metadata does not retain the configured field periods")
 
 with (WORK_DIR / "particle_histories.dat").open() as fh:
     history_rows = [line.split() for line in fh if line.strip()]
