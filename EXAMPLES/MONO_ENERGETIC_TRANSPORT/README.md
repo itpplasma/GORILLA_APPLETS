@@ -38,6 +38,31 @@ scan. Thread count follows `OMP_NUM_THREADS` (default: all cores).
 nu*, D11, and the standard deviation of the mean. Plot D11 over nu* and
 overlay the NEO-2 result for the same configuration.
 
+`loss_summary.dat` records `nu*`, the number of markers that left the
+tetrahedral domain, and the initial marker count for every scan point.
+`lost_particle_events.dat` records each exit's marker index, integrator
+reason, time step, physical time, and position. Lost trajectories contribute
+through their last valid step, while the default MSD fit ends before the first
+loss. Treat a substantial loss fraction as a locality/domain diagnostic.
+
+`flight_time_multiplier` controls the orbit duration in units of
+`max(tau_collision, tau_bounce**2/tau_collision)` and defaults to 10. Check
+duration convergence and require negligible losses; a longer absorbing-domain
+run is not automatically a better local transport estimate.
+
+`transport_metadata.dat` records the local `q`, signed rotational transform
+`iota`, particle speed, collision frequency, time step, and seed settings. The
+reported standard collisionality uses
+`nu* = R0*nu_collision/(abs(iota)*speed)` for both EFIT and VMEC fields.
+
+For paired full-field and `n=0` estimates, set `boole_psi_mat=.true.` and
+`boole_write_particle_histories=.true.` and `boole_random_precalc=.true.`, then
+run both fields with the same executable and `random_seed_filename` contents.
+`particle_histories.dat` contains
+`nu*`, marker index, step, physical time, and `s` through each marker's last
+valid step. Pair rows by marker and step; use `lost_particle_events.dat` for
+the censoring reason and loss position.
+
 ## Input files
 
 | File | Role |

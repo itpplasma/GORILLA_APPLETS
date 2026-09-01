@@ -95,10 +95,17 @@ mono["transpcoefnml"]["boole_collisions"] = True
 mono["transpcoefnml"]["energy_ev"] = 3.0e3
 mono["transpcoefnml"]["boole_random_precalc"] = True
 mono["transpcoefnml"]["seed_option"] = 2
+mono["transpcoefnml"]["random_seed_filename"] = "seed.inp"
 mono["transpcoefnml"]["idiffcoef_output"] = 1
 mono["transpcoefnml"]["filename_transp_diff_coef"] = "nustar_diffcoef_std.dat"
 mono["transpcoefnml"]["nu_star"] = 0.1
 mono["transpcoefnml"]["v_e"] = 0.0
+# One transport timescale is enough for this deterministic output/interface test.
+mono["transpcoefnml"]["flight_time_multiplier"] = 1.0
+mono["transpcoefnml"]["boole_psi_mat"] = True
+mono["transpcoefnml"]["boole_write_particle_histories"] = True
+mono["transpcoefnml"]["filename_particle_histories"] = "particle_histories.dat"
+mono["transpcoefnml"]["filename_transport_metadata"] = "transport_metadata.dat"
 
 # Deterministic seed for reproducible CI output
 (WORK_DIR / "seed.inp").write_text("8\n  1 2 3 4 5 6 7 8\n")
@@ -165,5 +172,48 @@ compare_numeric_file(
     rtol=0.0,
     atol=0.0,
 )
+
+with (WORK_DIR / "n_lost_particles.dat").open() as fh:
+    n_lost = int(fh.read())
+with (WORK_DIR / "loss_summary.dat").open() as fh:
+    loss_rows = [line.split() for line in fh if line.strip()]
+if len(loss_rows) != 1 or len(loss_rows[0]) != 3:
+    sys.exit(f"FAIL: unexpected loss summary: {loss_rows}")
+loss_nu_star, summary_lost, summary_total = loss_rows[0]
+if float(loss_nu_star) != nu_star or int(summary_lost) != n_lost or int(summary_total) != 3:
+    sys.exit(f"FAIL: inconsistent loss summary: {loss_rows[0]}")
+with (WORK_DIR / "lost_particle_events.dat").open() as fh:
+    event_rows = [line.split() for line in fh if line.strip()]
+if len(event_rows) != n_lost:
+    sys.exit(f"FAIL: expected {n_lost} loss events, got {len(event_rows)}")
+
+with (WORK_DIR / "transport_metadata.dat").open() as fh:
+    metadata_rows = [line.split() for line in fh if line.strip() and not line.startswith("#")]
+if len(metadata_rows) != 1 or len(metadata_rows[0]) != 11:
+    sys.exit(f"FAIL: unexpected transport metadata: {metadata_rows}")
+meta = metadata_rows[0]
+meta_nu_star, radius, aiota, q_saf, speed, collision_frequency, time_step = (
+    float(value) for value in meta[:7]
+)
+if abs(meta_nu_star - nu_star) > 1.0e-15:
+    sys.exit("FAIL: metadata nu* differs from transport output")
+reconstructed_nu_star = radius * collision_frequency / (abs(aiota) * speed)
+if abs(reconstructed_nu_star - nu_star) > 1.0e-14:
+    sys.exit("FAIL: metadata does not obey standard nu* normalization")
+if abs(q_saf * aiota - 1.0) > 1.0e-12:
+    sys.exit("FAIL: metadata q and iota are not reciprocal")
+if int(meta[10]) != 5:
+    sys.exit("FAIL: metadata does not retain the configured field periods")
+
+with (WORK_DIR / "particle_histories.dat").open() as fh:
+    history_rows = [line.split() for line in fh if line.strip()]
+if not history_rows or any(len(row) != 5 for row in history_rows):
+    sys.exit("FAIL: malformed particle history output")
+for row in history_rows:
+    row_nu_star, marker, step, physical_time, _ = row
+    if float(row_nu_star) != nu_star:
+        sys.exit("FAIL: history row carries the wrong nu*")
+    if abs(float(physical_time) - int(step) * time_step) > 1.0e-12:
+        sys.exit(f"FAIL: inconsistent time for marker {marker}, step {step}")
 
 print(f"PASS: nu*={nu_star:g}  D11={d11:g}  sigma={sigma:g} (matches reference)")
