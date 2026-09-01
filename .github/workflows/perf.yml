@@ -29,6 +29,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: itpplasma/GORILLA
+          ref: feat/boozer-chartmap-grid
           path: GORILLA
 
       - name: System dependencies
