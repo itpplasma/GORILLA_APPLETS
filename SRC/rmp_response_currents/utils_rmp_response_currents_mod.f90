@@ -181,6 +181,10 @@ module utils_rmp_response_currents_mod
     ! loaded profiles instead of the constants energy_eV and density, so the
     ! OU equilibrium is <v_par^2> = T_e(s)/m (as in KIM's local model).
     logical,  public :: boole_local_background = .false.
+    ! Replace x_perp^2 = m v_perp^2/(2 T) in the delta-f source by its
+    ! Maxwellian average 1, i.e. the v_perp-integrated 1D source of KIM. The
+    ! OU operator acts on v_par only, so v_perp keeps its initial sample.
+    logical,  public :: boole_vperp_averaged_source = .false.
     ! Per-particle regularisation storage. Allocated alongside weights%w
     ! when boole_delta_f is on. tau_c is the local collision time at the
     ! starting position; t_reg_on the switch-on time of the damping;
@@ -240,7 +244,7 @@ subroutine read_rmp_response_currents_inp_into_type
     & point_source_x, boole_force_marker1_pitch, marker1_pitch_value, &
     & boole_dump_collisions_n1, coll_dump_stride, i_collision_mode, &
     & anomalous_diffusion_coefficient, &
-    & boole_local_background
+    & boole_local_background, boole_vperp_averaged_source
 
     ! Default: no anomalous transport (D_anom = 0 disables the kick).
     anomalous_diffusion_coefficient = 0.0_dp
@@ -1202,6 +1206,7 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
         T_alpha_erg = pv%Te * ev2erg
     end if
     if (T_alpha_erg <= 0.0_dp) T_alpha_erg = in%energy_eV * ev2erg
+    if (boole_vperp_averaged_source) v_sq = vpar*vpar + 2.0_dp * T_alpha_erg / mass
 
     ! A_1, A_2 in d/ds form (no ds/dpsi_pol conversion); the contravariant
     ! component delta_B^s in the source closes the chain rule.
