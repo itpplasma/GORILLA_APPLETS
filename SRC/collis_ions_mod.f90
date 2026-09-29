@@ -8,6 +8,10 @@ implicit none
 ! in stost. Default 1.0 (no change). Set at runtime from the namelist to
 ! benchmark against external collision-frequency conventions (e.g. KIM nu_e).
 real(dp), public :: nu_scale_factor = 1.0_dp
+! OU operator (iswmode = 5): if > 0, the step is dtau = ou_nu_dtau / nu (capped
+! by tau) and v_par is advanced with the exact OU transition (Gaussian
+! increment) instead of the Euler-Maruyama step with a uniform increment.
+real(dp), public :: ou_nu_dtau = 0.0_dp
 
 contains
 !
@@ -255,6 +259,7 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override
   if (iswmode.eq.5) then
     block
       real(dp) :: vpar_norm, vperp_norm, nu_step, sigma_eq2, xi_ou
+      real(dp) :: u_bm(2), decay_ou
       integer  :: i_bg
       i_bg = n
       vpar_norm  = z(4) * z(5)
@@ -272,15 +277,26 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override
       else
         sigma_eq2 = 0.5_dp
       end if
-      if (present(randnum)) then
-        ur = randnum(3)
+      if (ou_nu_dtau .gt. 0.0_dp) then
+        ! Exact OU transition over dtau = ou_nu_dtau/nu (Box-Muller normal).
+        if (present(tau)) dtau = min(ou_nu_dtau / nu_step, tau, upper_limit)
+        call random_number(u_bm)
+        u_bm(1) = max(u_bm(1), tiny(1.0_dp))
+        xi_ou = sqrt(-2.0_dp * log(u_bm(1))) * cos(2.0_dp * acos(-1.0_dp) * u_bm(2))
+        decay_ou = exp(-nu_step * dtau)
+        vpar_norm = vpar_norm * decay_ou &
+                  + sqrt(sigma_eq2 * (1.0_dp - decay_ou**2)) * xi_ou
       else
-        call getran(0, ur)
+        if (present(randnum)) then
+          ur = randnum(3)
+        else
+          call getran(0, ur)
+        end if
+        xi_ou     = dble(ur)
+        vpar_norm = vpar_norm &
+                  + sqrt(2.0_dp * nu_step * sigma_eq2 * dtau) * xi_ou &
+                  - vpar_norm * nu_step * dtau
       end if
-      xi_ou     = dble(ur)
-      vpar_norm = vpar_norm &
-                + sqrt(2.0_dp * nu_step * sigma_eq2 * dtau) * xi_ou &
-                - vpar_norm * nu_step * dtau
       z(4) = sqrt(vpar_norm*vpar_norm + vperp_norm*vperp_norm)
       z(5) = vpar_norm / z(4)
       if (z(4).lt.pmin) then
