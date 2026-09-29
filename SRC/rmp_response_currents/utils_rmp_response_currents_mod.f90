@@ -4,6 +4,7 @@ module utils_rmp_response_currents_mod
     ! Canonical KIM r_eff-alignment flag lives in profile_data_mod; use-associate
     ! it here so the namelist reads straight into the single source of truth.
     use profile_data_mod, only: boole_kim_reff_coords
+    use perturbation_field_mod, only: boole_eperp_native_grid
 
     implicit none
 
@@ -255,7 +256,7 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_dump_collisions_n1, coll_dump_stride, i_collision_mode, &
     & anomalous_diffusion_coefficient, &
     & boole_local_background, boole_vperp_averaged_source, &
-    & n_prof_bins, n_prof_batches, ou_nu_dtau
+    & n_prof_bins, n_prof_batches, ou_nu_dtau, boole_eperp_native_grid
 
     ! Default: no anomalous transport (D_anom = 0 disables the kick).
     anomalous_diffusion_coefficient = 0.0_dp
