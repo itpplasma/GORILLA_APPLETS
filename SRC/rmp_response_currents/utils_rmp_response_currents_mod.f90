@@ -193,6 +193,9 @@ module utils_rmp_response_currents_mod
     ! jpar_mn_profile.dat. Disabled for n_prof_bins = 0.
     integer,  public :: n_prof_bins = 0
     integer,  public :: n_prof_batches = 1
+    ! Burn-in: the profile deposit starts at t = prof_t_burn [s] of each marker's
+    ! trace (w starts at 0) and is divided by T_n - prof_t_burn.
+    real(dp), public :: prof_t_burn = 0.0_dp
     complex(dp), allocatable :: prof_acc(:,:)
     integer,     allocatable :: prof_count(:)
     ! Reflect anomalous-transport kicks at the radial spawn window
@@ -260,7 +263,7 @@ subroutine read_rmp_response_currents_inp_into_type
     & anomalous_diffusion_coefficient, &
     & boole_local_background, boole_vperp_averaged_source, &
     & n_prof_bins, n_prof_batches, ou_nu_dtau, boole_eperp_native_grid, &
-    & boole_reflect_window
+    & boole_reflect_window, prof_t_burn
 
     ! Default: no anomalous transport (D_anom = 0 disables the kick).
     anomalous_diffusion_coefficient = 0.0_dp
@@ -664,7 +667,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP&        boole_dump_collisions_n1, coll_dump_unit, coll_dump_stride, &
     !$OMP&        coll_event_count, coll_dt_sum, coll_dist_sum, &
     !$OMP&        da_profile_loaded, da_scale_factor, n_prof_bins, n_prof_batches, &
-    !$OMP&        prof_acc, prof_count, boole_reflect_window, rho_win) &
+    !$OMP&        prof_acc, prof_count, boole_reflect_window, rho_win, prof_t_burn) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
     !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local, n_da_sub, i_da_sub) &
     !$OMP& PRIVATE(prof_local, prof_marker, ibatch) &
@@ -841,9 +844,10 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                 local_tetr_moments = local_tetr_moments &
                                    + particle_tetr_moments / t_actual_n
             end if
-            if (n_prof_bins > 0 .and. t_actual_n > 0.0_dp) then
+            if (n_prof_bins > 0 .and. t_actual_n > prof_t_burn) then
                 ibatch = mod((n - 1) / 2, n_prof_batches) + 1
-                prof_local(:, ibatch) = prof_local(:, ibatch) + prof_marker / t_actual_n
+                prof_local(:, ibatch) = prof_local(:, ibatch) &
+                                      + prof_marker / (t_actual_n - prof_t_burn)
                 !$omp atomic update
                 prof_count(ibatch) = prof_count(ibatch) + 1
             end if
@@ -1024,7 +1028,8 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         endif
 
         ! (m,n)-demodulated radial profile deposit at the push midpoint.
-        if (present(prof_marker) .and. in%boole_delta_f .and. ind_tetr_save /= -1) then
+        if (present(prof_marker) .and. in%boole_delta_f .and. ind_tetr_save /= -1 &
+            .and. t%confined + t%step - t%remain > prof_t_burn) then
             call deposit_mn_profile(prof_marker, ind_tetr_save, 0.5_dp * (x_pre_push + x), &
                                     weights%w(n, species) * optional_quantities%vpar_int)
         end if
