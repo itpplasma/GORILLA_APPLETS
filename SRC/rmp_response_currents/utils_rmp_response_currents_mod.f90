@@ -206,7 +206,8 @@ contains
 subroutine read_rmp_response_currents_inp_into_type
 
     use gorilla_applets_types_mod, only: in
-    use collis_ions,               only: collis_nu_scale_factor => nu_scale_factor
+    use collis_ions,               only: collis_nu_scale_factor => nu_scale_factor, &
+                                         ou_nu_dtau
 
     real(dp) :: time_step, energy_eV, n_particles, density
     real(dp) :: anomalous_diffusion_coefficient
@@ -254,7 +255,7 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_dump_collisions_n1, coll_dump_stride, i_collision_mode, &
     & anomalous_diffusion_coefficient, &
     & boole_local_background, boole_vperp_averaged_source, &
-    & n_prof_bins, n_prof_batches
+    & n_prof_bins, n_prof_batches, ou_nu_dtau
 
     ! Default: no anomalous transport (D_anom = 0 disables the kick).
     anomalous_diffusion_coefficient = 0.0_dp
