@@ -218,6 +218,11 @@ module utils_rmp_response_currents_mod
     real(dp) :: max_rel_dH = 0.0_dp
     real(dp) :: max_rel_dH_loc = 0.0_dp
     !$omp threadprivate(max_rel_dH_loc)
+    ! Largest |w| and mean w^2 (per push) in nonlinear mode: at zero amplitude the
+    ! weights must stay ~0 (only pusher truncation errors).
+    real(dp) :: max_abs_w = 0.0_dp, sum_w2 = 0.0_dp, n_w2 = 0.0_dp
+    real(dp) :: max_abs_w_loc = 0.0_dp, sum_w2_loc = 0.0_dp, n_w2_loc = 0.0_dp
+    !$omp threadprivate(max_abs_w_loc, sum_w2_loc, n_w2_loc)
     ! Per-particle regularisation storage. Allocated alongside weights%w
     ! when boole_delta_f is on. tau_c is the local collision time at the
     ! starting position; t_reg_on the switch-on time of the damping;
@@ -693,7 +698,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP&        coll_event_count, coll_dt_sum, coll_dist_sum, &
     !$OMP&        da_profile_loaded, da_scale_factor, n_prof_bins, n_prof_batches, &
     !$OMP&        prof_acc, prof_count, boole_reflect_window, rho_win, prof_t_burn, &
-    !$OMP&        max_rel_dH) &
+    !$OMP&        max_rel_dH, max_abs_w, sum_w2, n_w2) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
     !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local, n_da_sub, i_da_sub) &
     !$OMP& PRIVATE(prof_local, prof_marker, ibatch) &
@@ -907,11 +912,17 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     end if
     !$omp critical (dH_merge)
     max_rel_dH = max(max_rel_dH, max_rel_dH_loc)
+    max_abs_w = max(max_abs_w, max_abs_w_loc)
+    sum_w2 = sum_w2 + sum_w2_loc
+    n_w2 = n_w2 + n_w2_loc
     !$omp end critical (dH_merge)
     !$OMP END PARALLEL
 
-    if (boole_nonlinear_weight) print '(a, es12.4)', &
-        ' Nonlinear weights: max |dH|/|H| over one push = ', max_rel_dH
+    if (boole_nonlinear_weight) then
+        print '(a, es12.4)', ' Nonlinear weights: max |dH|/|H| over one push = ', max_rel_dH
+        print '(a, es12.4, a, es12.4)', ' Nonlinear weights: max |w| = ', max_abs_w, &
+            ', rms w = ', sqrt(sum_w2 / max(n_w2, 1.0_dp))
+    end if
 
     if (n_prof_bins > 0) call write_mn_profile('jpar_mn_profile.dat')
 
@@ -1066,6 +1077,9 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
             weights%w(n, species) = cmplx((1.0_dp + real(weights%w(n, species), dp)) &
                                           * exp(lnf0_a - lnf0_b) - 1.0_dp, 0.0_dp, kind=dp)
             max_rel_dH_loc = max(max_rel_dH_loc, abs(H_b - H_a) / abs(H_a))
+            max_abs_w_loc = max(max_abs_w_loc, abs(weights%w(n, species)))
+            sum_w2_loc = sum_w2_loc + abs(weights%w(n, species))**2
+            n_w2_loc = n_w2_loc + 1.0_dp
             lnf0_a = lnf0_b
         else if (in%boole_delta_f .and. ind_tetr_save /= -1) then
             call update_delta_f_weight(n, ind_tetr_save, &
@@ -1632,15 +1646,16 @@ real(dp) function eval_s0_local(ind_tetr, x) result(s0)
 end function eval_s0_local
 
 ! ====================================================================
-! ln f0 = ln n(s0) - 3/2 ln T(s0) - K/T(s0), K = m (vpar^2/2 - perpinv B), and
-! H = K + q Phi at position x in tetrahedron ind_tetr (nonlinear mode).
+! ln F0 = ln n(s*) - 3/2 ln T(s*) - K0*/T(s*) (canonical background, see below),
+! K = m (vpar^2/2 - perpinv B), and H = K + q Phi at position x (nonlinear mode).
 ! perpinv = -vperp^2/(2B) is the conserved perpendicular invariant.
 ! ====================================================================
 subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in)
 
     use tetra_physics_mod, only: tetra_physics
     use gorilla_applets_types_mod, only: start
-    use profile_data_mod, only: eval_profiles, profile_values_t
+    use profile_data_mod, only: eval_profiles, profile_values_t, eval_s_from_psi_pol
+    use tetra_grid_mod, only: tetra_grid
     use constants, only: ev2erg
 
     integer,  intent(in)  :: ind_tetr, species
@@ -1651,8 +1666,9 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in)
     ! errors in vpar do not enter the weight. H still returns the pusher's value.
     real(dp), intent(in), optional :: H_in
 
-    real(dp) :: z(3), B, K, Te_erg, Phi
-    type(profile_values_t) :: pv
+    real(dp) :: z(3), B, K, Te_erg, Phi, h_phi, psi0, lam(4), s0, s_star, K0
+    logical  :: ok
+    type(profile_values_t) :: pv0, pvs
 
     z = x - tetra_physics(ind_tetr)%x1
     B = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z)
@@ -1660,9 +1676,21 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in)
     K = start%particle_mass(species) * (0.5_dp * vpar**2 - perpinv * B)
     H = K + start%particle_charge(species) * Phi
     if (present(H_in)) K = H_in - start%particle_charge(species) * Phi
-    call eval_profiles(eval_s0_local(ind_tetr, x), pv)
-    Te_erg = pv%Te * ev2erg
-    lnf0 = log(pv%n_e) - 1.5_dp * log(Te_erg) - K / Te_erg
+    ! Canonical background: psi* = psi0 + (c m/q) vpar h_phi (= c p_phi/q of the
+    ! unperturbed field, h_phi covariant) and K0* = K + q (Phi0(s0) - Phi0(s*))
+    ! are both conserved on unperturbed orbits, including magnetic drifts, so
+    ! the weight changes only through the perturbation.
+    call barycentric_coords(ind_tetr, x, lam, ok)
+    psi0 = sum(lam * psi0_vert(tetra_grid(ind_tetr)%ind_knot(1:4)))
+    h_phi = tetra_physics(ind_tetr)%h2_1 + sum(tetra_physics(ind_tetr)%gh2 * z)
+    s0 = max(0.0_dp, min(1.0_dp, eval_s_from_psi_pol(psi0)))
+    s_star = max(0.0_dp, min(1.0_dp, &
+        eval_s_from_psi_pol(psi0 + start%cm_over_e(species) * vpar * h_phi)))
+    call eval_profiles(s0, pv0)
+    call eval_profiles(s_star, pvs)
+    K0 = K + start%particle_charge(species) * (pv0%Phi0 - pvs%Phi0)
+    Te_erg = pvs%Te * ev2erg
+    lnf0 = log(pvs%n_e) - 1.5_dp * log(Te_erg) - K0 / Te_erg
 
 end subroutine ln_f0_and_H
 
