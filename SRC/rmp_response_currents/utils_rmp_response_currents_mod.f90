@@ -623,7 +623,14 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
 
     if (in%boole_delta_f) call allocate_delta_f_per_particle(n_particles, in%n_species)
 
-    allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
+    ! With the radial profile deposit (n_prof_bins > 0) the per-tetrahedron
+    ! moments are not accumulated; allocate a dummy column only (the two
+    ! per-thread copies otherwise cost ~2 kB per tetrahedron at 16 threads).
+    if (n_prof_bins > 0) then
+        allocate(local_tetr_moments(moment_specs%n_moments, 1))
+    else
+        allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
+    end if
     kpart = 0
     iantithetic = 1
     if (in%boole_antithetic_variate) iantithetic = 2
@@ -680,7 +687,11 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     ! the parallel region. Only used in the delta-f path; harmless to
     ! allocate either way.
     if (in%boole_delta_f) then
-        allocate(particle_tetr_moments(moment_specs%n_moments, ntetr))
+        if (n_prof_bins > 0) then
+            allocate(particle_tetr_moments(moment_specs%n_moments, 1))
+        else
+            allocate(particle_tetr_moments(moment_specs%n_moments, ntetr))
+        end if
     end if
     if (n_prof_bins > 0) then
         allocate(prof_local(n_prof_bins, n_prof_batches), prof_marker(n_prof_bins))
@@ -863,7 +874,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
         enddo
 
         !$omp critical
-        call add_local_tetr_moments_to_output(local_tetr_moments, species)
+        if (n_prof_bins == 0) call add_local_tetr_moments_to_output(local_tetr_moments, species)
         !$omp end critical
     enddo
     !$OMP END DO
@@ -1034,7 +1045,8 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
                                     weights%w(n, species) * optional_quantities%vpar_int)
         end if
 
-        call update_local_tetr_moments(local_tetr_moments, ind_tetr_save, n, optional_quantities, species)
+        if (.not. present(prof_marker)) &
+            call update_local_tetr_moments(local_tetr_moments, ind_tetr_save, n, optional_quantities, species)
         if ((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save, ind_tetr, x)
 
         ! Diagnostic: dump marker n=1 trajectory for orbit-q comparison.
