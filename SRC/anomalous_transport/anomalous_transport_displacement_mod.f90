@@ -15,8 +15,8 @@ module anomalous_transport_displacement_mod
 
 contains
 
-subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp, d_local, &
-                                           rho_bounds)
+subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp, &
+                                           d_local, rho_bounds)
 !
 ! Computes the displacement vector for anomalous transport and applies it.
 !
