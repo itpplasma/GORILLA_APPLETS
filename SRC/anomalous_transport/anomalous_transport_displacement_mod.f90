@@ -15,7 +15,8 @@ module anomalous_transport_displacement_mod
 
 contains
 
-subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp, d_local)
+subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp, d_local, &
+                                           rho_bounds)
 !
 ! Computes the displacement vector for anomalous transport and applies it.
 !
@@ -41,6 +42,9 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
 !   d_local   - Local D_a [cm^2/s] override (thread-private for OMP safety).
 !               When present and > 0, supersedes in%anomalous_diffusion_coefficient.
 !               Use this when D_a is radially varying (profile mode).
+!   rho_bounds(2) - grid_kind = 5 only: minor-radius window [rho_lo, rho_hi];
+!               an end point outside is reflected back into it (zero-flux
+!               boundary), so the marker does not leave the annular mesh.
 !
     use tetra_physics_mod, only: tetra_physics,isinside
     use collis_ions, only: getran
@@ -53,6 +57,7 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     integer, intent(inout)                :: ind_tetr, iface
     real(dp), intent(in)                  :: dt, vpar, vperp
     real(dp), intent(in), optional        :: d_local
+    real(dp), intent(in), optional        :: rho_bounds(2)
 
     real(dp), dimension(3) :: displacement, xi, V_c, x_new, x_save, displacement_towards_axis
 
@@ -107,6 +112,9 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     displacement(3) = sqrt_2dt * (alpha_perp_mat(3,1) * xi(1) + alpha_perp_mat(3,2) * xi(2) &
                                 + alpha_perp_mat(3,3) * xi(3)) + V_c(3) * dt
 
+    if (present(rho_bounds) .and. grid_kind.eq.5) &
+        call reflect_displacement_rho(x, displacement, rho_bounds)
+
     ! Save original state before displacement
     x_save = x
     ind_tetr_save = ind_tetr
@@ -153,6 +161,34 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     endif
 
 end subroutine anomalous_transport_displacement
+
+subroutine reflect_displacement_rho(x, displacement, rho_bounds)
+!
+! grid_kind = 5 (concentric circles about R0): reflect the end point of the
+! displacement at rho_bounds(1) and rho_bounds(2) in minor radius, keeping its
+! poloidal and toroidal angles, and clamp it into the window.
+!
+    use tetra_grid_settings_mod, only: R0_analytic_circ
+
+    real(dp), intent(in)    :: x(3), rho_bounds(2)
+    real(dp), intent(inout) :: displacement(3)
+
+    real(dp) :: dR, dZ, rho_e, rho_n
+
+    dR = x(1) + displacement(1) - R0_analytic_circ
+    dZ = x(3) + displacement(3)
+    rho_e = sqrt(dR**2 + dZ**2)
+    if (rho_e <= 0.0_dp) return
+    rho_n = rho_e
+    if (rho_n > rho_bounds(2)) rho_n = 2.0_dp * rho_bounds(2) - rho_n
+    if (rho_n < rho_bounds(1)) rho_n = 2.0_dp * rho_bounds(1) - rho_n
+    rho_n = min(max(rho_n, rho_bounds(1)), rho_bounds(2))
+    if (rho_n /= rho_e) then
+        displacement(1) = R0_analytic_circ + dR * rho_n / rho_e - x(1)
+        displacement(3) = dZ * rho_n / rho_e - x(3)
+    end if
+
+end subroutine reflect_displacement_rho
 
 ! ====================================================================
 subroutine compute_diffusion_cholesky(h_contra, R_local, D_perp, alpha_perp_mat)
