@@ -203,12 +203,14 @@ module utils_rmp_response_currents_mod
     logical,  public :: boole_reflect_window = .false.
     ! Nonlinear delta-f (prescribed static field with islands): the markers follow
     ! the full mesh field B0 + dB (helical_pert_file_analytic_circ, grid_kind = 5)
-    ! and w = df/f0 is advanced exactly by telescoping over each push,
-    !   1 + w <- (1 + w) f0(z_a)/f0(z_b),
-    ! f0 = n(psi0) (m/(2 pi T(psi0)))^(3/2) exp(-K/T(psi0)) on the UNPERTURBED
-    ! flux label psi0 (linear interpolant of the unperturbed vertex values) and
-    ! the kinetic energy K = m vpar^2/2 + mu B; collisions leave w unchanged.
-    ! eval_wdot_s is not used. Radial bins and the collision background use psi0.
+    ! and w = df/F0 is advanced exactly by telescoping over each push,
+    !   1 + w <- (1 + w) F0(z_a)/F0(z_b),
+    ! F0 = n(s*) (m/(2 pi T(s*)))^(3/2) exp(-K0*/T(s*)) on the canonical label
+    ! psi* = psi0 + (c m/q) vpar h_phi of the UNPERTURBED field (psi0: linear
+    ! interpolant of the unperturbed vertex A_phi), K0* = K + q (Phi0(s0) -
+    ! Phi0(s*)), K = H - q Phi(x) with H fixed between collisions (ln_f0_and_H);
+    ! collisions leave w unchanged. eval_wdot_s is not used. Radial bins and the
+    ! collision background use s0 = s(psi0).
     logical,  public :: boole_nonlinear_weight = .false.
     ! Rescale each marker's sampled energy by T_e(s)/energy_eV at its spawn point
     ! (Maxwellian at the local temperature).
