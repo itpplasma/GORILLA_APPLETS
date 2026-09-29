@@ -195,6 +195,9 @@ module utils_rmp_response_currents_mod
     integer,  public :: n_prof_batches = 1
     complex(dp), allocatable :: prof_acc(:,:)
     integer,     allocatable :: prof_count(:)
+    ! Reflect anomalous-transport kicks at the radial spawn window
+    ! (grid_kind = 5 only): zero-flux boundary, markers stay in the mesh.
+    logical,  public :: boole_reflect_window = .false.
     ! Per-particle regularisation storage. Allocated alongside weights%w
     ! when boole_delta_f is on. tau_c is the local collision time at the
     ! starting position; t_reg_on the switch-on time of the damping;
@@ -256,7 +259,8 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_dump_collisions_n1, coll_dump_stride, i_collision_mode, &
     & anomalous_diffusion_coefficient, &
     & boole_local_background, boole_vperp_averaged_source, &
-    & n_prof_bins, n_prof_batches, ou_nu_dtau, boole_eperp_native_grid
+    & n_prof_bins, n_prof_batches, ou_nu_dtau, boole_eperp_native_grid, &
+    & boole_reflect_window
 
     ! Default: no anomalous transport (D_anom = 0 disables the kick).
     anomalous_diffusion_coefficient = 0.0_dp
@@ -576,6 +580,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     ! or da_profile_file is loaded.
     use anomalous_transport_displacement_mod, only: anomalous_transport_displacement
     use profile_data_mod, only: da_profile_loaded, eval_da_profile
+    use tetra_grid_settings_mod, only: grid_kind, grid_size, R0_analytic_circ, a_analytic_circ
+    use constants, only: pi
 
     integer, intent(in)                               :: species
     integer, intent(in), optional                     :: n_particles_in
@@ -600,6 +606,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     real(dp)                                          :: da_local
     integer                                           :: n_da_sub, i_da_sub
     complex(dp), dimension(:,:), allocatable          :: prof_local
+    real(dp)                                          :: rho_win(2)
     complex(dp), dimension(:), allocatable            :: prof_marker
     integer                                           :: ibatch
     logical                                           :: thread_flag = .true.
@@ -623,6 +630,26 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     n_respawn_total = 0
     n_truly_lost    = 0
 
+    ! Reflecting window for the anomalous kicks: rho of the spawn-window
+    ! surfaces; the outer bound is pulled in to the chord of the polygonal
+    ! outer mesh surface (cos(pi/n3)), and both bounds by a further 100 um so
+    ! that drift-orbit excursions (~30 um for trapped electrons at R0 = 30x
+    ! AUG) do not carry reflected markers out of the mesh.
+    if (boole_reflect_window) then
+        if (grid_kind /= 5) then
+            print *, 'ERROR: boole_reflect_window requires grid_kind = 5'
+            stop
+        end if
+        rho_win(1) = sqrt(R0_analytic_circ**2 - (R0_analytic_circ - s_inner_sample &
+                     * (R0_analytic_circ - sqrt(R0_analytic_circ**2 - a_analytic_circ**2)))**2)
+        rho_win(2) = sqrt(R0_analytic_circ**2 - (R0_analytic_circ - s_outer_sample &
+                     * (R0_analytic_circ - sqrt(R0_analytic_circ**2 - a_analytic_circ**2)))**2) &
+                     * cos(pi / real(grid_size(3), dp))
+        rho_win(1) = rho_win(1) + 1.0e-2_dp
+        rho_win(2) = rho_win(2) - 1.0e-2_dp
+        print '(a, 2f12.5)', ' Reflecting window for anomalous kicks, rho [cm]: ', rho_win
+    end if
+
     if (n_prof_bins > 0) then
         if (allocated(prof_acc)) deallocate(prof_acc)
         if (allocated(prof_count)) deallocate(prof_count)
@@ -637,7 +664,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP&        boole_dump_collisions_n1, coll_dump_unit, coll_dump_stride, &
     !$OMP&        coll_event_count, coll_dt_sum, coll_dist_sum, &
     !$OMP&        da_profile_loaded, da_scale_factor, n_prof_bins, n_prof_batches, &
-    !$OMP&        prof_acc, prof_count) &
+    !$OMP&        prof_acc, prof_count, boole_reflect_window, rho_win) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
     !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local, n_da_sub, i_da_sub) &
     !$OMP& PRIVATE(prof_local, prof_marker, ibatch) &
@@ -761,8 +788,14 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                         n_da_sub = max(1, nint(2.0_dp * da_local * t%step / 1.0d-2))
                         t%step_anomalous_transport = t%step / real(n_da_sub, dp)
                         do i_da_sub = 1, n_da_sub
-                            call anomalous_transport_displacement(x, ind_tetr, iface, &
-                                t%step_anomalous_transport, vpar, vperp, da_local)
+                            if (boole_reflect_window) then
+                                call anomalous_transport_displacement(x, ind_tetr, iface, &
+                                    t%step_anomalous_transport, vpar, vperp, da_local, &
+                                    rho_bounds=rho_win)
+                            else
+                                call anomalous_transport_displacement(x, ind_tetr, iface, &
+                                    t%step_anomalous_transport, vpar, vperp, da_local)
+                            end if
                             if (ind_tetr == -1) exit
                         end do
                     end if
