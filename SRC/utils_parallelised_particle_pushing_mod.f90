@@ -269,17 +269,12 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
 
     real(dp), dimension(5) :: zet
     real(dp), dimension(3) :: randnum
-    real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
+    real(dp), dimension(c%n) :: efcolf,velrat,enrat,vpar_background
     integer :: err
     real(dp) :: t_max
 
     real(dp) :: z_cell(3), psi_pol_loc, s_loc, nu_kim_phys, nu_kim_code
     logical  :: use_kim_nu_now
-
-    allocate(efcolf(c%n))
-    allocate(velrat(c%n))
-    allocate(enrat(c%n))
-    allocate(vpar_background(c%n))
 
     efcolf = c%efcolf_mat(:,ind_tetr)
     velrat = c%velrat_mat(:,ind_tetr)
