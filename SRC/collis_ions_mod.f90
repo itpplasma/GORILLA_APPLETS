@@ -208,7 +208,7 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override
   real(dp), dimension(5) :: z
   real(dp) :: ur, epsilon, q
   real(dp), dimension(:), intent(in) :: efcolf,velrat,enrat
-  real(dp), dimension(:), allocatable :: dpp_vec,dhh_vec,fpeff_vec
+  real(dp), dimension(size(efcolf)) :: dpp_vec,dhh_vec,fpeff_vec
   real(dp), optional :: tau
   real(dp), dimension(3), intent(in), optional :: randnum
   ! Optional caller-supplied override for the OU step rate, in code units
@@ -222,9 +222,6 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override
   q = 0.3
   upper_limit = 30
   n = size(efcolf)
-  allocate(dpp_vec(n))
-  allocate(dhh_vec(n))
-  allocate(fpeff_vec(n))
 
   p=z(4)
   call coleff(efcolf,velrat,enrat,p,dpp_vec,dhh_vec,fpeff_vec)
