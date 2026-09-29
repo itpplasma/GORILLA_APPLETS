@@ -177,6 +177,10 @@ module utils_rmp_response_currents_mod
     ! Module-private temperature plumbed into pdf_maxwellian_energy.
     real(dp)                  :: T_sample_eV     = 0.0_dp
 
+    ! Local-profile OU background: per-tetrahedron T_e(s), n_e(s) from the
+    ! loaded profiles instead of the constants energy_eV and density, so the
+    ! OU equilibrium is <v_par^2> = T_e(s)/m (as in KIM's local model).
+    logical,  public :: boole_local_background = .false.
     ! Per-particle regularisation storage. Allocated alongside weights%w
     ! when boole_delta_f is on. tau_c is the local collision time at the
     ! starting position; t_reg_on the switch-on time of the damping;
@@ -235,7 +239,8 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_dump_orbit_n1, orbit_dump_stride, trapping_filter_mode, &
     & point_source_x, boole_force_marker1_pitch, marker1_pitch_value, &
     & boole_dump_collisions_n1, coll_dump_stride, i_collision_mode, &
-    & anomalous_diffusion_coefficient
+    & anomalous_diffusion_coefficient, &
+    & boole_local_background
 
     ! Default: no anomalous transport (D_anom = 0 disables the kick).
     anomalous_diffusion_coefficient = 0.0_dp
@@ -1264,6 +1269,58 @@ subroutine init_regularisation_for_particle(n, ind_tetr, x, vpar, vperp, species
     t_reg_on(n, species)   = real(m_collision_times_reg_on, dp) * tau_c_loc
 
 end subroutine init_regularisation_for_particle
+
+! ====================================================================
+! Local-profile collision background for the OU operator: per tetrahedron
+! T_e(s), T_i(s) and n_e(s) from the loaded profiles (at the centroid),
+! replacing the constants energy_eV and density set in
+! calc_collision_coefficients_for_all_tetrahedra, and recomputes the
+! collis_init coefficients. The OU equilibrium is then <v_par^2> = T_e(s)/m.
+! ====================================================================
+subroutine set_local_collision_background()
+
+    use gorilla_applets_types_mod, only: in, c
+    use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
+    use tetra_physics_mod, only: particle_mass, particle_charge
+    use constants, only: echarge
+    use collis_ions, only: collis_init
+    use profile_data_mod, only: eval_profiles, profile_values_t
+
+    integer :: i, k
+    real(dp) :: x_c(3), m0, z0, v0_l, s_c
+    real(dp), allocatable :: efcolf_l(:), velrat_l(:), enrat_l(:)
+    real(dp), allocatable :: dens_l(:), temp_l(:)
+    type(profile_values_t) :: pv
+
+    m0 = particle_mass
+    z0 = particle_charge / echarge
+    !$omp parallel default(shared) private(i, k, x_c, s_c, pv, v0_l, &
+    !$omp& efcolf_l, velrat_l, enrat_l, dens_l, temp_l)
+    allocate(efcolf_l(c%n), velrat_l(c%n), enrat_l(c%n), dens_l(c%n), temp_l(c%n))
+    !$omp do
+    do i = 1, ntetr
+        x_c = 0.0_dp
+        do k = 1, 4
+            x_c = x_c + 0.25_dp * verts_rphiz(:, tetra_grid(i)%ind_knot(k))
+        end do
+        s_c = eval_s_local(i, x_c)
+        call eval_profiles(s_c, pv)
+        dens_l = pv%n_e
+        temp_l = pv%Ti
+        temp_l(c%n) = pv%Te
+        c%temp_mat(:, i) = temp_l
+        c%dens_mat(:, i) = dens_l
+        call collis_init(m0, z0, c%mass, c%charge_num, dens_l, temp_l, in%energy_eV, &
+                         v0_l, efcolf_l, velrat_l, enrat_l)
+        c%efcolf_mat(:, i) = efcolf_l
+        c%velrat_mat(:, i) = velrat_l
+        c%enrat_mat(:, i) = enrat_l
+    end do
+    !$omp end do
+    deallocate(efcolf_l, velrat_l, enrat_l, dens_l, temp_l)
+    !$omp end parallel
+
+end subroutine set_local_collision_background
 
 ! ====================================================================
 ! Physics-normal flux label s at the particle position x inside tetra
