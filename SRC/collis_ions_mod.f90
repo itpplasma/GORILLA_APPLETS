@@ -279,7 +279,9 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override
       end if
       if (ou_nu_dtau .gt. 0.0_dp) then
         ! Exact OU transition over dtau = ou_nu_dtau/nu (Box-Muller normal).
-        if (present(tau)) dtau = min(ou_nu_dtau / nu_step, tau, upper_limit)
+        ! Not capped by upper_limit (30 code units = 23 ns for thermal AUG
+        ! electrons), which would force nu*dtau ~ 0.01 again.
+        if (present(tau)) dtau = min(ou_nu_dtau / nu_step, tau)
         call random_number(u_bm)
         u_bm(1) = max(u_bm(1), tiny(1.0_dp))
         xi_ou = sqrt(-2.0_dp * log(u_bm(1))) * cos(2.0_dp * acos(-1.0_dp) * u_bm(2))
