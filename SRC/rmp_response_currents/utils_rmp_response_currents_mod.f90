@@ -972,6 +972,7 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
 
     real(dp), dimension(3)                       :: z_save, x_new, x_pre_push
     real(dp)                                     :: lnf0_a, lnf0_b, H_a, H_b
+    real(dp)                                     :: lnf0_loc_b
     complex(dp)                                  :: w_dep
     real(dp)                                     :: t_pass, perpinv, rand_frac
     logical                                      :: boole_t_finished, boole_lost_inside
@@ -1084,7 +1085,7 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
             .and. ind_tetr_save /= -1) then
             ! Exact telescoping update of w = df/f0 over the push.
             call ln_f0_and_H(ind_tetr_save, x, vpar, perpinv, species, lnf0_b, H_b, &
-                             H_in=H_a)
+                             H_in=H_a, lnf0_loc=lnf0_loc_b)
             weights%w(n, species) = cmplx((1.0_dp + real(weights%w(n, species), dp)) &
                                           * exp(lnf0_a - lnf0_b) - 1.0_dp, 0.0_dp, &
                                           kind=dp)
@@ -1102,11 +1103,14 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         ! (m,n)-demodulated radial profile deposit at the push midpoint.
         if (present(prof_marker) .and. in%boole_delta_f .and. ind_tetr_save /= -1 &
             .and. t%confined + t%step - t%remain > prof_t_burn) then
-            ! Nonlinear mode: the markers (loaded as F0, same dynamics as the
-            ! electrons) are distributed like f, not F0, so the unbiased weight
-            ! of the deposit is df/f = w/(1+w) (identical to w at first order).
+            ! Nonlinear mode: the markers follow the same dynamics as the
+            ! electrons, so they are distributed like f0 + df (f0: local
+            ! Maxwellian at rest, as loaded and kept by the OU kicks), not like
+            ! the canonical F0. The deposit weight is therefore
+            ! df/(f0 + df) = w/(f0/F0 + w) (= w at first order when f0 = F0).
             if (boole_nonlinear_weight) then
-                w_dep = weights%w(n, species) / (1.0_dp + weights%w(n, species))
+                w_dep = weights%w(n, species) &
+                    / (exp(lnf0_loc_b - lnf0_b) + weights%w(n, species))
             else
                 w_dep = weights%w(n, species)
             end if
@@ -1672,7 +1676,7 @@ end function eval_s0_local
 ! K = m (vpar^2/2 - perpinv B), and H = K + q Phi at position x (nonlinear mode).
 ! perpinv = -vperp^2/(2B) is the conserved perpendicular invariant.
 ! ====================================================================
-subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in)
+subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, lnf0_loc)
 
     use tetra_physics_mod, only: tetra_physics
     use gorilla_applets_types_mod, only: start
@@ -1687,6 +1691,9 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in)
     ! (exact energy conservation of the static fields), so orbit-integration
     ! errors in vpar do not enter the weight. H still returns the pusher's value.
     real(dp), intent(in), optional :: H_in
+    ! lnf0_loc: ln of the local Maxwellian at rest, n(s0), T(s0), energy K (the
+    ! distribution the markers are loaded with and relax to under the OU kicks)
+    real(dp), intent(out), optional :: lnf0_loc
 
     real(dp) :: z(3), B, K, Te_erg, Phi, h_phi, psi0, lam(4), s0, s_star, K0
     logical  :: ok
@@ -1713,6 +1720,8 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in)
     K0 = K + start%particle_charge(species) * (pv0%Phi0 - pvs%Phi0)
     Te_erg = pvs%Te * ev2erg
     lnf0 = log(pvs%n_e) - 1.5_dp * log(Te_erg) - K0 / Te_erg
+    if (present(lnf0_loc)) lnf0_loc = log(pv0%n_e) - 1.5_dp * log(pv0%Te * ev2erg) &
+        - K / (pv0%Te * ev2erg)
 
 end subroutine ln_f0_and_H
 
