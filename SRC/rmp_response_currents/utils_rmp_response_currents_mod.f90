@@ -972,6 +972,7 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
 
     real(dp), dimension(3)                       :: z_save, x_new, x_pre_push
     real(dp)                                     :: lnf0_a, lnf0_b, H_a, H_b
+    complex(dp)                                  :: w_dep
     real(dp)                                     :: t_pass, perpinv, rand_frac
     logical                                      :: boole_t_finished, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
@@ -1101,10 +1102,17 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         ! (m,n)-demodulated radial profile deposit at the push midpoint.
         if (present(prof_marker) .and. in%boole_delta_f .and. ind_tetr_save /= -1 &
             .and. t%confined + t%step - t%remain > prof_t_burn) then
+            ! Nonlinear mode: the markers (loaded as F0, same dynamics as the
+            ! electrons) are distributed like f, not F0, so the unbiased weight
+            ! of the deposit is df/f = w/(1+w) (identical to w at first order).
+            if (boole_nonlinear_weight) then
+                w_dep = weights%w(n, species) / (1.0_dp + weights%w(n, species))
+            else
+                w_dep = weights%w(n, species)
+            end if
             call deposit_mn_profile(prof_marker, ind_tetr_save, &
-                0.5_dp * (x_pre_push + x), &
-                weights%w(n, species) * optional_quantities%vpar_int, &
-                weights%w(n, species) * t_pass)
+                0.5_dp * (x_pre_push + x), w_dep * optional_quantities%vpar_int, &
+                w_dep * t_pass)
         end if
 
         if (.not. present(prof_marker)) &
