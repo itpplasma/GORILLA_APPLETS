@@ -955,7 +955,8 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
     use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g, weights
-    use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
+    use tetra_grid_settings_mod, only: grid_kind, sfc_s_min, n_field_periods
+    use constants, only: pi
     use utils_orbit_timestep_mod, only: initialize_constants_of_motion, compute_radial_fluxes, &
         identify_particles_entering_annulus, update_local_tetr_moments
 
@@ -970,7 +971,7 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
     real(dp), intent(in)                         :: t_tot
     complex(dp), dimension(:), intent(inout), optional :: prof_marker
 
-    real(dp), dimension(3)                       :: z_save, x_new, x_pre_push
+    real(dp), dimension(3)                       :: z_save, x_new, x_pre_push, x_cell
     real(dp)                                     :: lnf0_a, lnf0_b, H_a, H_b
     real(dp)                                     :: lnf0_loc_b
     complex(dp)                                  :: w_dep
@@ -1071,6 +1072,14 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
 
         vperp = vperp_func(z_save, perpinv, ind_tetr_save)
 
+        ! Position in the frame of the cell just traversed: the handover to the
+        ! neighbour across the periodic boundary phi = 2 pi/n_field_periods shifts
+        ! x(2) by one period (iper_phi); every evaluation in ind_tetr_save below
+        ! (weights, deposit phase, energy check) must use the unshifted position.
+        x_cell = x
+        if (iper_phi /= 0) x_cell(2) = x(2) &
+            + real(iper_phi, dp) * 2.0_dp * pi / real(n_field_periods, dp)
+
         t%remain = t%remain - t_pass
 
         ! Delta-f weight evolution (Albert 2016, Eq. 4) with linear
@@ -1084,8 +1093,8 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         if (boole_nonlinear_weight .and. in%boole_delta_f &
             .and. ind_tetr_save /= -1) then
             ! Exact telescoping update of w = df/f0 over the push.
-            call ln_f0_and_H(ind_tetr_save, x, vpar, perpinv, species, lnf0_b, H_b, &
-                             H_in=H_a, lnf0_loc=lnf0_loc_b)
+            call ln_f0_and_H(ind_tetr_save, x_cell, vpar, perpinv, species, lnf0_b, &
+                             H_b, H_in=H_a, lnf0_loc=lnf0_loc_b)
             weights%w(n, species) = cmplx((1.0_dp + real(weights%w(n, species), dp)) &
                                           * exp(lnf0_a - lnf0_b) - 1.0_dp, 0.0_dp, &
                                           kind=dp)
@@ -1096,7 +1105,7 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
             lnf0_a = lnf0_b
         else if (in%boole_delta_f .and. ind_tetr_save /= -1) then
             call update_delta_f_weight(n, ind_tetr_save, &
-                                       0.5_dp * (x_pre_push + x), &
+                                       0.5_dp * (x_pre_push + x_cell), &
                                        vpar, vperp, t_pass, t, species)
         endif
 
@@ -1115,7 +1124,7 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
                 w_dep = weights%w(n, species)
             end if
             call deposit_mn_profile(prof_marker, ind_tetr_save, &
-                0.5_dp * (x_pre_push + x), w_dep * optional_quantities%vpar_int, &
+                0.5_dp * (x_pre_push + x_cell), w_dep * optional_quantities%vpar_int, &
                 w_dep * t_pass)
         end if
 
