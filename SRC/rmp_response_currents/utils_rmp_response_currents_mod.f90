@@ -232,10 +232,15 @@ module utils_rmp_response_currents_mod
     ! deposit is unbiased for f - F0 for every moment.
     real(dp), allocatable :: birth_factor(:,:)
     logical,  public :: boole_mh_collisions = .false.
-    ! MH statistics (nonlinear mode).
+    ! Energy error relative to the local temperature, MH statistics, and the
+    ! (0,0) accounting of lost and surviving markers (nonlinear mode).
+    real(dp) :: max_dH_T = 0.0_dp, max_dH_T_loc = 0.0_dp
+    !$omp threadprivate(max_dH_T_loc)
     real(dp) :: n_mh_prop = 0.0_dp, n_mh_rej = 0.0_dp
     real(dp) :: n_mh_prop_loc = 0.0_dp, n_mh_rej_loc = 0.0_dp
     !$omp threadprivate(n_mh_prop_loc, n_mh_rej_loc)
+    real(dp) :: lost_W = 0.0_dp, alive_W = 0.0_dp, alive_absW = 0.0_dp
+    integer  :: n_lost_early = 0, n_lost_late = 0
     ! Per-particle regularisation storage. Allocated alongside weights%w
     ! when boole_delta_f is on. tau_c is the local collision time at the
     ! starting position; t_reg_on the switch-on time of the damping;
@@ -717,7 +722,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP&        coll_event_count, coll_dt_sum, coll_dist_sum, &
     !$OMP&        da_profile_loaded, da_scale_factor, n_prof_bins, n_prof_batches, &
     !$OMP&        prof_acc, prof_count, boole_reflect_window, rho_win, prof_t_burn, &
-    !$OMP&        max_rel_dH, max_abs_w, sum_w2, n_w2, n_mh_prop, n_mh_rej, &
+    !$OMP&        max_rel_dH, max_abs_w, sum_w2, n_w2, max_dH_T, n_mh_prop, n_mh_rej, &
     !$OMP&        boole_nonlinear_weight, boole_mh_collisions) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
     !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local, n_da_sub, i_da_sub) &
@@ -900,6 +905,10 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
             if (ind_tetr == -1 .and. t%confined < trace_time_n) then
                 call handle_lost_particles(local_counter, particle_status%lost)
                 n_truly_lost = n_truly_lost + 1
+                if (boole_nonlinear_weight .and. in%boole_delta_f) &
+                    call account_marker_end(n, species, .true., t%confined)
+            else if (boole_nonlinear_weight .and. in%boole_delta_f) then
+                call account_marker_end(n, species, .false., t%confined)
             end if
 
             ! Per-particle time average using the SUM of t_confined over all
@@ -911,10 +920,14 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                 local_tetr_moments = local_tetr_moments &
                                    + particle_tetr_moments / t_actual_n
             end if
-            if (n_prof_bins > 0 .and. t_actual_n > prof_t_burn) then
+            ! Fixed normalisation: every loaded marker counts, and its deposit is
+            ! averaged over the full window [prof_t_burn, trace_time_n]; a lost
+            ! marker contributes nothing after its loss (no conditioning on
+            ! survival, derivation section 8, note "losses").
+            if (n_prof_bins > 0) then
                 ibatch = mod((n - 1) / 2, n_prof_batches) + 1
                 prof_local(:, ibatch) = prof_local(:, ibatch) &
-                                      + prof_marker / (t_actual_n - prof_t_burn)
+                                      + prof_marker / (trace_time_n - prof_t_burn)
                 !$omp atomic update
                 prof_count(ibatch) = prof_count(ibatch) + 1
             end if
@@ -948,6 +961,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     max_abs_w = max(max_abs_w, max_abs_w_loc)
     sum_w2 = sum_w2 + sum_w2_loc
     n_w2 = n_w2 + n_w2_loc
+    max_dH_T = max(max_dH_T, max_dH_T_loc)
     n_mh_prop = n_mh_prop + n_mh_prop_loc
     n_mh_rej = n_mh_rej + n_mh_rej_loc
     !$omp end critical (dH_merge)
@@ -958,9 +972,16 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
             max_rel_dH
         print '(a, es12.4, a, es12.4)', ' Nonlinear weights: max |w| = ', max_abs_w, &
             ', rms w = ', sqrt(sum_w2 / max(n_w2, 1.0_dp))
+        print '(a, es12.4)', ' Nonlinear weights: max |dH|/T_e(s0) over one step = ', &
+            max_dH_T
         if (boole_mh_collisions) print '(a, es12.4, a, es12.4)', &
             ' MH collisions: proposals = ', n_mh_prop, ', rejected fraction = ', &
             n_mh_rej / max(n_mh_prop, 1.0_dp)
+        print '(a, i0, a, i0)', ' Lost markers: before burn-in = ', n_lost_early, &
+            ', after = ', n_lost_late
+        print '(a, 3es14.6)', &
+            ' (0,0) accounting: sum W lost, sum W alive, sum |W| alive = ', &
+            lost_W, alive_W, alive_absW
     end if
 
     if (n_prof_bins > 0) call write_mn_profile('jpar_mn_profile.dat')
@@ -1003,6 +1024,7 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
 
     real(dp), dimension(3)                       :: z_save, x_new, x_pre_push, x_cell
     real(dp)                                     :: lnf0_a, lnf0_b, H_a, H_b
+    real(dp)                                     :: T0_b
     complex(dp)                                  :: w_dep
     real(dp)                                     :: t_pass, perpinv, rand_frac
     logical                                      :: boole_t_finished, boole_lost_inside
@@ -1123,11 +1145,12 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
             .and. ind_tetr_save /= -1) then
             ! Exact telescoping update of w = df/f0 over the push.
             call ln_f0_and_H(ind_tetr_save, x_cell, vpar, perpinv, species, lnf0_b, &
-                             H_b, H_in=H_a)
+                             H_b, H_in=H_a, T0_erg=T0_b)
             weights%w(n, species) = cmplx((1.0_dp + real(weights%w(n, species), dp)) &
                                           * exp(lnf0_a - lnf0_b) - 1.0_dp, 0.0_dp, &
                                           kind=dp)
             max_rel_dH_loc = max(max_rel_dH_loc, abs(H_b - H_a) / abs(H_a))
+            max_dH_T_loc = max(max_dH_T_loc, abs(H_b - H_a) / T0_b)
             max_abs_w_loc = max(max_abs_w_loc, abs(weights%w(n, species)))
             sum_w2_loc = sum_w2_loc + abs(weights%w(n, species))**2
             n_w2_loc = n_w2_loc + 1.0_dp
@@ -1714,7 +1737,8 @@ end function eval_s0_local
 ! K = m (vpar^2/2 - perpinv B), and H = K + q Phi at position x (nonlinear mode).
 ! perpinv = -vperp^2/(2B) is the conserved perpendicular invariant.
 ! ====================================================================
-subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_mload)
+subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_mload, &
+                       T0_erg)
 
     use tetra_physics_mod, only: tetra_physics
     use gorilla_applets_types_mod, only: start
@@ -1731,8 +1755,8 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_ml
     real(dp), intent(in), optional :: H_in
     ! ln_mload: ln of the unit-density local Maxwellian at rest, T(s0), energy K, in
     ! the normalisation of lnf0 (the velocity distribution the markers are loaded
-    ! with)
-    real(dp), intent(out), optional :: ln_mload
+    ! with); T0_erg: T_e(s0)
+    real(dp), intent(out), optional :: ln_mload, T0_erg
 
     real(dp) :: z(3), B, K, Te_erg, Phi, h_phi, psi0, lam(4), s0, s_star, K0
     logical  :: ok
@@ -1761,6 +1785,7 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_ml
     lnf0 = log(pvs%n_e) - 1.5_dp * log(Te_erg) - K0 / Te_erg
     if (present(ln_mload)) &
         ln_mload = -1.5_dp * log(pv0%Te * ev2erg) - K / (pv0%Te * ev2erg)
+    if (present(T0_erg)) T0_erg = pv0%Te * ev2erg
 
 end subroutine ln_f0_and_H
 
@@ -1845,6 +1870,39 @@ subroutine carry_out_collisions_mh(i, n, t, x, vpar, vperp, ind_tetr, iface, spe
     end if
 
 end subroutine carry_out_collisions_mh
+
+! ====================================================================
+! (0,0) accounting at the end of a marker's trace (nonlinear mode): the
+! deposit weight W = P w/(1 + w) of lost markers (at their loss) and of the
+! surviving ones (at the end of the trace).
+! ====================================================================
+subroutine account_marker_end(n, species, lost, t_end)
+
+    use gorilla_applets_types_mod, only: weights
+
+    integer,  intent(in) :: n, species
+    logical,  intent(in) :: lost
+    real(dp), intent(in) :: t_end
+
+    real(dp) :: W
+
+    W = birth_factor(n, species) &
+        * real(weights%w(n, species) / (1.0_dp + weights%w(n, species)), dp)
+    !$omp critical (nl_account)
+    if (lost) then
+        lost_W = lost_W + W
+        if (t_end < prof_t_burn) then
+            n_lost_early = n_lost_early + 1
+        else
+            n_lost_late = n_lost_late + 1
+        end if
+    else
+        alive_W = alive_W + W
+        alive_absW = alive_absW + abs(W)
+    end if
+    !$omp end critical (nl_account)
+
+end subroutine account_marker_end
 
 ! ====================================================================
 ! Maxwellian at the local temperature: rescale each marker's sampled energy
