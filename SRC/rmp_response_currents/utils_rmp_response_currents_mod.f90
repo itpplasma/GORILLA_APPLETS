@@ -225,6 +225,17 @@ module utils_rmp_response_currents_mod
     real(dp) :: max_abs_w = 0.0_dp, sum_w2 = 0.0_dp, n_w2 = 0.0_dp
     real(dp) :: max_abs_w_loc = 0.0_dp, sum_w2_loc = 0.0_dp, n_w2_loc = 0.0_dp
     !$omp threadprivate(max_abs_w_loc, sum_w2_loc, n_w2_loc)
+    ! Nonlinear-mode estimator (derivation/G2_nonlinear_weight.wl, section 8): each
+    ! marker carries P = F0/g0 at its birth (g0: uniform in volume, local Maxwellian
+    ! at rest) and deposits P w/(1 + w). With boole_mh_collisions the OU kicks are
+    ! Metropolis-Hastings corrected so that they leave F0 invariant; then the
+    ! deposit is unbiased for f - F0 for every moment.
+    real(dp), allocatable :: birth_factor(:,:)
+    logical,  public :: boole_mh_collisions = .false.
+    ! MH statistics (nonlinear mode).
+    real(dp) :: n_mh_prop = 0.0_dp, n_mh_rej = 0.0_dp
+    real(dp) :: n_mh_prop_loc = 0.0_dp, n_mh_rej_loc = 0.0_dp
+    !$omp threadprivate(n_mh_prop_loc, n_mh_rej_loc)
     ! Per-particle regularisation storage. Allocated alongside weights%w
     ! when boole_delta_f is on. tau_c is the local collision time at the
     ! starting position; t_reg_on the switch-on time of the damping;
@@ -288,7 +299,7 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_local_background, boole_vperp_averaged_source, &
     & n_prof_bins, n_prof_batches, ou_nu_dtau, boole_eperp_native_grid, &
     & boole_reflect_window, prof_t_burn, boole_nonlinear_weight, &
-    & boole_local_energy_sampling
+    & boole_local_energy_sampling, boole_mh_collisions
 
     ! Default: no anomalous transport (D_anom = 0 disables the kick).
     anomalous_diffusion_coefficient = 0.0_dp
@@ -445,6 +456,9 @@ subroutine allocate_weights_rmp
 
     allocate(weights%w(in%num_particles,in%n_species))
     weights%w = (0.0_dp, 0.0_dp)
+    if (allocated(birth_factor)) deallocate(birth_factor)
+    allocate(birth_factor(in%num_particles,in%n_species))
+    birth_factor = 1.0_dp
     if (in%boole_delta_f) then
         allocate(weights%original(in%num_particles,in%n_species))
         weights%original = (0.0_dp, 0.0_dp)
@@ -703,7 +717,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP&        coll_event_count, coll_dt_sum, coll_dist_sum, &
     !$OMP&        da_profile_loaded, da_scale_factor, n_prof_bins, n_prof_batches, &
     !$OMP&        prof_acc, prof_count, boole_reflect_window, rho_win, prof_t_burn, &
-    !$OMP&        max_rel_dH, max_abs_w, sum_w2, n_w2) &
+    !$OMP&        max_rel_dH, max_abs_w, sum_w2, n_w2, n_mh_prop, n_mh_rej, &
+    !$OMP&        boole_nonlinear_weight, boole_mh_collisions) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
     !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local, n_da_sub, i_da_sub) &
     !$OMP& PRIVATE(prof_local, prof_marker, ibatch) &
@@ -770,8 +785,18 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
             do while (t%confined.lt.trace_time_n)
                 i = i + 1
 
+                if (i == 1 .and. boole_nonlinear_weight .and. in%boole_delta_f) &
+                    call set_birth_factor(n, species, x, vpar, vperp)
                 if (in%boole_collisions) then
-                    call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species, iswmode_in=in%i_collision_mode)
+                    if (boole_nonlinear_weight .and. boole_mh_collisions &
+                        .and. in%boole_delta_f) then
+                        call carry_out_collisions_mh(i, n, t, x, vpar, vperp, &
+                                                     ind_tetr, iface, species)
+                    else
+                        call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, &
+                                                  iface, species, &
+                                                  iswmode_in=in%i_collision_mode)
+                    end if
                     t%step = t%step / start%v0(species)
                     ! Collision-event diagnostics for marker n=1:
                     ! accumulate counters on every event (so end-of-run
@@ -923,6 +948,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     max_abs_w = max(max_abs_w, max_abs_w_loc)
     sum_w2 = sum_w2 + sum_w2_loc
     n_w2 = n_w2 + n_w2_loc
+    n_mh_prop = n_mh_prop + n_mh_prop_loc
+    n_mh_rej = n_mh_rej + n_mh_rej_loc
     !$omp end critical (dH_merge)
     !$OMP END PARALLEL
 
@@ -931,6 +958,9 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
             max_rel_dH
         print '(a, es12.4, a, es12.4)', ' Nonlinear weights: max |w| = ', max_abs_w, &
             ', rms w = ', sqrt(sum_w2 / max(n_w2, 1.0_dp))
+        if (boole_mh_collisions) print '(a, es12.4, a, es12.4)', &
+            ' MH collisions: proposals = ', n_mh_prop, ', rejected fraction = ', &
+            n_mh_rej / max(n_mh_prop, 1.0_dp)
     end if
 
     if (n_prof_bins > 0) call write_mn_profile('jpar_mn_profile.dat')
@@ -973,7 +1003,6 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
 
     real(dp), dimension(3)                       :: z_save, x_new, x_pre_push, x_cell
     real(dp)                                     :: lnf0_a, lnf0_b, H_a, H_b
-    real(dp)                                     :: lnf0_loc_b
     complex(dp)                                  :: w_dep
     real(dp)                                     :: t_pass, perpinv, rand_frac
     logical                                      :: boole_t_finished, boole_lost_inside
@@ -1094,7 +1123,7 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
             .and. ind_tetr_save /= -1) then
             ! Exact telescoping update of w = df/f0 over the push.
             call ln_f0_and_H(ind_tetr_save, x_cell, vpar, perpinv, species, lnf0_b, &
-                             H_b, H_in=H_a, lnf0_loc=lnf0_loc_b)
+                             H_b, H_in=H_a)
             weights%w(n, species) = cmplx((1.0_dp + real(weights%w(n, species), dp)) &
                                           * exp(lnf0_a - lnf0_b) - 1.0_dp, 0.0_dp, &
                                           kind=dp)
@@ -1112,14 +1141,11 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         ! (m,n)-demodulated radial profile deposit at the push midpoint.
         if (present(prof_marker) .and. in%boole_delta_f .and. ind_tetr_save /= -1 &
             .and. t%confined + t%step - t%remain > prof_t_burn) then
-            ! Nonlinear mode: the markers follow the same dynamics as the
-            ! electrons, so they are distributed like f0 + df (f0: local
-            ! Maxwellian at rest, as loaded and kept by the OU kicks), not like
-            ! the canonical F0. The deposit weight is therefore
-            ! df/(f0 + df) = w/(f0/F0 + w) (= w at first order when f0 = F0).
+            ! Nonlinear mode: deposit P w/(1 + w) with the birth factor P = F0/g0
+            ! (derivation section 8); the density is in P, not in the bin.
             if (boole_nonlinear_weight) then
-                w_dep = weights%w(n, species) &
-                    / (exp(lnf0_loc_b - lnf0_b) + weights%w(n, species))
+                w_dep = birth_factor(n, species) * weights%w(n, species) &
+                    / (1.0_dp + weights%w(n, species))
             else
                 w_dep = weights%w(n, species)
             end if
@@ -1582,6 +1608,9 @@ subroutine write_mn_profile(fname)
         write(u, '(1x, i0)', advance='no') prof_count(jb)
     end do
     write(u, *)
+    ! Nonlinear mode: the particle density is in the weights (birth factor P), the
+    ! post-processing must not multiply by the local density again.
+    if (boole_nonlinear_weight) write(u, '(a)') '# density_in_weights 1'
     write(u, '(a)') '# bin batch s_lo s_hi Re(sum) Im(sum) Re(dens) Im(dens)'
     do jb = 1, n_prof_batches
         do ib = 1, n_prof_bins
@@ -1685,7 +1714,7 @@ end function eval_s0_local
 ! K = m (vpar^2/2 - perpinv B), and H = K + q Phi at position x (nonlinear mode).
 ! perpinv = -vperp^2/(2B) is the conserved perpendicular invariant.
 ! ====================================================================
-subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, lnf0_loc)
+subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_mload)
 
     use tetra_physics_mod, only: tetra_physics
     use gorilla_applets_types_mod, only: start
@@ -1700,9 +1729,10 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, lnf0_
     ! (exact energy conservation of the static fields), so orbit-integration
     ! errors in vpar do not enter the weight. H still returns the pusher's value.
     real(dp), intent(in), optional :: H_in
-    ! lnf0_loc: ln of the local Maxwellian at rest, n(s0), T(s0), energy K (the
-    ! distribution the markers are loaded with and relax to under the OU kicks)
-    real(dp), intent(out), optional :: lnf0_loc
+    ! ln_mload: ln of the unit-density local Maxwellian at rest, T(s0), energy K, in
+    ! the normalisation of lnf0 (the velocity distribution the markers are loaded
+    ! with)
+    real(dp), intent(out), optional :: ln_mload
 
     real(dp) :: z(3), B, K, Te_erg, Phi, h_phi, psi0, lam(4), s0, s_star, K0
     logical  :: ok
@@ -1729,10 +1759,92 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, lnf0_
     K0 = K + start%particle_charge(species) * (pv0%Phi0 - pvs%Phi0)
     Te_erg = pvs%Te * ev2erg
     lnf0 = log(pvs%n_e) - 1.5_dp * log(Te_erg) - K0 / Te_erg
-    if (present(lnf0_loc)) lnf0_loc = log(pv0%n_e) - 1.5_dp * log(pv0%Te * ev2erg) &
-        - K / (pv0%Te * ev2erg)
+    if (present(ln_mload)) &
+        ln_mload = -1.5_dp * log(pv0%Te * ev2erg) - K / (pv0%Te * ev2erg)
 
 end subroutine ln_f0_and_H
+
+! ====================================================================
+! Birth factor P = F0/g0 of marker n (nonlinear mode, derivation section 8):
+! g0 is uniform in volume (equidistant layers) times the unit-density local
+! Maxwellian at rest at T(s0) (boole_local_energy_sampling), so
+! P = exp(ln F0 - ln M_T(s0)) in the common normalisation of ln_f0_and_H.
+! Called at the spawn point, before the first collision kick.
+! ====================================================================
+subroutine set_birth_factor(n, species, x, vpar, vperp)
+
+    use find_tetra_mod, only: find_tetra
+    use tetra_physics_mod, only: tetra_physics
+
+    integer,  intent(in) :: n, species
+    real(dp), intent(in) :: x(3), vpar, vperp
+
+    integer  :: ind_tetr, iface
+    real(dp) :: xx(3), z(3), B, perpinv, lnf0, H, ln_mload
+
+    xx = x
+    call find_tetra(xx, vpar, vperp, ind_tetr, iface)
+    if (ind_tetr == -1) then
+        birth_factor(n, species) = 0.0_dp
+        return
+    end if
+    z = xx - tetra_physics(ind_tetr)%x1
+    B = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z)
+    perpinv = -0.5_dp * vperp**2 / B
+    call ln_f0_and_H(ind_tetr, xx, vpar, perpinv, species, lnf0, H, ln_mload=ln_mload)
+    birth_factor(n, species) = exp(lnf0 - ln_mload)
+
+end subroutine set_birth_factor
+
+! ====================================================================
+! OU collision kick with a Metropolis-Hastings correction to the target F0
+! (nonlinear mode, boole_mh_collisions). The exact OU transition of vpar at
+! fixed v_perp is reversible w.r.t. exp(-vpar^2/(2 sigma^2)), sigma^2 from the
+! cell background (as in stost), so the proposal vpar -> vpar' is accepted with
+!   min(1, F0(vpar') exp(-vpar^2/(2 sigma^2)) / (F0(vpar) exp(-vpar'^2/(2 sigma^2)))).
+! The kick then leaves F0 invariant (derivation section 8b, 8c).
+! ====================================================================
+subroutine carry_out_collisions_mh(i, n, t, x, vpar, vperp, ind_tetr, iface, species)
+
+    use gorilla_applets_types_mod, only: in, c, start, time_t
+    use utils_parallelised_particle_pushing_mod, only: carry_out_collisions
+    use tetra_physics_mod, only: tetra_physics
+
+    integer,      intent(in)    :: i, n, species
+    type(time_t), intent(inout) :: t
+    real(dp),     intent(inout) :: x(3), vpar, vperp
+    integer,      intent(inout) :: ind_tetr, iface
+
+    real(dp) :: vpar0, vperp0, z(3), B, perpinv, lnf_a, lnf_b, H, sig2, dlog, u
+
+    vpar0 = vpar
+    vperp0 = vperp
+    call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species, &
+                              iswmode_in=in%i_collision_mode)
+    if (ind_tetr == -1) return
+    if (vpar == vpar0) return
+    z = x - tetra_physics(ind_tetr)%x1
+    B = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z)
+    perpinv = -0.5_dp * vperp0**2 / B
+    call ln_f0_and_H(ind_tetr, x, vpar0, perpinv, species, lnf_a, H)
+    call ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf_b, H)
+    if (c%enrat_mat(c%n, ind_tetr) > 0.0_dp) then
+        sig2 = 0.5_dp / c%enrat_mat(c%n, ind_tetr) * start%v0(species)**2
+    else
+        sig2 = 0.5_dp * start%v0(species)**2
+    end if
+    dlog = lnf_b - lnf_a + 0.5_dp * (vpar**2 - vpar0**2) / sig2
+    n_mh_prop_loc = n_mh_prop_loc + 1.0_dp
+    if (dlog < 0.0_dp) then
+        call random_number(u)
+        if (u > exp(dlog)) then
+            vpar = vpar0
+            vperp = vperp0
+            n_mh_rej_loc = n_mh_rej_loc + 1.0_dp
+        end if
+    end if
+
+end subroutine carry_out_collisions_mh
 
 ! ====================================================================
 ! Maxwellian at the local temperature: rescale each marker's sampled energy
