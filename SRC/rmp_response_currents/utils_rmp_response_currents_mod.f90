@@ -606,7 +606,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     ! or da_profile_file is loaded.
     use anomalous_transport_displacement_mod, only: anomalous_transport_displacement
     use profile_data_mod, only: da_profile_loaded, eval_da_profile
-    use tetra_grid_settings_mod, only: grid_kind, grid_size, R0_analytic_circ, a_analytic_circ
+    use tetra_grid_settings_mod, only: grid_kind, grid_size, R0_analytic_circ, &
+                                       a_analytic_circ
     use constants, only: pi
 
     integer, intent(in)                               :: species
@@ -632,7 +633,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     real(dp)                                          :: da_local
     integer                                           :: n_da_sub, i_da_sub
     complex(dp), dimension(:,:), allocatable          :: prof_local
-    real(dp)                                          :: rho_win(2)
+    real(dp)                                          :: rho_win(2), s_edge_win
     complex(dp), dimension(:), allocatable            :: prof_marker
     integer                                           :: ibatch
     logical                                           :: thread_flag = .true.
@@ -673,14 +674,16 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
             print *, 'ERROR: boole_reflect_window requires grid_kind = 5'
             stop
         end if
-        rho_win(1) = sqrt(R0_analytic_circ**2 - (R0_analytic_circ - s_inner_sample &
-                     * (R0_analytic_circ - sqrt(R0_analytic_circ**2 - a_analytic_circ**2)))**2)
-        rho_win(2) = sqrt(R0_analytic_circ**2 - (R0_analytic_circ - s_outer_sample &
-                     * (R0_analytic_circ - sqrt(R0_analytic_circ**2 - a_analytic_circ**2)))**2) &
+        s_edge_win = R0_analytic_circ - sqrt(R0_analytic_circ**2 - a_analytic_circ**2)
+        rho_win(1) = sqrt(R0_analytic_circ**2 &
+                          - (R0_analytic_circ - s_inner_sample * s_edge_win)**2)
+        rho_win(2) = sqrt(R0_analytic_circ**2 &
+                          - (R0_analytic_circ - s_outer_sample * s_edge_win)**2) &
                      * cos(pi / real(grid_size(3), dp))
         rho_win(1) = rho_win(1) + 1.0e-2_dp
         rho_win(2) = rho_win(2) - 1.0e-2_dp
-        print '(a, 2f12.5)', ' Reflecting window for anomalous kicks, rho [cm]: ', rho_win
+        print '(a, 2f12.5)', ' Reflecting window for anomalous kicks, rho [cm]: ', &
+            rho_win
     end if
 
     if (n_prof_bins > 0) then
@@ -718,7 +721,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
         end if
     end if
     if (n_prof_bins > 0) then
-        allocate(prof_local(2 * n_prof_bins, n_prof_batches), prof_marker(2 * n_prof_bins))
+        allocate(prof_local(2 * n_prof_bins, n_prof_batches))
+        allocate(prof_marker(2 * n_prof_bins))
         prof_local = (0.0_dp, 0.0_dp)
     end if
 
@@ -789,9 +793,9 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                 endif
 
                 if (in%boole_delta_f .and. n_prof_bins > 0) then
-                    call orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                                              particle_tetr_moments, local_counter, species, trace_time_n, &
-                                                              prof_marker)
+                    call orbit_timestep_rmp_response_currents(x, vpar, vperp, t, &
+                        particle_status, ind_tetr, iface, n, particle_tetr_moments, &
+                        local_counter, species, trace_time_n, prof_marker)
                 else if (in%boole_delta_f) then
                     call orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
                                                               particle_tetr_moments, local_counter, species, trace_time_n)
@@ -827,12 +831,13 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                         t%step_anomalous_transport = t%step / real(n_da_sub, dp)
                         do i_da_sub = 1, n_da_sub
                             if (boole_reflect_window) then
-                                call anomalous_transport_displacement(x, ind_tetr, iface, &
-                                    t%step_anomalous_transport, vpar, vperp, da_local, &
-                                    rho_bounds=rho_win)
+                                call anomalous_transport_displacement(x, ind_tetr, &
+                                    iface, t%step_anomalous_transport, vpar, vperp, &
+                                    da_local, rho_bounds=rho_win)
                             else
-                                call anomalous_transport_displacement(x, ind_tetr, iface, &
-                                    t%step_anomalous_transport, vpar, vperp, da_local)
+                                call anomalous_transport_displacement(x, ind_tetr, &
+                                    iface, t%step_anomalous_transport, vpar, vperp, &
+                                    da_local)
                             end if
                             if (ind_tetr == -1) exit
                         end do
@@ -898,7 +903,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
         enddo
 
         !$omp critical
-        if (n_prof_bins == 0) call add_local_tetr_moments_to_output(local_tetr_moments, species)
+        if (n_prof_bins == 0) &
+            call add_local_tetr_moments_to_output(local_tetr_moments, species)
         !$omp end critical
     enddo
     !$OMP END DO
@@ -919,7 +925,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP END PARALLEL
 
     if (boole_nonlinear_weight) then
-        print '(a, es12.4)', ' Nonlinear weights: max |dH|/|H| over one push = ', max_rel_dH
+        print '(a, es12.4)', ' Nonlinear weights: max |dH|/|H| over one push = ', &
+            max_rel_dH
         print '(a, es12.4, a, es12.4)', ' Nonlinear weights: max |w| = ', max_abs_w, &
             ', rms w = ', sqrt(sum_w2 / max(n_w2, 1.0_dp))
     end if
@@ -936,8 +943,7 @@ end subroutine parallelised_particle_pushing_rmp_response_currents
 
 ! ====================================================================
 subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                                local_tetr_moments, local_counter, species, t_tot, &
-                                                prof_marker)
+        local_tetr_moments, local_counter, species, t_tot, prof_marker)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly
@@ -1071,11 +1077,14 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         ! tetra_physics of the cell the marker just traversed. Previously
         ! we evaluated at x_post_push with the NEW cell's physics — a
         ! left-Riemann sample at the wrong boundary.
-        if (boole_nonlinear_weight .and. in%boole_delta_f .and. ind_tetr_save /= -1) then
+        if (boole_nonlinear_weight .and. in%boole_delta_f &
+            .and. ind_tetr_save /= -1) then
             ! Exact telescoping update of w = df/f0 over the push.
-            call ln_f0_and_H(ind_tetr_save, x, vpar, perpinv, species, lnf0_b, H_b, H_in=H_a)
+            call ln_f0_and_H(ind_tetr_save, x, vpar, perpinv, species, lnf0_b, H_b, &
+                             H_in=H_a)
             weights%w(n, species) = cmplx((1.0_dp + real(weights%w(n, species), dp)) &
-                                          * exp(lnf0_a - lnf0_b) - 1.0_dp, 0.0_dp, kind=dp)
+                                          * exp(lnf0_a - lnf0_b) - 1.0_dp, 0.0_dp, &
+                                          kind=dp)
             max_rel_dH_loc = max(max_rel_dH_loc, abs(H_b - H_a) / abs(H_a))
             max_abs_w_loc = max(max_abs_w_loc, abs(weights%w(n, species)))
             sum_w2_loc = sum_w2_loc + abs(weights%w(n, species))**2
@@ -1090,13 +1099,15 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         ! (m,n)-demodulated radial profile deposit at the push midpoint.
         if (present(prof_marker) .and. in%boole_delta_f .and. ind_tetr_save /= -1 &
             .and. t%confined + t%step - t%remain > prof_t_burn) then
-            call deposit_mn_profile(prof_marker, ind_tetr_save, 0.5_dp * (x_pre_push + x), &
-                                    weights%w(n, species) * optional_quantities%vpar_int, &
-                                    weights%w(n, species) * t_pass)
+            call deposit_mn_profile(prof_marker, ind_tetr_save, &
+                0.5_dp * (x_pre_push + x), &
+                weights%w(n, species) * optional_quantities%vpar_int, &
+                weights%w(n, species) * t_pass)
         end if
 
         if (.not. present(prof_marker)) &
-            call update_local_tetr_moments(local_tetr_moments, ind_tetr_save, n, optional_quantities, species)
+            call update_local_tetr_moments(local_tetr_moments, ind_tetr_save, n, &
+                                           optional_quantities, species)
         if ((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save, ind_tetr, x)
 
         ! Diagnostic: dump marker n=1 trajectory for orbit-q comparison.
@@ -1540,8 +1551,9 @@ subroutine write_mn_profile(fname)
 
     ds = (s_outer_sample - s_inner_sample) / real(n_prof_bins, dp)
     open(newunit=u, file=fname, status='replace', action='write')
-    write(u, '(a, 2(1x, i0), 2(1x, es24.16), 2(1x, i0))') '# n_bins n_batches s_in s_out m n', &
-        n_prof_bins, n_prof_batches, s_inner_sample, s_outer_sample, pert_m_mode, pert_n_mode
+    write(u, '(a, 2(1x, i0), 2(1x, es24.16), 2(1x, i0))') &
+        '# n_bins n_batches s_in s_out m n', n_prof_bins, n_prof_batches, &
+        s_inner_sample, s_outer_sample, pert_m_mode, pert_n_mode
     write(u, '(a)', advance='no') '# markers_per_batch'
     do jb = 1, n_prof_batches
         write(u, '(1x, i0)', advance='no') prof_count(jb)

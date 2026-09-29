@@ -452,8 +452,10 @@ subroutine load_eperp_field(eperp_file, equil_mapping_file)
                     if (r_raw(j+1) >= r_map(i)) exit
                 end do
                 frac = (r_map(i) - r_raw(j)) / (r_raw(j+1) - r_raw(j))
-                eperp_re_spl(i) = eperp_re_raw(j) + frac * (eperp_re_raw(j+1) - eperp_re_raw(j))
-                eperp_im_spl(i) = eperp_im_raw(j) + frac * (eperp_im_raw(j+1) - eperp_im_raw(j))
+                eperp_re_spl(i) = eperp_re_raw(j) &
+                                + frac * (eperp_re_raw(j+1) - eperp_re_raw(j))
+                eperp_im_spl(i) = eperp_im_raw(j) &
+                                + frac * (eperp_im_raw(j+1) - eperp_im_raw(j))
             end if
         end do
         deallocate(r_map)
