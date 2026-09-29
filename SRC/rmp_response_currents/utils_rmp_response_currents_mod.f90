@@ -1577,7 +1577,8 @@ subroutine spawn_equidistant_in_s(species, n_spawned)
 
     use gorilla_applets_types_mod, only: in, start, g
     use tetra_grid_settings_mod, only: sfc_s_min, sfc_s_max, grid_size, n_extra_rings, &
-                                       grid_kind, R0_analytic_circ, a_analytic_circ
+                                       grid_kind, R0_analytic_circ, a_analytic_circ, &
+                                       n_field_periods
     use tetra_physics_mod, only: coord_system
     use find_tetra_mod, only: find_tetra
     use magdata_in_symfluxcoordinates_mod, only: magdata_in_symfluxcoord_ext
@@ -1695,12 +1696,14 @@ subroutine spawn_equidistant_in_s(species, n_spawned)
                 else
                     theta_loc = u(2) * 2.0_dp * pi
                 end if
+                ! Toroidal range is one field period [0, 2 pi/n_field_periods],
+                ! so markers land inside a wedge mesh (no-op for the full torus).
                 if (boole_stratify_phi) then
                     phi_bin_idx = phi_bin_perm(k_in_layer)
                     phi_loc = (dble(phi_bin_idx - 1) + u(3)) &
-                            * 2.0_dp * pi / dble(k_per_layer)
+                            * 2.0_dp * pi / dble(k_per_layer * n_field_periods)
                 else
-                    phi_loc = u(3) * 2.0_dp * pi
+                    phi_loc = u(3) * 2.0_dp * pi / dble(n_field_periods)
                 end if
 
                 if (coord_system == 1) then
