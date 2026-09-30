@@ -300,10 +300,12 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override
                   - vpar_norm * nu_step * dtau
       end if
       z(4) = sqrt(vpar_norm*vpar_norm + vperp_norm*vperp_norm)
-      z(5) = vpar_norm / z(4)
-      if (z(4).lt.pmin) then
-        ierr = ierr + 10
-        z(4) = pmin + abs(pmin - z(4))
+      ! OU evolves v_parallel alone. A speed floor would also change v_perp
+      ! and destroy the Gaussian invariant distribution of this transition.
+      if (z(4) > 0.0_dp) then
+        z(5) = vpar_norm / z(4)
+      else
+        z(5) = 0.0_dp
       end if
     end block
     return
