@@ -38,6 +38,15 @@ add_library(GORILLA_APPLETS STATIC
   zzg.f90
   self_consistent_electric_field_mod.f90
   )
+# SplitMix64 in the seeding utilities intentionally relies on int64 wrap-around
+# arithmetic. Without -fwrapv, gfortran at -O2+ treats signed overflow as
+# undefined and produces degenerate per-thread seeds (all threads identical).
+set_source_files_properties(
+  utils_data_pre_and_post_processing_mod.f90
+  utils_parallelised_particle_pushing_mod.f90
+  PROPERTIES COMPILE_OPTIONS "-fwrapv"
+)
+
 target_link_libraries(GORILLA_APPLETS
   GORILLA
   ${BLAS_LIBRARIES}

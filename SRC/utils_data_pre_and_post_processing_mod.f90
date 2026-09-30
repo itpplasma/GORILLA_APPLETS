@@ -1,8 +1,12 @@
 module utils_data_pre_and_post_processing_mod
 
-    use, intrinsic :: iso_fortran_env, only: dp => real64
+    use, intrinsic :: iso_fortran_env, only: dp => real64, int64
 
     implicit none
+
+    integer, dimension(:), allocatable, protected :: master_seed
+    integer(int64),                     protected :: master_seed_u64 = 0_int64
+    logical,                            protected :: master_seed_loaded = .false.
 
 contains
 
@@ -10,17 +14,54 @@ subroutine set_seed_for_random_numbers
 
     integer,dimension(:), allocatable   :: seed
     integer                             :: seed_inp_unit
-    integer                             :: n
-    
+    integer                             :: n, i
+    integer(int64)                      :: acc, tmp
+
     open(newunit = seed_inp_unit, file='seed.inp', status='old',action = 'read')
     read(seed_inp_unit,*) n
     allocate(seed(n))
     read(seed_inp_unit,*) seed
     close(seed_inp_unit)
     CALL RANDOM_SEED (PUT=seed)
+
+    ! Retain the loaded seed and derive a 64-bit master key from it, so that
+    ! per-thread seeding inside parallel loops can be a deterministic function
+    ! of seed.inp (see initialise_seed_for_random_numbers_for_each_thread).
+    if (allocated(master_seed)) deallocate(master_seed)
+    allocate(master_seed(n))
+    master_seed = seed
+
+    acc = 0_int64
+    do i = 1, n
+        acc = ieor(acc, int(seed(i), int64))
+        call splitmix64_next(acc, tmp)
+    enddo
+    master_seed_u64 = acc
+    master_seed_loaded = .true.
+
     deallocate(seed)
 
 end subroutine set_seed_for_random_numbers
+
+subroutine splitmix64_next(state, z)
+    ! One step of Vigna's SplitMix64 bit mixer. Advances `state` in place and
+    ! returns the next well-diffused 64-bit word `z`. Used both to fold the
+    ! master seed into a single key and to fan a key out into a per-thread
+    ! Fortran RNG state array.
+
+    integer(int64), intent(inout) :: state
+    integer(int64), intent(out)   :: z
+    integer(int64), parameter     :: gamma = -7046029254386353131_int64  ! 0x9E3779B97F4A7C15
+    integer(int64), parameter     :: m1    = -4658895280553007687_int64  ! 0xBF58476D1CE4E5B9
+    integer(int64), parameter     :: m2    = -7723592293110705173_int64  ! 0x94D049BB133111EB
+
+    state = state + gamma
+    z = state
+    z = ieor(z, ishft(z, -30)) * m1
+    z = ieor(z, ishft(z, -27)) * m2
+    z = ieor(z, ishft(z, -31))
+
+end subroutine splitmix64_next
 
 subroutine get_ipert()
 
