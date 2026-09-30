@@ -57,3 +57,16 @@ target_link_libraries(gorilla_applets_main.x
   GORILLA_APPLETS
   )
 target_include_directories(gorilla_applets_main.x PUBLIC ${CMAKE_BINARY_DIR}/SRC_CORE)
+# Analytic moment oracle; no equilibrium or orbit calculation is required.
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(test_rmp_profile_moments.x
+        SRC/rmp_response_currents/rmp_profile_moments_mod.f90
+        TESTS/test_rmp_profile_moments.f90)
+    set_target_properties(test_rmp_profile_moments.x PROPERTIES
+        Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/moment_test_modules)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/moment_test_modules)
+    target_include_directories(test_rmp_profile_moments.x PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/moment_test_modules)
+    add_test(NAME rmp_profile_moments COMMAND test_rmp_profile_moments.x)
+endif()
