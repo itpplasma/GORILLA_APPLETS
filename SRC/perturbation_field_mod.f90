@@ -76,6 +76,9 @@ module perturbation_field_mod
     ! to verify that the resonant structure in n=2 originates from the
     ! helical phase, not from any other coupling.
     logical, public :: boole_skip_phase = .false.
+    ! Spline E_perp on the radial points of the file (mapped to s) instead of
+    ! resampling it onto the equil-mapping grid first (see load_eperp_field).
+    logical, public :: boole_eperp_native_grid = .false.
 
 contains
 
@@ -408,26 +411,55 @@ subroutine load_eperp_field(eperp_file, equil_mapping_file)
         r_map = r_equil
     end if
 
-    allocate(eperp_re_spl(ns_eperp), eperp_re_dd(ns_eperp))
-    allocate(eperp_im_spl(ns_eperp), eperp_im_dd(ns_eperp))
+    if (boole_eperp_native_grid) then
+        ! Knots at the file's own radii, mapped to s by linear interpolation of
+        ! s(r_map) (smooth); keeps the resolution of the E_perp data.
+        deallocate(s_eperp_grid)
+        ns_eperp = n_raw
+        allocate(s_eperp_grid(ns_eperp))
+        allocate(eperp_re_spl(ns_eperp), eperp_re_dd(ns_eperp))
+        allocate(eperp_im_spl(ns_eperp), eperp_im_dd(ns_eperp))
+        do i = 1, n_raw
+            if (r_raw(i) <= r_map(1)) then
+                s_eperp_grid(i) = psi_tor_equil(1) / psi_tor_edge
+            else if (r_raw(i) >= r_map(n_equil)) then
+                s_eperp_grid(i) = 1.0_dp
+            else
+                do j = 1, n_equil - 1
+                    if (r_map(j+1) >= r_raw(i)) exit
+                end do
+                frac = (r_raw(i) - r_map(j)) / (r_map(j+1) - r_map(j))
+                s_eperp_grid(i) = (psi_tor_equil(j) &
+                    + frac * (psi_tor_equil(j+1) - psi_tor_equil(j))) / psi_tor_edge
+            end if
+        end do
+        eperp_re_spl = eperp_re_raw
+        eperp_im_spl = eperp_im_raw
+        deallocate(r_map)
+    else
+        allocate(eperp_re_spl(ns_eperp), eperp_re_dd(ns_eperp))
+        allocate(eperp_im_spl(ns_eperp), eperp_im_dd(ns_eperp))
 
-    do i = 1, ns_eperp
-        if (r_map(i) <= r_raw(1)) then
-            eperp_re_spl(i) = eperp_re_raw(1)
-            eperp_im_spl(i) = eperp_im_raw(1)
-        else if (r_map(i) >= r_raw(n_raw)) then
-            eperp_re_spl(i) = eperp_re_raw(n_raw)
-            eperp_im_spl(i) = eperp_im_raw(n_raw)
-        else
-            do j = 1, n_raw - 1
-                if (r_raw(j+1) >= r_map(i)) exit
-            end do
-            frac = (r_map(i) - r_raw(j)) / (r_raw(j+1) - r_raw(j))
-            eperp_re_spl(i) = eperp_re_raw(j) + frac * (eperp_re_raw(j+1) - eperp_re_raw(j))
-            eperp_im_spl(i) = eperp_im_raw(j) + frac * (eperp_im_raw(j+1) - eperp_im_raw(j))
-        end if
-    end do
-    deallocate(r_map)
+        do i = 1, ns_eperp
+            if (r_map(i) <= r_raw(1)) then
+                eperp_re_spl(i) = eperp_re_raw(1)
+                eperp_im_spl(i) = eperp_im_raw(1)
+            else if (r_map(i) >= r_raw(n_raw)) then
+                eperp_re_spl(i) = eperp_re_raw(n_raw)
+                eperp_im_spl(i) = eperp_im_raw(n_raw)
+            else
+                do j = 1, n_raw - 1
+                    if (r_raw(j+1) >= r_map(i)) exit
+                end do
+                frac = (r_map(i) - r_raw(j)) / (r_raw(j+1) - r_raw(j))
+                eperp_re_spl(i) = eperp_re_raw(j) &
+                                + frac * (eperp_re_raw(j+1) - eperp_re_raw(j))
+                eperp_im_spl(i) = eperp_im_raw(j) &
+                                + frac * (eperp_im_raw(j+1) - eperp_im_raw(j))
+            end if
+        end do
+        deallocate(r_map)
+    end if
 
     ! --- Build cubic splines in s ---
     call spline_natural_pert(ns_eperp, s_eperp_grid, eperp_re_spl, eperp_re_dd)
@@ -468,6 +500,8 @@ subroutine eval_delta_E_s(s_val, theta, phi, dE_s)
     end if
 
     s_clamped = max(0.0_dp, min(1.0_dp, s_val))
+    if (boole_eperp_native_grid) &
+        s_clamped = max(s_eperp_grid(1), min(s_eperp_grid(ns_eperp), s_clamped))
     phase = real(pert_m_mode, dp) * theta + real(pert_n_mode, dp) * phi
     ds_dreff = eval_ds_dreff(s_val)
 

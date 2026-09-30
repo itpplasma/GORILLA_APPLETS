@@ -4,6 +4,7 @@ module utils_rmp_response_currents_mod
     ! Canonical KIM r_eff-alignment flag lives in profile_data_mod; use-associate
     ! it here so the namelist reads straight into the single source of truth.
     use profile_data_mod, only: boole_kim_reff_coords
+    use perturbation_field_mod, only: boole_eperp_native_grid
 
     implicit none
 
@@ -177,6 +178,69 @@ module utils_rmp_response_currents_mod
     ! Module-private temperature plumbed into pdf_maxwellian_energy.
     real(dp)                  :: T_sample_eV     = 0.0_dp
 
+    ! Local-profile OU background: per-tetrahedron T_e(s), n_e(s) from the
+    ! loaded profiles instead of the constants energy_eV and density, so the
+    ! OU equilibrium is <v_par^2> = T_e(s)/m (as in KIM's local model).
+    logical,  public :: boole_local_background = .false.
+    ! Replace x_perp^2 = m v_perp^2/(2 T) in the delta-f source by its
+    ! Maxwellian average 1, i.e. the v_perp-integrated 1D source of KIM. The
+    ! OU operator acts on v_par only, so v_perp keeps its initial sample.
+    logical,  public :: boole_vperp_averaged_source = .false.
+    ! (m,n)-demodulated radial profile of the parallel-velocity moment,
+    ! sum over markers of (1/T_n) int w v_par exp(-i(m theta + n phi)) dt,
+    ! in n_prof_bins uniform s-bins over [s_inner_sample, s_outer_sample],
+    ! per marker batch (antithetic pairs share a batch). Written to
+    ! jpar_mn_profile.dat. Disabled for n_prof_bins = 0.
+    integer,  public :: n_prof_bins = 0
+    integer,  public :: n_prof_batches = 1
+    ! Burn-in: the profile deposit starts at t = prof_t_burn [s] of each marker's
+    ! trace (w starts at 0) and is divided by T_n - prof_t_burn.
+    real(dp), public :: prof_t_burn = 0.0_dp
+    complex(dp), allocatable :: prof_acc(:,:)
+    integer,     allocatable :: prof_count(:)
+    ! Reflect anomalous-transport kicks at the radial spawn window
+    ! (grid_kind = 5 only): zero-flux boundary, markers stay in the mesh.
+    logical,  public :: boole_reflect_window = .false.
+    ! Nonlinear delta-f (prescribed static field with islands): the markers follow
+    ! the full mesh field B0 + dB (helical_pert_file_analytic_circ, grid_kind = 5)
+    ! and w = df/F0 is advanced exactly by telescoping over each push,
+    !   1 + w <- (1 + w) F0(z_a)/F0(z_b),
+    ! F0 = n(s*) (m/(2 pi T(s*)))^(3/2) exp(-K0*/T(s*)) on the canonical label
+    ! psi* = psi0 + (c m/q) vpar h_phi of the UNPERTURBED field (psi0: linear
+    ! interpolant of the unperturbed vertex A_phi), K0* = K + q (Phi0(s0) -
+    ! Phi0(s*)), K = H - q Phi(x) with H fixed between collisions (ln_f0_and_H);
+    ! collisions leave w unchanged. eval_wdot_s is not used. Radial bins and the
+    ! collision background use s0 = s(psi0).
+    logical,  public :: boole_nonlinear_weight = .false.
+    ! Rescale each marker's sampled energy by T_e(s)/energy_eV at its spawn point
+    ! (Maxwellian at the local temperature).
+    logical,  public :: boole_local_energy_sampling = .false.
+    real(dp), allocatable :: psi0_vert(:)
+    ! Largest relative change of H = K + q Phi over one push (nonlinear mode).
+    real(dp) :: max_rel_dH = 0.0_dp
+    real(dp) :: max_rel_dH_loc = 0.0_dp
+    !$omp threadprivate(max_rel_dH_loc)
+    ! Largest |w| and mean w^2 (per push) in nonlinear mode: at zero amplitude the
+    ! weights must stay ~0 (only pusher truncation errors).
+    real(dp) :: max_abs_w = 0.0_dp, sum_w2 = 0.0_dp, n_w2 = 0.0_dp
+    real(dp) :: max_abs_w_loc = 0.0_dp, sum_w2_loc = 0.0_dp, n_w2_loc = 0.0_dp
+    !$omp threadprivate(max_abs_w_loc, sum_w2_loc, n_w2_loc)
+    ! Nonlinear-mode estimator (derivation/G2_nonlinear_weight.wl, section 8): each
+    ! marker carries P = F0/g0 at its birth (g0: uniform in volume, local Maxwellian
+    ! at rest) and deposits P w/(1 + w). With boole_mh_collisions the OU kicks are
+    ! Metropolis-Hastings corrected so that they leave F0 invariant; then the
+    ! deposit is unbiased for f - F0 for every moment.
+    real(dp), allocatable :: birth_factor(:,:)
+    logical,  public :: boole_mh_collisions = .false.
+    ! Energy error relative to the local temperature, MH statistics, and the
+    ! (0,0) accounting of lost and surviving markers (nonlinear mode).
+    real(dp) :: max_dH_T = 0.0_dp, max_dH_T_loc = 0.0_dp
+    !$omp threadprivate(max_dH_T_loc)
+    real(dp) :: n_mh_prop = 0.0_dp, n_mh_rej = 0.0_dp
+    real(dp) :: n_mh_prop_loc = 0.0_dp, n_mh_rej_loc = 0.0_dp
+    !$omp threadprivate(n_mh_prop_loc, n_mh_rej_loc)
+    real(dp) :: lost_W = 0.0_dp, alive_W = 0.0_dp, alive_absW = 0.0_dp
+    integer  :: n_lost_early = 0, n_lost_late = 0
     ! Per-particle regularisation storage. Allocated alongside weights%w
     ! when boole_delta_f is on. tau_c is the local collision time at the
     ! starting position; t_reg_on the switch-on time of the damping;
@@ -189,7 +253,8 @@ contains
 subroutine read_rmp_response_currents_inp_into_type
 
     use gorilla_applets_types_mod, only: in
-    use collis_ions,               only: collis_nu_scale_factor => nu_scale_factor
+    use collis_ions,               only: collis_nu_scale_factor => nu_scale_factor, &
+                                         ou_nu_dtau
 
     real(dp) :: time_step, energy_eV, n_particles, density
     real(dp) :: anomalous_diffusion_coefficient
@@ -235,7 +300,11 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_dump_orbit_n1, orbit_dump_stride, trapping_filter_mode, &
     & point_source_x, boole_force_marker1_pitch, marker1_pitch_value, &
     & boole_dump_collisions_n1, coll_dump_stride, i_collision_mode, &
-    & anomalous_diffusion_coefficient
+    & anomalous_diffusion_coefficient, &
+    & boole_local_background, boole_vperp_averaged_source, &
+    & n_prof_bins, n_prof_batches, ou_nu_dtau, boole_eperp_native_grid, &
+    & boole_reflect_window, prof_t_burn, boole_nonlinear_weight, &
+    & boole_local_energy_sampling, boole_mh_collisions
 
     ! Default: no anomalous transport (D_anom = 0 disables the kick).
     anomalous_diffusion_coefficient = 0.0_dp
@@ -392,6 +461,9 @@ subroutine allocate_weights_rmp
 
     allocate(weights%w(in%num_particles,in%n_species))
     weights%w = (0.0_dp, 0.0_dp)
+    if (allocated(birth_factor)) deallocate(birth_factor)
+    allocate(birth_factor(in%num_particles,in%n_species))
+    birth_factor = 1.0_dp
     if (in%boole_delta_f) then
         allocate(weights%original(in%num_particles,in%n_species))
         weights%original = (0.0_dp, 0.0_dp)
@@ -555,6 +627,9 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     ! or da_profile_file is loaded.
     use anomalous_transport_displacement_mod, only: anomalous_transport_displacement
     use profile_data_mod, only: da_profile_loaded, eval_da_profile
+    use tetra_grid_settings_mod, only: grid_kind, grid_size, R0_analytic_circ, &
+                                       a_analytic_circ
+    use constants, only: pi
 
     integer, intent(in)                               :: species
     integer, intent(in), optional                     :: n_particles_in
@@ -578,6 +653,10 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     complex(dp), dimension(:,:), allocatable          :: particle_tetr_moments
     real(dp)                                          :: da_local
     integer                                           :: n_da_sub, i_da_sub
+    complex(dp), dimension(:,:), allocatable          :: prof_local
+    real(dp)                                          :: rho_win(2), s_edge_win
+    complex(dp), dimension(:), allocatable            :: prof_marker
+    integer                                           :: ibatch
     logical                                           :: thread_flag = .true.
     logical                                           :: respawn_success
 
@@ -589,7 +668,14 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
 
     if (in%boole_delta_f) call allocate_delta_f_per_particle(n_particles, in%n_species)
 
-    allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
+    ! With the radial profile deposit (n_prof_bins > 0) the per-tetrahedron
+    ! moments are not accumulated; allocate a dummy column only (the two
+    ! per-thread copies otherwise cost ~2 kB per tetrahedron at 16 threads).
+    if (n_prof_bins > 0) then
+        allocate(local_tetr_moments(moment_specs%n_moments, 1))
+    else
+        allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
+    end if
     kpart = 0
     iantithetic = 1
     if (in%boole_antithetic_variate) iantithetic = 2
@@ -599,14 +685,48 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     n_respawn_total = 0
     n_truly_lost    = 0
 
+    ! Reflecting window for the anomalous kicks: rho of the spawn-window
+    ! surfaces; the outer bound is pulled in to the chord of the polygonal
+    ! outer mesh surface (cos(pi/n3)), and both bounds by a further 100 um so
+    ! that drift-orbit excursions (~30 um for trapped electrons at R0 = 30x
+    ! AUG) do not carry reflected markers out of the mesh.
+    if (boole_reflect_window) then
+        if (grid_kind /= 5) then
+            print *, 'ERROR: boole_reflect_window requires grid_kind = 5'
+            stop
+        end if
+        s_edge_win = R0_analytic_circ - sqrt(R0_analytic_circ**2 - a_analytic_circ**2)
+        rho_win(1) = sqrt(R0_analytic_circ**2 &
+                          - (R0_analytic_circ - s_inner_sample * s_edge_win)**2)
+        rho_win(2) = sqrt(R0_analytic_circ**2 &
+                          - (R0_analytic_circ - s_outer_sample * s_edge_win)**2) &
+                     * cos(pi / real(grid_size(3), dp))
+        rho_win(1) = rho_win(1) + 1.0e-2_dp
+        rho_win(2) = rho_win(2) - 1.0e-2_dp
+        print '(a, 2f12.5)', ' Reflecting window for anomalous kicks, rho [cm]: ', &
+            rho_win
+    end if
+
+    if (n_prof_bins > 0) then
+        if (allocated(prof_acc)) deallocate(prof_acc)
+        if (allocated(prof_count)) deallocate(prof_count)
+        allocate(prof_acc(2 * n_prof_bins, n_prof_batches), prof_count(n_prof_batches))
+        prof_acc = (0.0_dp, 0.0_dp)
+        prof_count = 0
+    end if
+
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, moment_specs, ntetr, n_respawn_max, &
     !$OMP&        boole_dump_orbit_n1, traj_dump_unit, orbit_dump_stride, traj_step_count, &
     !$OMP&        boole_dump_collisions_n1, coll_dump_unit, coll_dump_stride, &
     !$OMP&        coll_event_count, coll_dt_sum, coll_dist_sum, &
-    !$OMP&        da_profile_loaded, da_scale_factor) &
+    !$OMP&        da_profile_loaded, da_scale_factor, n_prof_bins, n_prof_batches, &
+    !$OMP&        prof_acc, prof_count, boole_reflect_window, rho_win, prof_t_burn, &
+    !$OMP&        max_rel_dH, max_abs_w, sum_w2, n_w2, max_dH_T, n_mh_prop, n_mh_rej, &
+    !$OMP&        boole_nonlinear_weight, boole_mh_collisions) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
     !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local, n_da_sub, i_da_sub) &
+    !$OMP& PRIVATE(prof_local, prof_marker, ibatch) &
     !$OMP& FIRSTPRIVATE(thread_flag)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
@@ -616,7 +736,16 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     ! the parallel region. Only used in the delta-f path; harmless to
     ! allocate either way.
     if (in%boole_delta_f) then
-        allocate(particle_tetr_moments(moment_specs%n_moments, ntetr))
+        if (n_prof_bins > 0) then
+            allocate(particle_tetr_moments(moment_specs%n_moments, 1))
+        else
+            allocate(particle_tetr_moments(moment_specs%n_moments, ntetr))
+        end if
+    end if
+    if (n_prof_bins > 0) then
+        allocate(prof_local(2 * n_prof_bins, n_prof_batches))
+        allocate(prof_marker(2 * n_prof_bins))
+        prof_local = (0.0_dp, 0.0_dp)
     end if
 
     !$OMP DO SCHEDULE(static)
@@ -641,6 +770,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
 
             ! Per-particle accumulators that persist across respawn attempts.
             if (in%boole_delta_f) particle_tetr_moments = (0.0_dp, 0.0_dp)
+            if (n_prof_bins > 0) prof_marker = (0.0_dp, 0.0_dp)
             n_respawn_used = 0
 
             ! One-shot init: place the marker, zero t%confined, zero the
@@ -660,8 +790,18 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
             do while (t%confined.lt.trace_time_n)
                 i = i + 1
 
+                if (i == 1 .and. boole_nonlinear_weight .and. in%boole_delta_f) &
+                    call set_birth_factor(n, species, x, vpar, vperp)
                 if (in%boole_collisions) then
-                    call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species, iswmode_in=in%i_collision_mode)
+                    if (boole_nonlinear_weight .and. boole_mh_collisions &
+                        .and. in%boole_delta_f) then
+                        call carry_out_collisions_mh(i, n, t, x, vpar, vperp, &
+                                                     ind_tetr, iface, species)
+                    else
+                        call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, &
+                                                  iface, species, &
+                                                  iswmode_in=in%i_collision_mode)
+                    end if
                     t%step = t%step / start%v0(species)
                     ! Collision-event diagnostics for marker n=1:
                     ! accumulate counters on every event (so end-of-run
@@ -684,7 +824,11 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                     t%step = trace_time_n - t%confined
                 endif
 
-                if (in%boole_delta_f) then
+                if (in%boole_delta_f .and. n_prof_bins > 0) then
+                    call orbit_timestep_rmp_response_currents(x, vpar, vperp, t, &
+                        particle_status, ind_tetr, iface, n, particle_tetr_moments, &
+                        local_counter, species, trace_time_n, prof_marker)
+                else if (in%boole_delta_f) then
                     call orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
                                                               particle_tetr_moments, local_counter, species, trace_time_n)
                 else
@@ -718,8 +862,15 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                         n_da_sub = max(1, nint(2.0_dp * da_local * t%step / 1.0d-2))
                         t%step_anomalous_transport = t%step / real(n_da_sub, dp)
                         do i_da_sub = 1, n_da_sub
-                            call anomalous_transport_displacement(x, ind_tetr, iface, &
-                                t%step_anomalous_transport, vpar, vperp, da_local)
+                            if (boole_reflect_window) then
+                                call anomalous_transport_displacement(x, ind_tetr, &
+                                    iface, t%step_anomalous_transport, vpar, vperp, &
+                                    da_local, rho_bounds=rho_win)
+                            else
+                                call anomalous_transport_displacement(x, ind_tetr, &
+                                    iface, t%step_anomalous_transport, vpar, vperp, &
+                                    da_local)
+                            end if
                             if (ind_tetr == -1) exit
                         end do
                     end if
@@ -754,6 +905,10 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
             if (ind_tetr == -1 .and. t%confined < trace_time_n) then
                 call handle_lost_particles(local_counter, particle_status%lost)
                 n_truly_lost = n_truly_lost + 1
+                if (boole_nonlinear_weight .and. in%boole_delta_f) &
+                    call account_marker_end(n, species, .true., t%confined)
+            else if (boole_nonlinear_weight .and. in%boole_delta_f) then
+                call account_marker_end(n, species, .false., t%confined)
             end if
 
             ! Per-particle time average using the SUM of t_confined over all
@@ -764,6 +919,17 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
             if (in%boole_delta_f .and. t_actual_n > 0.0_dp) then
                 local_tetr_moments = local_tetr_moments &
                                    + particle_tetr_moments / t_actual_n
+            end if
+            ! Fixed normalisation: every loaded marker counts, and its deposit is
+            ! averaged over the full window [prof_t_burn, trace_time_n]; a lost
+            ! marker contributes nothing after its loss (no conditioning on
+            ! survival, derivation section 8, note "losses").
+            if (n_prof_bins > 0) then
+                ibatch = mod((n - 1) / 2, n_prof_batches) + 1
+                prof_local(:, ibatch) = prof_local(:, ibatch) &
+                                      + prof_marker / (trace_time_n - prof_t_burn)
+                !$omp atomic update
+                prof_count(ibatch) = prof_count(ibatch) + 1
             end if
 
             !$omp critical
@@ -777,13 +943,48 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
         enddo
 
         !$omp critical
-        call add_local_tetr_moments_to_output(local_tetr_moments, species)
+        if (n_prof_bins == 0) &
+            call add_local_tetr_moments_to_output(local_tetr_moments, species)
         !$omp end critical
     enddo
     !$OMP END DO
 
     if (allocated(particle_tetr_moments)) deallocate(particle_tetr_moments)
+    if (n_prof_bins > 0) then
+        !$omp critical (prof_merge)
+        prof_acc = prof_acc + prof_local
+        !$omp end critical (prof_merge)
+        deallocate(prof_local, prof_marker)
+    end if
+    !$omp critical (dH_merge)
+    max_rel_dH = max(max_rel_dH, max_rel_dH_loc)
+    max_abs_w = max(max_abs_w, max_abs_w_loc)
+    sum_w2 = sum_w2 + sum_w2_loc
+    n_w2 = n_w2 + n_w2_loc
+    max_dH_T = max(max_dH_T, max_dH_T_loc)
+    n_mh_prop = n_mh_prop + n_mh_prop_loc
+    n_mh_rej = n_mh_rej + n_mh_rej_loc
+    !$omp end critical (dH_merge)
     !$OMP END PARALLEL
+
+    if (boole_nonlinear_weight) then
+        print '(a, es12.4)', ' Nonlinear weights: max |dH|/|H| over one push = ', &
+            max_rel_dH
+        print '(a, es12.4, a, es12.4)', ' Nonlinear weights: max |w| = ', max_abs_w, &
+            ', rms w = ', sqrt(sum_w2 / max(n_w2, 1.0_dp))
+        print '(a, es12.4)', ' Nonlinear weights: max |dH|/T_e(s0) over one step = ', &
+            max_dH_T
+        if (boole_mh_collisions) print '(a, es12.4, a, es12.4)', &
+            ' MH collisions: proposals = ', n_mh_prop, ', rejected fraction = ', &
+            n_mh_rej / max(n_mh_prop, 1.0_dp)
+        print '(a, i0, a, i0)', ' Lost markers: before burn-in = ', n_lost_early, &
+            ', after = ', n_lost_late
+        print '(a, 3es14.6)', &
+            ' (0,0) accounting: sum W lost, sum W alive, sum |W| alive = ', &
+            lost_W, alive_W, alive_absW
+    end if
+
+    if (n_prof_bins > 0) call write_mn_profile('jpar_mn_profile.dat')
 
     print*, 'Total tracing time / number of particles: ', t_tot/n_particles, 's'
     if (in%boole_delta_f .and. n_respawn_max > 0) then
@@ -795,7 +996,7 @@ end subroutine parallelised_particle_pushing_rmp_response_currents
 
 ! ====================================================================
 subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                                local_tetr_moments, local_counter, species, t_tot)
+        local_tetr_moments, local_counter, species, t_tot, prof_marker)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly
@@ -805,7 +1006,8 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
     use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g, weights
-    use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
+    use tetra_grid_settings_mod, only: grid_kind, sfc_s_min, n_field_periods
+    use constants, only: pi
     use utils_orbit_timestep_mod, only: initialize_constants_of_motion, compute_radial_fluxes, &
         identify_particles_entering_annulus, update_local_tetr_moments
 
@@ -818,8 +1020,12 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
     complex(dp), dimension(:,:), intent(inout)   :: local_tetr_moments
     type(counter_t), intent(inout)               :: local_counter
     real(dp), intent(in)                         :: t_tot
+    complex(dp), dimension(:), intent(inout), optional :: prof_marker
 
-    real(dp), dimension(3)                       :: z_save, x_new, x_pre_push
+    real(dp), dimension(3)                       :: z_save, x_new, x_pre_push, x_cell
+    real(dp)                                     :: lnf0_a, lnf0_b, H_a, H_b
+    real(dp)                                     :: T0_b
+    complex(dp)                                  :: w_dep
     real(dp)                                     :: t_pass, perpinv, rand_frac
     logical                                      :: boole_t_finished, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
@@ -856,6 +1062,8 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
     if (t%step.eq.0.0_dp) return
     if (particle_status%initialized) z_save = x - tetra_physics(ind_tetr)%x1
     call initialize_constants_of_motion(vperp, z_save, ind_tetr, perpinv)
+    if (boole_nonlinear_weight .and. in%boole_delta_f .and. ind_tetr /= -1) &
+        call ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0_a, H_a)
 
     t%remain = t%step
     boole_t_finished = .false.
@@ -915,6 +1123,14 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
 
         vperp = vperp_func(z_save, perpinv, ind_tetr_save)
 
+        ! Position in the frame of the cell just traversed: the handover to the
+        ! neighbour across the periodic boundary phi = 2 pi/n_field_periods shifts
+        ! x(2) by one period (iper_phi); every evaluation in ind_tetr_save below
+        ! (weights, deposit phase, energy check) must use the unshifted position.
+        x_cell = x
+        if (iper_phi /= 0) x_cell(2) = x(2) &
+            + real(iper_phi, dp) * 2.0_dp * pi / real(n_field_periods, dp)
+
         t%remain = t%remain - t_pass
 
         ! Delta-f weight evolution (Albert 2016, Eq. 4) with linear
@@ -925,13 +1141,45 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         ! tetra_physics of the cell the marker just traversed. Previously
         ! we evaluated at x_post_push with the NEW cell's physics — a
         ! left-Riemann sample at the wrong boundary.
-        if (in%boole_delta_f .and. ind_tetr_save /= -1) then
+        if (boole_nonlinear_weight .and. in%boole_delta_f &
+            .and. ind_tetr_save /= -1) then
+            ! Exact telescoping update of w = df/f0 over the push.
+            call ln_f0_and_H(ind_tetr_save, x_cell, vpar, perpinv, species, lnf0_b, &
+                             H_b, H_in=H_a, T0_erg=T0_b)
+            weights%w(n, species) = cmplx((1.0_dp + real(weights%w(n, species), dp)) &
+                                          * exp(lnf0_a - lnf0_b) - 1.0_dp, 0.0_dp, &
+                                          kind=dp)
+            max_rel_dH_loc = max(max_rel_dH_loc, abs(H_b - H_a) / abs(H_a))
+            max_dH_T_loc = max(max_dH_T_loc, abs(H_b - H_a) / T0_b)
+            max_abs_w_loc = max(max_abs_w_loc, abs(weights%w(n, species)))
+            sum_w2_loc = sum_w2_loc + abs(weights%w(n, species))**2
+            n_w2_loc = n_w2_loc + 1.0_dp
+            lnf0_a = lnf0_b
+        else if (in%boole_delta_f .and. ind_tetr_save /= -1) then
             call update_delta_f_weight(n, ind_tetr_save, &
-                                       0.5_dp * (x_pre_push + x), &
+                                       0.5_dp * (x_pre_push + x_cell), &
                                        vpar, vperp, t_pass, t, species)
         endif
 
-        call update_local_tetr_moments(local_tetr_moments, ind_tetr_save, n, optional_quantities, species)
+        ! (m,n)-demodulated radial profile deposit at the push midpoint.
+        if (present(prof_marker) .and. in%boole_delta_f .and. ind_tetr_save /= -1 &
+            .and. t%confined + t%step - t%remain > prof_t_burn) then
+            ! Nonlinear mode: deposit P w/(1 + w) with the birth factor P = F0/g0
+            ! (derivation section 8); the density is in P, not in the bin.
+            if (boole_nonlinear_weight) then
+                w_dep = birth_factor(n, species) * weights%w(n, species) &
+                    / (1.0_dp + weights%w(n, species))
+            else
+                w_dep = weights%w(n, species)
+            end if
+            call deposit_mn_profile(prof_marker, ind_tetr_save, &
+                0.5_dp * (x_pre_push + x_cell), w_dep * optional_quantities%vpar_int, &
+                w_dep * t_pass)
+        end if
+
+        if (.not. present(prof_marker)) &
+            call update_local_tetr_moments(local_tetr_moments, ind_tetr_save, n, &
+                                           optional_quantities, species)
         if ((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save, ind_tetr, x)
 
         ! Diagnostic: dump marker n=1 trajectory for orbit-q comparison.
@@ -1197,6 +1445,7 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
         T_alpha_erg = pv%Te * ev2erg
     end if
     if (T_alpha_erg <= 0.0_dp) T_alpha_erg = in%energy_eV * ev2erg
+    if (boole_vperp_averaged_source) v_sq = vpar*vpar + 2.0_dp * T_alpha_erg / mass
 
     ! A_1, A_2 in d/ds form (no ds/dpsi_pol conversion); the contravariant
     ! component delta_B^s in the source closes the chain rule.
@@ -1266,6 +1515,428 @@ subroutine init_regularisation_for_particle(n, ind_tetr, x, vpar, vperp, species
 end subroutine init_regularisation_for_particle
 
 ! ====================================================================
+! Local-profile collision background for the OU operator: per tetrahedron
+! T_e(s), T_i(s) and n_e(s) from the loaded profiles (at the centroid),
+! replacing the constants energy_eV and density set in
+! calc_collision_coefficients_for_all_tetrahedra, and recomputes the
+! collis_init coefficients. The OU equilibrium is then <v_par^2> = T_e(s)/m.
+! ====================================================================
+subroutine set_local_collision_background()
+
+    use gorilla_applets_types_mod, only: in, c
+    use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
+    use tetra_physics_mod, only: particle_mass, particle_charge
+    use constants, only: echarge
+    use collis_ions, only: collis_init
+    use profile_data_mod, only: eval_profiles, profile_values_t
+
+    integer :: i, k
+    real(dp) :: x_c(3), m0, z0, v0_l, s_c
+    real(dp), allocatable :: efcolf_l(:), velrat_l(:), enrat_l(:)
+    real(dp), allocatable :: dens_l(:), temp_l(:)
+    type(profile_values_t) :: pv
+
+    m0 = particle_mass
+    z0 = particle_charge / echarge
+    !$omp parallel default(shared) private(i, k, x_c, s_c, pv, v0_l, &
+    !$omp& efcolf_l, velrat_l, enrat_l, dens_l, temp_l)
+    allocate(efcolf_l(c%n), velrat_l(c%n), enrat_l(c%n), dens_l(c%n), temp_l(c%n))
+    !$omp do
+    do i = 1, ntetr
+        x_c = 0.0_dp
+        do k = 1, 4
+            x_c = x_c + 0.25_dp * verts_rphiz(:, tetra_grid(i)%ind_knot(k))
+        end do
+        if (boole_nonlinear_weight) then
+            s_c = eval_s0_local(i, x_c)
+        else
+            s_c = eval_s_local(i, x_c)
+        end if
+        call eval_profiles(s_c, pv)
+        dens_l = pv%n_e
+        temp_l = pv%Ti
+        temp_l(c%n) = pv%Te
+        c%temp_mat(:, i) = temp_l
+        c%dens_mat(:, i) = dens_l
+        call collis_init(m0, z0, c%mass, c%charge_num, dens_l, temp_l, in%energy_eV, &
+                         v0_l, efcolf_l, velrat_l, enrat_l)
+        c%efcolf_mat(:, i) = efcolf_l
+        c%velrat_mat(:, i) = velrat_l
+        c%enrat_mat(:, i) = enrat_l
+    end do
+    !$omp end do
+    deallocate(efcolf_l, velrat_l, enrat_l, dens_l, temp_l)
+    !$omp end parallel
+
+end subroutine set_local_collision_background
+
+! ====================================================================
+! Add amp * exp(-i(m theta + n phi)) at position x (inside tetra ind_tetr)
+! to the s-bin of the per-marker radial profile (see n_prof_bins).
+! ====================================================================
+subroutine deposit_mn_profile(prof_marker, ind_tetr, x, amp, dens)
+
+    use tetra_physics_mod, only: coord_system
+    use perturbation_field_mod, only: pert_m_mode, pert_n_mode
+
+    complex(dp), intent(inout) :: prof_marker(:)
+    integer,     intent(in)    :: ind_tetr
+    real(dp),    intent(in)    :: x(3)
+    complex(dp), intent(in)    :: amp, dens
+
+    real(dp) :: s_loc, theta_loc, phi_loc, alpha
+    integer  :: ib
+
+    if (boole_nonlinear_weight) then
+        s_loc = eval_s0_local(ind_tetr, x)
+    else
+        s_loc = eval_s_local(ind_tetr, x)
+    end if
+    ib = floor((s_loc - s_inner_sample) / (s_outer_sample - s_inner_sample) &
+               * real(n_prof_bins, dp)) + 1
+    if (ib < 1 .or. ib > n_prof_bins) return
+    theta_loc = eval_theta_sfl_local(ind_tetr, x)
+    if (coord_system == 1) then
+        phi_loc = x(2)
+    else
+        phi_loc = x(3)
+    end if
+    alpha = real(pert_m_mode, dp) * theta_loc + real(pert_n_mode, dp) * phi_loc
+    prof_marker(ib) = prof_marker(ib) + amp * exp(cmplx(0.0_dp, -alpha, kind=dp))
+    ! second half: (0,0) moment int w dt (density of df per unit f0)
+    prof_marker(n_prof_bins + ib) = prof_marker(n_prof_bins + ib) + dens
+
+end subroutine deposit_mn_profile
+
+! ====================================================================
+! Write the (m,n) radial profile sums: one line per (bin, batch) with the
+! bin edges in s and the complex sum; header lists markers per batch.
+! Physical current: j_mn = q n_e(s) (V_W / N_batch) * sum / V_bin.
+! ====================================================================
+subroutine write_mn_profile(fname)
+
+    use perturbation_field_mod, only: pert_m_mode, pert_n_mode
+
+    character(len=*), intent(in) :: fname
+    integer  :: u, ib, jb
+    real(dp) :: ds
+
+    ds = (s_outer_sample - s_inner_sample) / real(n_prof_bins, dp)
+    open(newunit=u, file=fname, status='replace', action='write')
+    write(u, '(a, 2(1x, i0), 2(1x, es24.16), 2(1x, i0))') &
+        '# n_bins n_batches s_in s_out m n', n_prof_bins, n_prof_batches, &
+        s_inner_sample, s_outer_sample, pert_m_mode, pert_n_mode
+    write(u, '(a)', advance='no') '# markers_per_batch'
+    do jb = 1, n_prof_batches
+        write(u, '(1x, i0)', advance='no') prof_count(jb)
+    end do
+    write(u, *)
+    ! Nonlinear mode: the particle density is in the weights (birth factor P), the
+    ! post-processing must not multiply by the local density again.
+    if (boole_nonlinear_weight) write(u, '(a)') '# density_in_weights 1'
+    write(u, '(a)') '# bin batch s_lo s_hi Re(sum) Im(sum) Re(dens) Im(dens)'
+    do jb = 1, n_prof_batches
+        do ib = 1, n_prof_bins
+            write(u, '(2(i6, 1x), 6(es24.16, 1x))') ib, jb, &
+                s_inner_sample + (ib - 1) * ds, s_inner_sample + ib * ds, &
+                real(prof_acc(ib, jb), dp), aimag(prof_acc(ib, jb)), &
+                real(prof_acc(n_prof_bins + ib, jb), dp), &
+                aimag(prof_acc(n_prof_bins + ib, jb))
+        end do
+    end do
+    close(u)
+
+end subroutine write_mn_profile
+
+! ====================================================================
+! Barycentric coordinates of x in tetrahedron ind_tetr (vertex order of
+! tetra_grid%ind_knot), closed form (Cramer). ok = .false. if degenerate.
+! ====================================================================
+subroutine barycentric_coords(ind_tetr, x, lam, ok)
+
+    use tetra_grid_mod, only: tetra_grid, verts_rphiz
+
+    integer,  intent(in)  :: ind_tetr
+    real(dp), intent(in)  :: x(3)
+    real(dp), intent(out) :: lam(4)
+    logical,  intent(out) :: ok
+
+    real(dp) :: v(3,4), e1(3), e2(3), e3(3), d(3), c23(3), det
+    integer  :: i
+
+    do i = 1, 4
+        v(:, i) = verts_rphiz(:, tetra_grid(ind_tetr)%ind_knot(i))
+    end do
+    e1 = v(:, 2) - v(:, 1)
+    e2 = v(:, 3) - v(:, 1)
+    e3 = v(:, 4) - v(:, 1)
+    d  = x - v(:, 1)
+    c23 = [e2(2)*e3(3) - e2(3)*e3(2), e2(3)*e3(1) - e2(1)*e3(3), &
+           e2(1)*e3(2) - e2(2)*e3(1)]
+    det = sum(e1 * c23)
+    ok = abs(det) > tiny(1.0_dp)
+    if (.not. ok) then
+        lam = [1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp]
+        return
+    end if
+    lam(2) = sum(d * c23) / det
+    lam(3) = sum(e1 * [d(2)*e3(3) - d(3)*e3(2), d(3)*e3(1) - d(1)*e3(3), &
+                       d(1)*e3(2) - d(2)*e3(1)]) / det
+    lam(4) = sum(e1 * [e2(2)*d(3) - e2(3)*d(2), e2(3)*d(1) - e2(1)*d(3), &
+                       e2(1)*d(2) - e2(2)*d(1)]) / det
+    lam(1) = 1.0_dp - lam(2) - lam(3) - lam(4)
+
+end subroutine barycentric_coords
+
+! ====================================================================
+! Unperturbed flux label for the nonlinear mode: psi0_vert holds the
+! unperturbed A_phi (= psi_pol) at the vertices; its linear interpolant is
+! exactly conserved along unperturbed field lines of the piecewise-linear mesh.
+! ====================================================================
+subroutine init_nonlinear_weight()
+
+    use tetra_grid_mod, only: verts_rphiz, nvert
+    use tetra_grid_settings_mod, only: grid_kind, R0_analytic_circ
+    use field_analytic_circ_mod, only: psi_pol_analytic_circ
+
+    integer  :: iv
+    real(dp) :: rho
+
+    if (grid_kind /= 5) then
+        print *, 'ERROR: boole_nonlinear_weight requires grid_kind = 5'
+        stop
+    end if
+    if (allocated(psi0_vert)) deallocate(psi0_vert)
+    allocate(psi0_vert(nvert))
+    do iv = 1, nvert
+        rho = sqrt((verts_rphiz(1, iv) - R0_analytic_circ)**2 + verts_rphiz(3, iv)**2)
+        psi0_vert(iv) = psi_pol_analytic_circ(rho)
+    end do
+
+end subroutine init_nonlinear_weight
+
+real(dp) function eval_s0_local(ind_tetr, x) result(s0)
+
+    use tetra_grid_mod, only: tetra_grid
+    use profile_data_mod, only: eval_s_from_psi_pol
+
+    integer,  intent(in) :: ind_tetr
+    real(dp), intent(in) :: x(3)
+
+    real(dp) :: lam(4)
+    logical  :: ok
+
+    call barycentric_coords(ind_tetr, x, lam, ok)
+    s0 = eval_s_from_psi_pol(sum(lam * psi0_vert(tetra_grid(ind_tetr)%ind_knot(1:4))))
+    s0 = max(0.0_dp, min(1.0_dp, s0))
+
+end function eval_s0_local
+
+! ====================================================================
+! ln F0 = ln n(s*) - 3/2 ln T(s*) - K0*/T(s*) (canonical background, see below),
+! K = m (vpar^2/2 - perpinv B), and H = K + q Phi at position x (nonlinear mode).
+! perpinv = -vperp^2/(2B) is the conserved perpendicular invariant.
+! ====================================================================
+subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_mload, &
+                       T0_erg)
+
+    use tetra_physics_mod, only: tetra_physics
+    use gorilla_applets_types_mod, only: start
+    use profile_data_mod, only: eval_profiles, profile_values_t, eval_s_from_psi_pol
+    use tetra_grid_mod, only: tetra_grid
+    use constants, only: ev2erg
+
+    integer,  intent(in)  :: ind_tetr, species
+    real(dp), intent(in)  :: x(3), vpar, perpinv
+    real(dp), intent(out) :: lnf0, H
+    ! H_in: marker energy fixed since the last collision; then K = H_in - q Phi(x)
+    ! (exact energy conservation of the static fields), so orbit-integration
+    ! errors in vpar do not enter the weight. H still returns the pusher's value.
+    real(dp), intent(in), optional :: H_in
+    ! ln_mload: ln of the unit-density local Maxwellian at rest, T(s0), energy K, in
+    ! the normalisation of lnf0 (the velocity distribution the markers are loaded
+    ! with); T0_erg: T_e(s0)
+    real(dp), intent(out), optional :: ln_mload, T0_erg
+
+    real(dp) :: z(3), B, K, Te_erg, Phi, h_phi, psi0, lam(4), s0, s_star, K0
+    logical  :: ok
+    type(profile_values_t) :: pv0, pvs
+
+    z = x - tetra_physics(ind_tetr)%x1
+    B = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z)
+    Phi = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi * z)
+    K = start%particle_mass(species) * (0.5_dp * vpar**2 - perpinv * B)
+    H = K + start%particle_charge(species) * Phi
+    if (present(H_in)) K = H_in - start%particle_charge(species) * Phi
+    ! Canonical background: psi* = psi0 + (c m/q) vpar h_phi (= c p_phi/q of the
+    ! unperturbed field, h_phi covariant) and K0* = K + q (Phi0(s0) - Phi0(s*))
+    ! are both conserved on unperturbed orbits, including magnetic drifts, so
+    ! the weight changes only through the perturbation.
+    call barycentric_coords(ind_tetr, x, lam, ok)
+    psi0 = sum(lam * psi0_vert(tetra_grid(ind_tetr)%ind_knot(1:4)))
+    h_phi = tetra_physics(ind_tetr)%h2_1 + sum(tetra_physics(ind_tetr)%gh2 * z)
+    s0 = max(0.0_dp, min(1.0_dp, eval_s_from_psi_pol(psi0)))
+    s_star = max(0.0_dp, min(1.0_dp, &
+        eval_s_from_psi_pol(psi0 + start%cm_over_e(species) * vpar * h_phi)))
+    call eval_profiles(s0, pv0)
+    call eval_profiles(s_star, pvs)
+    K0 = K + start%particle_charge(species) * (pv0%Phi0 - pvs%Phi0)
+    Te_erg = pvs%Te * ev2erg
+    lnf0 = log(pvs%n_e) - 1.5_dp * log(Te_erg) - K0 / Te_erg
+    if (present(ln_mload)) &
+        ln_mload = -1.5_dp * log(pv0%Te * ev2erg) - K / (pv0%Te * ev2erg)
+    if (present(T0_erg)) T0_erg = pv0%Te * ev2erg
+
+end subroutine ln_f0_and_H
+
+! ====================================================================
+! Birth factor P = F0/g0 of marker n (nonlinear mode, derivation section 8):
+! g0 is uniform in volume (equidistant layers) times the unit-density local
+! Maxwellian at rest at T(s0) (boole_local_energy_sampling), so
+! P = exp(ln F0 - ln M_T(s0)) in the common normalisation of ln_f0_and_H.
+! Called at the spawn point, before the first collision kick.
+! ====================================================================
+subroutine set_birth_factor(n, species, x, vpar, vperp)
+
+    use find_tetra_mod, only: find_tetra
+    use tetra_physics_mod, only: tetra_physics
+
+    integer,  intent(in) :: n, species
+    real(dp), intent(in) :: x(3), vpar, vperp
+
+    integer  :: ind_tetr, iface
+    real(dp) :: xx(3), z(3), B, perpinv, lnf0, H, ln_mload
+
+    xx = x
+    call find_tetra(xx, vpar, vperp, ind_tetr, iface)
+    if (ind_tetr == -1) then
+        birth_factor(n, species) = 0.0_dp
+        return
+    end if
+    z = xx - tetra_physics(ind_tetr)%x1
+    B = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z)
+    perpinv = -0.5_dp * vperp**2 / B
+    call ln_f0_and_H(ind_tetr, xx, vpar, perpinv, species, lnf0, H, ln_mload=ln_mload)
+    birth_factor(n, species) = exp(lnf0 - ln_mload)
+
+end subroutine set_birth_factor
+
+! ====================================================================
+! OU collision kick with a Metropolis-Hastings correction to the target F0
+! (nonlinear mode, boole_mh_collisions). The exact OU transition of vpar at
+! fixed v_perp is reversible w.r.t. exp(-vpar^2/(2 sigma^2)), sigma^2 from the
+! cell background (as in stost), so the proposal vpar -> vpar' is accepted with
+!   min(1, F0(vpar') exp(-vpar^2/(2 sigma^2)) / (F0(vpar) exp(-vpar'^2/(2 sigma^2)))).
+! The kick then leaves F0 invariant (derivation section 8b, 8c).
+! ====================================================================
+subroutine carry_out_collisions_mh(i, n, t, x, vpar, vperp, ind_tetr, iface, species)
+
+    use gorilla_applets_types_mod, only: in, c, start, time_t
+    use utils_parallelised_particle_pushing_mod, only: carry_out_collisions
+    use tetra_physics_mod, only: tetra_physics
+
+    integer,      intent(in)    :: i, n, species
+    type(time_t), intent(inout) :: t
+    real(dp),     intent(inout) :: x(3), vpar, vperp
+    integer,      intent(inout) :: ind_tetr, iface
+
+    real(dp) :: vpar0, vperp0, z(3), B, perpinv, lnf_a, lnf_b, H, sig2, dlog, u
+
+    vpar0 = vpar
+    vperp0 = vperp
+    call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species, &
+                              iswmode_in=in%i_collision_mode)
+    if (ind_tetr == -1) return
+    if (vpar == vpar0) return
+    z = x - tetra_physics(ind_tetr)%x1
+    B = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z)
+    perpinv = -0.5_dp * vperp0**2 / B
+    call ln_f0_and_H(ind_tetr, x, vpar0, perpinv, species, lnf_a, H)
+    call ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf_b, H)
+    if (c%enrat_mat(c%n, ind_tetr) > 0.0_dp) then
+        sig2 = 0.5_dp / c%enrat_mat(c%n, ind_tetr) * start%v0(species)**2
+    else
+        sig2 = 0.5_dp * start%v0(species)**2
+    end if
+    dlog = lnf_b - lnf_a + 0.5_dp * (vpar**2 - vpar0**2) / sig2
+    n_mh_prop_loc = n_mh_prop_loc + 1.0_dp
+    if (dlog < 0.0_dp) then
+        call random_number(u)
+        if (u > exp(dlog)) then
+            vpar = vpar0
+            vperp = vperp0
+            n_mh_rej_loc = n_mh_rej_loc + 1.0_dp
+        end if
+    end if
+
+end subroutine carry_out_collisions_mh
+
+! ====================================================================
+! (0,0) accounting at the end of a marker's trace (nonlinear mode): the
+! deposit weight W = P w/(1 + w) of lost markers (at their loss) and of the
+! surviving ones (at the end of the trace).
+! ====================================================================
+subroutine account_marker_end(n, species, lost, t_end)
+
+    use gorilla_applets_types_mod, only: weights
+
+    integer,  intent(in) :: n, species
+    logical,  intent(in) :: lost
+    real(dp), intent(in) :: t_end
+
+    real(dp) :: W
+
+    W = birth_factor(n, species) &
+        * real(weights%w(n, species) / (1.0_dp + weights%w(n, species)), dp)
+    !$omp critical (nl_account)
+    if (lost) then
+        lost_W = lost_W + W
+        if (t_end < prof_t_burn) then
+            n_lost_early = n_lost_early + 1
+        else
+            n_lost_late = n_lost_late + 1
+        end if
+    else
+        alive_W = alive_W + W
+        alive_absW = alive_absW + abs(W)
+    end if
+    !$omp end critical (nl_account)
+
+end subroutine account_marker_end
+
+! ====================================================================
+! Maxwellian at the local temperature: rescale each marker's sampled energy
+! (drawn at in%energy_eV) by T_e(s)/in%energy_eV at its spawn position.
+! ====================================================================
+subroutine rescale_energies_to_local_temperature(species)
+
+    use gorilla_applets_types_mod, only: in, start
+    use find_tetra_mod, only: find_tetra
+    use profile_data_mod, only: eval_profiles, profile_values_t
+
+    integer, intent(in) :: species
+
+    integer  :: n, ind_tetr, iface
+    real(dp) :: x(3), s_loc
+    type(profile_values_t) :: pv
+
+    do n = 1, in%num_particles
+        if (start%lost(n, species)) cycle
+        x = start%x(:, n, species)
+        call find_tetra(x, 0.0_dp, 0.0_dp, ind_tetr, iface)
+        if (ind_tetr == -1) cycle
+        if (boole_nonlinear_weight) then
+            s_loc = eval_s0_local(ind_tetr, x)
+        else
+            s_loc = eval_s_local(ind_tetr, x)
+        end if
+        call eval_profiles(s_loc, pv)
+        start%energy(n, species) = start%energy(n, species) * pv%Te / in%energy_eV
+    end do
+
+end subroutine rescale_energies_to_local_temperature
+
+! ====================================================================
 ! Physics-normal flux label s at the particle position x inside tetra
 ! ind_tetr, clamped to [0,1] with 0 = magnetic axis and 1 = last closed
 ! flux surface. In flux coordinates (coord_system==2) GORILLA's x(1) is
@@ -1319,8 +1990,8 @@ real(dp) function eval_theta_sfl_local(ind_tetr, x) result(theta_loc)
     integer,  intent(in) :: ind_tetr
     real(dp), intent(in) :: x(3)
 
-    integer  :: i, vidx, ipiv(4), ierr
-    real(dp) :: M(4,4), b(4,1), V_th(4), span
+    integer  :: i, vidx
+    real(dp) :: v(3,4), e1(3), e2(3), e3(3), d(3), c23(3), det, lam(4), V_th(4), span
 
     ! In SFL coordinates (coord_system==2), theta is the native x(2) coordinate.
     if (coord_system == 2) then
@@ -1330,18 +2001,29 @@ real(dp) function eval_theta_sfl_local(ind_tetr, x) result(theta_loc)
 
     do i = 1, 4
         vidx = tetra_grid(ind_tetr)%ind_knot(i)
-        M(1:3, i) = verts_rphiz(:, vidx)
-        M(4,   i) = 1.0_dp
-        V_th(i)   = verts_sthetaphi(2, vidx)
+        v(:, i) = verts_rphiz(:, vidx)
+        V_th(i) = verts_sthetaphi(2, vidx)
     end do
-    b(1:3, 1) = x
-    b(4,   1) = 1.0_dp
 
-    call dgesv(4, 1, M, 4, ipiv, b, 4, ierr)
-    if (ierr /= 0) then
+    ! Barycentric coordinates by Cramer's rule, x - v1 = sum_k lam_k (v_k - v1),
+    ! k = 2..4 (closed form; no LAPACK call in the push loop).
+    e1 = v(:, 2) - v(:, 1)
+    e2 = v(:, 3) - v(:, 1)
+    e3 = v(:, 4) - v(:, 1)
+    d  = x - v(:, 1)
+    c23 = [e2(2)*e3(3) - e2(3)*e3(2), e2(3)*e3(1) - e2(1)*e3(3), &
+           e2(1)*e3(2) - e2(2)*e3(1)]
+    det = sum(e1 * c23)
+    if (abs(det) <= tiny(1.0_dp)) then
         theta_loc = V_th(1)
         return
     end if
+    lam(2) = sum(d * c23) / det
+    lam(3) = sum(e1 * [d(2)*e3(3) - d(3)*e3(2), d(3)*e3(1) - d(1)*e3(3), &
+                       d(1)*e3(2) - d(2)*e3(1)]) / det
+    lam(4) = sum(e1 * [e2(2)*d(3) - e2(3)*d(2), e2(3)*d(1) - e2(1)*d(3), &
+                       e2(1)*d(2) - e2(2)*d(1)]) / det
+    lam(1) = 1.0_dp - lam(2) - lam(3) - lam(4)
 
     ! Unwrap theta across the 2pi seam if the tetra straddles it.
     span = maxval(V_th) - minval(V_th)
@@ -1351,7 +2033,7 @@ real(dp) function eval_theta_sfl_local(ind_tetr, x) result(theta_loc)
         end do
     end if
 
-    theta_loc = sum(b(:, 1) * V_th)
+    theta_loc = sum(lam * V_th)
     theta_loc = modulo(theta_loc, 2.0_dp * pi)
 
 end function eval_theta_sfl_local
@@ -1577,7 +2259,8 @@ subroutine spawn_equidistant_in_s(species, n_spawned)
 
     use gorilla_applets_types_mod, only: in, start, g
     use tetra_grid_settings_mod, only: sfc_s_min, sfc_s_max, grid_size, n_extra_rings, &
-                                       grid_kind, R0_analytic_circ, a_analytic_circ
+                                       grid_kind, R0_analytic_circ, a_analytic_circ, &
+                                       n_field_periods
     use tetra_physics_mod, only: coord_system
     use find_tetra_mod, only: find_tetra
     use magdata_in_symfluxcoordinates_mod, only: magdata_in_symfluxcoord_ext
@@ -1695,12 +2378,14 @@ subroutine spawn_equidistant_in_s(species, n_spawned)
                 else
                     theta_loc = u(2) * 2.0_dp * pi
                 end if
+                ! Toroidal range is one field period [0, 2 pi/n_field_periods],
+                ! so markers land inside a wedge mesh (no-op for the full torus).
                 if (boole_stratify_phi) then
                     phi_bin_idx = phi_bin_perm(k_in_layer)
                     phi_loc = (dble(phi_bin_idx - 1) + u(3)) &
-                            * 2.0_dp * pi / dble(k_per_layer)
+                            * 2.0_dp * pi / dble(k_per_layer * n_field_periods)
                 else
-                    phi_loc = u(3) * 2.0_dp * pi
+                    phi_loc = u(3) * 2.0_dp * pi / dble(n_field_periods)
                 end if
 
                 if (coord_system == 1) then
