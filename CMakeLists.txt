@@ -10,7 +10,28 @@ enable_language(Fortran)
 find_package(BLAS REQUIRED)
 find_package(LAPACK REQUIRED)
 find_package(netCDF REQUIRED)
-find_package(netCDF-Fortran REQUIRED)
+
+# netCDF-Fortran shim: on Debian/Ubuntu, libnetcdff-dev ships the library and
+# .mod files but NOT netCDF-FortranConfig.cmake (upstream only generates it for
+# CMake-based builds; Debian builds with autotools). Try find_package first so
+# machines with a proper config file (source builds, conda, other distros) keep
+# using it; otherwise synthesize the netCDF::netcdff IMPORTED target manually
+# from the discovered .so and .mod paths.
+find_package(netCDF-Fortran QUIET CONFIG)
+if(NOT netCDF-Fortran_FOUND)
+    message(STATUS "netCDF-Fortran: no CMake config file found, using manual discovery")
+    find_library(NETCDFF_LIBRARY NAMES netcdff REQUIRED)
+    find_path(NETCDFF_MODULE_DIR NAMES netcdf.mod
+              HINTS /usr/include /usr/local/include
+              PATH_SUFFIXES netcdf-fortran
+              REQUIRED)
+    add_library(netCDF::netcdff UNKNOWN IMPORTED)
+    set_target_properties(netCDF::netcdff PROPERTIES
+        IMPORTED_LOCATION "${NETCDFF_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${NETCDFF_MODULE_DIR}")
+    message(STATUS "netCDF-Fortran library : ${NETCDFF_LIBRARY}")
+    message(STATUS "netCDF-Fortran modules : ${NETCDFF_MODULE_DIR}")
+endif()
 
 get_target_property(_NETCDFF_INC netCDF::netcdff INTERFACE_INCLUDE_DIRECTORIES)
 include_directories(${netCDF_INCLUDE_DIR} ${_NETCDFF_INC})
