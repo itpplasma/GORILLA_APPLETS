@@ -57,3 +57,16 @@ target_link_libraries(gorilla_applets_main.x
   GORILLA_APPLETS
   )
 target_include_directories(gorilla_applets_main.x PUBLIC ${CMAKE_BINARY_DIR}/SRC_CORE)
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(test_ou_collision_invariant.x
+        SRC_CORE/constants_mod.f90
+        SRC/collis_ions_mod.f90
+        TESTS/test_ou_collision_invariant.f90)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ou_test_modules)
+    set_target_properties(test_ou_collision_invariant.x PROPERTIES
+        Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ou_test_modules)
+    target_include_directories(test_ou_collision_invariant.x PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/ou_test_modules)
+    add_test(NAME ou_collision_invariant COMMAND test_ou_collision_invariant.x)
+endif()
