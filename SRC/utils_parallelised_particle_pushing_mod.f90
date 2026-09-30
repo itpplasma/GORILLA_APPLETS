@@ -1,9 +1,9 @@
 module utils_parallelised_particle_pushing_mod
 
-    use, intrinsic :: iso_fortran_env, only: dp => real64
+    use, intrinsic :: iso_fortran_env, only: dp => real64, int64
 
     implicit none
-   
+
 contains
 
 subroutine print_progress(num_particles,kpart,n)
@@ -423,34 +423,47 @@ function linspace(start, stop, n) result(x)
 end function linspace
 
 subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num, second_factor)
-    !This routine sets an individual seed for random number generation in each thread. It does so by adding the thread number
-    !to a given array of integers and using the sum as a put argument of random_seed. Since the seed has rather low entropy (values
-    !of the array are multiples of each other), the first random numbers produced are likely to be non-random. Thus, n random
-    !numbers are generated to get rid of these potentially corrupted numnbers (compare with 
-    !https://stackoverflow.com/questions/51893720/correctly-setting-random-seeds-for-repeatability, also check
-    !https://stats.stackexchange.com/questions/354373/what-exactly-is-a-seed-in-a-random-number-generator)
+    !Sets an individual, reproducible RNG state for each OpenMP thread. The state
+    !is derived from the master seed loaded from seed.inp (via
+    !set_seed_for_random_numbers) by combining it with thread_num and an optional
+    !second_factor through the SplitMix64 bit mixer, which produces
+    !well-decorrelated 64-bit words for neighbouring inputs. Same seed.inp +
+    !same thread partition => bit-identical per-thread streams. If no master
+    !seed was loaded, we fall back to a hardcoded constant so callers that
+    !skipped set_seed_for_random_numbers keep working.
+
+    use utils_data_pre_and_post_processing_mod, only: master_seed_u64, master_seed_loaded, splitmix64_next
 
     integer, intent(in) :: thread_num
     integer, intent(in), optional :: second_factor
-    real(dp) :: randnum
-    integer :: i,n, state(33)
+    integer(int64), parameter :: gamma        = -7046029254386353131_int64  ! 0x9E3779B97F4A7C15
+    integer(int64), parameter :: second_salt  = -6534898150910275811_int64  ! arbitrary large odd
+    integer(int64), parameter :: mask31       = 2147483647_int64            ! 0x7FFFFFFF
+    integer(int64) :: sm_state, key, w
+    integer, allocatable :: state(:)
+    integer :: n, i, sf
 
-    n = 1000
-    state = 20180815
+    sf = 0
+    if (present(second_factor)) sf = second_factor
 
-    do i = 1, size(state)
-        if (present(second_factor)) then 
-            state(i) = (state(i)+thread_num+second_factor)*i
-        else
-            state(i) = (state(i)+thread_num)*i
-        endif
+    if (master_seed_loaded) then
+        key = ieor(master_seed_u64, int(thread_num, int64) * gamma)
+        key = ieor(key,             int(sf,         int64) * second_salt)
+    else
+        key = int(20180815, int64) + int(thread_num, int64) + int(sf, int64) * gamma
+    endif
+
+    sm_state = key
+    call splitmix64_next(sm_state, w)   ! initial diffusion of the key
+
+    call random_seed(size=n)
+    allocate(state(n))
+    do i = 1, n
+        call splitmix64_next(sm_state, w)
+        state(i) = int(iand(w, mask31), kind(state(i)))
     enddo
-
-    call random_seed(put=state+thread_num)
-
-    do i = 1,n
-        call random_number(randnum)
-    enddo
+    call random_seed(put=state)
+    deallocate(state)
 
 end subroutine initialise_seed_for_random_numbers_for_each_thread
 
