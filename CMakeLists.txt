@@ -83,4 +83,14 @@ if(BUILD_TESTING)
     target_include_directories(test_ou_collision_invariant.x PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}/ou_test_modules)
     add_test(NAME ou_collision_invariant COMMAND test_ou_collision_invariant.x)
+    # Analytic moment oracle; no equilibrium or orbit calculation is required.
+    add_executable(test_rmp_profile_moments.x
+        SRC/rmp_response_currents/rmp_profile_moments_mod.f90
+        TESTS/test_rmp_profile_moments.f90)
+    set_target_properties(test_rmp_profile_moments.x PROPERTIES
+        Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/moment_test_modules)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/moment_test_modules)
+    target_include_directories(test_rmp_profile_moments.x PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/moment_test_modules)
+    add_test(NAME rmp_profile_moments COMMAND test_rmp_profile_moments.x)
 endif()
