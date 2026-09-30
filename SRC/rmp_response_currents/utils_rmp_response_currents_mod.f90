@@ -5,6 +5,7 @@ module utils_rmp_response_currents_mod
     ! it here so the namelist reads straight into the single source of truth.
     use profile_data_mod, only: boole_kim_reff_coords
     use perturbation_field_mod, only: boole_eperp_native_grid
+    use rmp_profile_moments_mod, only: deposit_profile_moments
 
     implicit none
 
@@ -710,7 +711,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     if (n_prof_bins > 0) then
         if (allocated(prof_acc)) deallocate(prof_acc)
         if (allocated(prof_count)) deallocate(prof_count)
-        allocate(prof_acc(2 * n_prof_bins, n_prof_batches), prof_count(n_prof_batches))
+        allocate(prof_acc(3 * n_prof_bins, n_prof_batches), prof_count(n_prof_batches))
         prof_acc = (0.0_dp, 0.0_dp)
         prof_count = 0
     end if
@@ -743,8 +744,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
         end if
     end if
     if (n_prof_bins > 0) then
-        allocate(prof_local(2 * n_prof_bins, n_prof_batches))
-        allocate(prof_marker(2 * n_prof_bins))
+        allocate(prof_local(3 * n_prof_bins, n_prof_batches))
+        allocate(prof_marker(3 * n_prof_bins))
         prof_local = (0.0_dp, 0.0_dp)
     end if
 
@@ -1602,9 +1603,7 @@ subroutine deposit_mn_profile(prof_marker, ind_tetr, x, amp, dens)
         phi_loc = x(3)
     end if
     alpha = real(pert_m_mode, dp) * theta_loc + real(pert_n_mode, dp) * phi_loc
-    prof_marker(ib) = prof_marker(ib) + amp * exp(cmplx(0.0_dp, -alpha, kind=dp))
-    ! second half: (0,0) moment int w dt (density of df per unit f0)
-    prof_marker(n_prof_bins + ib) = prof_marker(n_prof_bins + ib) + dens
+    call deposit_profile_moments(prof_marker, n_prof_bins, ib, alpha, amp, dens)
 
 end subroutine deposit_mn_profile
 
@@ -1634,14 +1633,17 @@ subroutine write_mn_profile(fname)
     ! Nonlinear mode: the particle density is in the weights (birth factor P), the
     ! post-processing must not multiply by the local density again.
     if (boole_nonlinear_weight) write(u, '(a)') '# density_in_weights 1'
-    write(u, '(a)') '# bin batch s_lo s_hi Re(sum) Im(sum) Re(dens) Im(dens)'
+    write(u, '(a)') '# bin batch s_lo s_hi Re(sum) Im(sum) Re(dens) Im(dens)' &
+        // ' Re(dens_mn) Im(dens_mn)'
     do jb = 1, n_prof_batches
         do ib = 1, n_prof_bins
-            write(u, '(2(i6, 1x), 6(es24.16, 1x))') ib, jb, &
+            write(u, '(2(i6, 1x), 8(es24.16, 1x))') ib, jb, &
                 s_inner_sample + (ib - 1) * ds, s_inner_sample + ib * ds, &
                 real(prof_acc(ib, jb), dp), aimag(prof_acc(ib, jb)), &
                 real(prof_acc(n_prof_bins + ib, jb), dp), &
-                aimag(prof_acc(n_prof_bins + ib, jb))
+                aimag(prof_acc(n_prof_bins + ib, jb)), &
+                real(prof_acc(2 * n_prof_bins + ib, jb), dp), &
+                aimag(prof_acc(2 * n_prof_bins + ib, jb))
         end do
     end do
     close(u)
