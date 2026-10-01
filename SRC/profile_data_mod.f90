@@ -220,7 +220,8 @@ subroutine load_profiles(profile_dir, equil_mapping_file)
     Phi_mapped(1) = 0.0_dp
     do i = 2, ns
         ds = r_equil(i) - r_equil(i-1)
-        Phi_mapped(i) = Phi_mapped(i-1) - Er_mapped(i) * ds
+        Phi_mapped(i) = Phi_mapped(i-1) &
+            - 0.5_dp*(Er_mapped(i-1) + Er_mapped(i))*ds
     end do
 
     ! --- Build cubic splines in s ---
