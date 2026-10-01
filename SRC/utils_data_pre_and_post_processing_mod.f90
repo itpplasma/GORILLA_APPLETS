@@ -412,6 +412,7 @@ end subroutine calc_poloidal_flux
 
 subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
+    use toroidal_profile_slices_mod, only: toroidal_profile_bounds
     use gorilla_applets_types_mod, only: in, c, start, s, flux
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
@@ -425,7 +426,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
     real(dp), dimension(:), allocatable :: efcolf_l, velrat_l, enrat_l, dens_l, temp_l
     real(dp) :: v0_l
-    integer :: i, j
+    integer :: i, j, slice_first, slice_last
     integer :: species = 1
     real(dp) :: m0, z0, n0, s_value, v0
     logical :: boole_T_and_n_from_files = .false.
@@ -478,8 +479,9 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     endif
 
     do i = 1,grid_size(2)-1 !copy data from first phi slice to all other phi slices
-        c%temp_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%temp_mat(:,1:ntetr/grid_size(2):3)
-        c%dens_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%dens_mat(:,1:ntetr/grid_size(2):3)
+        call toroidal_profile_bounds(ntetr, grid_size(2), i, slice_first, slice_last)
+        c%temp_mat(:, slice_first:slice_last:3) = c%temp_mat(:, 1:ntetr/grid_size(2):3)
+        c%dens_mat(:, slice_first:slice_last:3) = c%dens_mat(:, 1:ntetr/grid_size(2):3)
     enddo
     do i = 1,2 !copy data from first tetrahedron of each triangular prism to the two other ones
         c%temp_mat(:,1+i:ntetr:3) = c%temp_mat(:,1:ntetr:3)
