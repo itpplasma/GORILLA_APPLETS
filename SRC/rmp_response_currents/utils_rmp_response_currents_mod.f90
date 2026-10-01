@@ -5,6 +5,7 @@ module utils_rmp_response_currents_mod
     ! it here so the namelist reads straight into the single source of truth.
     use profile_data_mod, only: boole_kim_reff_coords
     use perturbation_field_mod, only: boole_eperp_native_grid
+    use rmp_gc_measure_mod, only: gc_measure_correction, gc_log_measure_change
     use rmp_profile_moments_mod, only: deposit_profile_moments
     use rmp_volume_loading_mod, only: volume_candidate, analytic_window_volume
     use rmp_maxwellian_loading_mod, only: maxwellian_from_uniforms
@@ -198,6 +199,8 @@ module utils_rmp_response_currents_mod
     integer,  public :: n_prof_batches = 1
     ! Burn-in: the profile deposit starts at t = prof_t_burn [s] of each marker's
     ! trace (w starts at 0) and is divided by T_n - prof_t_burn.
+    logical, public :: boole_physical_profile_time = .false.
+    logical, public :: boole_gc_phase_measure = .false.
     real(dp), public :: prof_t_burn = 0.0_dp
     complex(dp), allocatable :: prof_acc(:,:)
     integer,     allocatable :: prof_count(:)
@@ -309,7 +312,7 @@ subroutine read_rmp_response_currents_inp_into_type
     & n_prof_bins, n_prof_batches, ou_nu_dtau, boole_eperp_native_grid, &
     & boole_reflect_window, prof_t_burn, boole_nonlinear_weight, &
     & boole_uniform_volume_sampling, &
-    & boole_local_energy_sampling, boole_mh_collisions
+    & boole_local_energy_sampling, boole_mh_collisions, boole_physical_profile_time, boole_gc_phase_measure
 
     ! Default: no anomalous transport (D_anom = 0 disables the kick).
     anomalous_diffusion_coefficient = 0.0_dp
@@ -728,7 +731,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP&        da_profile_loaded, da_scale_factor, n_prof_bins, n_prof_batches, &
     !$OMP&        prof_acc, prof_count, boole_reflect_window, rho_win, prof_t_burn, &
     !$OMP&        max_rel_dH, max_abs_w, sum_w2, n_w2, max_dH_T, n_mh_prop, n_mh_rej, &
-    !$OMP&        boole_nonlinear_weight, boole_mh_collisions) &
+    !$OMP&        boole_nonlinear_weight, boole_mh_collisions, boole_physical_profile_time, &
+    !$OMP&        boole_gc_phase_measure) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
     !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local, n_da_sub, i_da_sub) &
     !$OMP& PRIVATE(prof_local, prof_marker, ibatch) &
@@ -1179,7 +1183,7 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
             end if
             call deposit_mn_profile(prof_marker, ind_tetr_save, &
                 0.5_dp * (x_pre_push + x_cell), w_dep * optional_quantities%vpar_int, &
-                w_dep * t_pass)
+                w_dep * profile_dwell_time(t_pass, optional_quantities%t_hamiltonian))
         end if
 
         if (.not. present(prof_marker)) &
@@ -1585,6 +1589,50 @@ end subroutine set_local_collision_background
 ! Add amp * exp(-i(m theta + n phi)) at position x (inside tetra ind_tetr)
 ! to the s-bin of the per-marker radial profile (see n_prof_bins).
 ! ====================================================================
+pure function profile_dwell_time(tracer_time, hamiltonian_time) result(dwell)
+    real(dp), intent(in) :: tracer_time, hamiltonian_time
+    real(dp) :: dwell
+
+    dwell = tracer_time
+    if (boole_physical_profile_time) dwell = hamiltonian_time
+end function profile_dwell_time
+
+subroutine validate_profile_clock()
+    use gorilla_applets_types_mod, only: in
+    use gorilla_settings_mod, only: ipusher, i_time_tracing_option, &
+        boole_time_hamiltonian, boole_vpar_int
+
+    if (boole_gc_phase_measure) then
+        if (.not. in%boole_delta_f) &
+            error stop 'GC measure requires the delta-f estimator'
+        if (.not. boole_physical_profile_time) &
+            error stop 'GC measure requires physical profile time'
+        if (.not. boole_nonlinear_weight) &
+            error stop 'GC measure requires nonlinear birth weights'
+    end if
+    if (.not. boole_physical_profile_time) return
+    if (n_prof_bins < 1) error stop 'Physical profile time requires profile bins'
+    if (ipusher /= 2) error stop 'Physical profile time requires polynomial pusher'
+    if (i_time_tracing_option /= 2) &
+        error stop 'Physical profile time requires Hamiltonian time tracing'
+    if (.not. boole_time_hamiltonian) &
+        error stop 'Physical profile time requires Hamiltonian-time moment'
+    if (.not. boole_vpar_int) &
+        error stop 'Physical profile time requires parallel-current moment'
+    if (in%time_step <= 0.0_dp) &
+        error stop 'Physical occupation requires a forward-time trace'
+    if (prof_t_burn /= 0.0_dp) &
+        error stop 'Physical occupation currently requires zero burn-in'
+    if (boole_gc_phase_measure .and. in%boole_collisions) then
+        if (in%boole_preserve_energy_and_momentum_during_collisions) &
+            error stop 'GC MH requires a fixed collision background'
+        if (.not. boole_mh_collisions) &
+            error stop 'GC collision measure requires MH correction'
+        if (in%i_collision_mode /= 5) &
+            error stop 'GC MH correction requires OU collision mode 5'
+    end if
+end subroutine validate_profile_clock
+
 subroutine deposit_mn_profile(prof_marker, ind_tetr, x, amp, dens)
 
     use tetra_physics_mod, only: coord_system
@@ -1646,6 +1694,8 @@ subroutine write_mn_profile(fname)
     if (boole_nonlinear_weight .or. boole_uniform_volume_sampling) then
         write(u, '(a, es24.16)') '# analytic_spawn_volume_cm3 ', compute_spawn_volume()
     end if
+    write(u, '(a, l1)') '# physical_profile_time ', boole_physical_profile_time
+    write(u, '(a, l1)') '# gc_phase_measure ', boole_gc_phase_measure
     write(u, '(a)') '# bin batch s_lo s_hi Re(sum) Im(sum) Re(dens) Im(dens)' &
         // ' Re(dens_mn) Im(dens_mn)'
     do jb = 1, n_prof_batches
@@ -1760,6 +1810,7 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_ml
     use profile_data_mod, only: eval_profiles, profile_values_t, eval_s_from_psi_pol
     use tetra_grid_mod, only: tetra_grid
     use constants, only: ev2erg
+    use gorilla_settings_mod, only: boole_strong_electric_field
 
     integer,  intent(in)  :: ind_tetr, species
     real(dp), intent(in)  :: x(3), vpar, perpinv
@@ -1774,6 +1825,7 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_ml
     real(dp), intent(out), optional :: ln_mload, T0_erg
 
     real(dp) :: z(3), B, K, Te_erg, Phi, h_phi, psi0, lam(4), s0, s_star, K0
+    real(dp) :: energy_drift, drift_phi, K_random
     logical  :: ok
     type(profile_values_t) :: pv0, pvs
 
@@ -1781,8 +1833,20 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_ml
     B = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z)
     Phi = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi * z)
     K = start%particle_mass(species) * (0.5_dp * vpar**2 - perpinv * B)
-    H = K + start%particle_charge(species) * Phi
-    if (present(H_in)) K = H_in - start%particle_charge(species) * Phi
+    K_random = K
+    energy_drift = 0.0_dp
+    drift_phi = 0.0_dp
+    if (boole_gc_phase_measure .and. boole_strong_electric_field) then
+        energy_drift = 0.5_dp*start%particle_mass(species) &
+            * (tetra_physics(ind_tetr)%v2Emod_1 &
+               + dot_product(tetra_physics(ind_tetr)%gv2Emod, z))
+        drift_phi = tetra_physics(ind_tetr)%vE2_1 &
+            + dot_product(tetra_physics(ind_tetr)%gvE2, z)
+    end if
+    H = K + energy_drift + start%particle_charge(species)*Phi
+    if (present(H_in)) then
+        K = H_in - start%particle_charge(species)*Phi - energy_drift
+    end if
     ! Canonical background: psi* = psi0 + (c m/q) vpar h_phi (= c p_phi/q of the
     ! unperturbed field, h_phi covariant) and K0* = K + q (Phi0(s0) - Phi0(s*))
     ! are both conserved on unperturbed orbits, including magnetic drifts, so
@@ -1792,14 +1856,16 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_ml
     h_phi = tetra_physics(ind_tetr)%h2_1 + sum(tetra_physics(ind_tetr)%gh2 * z)
     s0 = max(0.0_dp, min(1.0_dp, eval_s_from_psi_pol(psi0)))
     s_star = max(0.0_dp, min(1.0_dp, &
-        eval_s_from_psi_pol(psi0 + start%cm_over_e(species) * vpar * h_phi)))
+        eval_s_from_psi_pol(psi0 + start%cm_over_e(species) &
+            * (vpar*h_phi + drift_phi))))
     call eval_profiles(s0, pv0)
     call eval_profiles(s_star, pvs)
-    K0 = K + start%particle_charge(species) * (pv0%Phi0 - pvs%Phi0)
+    K0 = K + energy_drift &
+        + start%particle_charge(species)*(pv0%Phi0 - pvs%Phi0)
     Te_erg = pvs%Te * ev2erg
     lnf0 = log(pvs%n_e) - 1.5_dp * log(Te_erg) - K0 / Te_erg
     if (present(ln_mload)) &
-        ln_mload = -1.5_dp * log(pv0%Te * ev2erg) - K / (pv0%Te * ev2erg)
+        ln_mload = -1.5_dp * log(pv0%Te * ev2erg) - K_random / (pv0%Te * ev2erg)
     if (present(T0_erg)) T0_erg = pv0%Te * ev2erg
 
 end subroutine ln_f0_and_H
@@ -1811,6 +1877,30 @@ end subroutine ln_f0_and_H
 ! P = exp(ln F0 - ln M_T(s0)) in the common normalisation of ln_f0_and_H.
 ! Called at the spawn point, before the first collision kick.
 ! ====================================================================
+function phase_measure_ratio(ind_tetr, x, vpar, species) result(chi)
+    use tetra_physics_mod, only: tetra_physics
+    use gorilla_applets_types_mod, only: start
+    use gorilla_settings_mod, only: boole_strong_electric_field
+
+    integer, intent(in) :: ind_tetr, species
+    real(dp), intent(in) :: x(3), vpar
+    real(dp) :: chi, z(3), h(3), symplectic_curl(3), B
+
+    z = x - tetra_physics(ind_tetr)%x1
+    h(1) = tetra_physics(ind_tetr)%h1_1 &
+        + dot_product(tetra_physics(ind_tetr)%gh1, z)
+    h(2) = tetra_physics(ind_tetr)%h2_1 &
+        + dot_product(tetra_physics(ind_tetr)%gh2, z)
+    h(3) = tetra_physics(ind_tetr)%h3_1 &
+        + dot_product(tetra_physics(ind_tetr)%gh3, z)
+    B = tetra_physics(ind_tetr)%bmod1 + dot_product(tetra_physics(ind_tetr)%gB, z)
+    symplectic_curl = tetra_physics(ind_tetr)%curlA &
+        + start%cm_over_e(species)*vpar*tetra_physics(ind_tetr)%curlh
+    if (boole_strong_electric_field) symplectic_curl = symplectic_curl &
+        + start%cm_over_e(species)*tetra_physics(ind_tetr)%curlvE
+    chi = gc_measure_correction(h, symplectic_curl, x(1), B)
+end function phase_measure_ratio
+
 subroutine set_birth_factor(n, species, x, vpar, vperp)
 
     use find_tetra_mod, only: find_tetra
@@ -1833,6 +1923,8 @@ subroutine set_birth_factor(n, species, x, vpar, vperp)
     perpinv = -0.5_dp * vperp**2 / B
     call ln_f0_and_H(ind_tetr, xx, vpar, perpinv, species, lnf0, H, ln_mload=ln_mload)
     birth_factor(n, species) = exp(lnf0 - ln_mload)
+    if (boole_gc_phase_measure) birth_factor(n, species) = &
+        birth_factor(n, species)*phase_measure_ratio(ind_tetr, xx, vpar, species)
 
 end subroutine set_birth_factor
 
@@ -1849,6 +1941,7 @@ subroutine carry_out_collisions_mh(i, n, t, x, vpar, vperp, ind_tetr, iface, spe
     use gorilla_applets_types_mod, only: in, c, start, time_t
     use utils_parallelised_particle_pushing_mod, only: carry_out_collisions
     use tetra_physics_mod, only: tetra_physics
+    use find_tetra_mod, only: find_tetra
 
     integer,      intent(in)    :: i, n, species
     type(time_t), intent(inout) :: t
@@ -1857,6 +1950,16 @@ subroutine carry_out_collisions_mh(i, n, t, x, vpar, vperp, ind_tetr, iface, spe
 
     real(dp) :: vpar0, vperp0, z(3), B, perpinv, lnf_a, lnf_b, H, sig2, dlog, u
 
+    if (in%i_collision_mode /= 5) &
+        error stop 'MH correction requires OU collision mode 5'
+    if (in%boole_preserve_energy_and_momentum_during_collisions) &
+        error stop 'MH correction requires a fixed collision background'
+    ! The collision wrapper locates the initial cell on its first call.
+    ! Locate it before validating the local proposal parameters.
+    if (i == 1) call find_tetra(x, vpar, vperp, ind_tetr, iface)
+    if (ind_tetr == -1) return
+    if (any(c%vpar_mat(:, ind_tetr) /= 0.0_dp)) &
+        error stop 'MH correction requires a zero-flow OU proposal'
     vpar0 = vpar
     vperp0 = vperp
     call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species, &
@@ -1874,6 +1977,9 @@ subroutine carry_out_collisions_mh(i, n, t, x, vpar, vperp, ind_tetr, iface, spe
         sig2 = 0.5_dp * start%v0(species)**2
     end if
     dlog = lnf_b - lnf_a + 0.5_dp * (vpar**2 - vpar0**2) / sig2
+    if (boole_gc_phase_measure) dlog = dlog + gc_log_measure_change( &
+        phase_measure_ratio(ind_tetr, x, vpar0, species), &
+        phase_measure_ratio(ind_tetr, x, vpar, species))
     n_mh_prop_loc = n_mh_prop_loc + 1.0_dp
     if (dlog < 0.0_dp) then
         call random_number(u)
