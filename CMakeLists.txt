@@ -102,3 +102,15 @@ if(BUILD_TESTING)
     target_link_libraries(test_rmp_equilibrium_potential.x GORILLA_APPLETS)
     add_test(NAME rmp_equilibrium_potential COMMAND test_rmp_equilibrium_potential.x)
 endif()
+
+if(BUILD_TESTING)
+    add_executable(test_toroidal_profile_slices.x
+        SRC/toroidal_profile_slices_mod.f90
+        TESTS/test_toroidal_profile_slices.f90)
+    set_target_properties(test_toroidal_profile_slices.x PROPERTIES
+        Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/slice_test_modules)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/slice_test_modules)
+    target_include_directories(test_toroidal_profile_slices.x PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/slice_test_modules)
+    add_test(NAME toroidal_profile_slices COMMAND test_toroidal_profile_slices.x)
+endif()

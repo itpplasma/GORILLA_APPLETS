@@ -20,6 +20,7 @@ add_library(GORILLA_APPLETS STATIC
   reversibility_test_mod.f90
   russian_roulette_mod.f90
   utils_data_pre_and_post_processing_mod.f90
+  toroidal_profile_slices_mod.f90
   sub_alpha_lifetime_can.f90
   utils_orbit_timestep_mod.f90
   utils_parallelised_particle_pushing_mod.f90

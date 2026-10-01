@@ -1,5 +1,6 @@
 module field_line_tracing_mod
 
+    use toroidal_profile_slices_mod, only: toroidal_profile_bounds
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
 
     implicit none
@@ -61,6 +62,7 @@ subroutine calc_field_lines
     double precision, dimension(:,:), allocatable :: start_pos_pitch_mat, dens_mat, temp_mat, vpar_mat, efcolf_mat, &
                                                      velrat_mat, enrat_mat, dens_mat_tetr, temp_mat_tetr
     double precision :: v0,pitchpar,vpar,vperp,t_remain,t_confined, v, maxcol
+    integer :: slice_first, slice_last
     integer :: kpart,i,j,n,m,k,ind_tetr,iface,ierr,err,num_background_species
     integer :: n_start, n_end, i_part
     double precision, dimension(3) :: x_rand_beg,x,randnum
@@ -168,8 +170,9 @@ print*, 'calc_starting_conditions finished'
         close(ne_unit)
 
         do i = 1,grid_size(2)-1
-            temp_mat_tetr(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = temp_mat_tetr(:,1:ntetr/grid_size(2):3)
-            dens_mat_tetr(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = dens_mat_tetr(:,1:ntetr/grid_size(2):3)
+            call toroidal_profile_bounds(ntetr, grid_size(2), i, slice_first, slice_last)
+            temp_mat_tetr(:, slice_first:slice_last:3) = temp_mat_tetr(:, 1:ntetr/grid_size(2):3)
+            dens_mat_tetr(:, slice_first:slice_last:3) = dens_mat_tetr(:, 1:ntetr/grid_size(2):3)
         enddo
         do i = 1,2
             temp_mat_tetr(:,1+i:ntetr:3) = temp_mat_tetr(:,1:ntetr:3)
