@@ -57,3 +57,11 @@ target_link_libraries(gorilla_applets_main.x
   GORILLA_APPLETS
   )
 target_include_directories(gorilla_applets_main.x PUBLIC ${CMAKE_BINARY_DIR}/SRC_CORE)
+# Exact cylinder provider. It needs the characteristic backend, not a toroidal mesh.
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/cylindrical_modules")
+add_executable(gorilla_cylindrical_response.x
+    SRC/rmp_response_currents/cylindrical_electron_response_mod.f90
+    SRC/rmp_response_currents/cylindrical_response_main.f90)
+set_target_properties(gorilla_cylindrical_response.x PROPERTIES
+    Fortran_MODULE_DIRECTORY "${CMAKE_BINARY_DIR}/cylindrical_modules")
+target_link_libraries(gorilla_cylindrical_response.x GORILLA)
