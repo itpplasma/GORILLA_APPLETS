@@ -6,6 +6,7 @@ module utils_rmp_response_currents_mod
     use profile_data_mod, only: boole_kim_reff_coords
     use perturbation_field_mod, only: boole_eperp_native_grid
     use rmp_profile_moments_mod, only: deposit_profile_moments
+    use rmp_volume_loading_mod, only: volume_candidate, analytic_window_volume
 
     implicit none
 
@@ -213,6 +214,7 @@ module utils_rmp_response_currents_mod
     ! collisions leave w unchanged. eval_wdot_s is not used. Radial bins and the
     ! collision background use s0 = s(psi0).
     logical,  public :: boole_nonlinear_weight = .false.
+    logical, public :: boole_uniform_volume_sampling = .false.
     ! Rescale each marker's sampled energy by T_e(s)/energy_eV at its spawn point
     ! (Maxwellian at the local temperature).
     logical,  public :: boole_local_energy_sampling = .false.
@@ -305,6 +307,7 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_local_background, boole_vperp_averaged_source, &
     & n_prof_bins, n_prof_batches, ou_nu_dtau, boole_eperp_native_grid, &
     & boole_reflect_window, prof_t_burn, boole_nonlinear_weight, &
+    & boole_uniform_volume_sampling, &
     & boole_local_energy_sampling, boole_mh_collisions
 
     ! Default: no anomalous transport (D_anom = 0 disables the kick).
@@ -1633,6 +1636,9 @@ subroutine write_mn_profile(fname)
     ! Nonlinear mode: the particle density is in the weights (birth factor P), the
     ! post-processing must not multiply by the local density again.
     if (boole_nonlinear_weight) write(u, '(a)') '# density_in_weights 1'
+    if (boole_nonlinear_weight .or. boole_uniform_volume_sampling) then
+        write(u, '(a, es24.16)') '# analytic_spawn_volume_cm3 ', compute_spawn_volume()
+    end if
     write(u, '(a)') '# bin batch s_lo s_hi Re(sum) Im(sum) Re(dens) Im(dens)' &
         // ' Re(dens_mn) Im(dens_mn)'
     do jb = 1, n_prof_batches
@@ -1793,7 +1799,7 @@ end subroutine ln_f0_and_H
 
 ! ====================================================================
 ! Birth factor P = F0/g0 of marker n (nonlinear mode, derivation section 8):
-! g0 is uniform in volume (equidistant layers) times the unit-density local
+! g0 is uniform in volume (analytic rejection sampler) times the unit-density local
 ! Maxwellian at rest at T(s0) (boole_local_energy_sampling), so
 ! P = exp(ln F0 - ln M_T(s0)) in the common normalisation of ln_f0_and_H.
 ! Called at the spawn point, before the first collision kick.
@@ -2056,10 +2062,17 @@ real(dp) function compute_spawn_volume() result(V_W)
 
     use gorilla_applets_types_mod, only: output
     use tetra_grid_mod, only: tetra_grid, verts_sthetaphi, ntetr
+    use tetra_grid_settings_mod, only: R0_analytic_circ, a_analytic_circ, &
+        n_field_periods
 
     integer  :: n_prisms, p, knot1
     real(dp) :: s_p
 
+    if (boole_nonlinear_weight .or. boole_uniform_volume_sampling) then
+        V_W = analytic_window_volume(R0_analytic_circ, a_analytic_circ, &
+            s_inner_sample, s_outer_sample)/real(n_field_periods, dp)
+        return
+    end if
     n_prisms = ntetr / 3
     V_W = 0.0_dp
     do p = 1, n_prisms
@@ -2257,6 +2270,60 @@ end subroutine bias_starting_positions_to_s_window
 ! window; layers in excess of the slot count are skipped and a warning
 ! is printed. Unused slots get marked as lost.
 ! ====================================================================
+! Nonlinear birth factors require uniform physical-volume loading. Uniform
+! s/theta layers do not supply it. This restricted sampler supports the
+! analytic circular grid in cylindrical coordinates and fills every slot.
+! A mesh miss aborts: retrying those misses would condition the loading on an
+! unknown domain and invalidate the analytic normalization.
+subroutine spawn_uniform_volume_analytic(species)
+    use gorilla_applets_types_mod, only: in, start
+    use tetra_grid_settings_mod, only: grid_kind, R0_analytic_circ, &
+        a_analytic_circ, n_field_periods, sfc_s_min, sfc_s_max
+    use tetra_physics_mod, only: coord_system
+    use find_tetra_mod, only: find_tetra
+
+    integer, intent(in) :: species
+    integer :: n, attempt, ind_tetr, iface
+    real(dp) :: u(4), x(3), acceptance
+    logical :: placed
+
+    if (grid_kind /= 5) error stop 'Volume loading requires analytic circular grid'
+    if (coord_system /= 1) error stop 'Volume loading requires cylindrical coordinates'
+    if (boole_nonlinear_weight) then
+        if (trim(energy_dist_kind) /= 'maxwellian') &
+            error stop 'Nonlinear birth factor requires Maxwellian energy loading'
+        if (.not. boole_local_energy_sampling) &
+            error stop 'Nonlinear birth factor requires local Maxwellian loading'
+    end if
+    if (R0_analytic_circ <= a_analytic_circ) error stop 'Invalid analytic torus geometry'
+    if (a_analytic_circ <= 0.0_dp) error stop 'Nonpositive minor radius'
+    if (s_inner_sample < sfc_s_min) error stop 'Spawn window below mesh domain'
+    if (s_outer_sample > sfc_s_max) error stop 'Spawn window above mesh domain'
+    if (s_inner_sample < 0.0_dp) error stop 'Negative spawn flux label'
+    if (s_outer_sample > 1.0_dp) error stop 'Spawn flux label exceeds analytic edge'
+    if (s_outer_sample <= s_inner_sample) error stop 'Empty spawn window'
+    if (n_field_periods < 1) error stop 'Invalid field period count'
+    do n = 1, in%num_particles
+        placed = .false.
+        do attempt = 1, 10000
+            call random_number(u)
+            call volume_candidate(R0_analytic_circ, a_analytic_circ, &
+                s_inner_sample, s_outer_sample, u(1:3), x, acceptance)
+            if (u(4) > acceptance) cycle
+            x(2) = x(2)/real(n_field_periods, dp)
+            call find_tetra(x, 0.0_dp, 0.0_dp, ind_tetr, iface)
+            if (ind_tetr == -1) &
+                error stop 'Volume candidate outside mesh; shrink window or refine grid'
+            start%x(:, n, species) = x
+            start%lost(n, species) = .false.
+            placed = .true.
+            exit
+        end do
+        if (.not. placed) error stop 'Uniform-volume rejection budget exhausted'
+    end do
+    print *, 'Markers loaded uniformly in analytic physical volume'
+end subroutine spawn_uniform_volume_analytic
+
 subroutine spawn_equidistant_in_s(species, n_spawned)
 
     use gorilla_applets_types_mod, only: in, start, g

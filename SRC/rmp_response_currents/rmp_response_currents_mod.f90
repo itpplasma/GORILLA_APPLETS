@@ -30,7 +30,8 @@ subroutine calc_rmp_response_currents
         boole_step_delta_B_r, step_center_reff, step_halfwidth_reff, &
         boole_e_perp, e_perp_file, &
         bias_starting_positions_to_s_window, dump_start_positions, &
-        spawn_equidistant_in_s, boole_equidistant_s_sampling, &
+        spawn_equidistant_in_s, spawn_uniform_volume_analytic, &
+        boole_equidistant_s_sampling, boole_uniform_volume_sampling, &
         boole_dump_orbit_n1, traj_dump_unit, traj_step_count, &
         boole_dump_collisions_n1, coll_dump_unit, coll_event_count, &
         coll_dt_sum, coll_dist_sum, &
@@ -97,7 +98,9 @@ subroutine calc_rmp_response_currents
     call calc_starting_conditions_rmp_response_currents
     call eliminate_particles_outside_flux_threshold
     if (in%boole_delta_f) then
-        if (boole_equidistant_s_sampling) then
+        if (boole_nonlinear_weight .or. boole_uniform_volume_sampling) then
+            call spawn_uniform_volume_analytic(species=1)
+        else if (boole_equidistant_s_sampling) then
             block
                 integer :: n_spawned
                 call spawn_equidistant_in_s(species=1, n_spawned=n_spawned)
