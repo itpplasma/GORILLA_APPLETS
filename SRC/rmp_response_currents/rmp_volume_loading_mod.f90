@@ -15,7 +15,9 @@ contains
         rho2_hi = s_hi*edge*(2.0_dp*r0 - s_hi*edge)
         rho = sqrt(rho2_lo + u(1)*(rho2_hi - rho2_lo))
         theta = 2.0_dp*pi*u(2)
-        x = [r0 + rho*cos(theta), 2.0_dp*pi*u(3), rho*sin(theta)]
+        x(1) = r0 + rho*cos(theta)
+        x(2) = 2.0_dp*pi*u(3)
+        x(3) = rho*sin(theta)
         ! Uniform cross-section proposals become uniform dV = R dR dZ dphi.
         acceptance = x(1)/(r0 + sqrt(rho2_hi))
     end subroutine volume_candidate

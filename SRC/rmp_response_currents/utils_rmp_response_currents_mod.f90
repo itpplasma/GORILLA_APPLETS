@@ -7,6 +7,7 @@ module utils_rmp_response_currents_mod
     use perturbation_field_mod, only: boole_eperp_native_grid
     use rmp_profile_moments_mod, only: deposit_profile_moments
     use rmp_volume_loading_mod, only: volume_candidate, analytic_window_volume
+    use rmp_maxwellian_loading_mod, only: maxwellian_from_uniforms
 
     implicit none
 
@@ -1266,6 +1267,12 @@ subroutine calc_particle_weights_and_jperp_rmp_response_currents(n, z_save, vpar
     endif
 
     m = start%particle_mass(species)
+    if (in%boole_delta_f) then
+        weights%w(n, species) = (0.0_dp, 0.0_dp)
+        start%jperp(n, species) = -m*vperp**2*start%cm_over_e(species) &
+            /(2.0_dp*bmod_func(z_save, ind_tetr))
+        return
+    end if
     T = in%energy_eV*ev2erg
     energy_ev = start%energy(n,species)
     energy_erg = start%energy(n,species)*ev2erg
@@ -1924,12 +1931,31 @@ subroutine rescale_energies_to_local_temperature(species)
 
     integer, intent(in) :: species
 
-    integer  :: n, ind_tetr, iface
-    real(dp) :: x(3), s_loc
+    integer  :: n, ind_tetr, iface, output_unit
+    real(dp) :: x(3), s_loc, u(4), energy_over_t, pitch
     type(profile_values_t) :: pv
 
+    if (boole_nonlinear_weight) &
+        print *, 'Untruncated local Maxwellian loading; e_cutoff_factor ignored'
+    if (boole_nonlinear_weight) then
+        if (in%boole_antithetic_variate) then
+            if (mod(in%num_particles, 2) /= 0) &
+                error stop 'Antithetic loading requires even marker count'
+            start%x(:, 2:in%num_particles:2, species) &
+                = start%x(:, 1:in%num_particles:2, species)
+        end if
+    end if
     do n = 1, in%num_particles
         if (start%lost(n, species)) cycle
+        if (boole_nonlinear_weight) then
+            if (in%boole_antithetic_variate) then
+                if (mod(n, 2) == 0) then
+                    start%energy(n, species) = start%energy(n-1, species)
+                    start%pitch(n, species) = -start%pitch(n-1, species)
+                    cycle
+                end if
+            end if
+        end if
         x = start%x(:, n, species)
         call find_tetra(x, 0.0_dp, 0.0_dp, ind_tetr, iface)
         if (ind_tetr == -1) cycle
@@ -1939,8 +1965,29 @@ subroutine rescale_energies_to_local_temperature(species)
             s_loc = eval_s_local(ind_tetr, x)
         end if
         call eval_profiles(s_loc, pv)
-        start%energy(n, species) = start%energy(n, species) * pv%Te / in%energy_eV
+        if (boole_nonlinear_weight) then
+            call random_number(u)
+            call maxwellian_from_uniforms(u, energy_over_t, pitch)
+            start%energy(n, species) = energy_over_t*pv%Te
+            start%pitch(n, species) = pitch
+        else
+            start%energy(n, species) = start%energy(n, species)*pv%Te/in%energy_eV
+        end if
     end do
+    if (boole_nonlinear_weight) then
+        open(newunit=output_unit, file='loaded_maxwellian.dat', &
+            status='replace', action='write')
+        write(output_unit, '(a)') '# marker R phi Z energy_eV energy_over_T pitch'
+        do n = 1, in%num_particles
+            x = start%x(:, n, species)
+            call find_tetra(x, 0.0_dp, 0.0_dp, ind_tetr, iface)
+            if (ind_tetr == -1) error stop 'Loaded Maxwellian outside mesh'
+            call eval_profiles(eval_s0_local(ind_tetr, x), pv)
+            write(output_unit, *) n, x, start%energy(n, species), &
+                start%energy(n, species)/pv%Te, start%pitch(n, species)
+        end do
+        close(output_unit)
+    end if
 
 end subroutine rescale_energies_to_local_temperature
 
