@@ -114,3 +114,28 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_BINARY_DIR}/slice_test_modules)
     add_test(NAME toroidal_profile_slices COMMAND test_toroidal_profile_slices.x)
 endif()
+
+if(BUILD_TESTING)
+    add_executable(test_ou_collision_invariant.x
+        SRC_CORE/constants_mod.f90
+        SRC/collis_ions_mod.f90
+        TESTS/test_ou_collision_invariant.f90)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ou_test_modules)
+    set_target_properties(test_ou_collision_invariant.x PROPERTIES
+        Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ou_test_modules)
+    target_include_directories(test_ou_collision_invariant.x PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/ou_test_modules)
+    add_test(NAME ou_collision_invariant COMMAND test_ou_collision_invariant.x)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(test_rmp_gc_measure.x
+        SRC/rmp_response_currents/rmp_gc_measure_mod.f90
+        TESTS/test_rmp_gc_measure.f90)
+    set_target_properties(test_rmp_gc_measure.x PROPERTIES
+        Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/measure_test_modules)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/measure_test_modules)
+    target_include_directories(test_rmp_gc_measure.x PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/measure_test_modules)
+    add_test(NAME rmp_gc_measure COMMAND test_rmp_gc_measure.x)
+endif()

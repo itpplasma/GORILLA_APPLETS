@@ -9,6 +9,7 @@ contains
 subroutine calc_rmp_response_currents
 
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
+    use utils_rmp_response_currents_mod, only: validate_profile_clock
     use constants, only: ev2erg
     use tetra_grid_settings_mod, only: grid_kind
     use tetra_grid_mod, only: verts_rphiz
@@ -48,6 +49,7 @@ subroutine calc_rmp_response_currents
     call read_rmp_response_currents_inp_into_type
     call get_ipert()
     call initialize_gorilla(i_option,ipert)
+    call validate_profile_clock()
 
     call set_moment_specifications
     call initialise_output
