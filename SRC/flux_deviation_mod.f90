@@ -122,6 +122,7 @@
             use binsrc_mod, only: binsrc
             use llsq_mod, only: llsq
             use sub_alpha_lifetime_can_mod, only: orbit_timestep_can
+            use, intrinsic :: ieee_arithmetic, only: ieee_value,ieee_quiet_nan
 !
             implicit none
 !
@@ -143,7 +144,7 @@
             integer, dimension(:), allocatable :: n_contributors
             double precision, dimension(:,:), allocatable :: lost_position
             double precision, dimension(:,:), allocatable :: psi_mat,psi_vec,delta_psi_mat,delta_psi_vec
-            double precision, dimension(:,:), allocatable :: delta_psi_average,delta_psi2_average,delta_psi4_average,xi_collisions
+            double precision, dimension(:,:), allocatable :: delta_psi2_average,delta_psi4_average,xi_collisions
             double precision, dimension(:,:), allocatable :: trend_delta_psi2_average,trend_std_delta_psi2_average
             double precision, dimension(:), allocatable :: xi
             double precision :: t_pass,t_remain,vpar,vperp,vmod1,pitchpar,collisionality,eps_collisions
@@ -202,7 +203,6 @@
                 allocate(delta_psi_vec(1,n_time_steps))
             endif
 !
-            allocate(delta_psi_average(1,n_time_steps))
             allocate(delta_psi2_average(1,n_time_steps))
             allocate(delta_psi4_average(1,n_time_steps))
             allocate(trend_delta_psi2_average(2,n_time_steps))
@@ -214,7 +214,6 @@
             allocate(n_contributors(n_time_steps))
 !
             !Initializations
-            delta_psi_average = 0.d0
             delta_psi2_average = 0.d0
             delta_psi4_average = 0.d0
 !
@@ -602,7 +601,6 @@
                     if(lost_particles(n)) valid_steps = lost_step(n)-1
                     do i = 1,valid_steps
                         delta_psi = psi_mat(n,i+1)-psi_mat(n,1)
-                        delta_psi_average(1,i) = delta_psi_average(1,i)+delta_psi
                         delta_psi2_average(1,i) = delta_psi2_average(1,i)+delta_psi**2
                         delta_psi4_average(1,i) = delta_psi4_average(1,i)+delta_psi**4
                         n_contributors(i) = n_contributors(i)+1
@@ -688,9 +686,9 @@
                                & trend_std_delta_psi2_average(2,fit_start_step:fit_end_step),std_diff_coef,off_set)
                     std_diff_coef = std_diff_coef/2.d0
                 else
-                    print *, 'WARNING: no loss-free MSD fitting interval after transient'
-                    diff_coef = 0.d0
-                    std_diff_coef = 0.d0
+                    print *, 'WARNING: no loss-free MSD fitting interval after transient, writing NaN'
+                    diff_coef = ieee_value(diff_coef,ieee_quiet_nan)
+                    std_diff_coef = ieee_value(std_diff_coef,ieee_quiet_nan)
                 endif
 !
                 !Write output depending, if nu_star is present
@@ -704,7 +702,7 @@
 !
 !------------------------------------------------------------------------------------------------------------!
 !
-            deallocate(delta_psi_average,delta_psi2_average,delta_psi4_average,xi,lost_particles)
+            deallocate(delta_psi2_average,delta_psi4_average,xi,lost_particles)
             deallocate(lost_reason,lost_step,lost_position)
             deallocate(n_contributors)
             deallocate(trend_delta_psi2_average,trend_std_delta_psi2_average)
