@@ -16,7 +16,8 @@ subroutine read_boltzmann_inp_into_type
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-               boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
+               boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
+               boole_write_collision_energy_diagnostics
     integer :: i_integrator_type, seed_option, n_background_density_updates
 
     integer :: b_inp_unit
@@ -27,7 +28,10 @@ subroutine read_boltzmann_inp_into_type
     & boole_antithetic_variate,boole_linear_temperature_simulation,i_integrator_type,seed_option, boole_write_vertex_indices, &
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
-    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_background_density_updates
+    & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_background_density_updates, &
+    & boole_write_collision_energy_diagnostics
+
+    boole_write_collision_energy_diagnostics = .false.
 
     open(newunit = b_inp_unit, file='boltzmann.inp', status='unknown')
     read(b_inp_unit,nml=boltzmann_nml)
@@ -61,6 +65,7 @@ subroutine read_boltzmann_inp_into_type
     in%boole_write_grid_data = boole_write_grid_data
     in%boole_preserve_energy_and_momentum_during_collisions = boole_preserve_energy_and_momentum_during_collisions
     in%n_background_density_updates = n_background_density_updates
+    in%boole_write_collision_energy_diagnostics = boole_write_collision_energy_diagnostics
 
     print *,'GORILLA: Loaded input data from boltzmann.inp'
 
@@ -88,7 +93,7 @@ subroutine calc_boltzmann
     use gorilla_applets_types_mod, only: output
 
     real(dp) :: v0
-    real(dp), dimension(:,:), allocatable :: verts
+    real(dp), dimension(:,:), allocatable :: verts, temp_mat_initial, vpar_mat_initial
     integer :: i
 
     call set_seed_for_random_numbers
@@ -118,6 +123,11 @@ subroutine calc_boltzmann
     if (in%i_integrator_type.eq.2) print*, 'Error: i_integrator_type set to 2, this module only works with &
                                     & i_integrator_type set to 1'
 
+    if (in%boole_write_collision_energy_diagnostics.and.in%boole_collisions) then
+        temp_mat_initial = c%temp_mat
+        vpar_mat_initial = c%vpar_mat
+    endif
+
     if (in%n_background_density_updates.eq.0) then
         call parallelised_particle_pushing(v0)
     else
@@ -126,6 +136,10 @@ subroutine calc_boltzmann
             call parallelised_particle_pushing(v0)
             call perform_background_density_update(i)
         enddo
+    endif
+
+    if (in%boole_write_collision_energy_diagnostics) then
+        call write_collision_energy_diagnostics(temp_mat_initial, vpar_mat_initial)
     endif
 
     call normalise_prism_moments_and_prism_moments_squared
@@ -149,6 +163,59 @@ subroutine calc_boltzmann
     !print*, output%radial_flux
 
 end subroutine calc_boltzmann
+
+subroutine write_collision_energy_diagnostics(temp_mat_initial, vpar_mat_initial)
+    !Writes the energy and momentum balance between test-particle markers and the background reservoir
+    !of the conserving collision operator. Per background ion species j (electrons, index c%n, are not
+    !updated) and tetrahedron k, the reservoir holds (3/2)*T_jk + (1/2)*m_j*u_jk^2 per background particle.
+    !Markers enter with the ratio r_n = c%weight_factor*weights%w(n)*1e-4, so this is the code's internal
+    !normalisation, not a physical particle count. Reservoir changes are summed per cell to avoid cancellation.
+
+    use gorilla_applets_types_mod, only: c, in, start, exit_data, weights, counter
+    use constants, only: ev2erg
+    use tetra_physics_mod, only: particle_mass
+    use utils_parallelised_particle_pushing_mod, only: collision_ledger
+
+    real(dp), dimension(:,:), allocatable, intent(in) :: temp_mat_initial, vpar_mat_initial
+    real(dp) :: delta_reservoir_energy, delta_reservoir_momentum, r, marker_energy_initial, marker_energy_final
+    integer :: j, n, diag_unit
+
+    delta_reservoir_energy = 0.0_dp
+    delta_reservoir_momentum = 0.0_dp
+    !without collisions there is no background reservoir
+    if (allocated(temp_mat_initial)) then
+    do j = 1, c%n-1
+        delta_reservoir_energy = delta_reservoir_energy + &
+            sum(1.5_dp*(c%temp_mat(j,:) - temp_mat_initial(j,:))*ev2erg + &
+                0.5_dp*c%mass(j)*(c%vpar_mat(j,:)**2 - vpar_mat_initial(j,:)**2))
+        delta_reservoir_momentum = delta_reservoir_momentum + &
+            sum(c%mass(j)*(c%vpar_mat(j,:) - vpar_mat_initial(j,:)))
+    enddo
+    endif
+
+    !marker energies weighted with the final r_n (the first collision of each marker may have used a different r)
+    marker_energy_initial = 0.0_dp
+    marker_energy_final = 0.0_dp
+    do n = 1, in%num_particles
+        r = c%weight_factor*weights%w(n,1)*1.0e-4_dp
+        marker_energy_initial = marker_energy_initial + r*start%energy(n,1)*ev2erg
+        marker_energy_final = marker_energy_final + r*0.5_dp*particle_mass*(exit_data%vpar(n,1)**2 + exit_data%vperp(n,1)**2)
+    enddo
+
+    open(newunit = diag_unit, file = 'collision_energy_diagnostics.dat', status = 'replace')
+    write(diag_unit,'(a,es24.16)') 'delta_reservoir_energy = ', delta_reservoir_energy
+    write(diag_unit,'(a,es24.16)') 'delta_reservoir_momentum = ', delta_reservoir_momentum
+    write(diag_unit,'(a,es24.16)') 'collision_energy_exchange = ', collision_ledger%energy
+    write(diag_unit,'(a,es24.16)') 'collision_energy_exchange_abs = ', collision_ledger%energy_abs
+    write(diag_unit,'(a,es24.16)') 'collision_momentum_exchange = ', collision_ledger%momentum
+    write(diag_unit,'(a,es24.16)') 'collision_momentum_exchange_abs = ', collision_ledger%momentum_abs
+    write(diag_unit,'(a,es24.16)') 'marker_energy_initial = ', marker_energy_initial
+    write(diag_unit,'(a,es24.16)') 'marker_energy_final = ', marker_energy_final
+    write(diag_unit,'(a,i0)') 'n_collisions = ', collision_ledger%n_collisions
+    write(diag_unit,'(a,i0)') 'n_lost_markers = ', counter%lost_particles
+    close(diag_unit)
+
+end subroutine write_collision_energy_diagnostics
 
 subroutine parallelised_particle_pushing(v0)
 

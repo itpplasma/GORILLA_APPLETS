@@ -3,6 +3,18 @@ module utils_parallelised_particle_pushing_mod
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
     implicit none
+
+    !Collision energy/momentum ledger, filled only if in%boole_write_collision_energy_diagnostics
+    !(see write_collision_energy_diagnostics in boltzmann_mod)
+    type collision_ledger_t
+    real(dp) :: energy = 0.0_dp          !sum r*delta_epsilon over all collisions [erg]
+    real(dp) :: energy_abs = 0.0_dp      !sum r*|delta_epsilon| [erg]
+    real(dp) :: momentum = 0.0_dp        !sum r*m_t*delta_vpar [g cm/s]
+    real(dp) :: momentum_abs = 0.0_dp    !sum r*m_t*|delta_vpar| [g cm/s]
+    integer  :: n_collisions = 0
+    end type collision_ledger_t
+
+    type(collision_ledger_t) :: collision_ledger
    
 contains
 
@@ -139,8 +151,9 @@ end subroutine add_local_counter_to_counter
 
 subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species_in, iswmode_in)
 
-    use gorilla_applets_types_mod, only: in, time_t
+    use gorilla_applets_types_mod, only: in, time_t, c, weights
     use find_tetra_mod, only: find_tetra
+    use tetra_physics_mod, only: particle_mass
 
     integer, intent(in) :: i, n
     integer, intent(in), optional :: species_in
@@ -151,6 +164,7 @@ subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, specie
     real(dp), intent(inout) :: vpar, vperp
     type(time_t) :: t
     integer :: ind_tetr, iface
+    real(dp) :: vpar_save, vperp_save, delta_epsilon, delta_vpar, r
 
     if (present(species_in)) species = species_in
     !iswmode options:
@@ -162,10 +176,25 @@ subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, specie
 
     if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
     if (.not.(ind_tetr.eq.-1)) then
+        vpar_save = vpar
+        vperp_save = vperp
         if (in%boole_preserve_energy_and_momentum_during_collisions) then
             call collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
         else
             call collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
+        endif
+        if (in%boole_write_collision_energy_diagnostics) then
+            !same marker-to-background ratio as in collisions_with_background_updates
+            r = c%weight_factor*weights%w(n,species)*1.0e-4_dp
+            delta_epsilon = particle_mass/2*(vpar**2 + vperp**2 - vpar_save**2 - vperp_save**2)
+            delta_vpar = vpar - vpar_save
+            !$omp critical
+            collision_ledger%energy = collision_ledger%energy + r*delta_epsilon
+            collision_ledger%energy_abs = collision_ledger%energy_abs + r*abs(delta_epsilon)
+            collision_ledger%momentum = collision_ledger%momentum + r*particle_mass*delta_vpar
+            collision_ledger%momentum_abs = collision_ledger%momentum_abs + r*particle_mass*abs(delta_vpar)
+            collision_ledger%n_collisions = collision_ledger%n_collisions + 1
+            !$omp end critical
         endif
     endif
 

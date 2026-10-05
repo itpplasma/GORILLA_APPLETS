@@ -85,3 +85,16 @@ GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/helical_core_rectangular_work;\
 HELICAL_CORE_GRID_KIND=1"
 )
+
+add_test(
+    NAME collision_energy_conservation
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_collision_energy_conservation.py
+)
+set_tests_properties(collision_energy_conservation PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
+GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/collision_energy_conservation_work"
+)
