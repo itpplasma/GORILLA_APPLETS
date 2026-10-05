@@ -72,6 +72,9 @@
  !Normalized ExB-drift velocity $v_E$ (Mach number)
  v_E = 0.d0 ,
 !
+ !Orbit flight time in units of max(tau_collision,tau_bounce^2/tau_collision)
+ flight_time_multiplier = 10.d0 ,
+!
 !------------------------------------------------------------------------------------------------------------!
 !
  !Settings for scan over collisionality: Mono-energetic transport coefficent for constant Mach number (from above)

@@ -98,11 +98,12 @@
             use flux_deviation_mod, only: calc_flux_deviation
             use mono_energetic_transp_coef_settings_mod, only: boole_collisions, boole_random_precalc, i_integrator_type, &
                                        & filename_transp_diff_coef, filename_delta_s_squared, filename_std_dvt_delta_s_squared, &
-                                       & idiffcoef_output, energy_eV, v_E, nu_star, n_particles
+                                       & idiffcoef_output, energy_eV, v_E, nu_star, n_particles,flight_time_multiplier
 !
             implicit none
 !
             integer                                     :: file_id_psi2,file_id_std_psi2,file_id_transp_diff_coef
+            integer                                     :: file_id_loss_events,file_id_loss_summary
             integer(kind=8)                             :: n_time_steps
             double precision                            :: tau_bounce,coll_freq,tau_collision,t_step
             double precision                            :: q_saf
@@ -124,6 +125,8 @@
                     open(newunit=file_id_psi2,file=filename_delta_s_squared)
                     open(newunit=file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
             end select
+            open(newunit=file_id_loss_events,file='lost_particle_events.dat',status='replace')
+            open(newunit=file_id_loss_summary,file='loss_summary.dat',status='replace')
 !
             print *, 'Mono-energetic radial transport coefficient:'
             print *, ''
@@ -150,7 +153,8 @@
             t_step = minval([tau_bounce/20.d0,tau_collision/20.d0]);
 !
             !Define number of steps
-            n_time_steps = int(10.d0* maxval([tau_collision,tau_bounce**2/tau_collision])/t_step) !(not couting initial measurement)
+            n_time_steps = int(flight_time_multiplier &
+                               & * maxval([tau_collision,tau_bounce**2/tau_collision])/t_step)
 
             print *, 'Number of time steps (measurements)',n_time_steps
 !
@@ -158,7 +162,9 @@
 !
             call calc_flux_deviation(n_particles,n_time_steps,t_step,vmod,boole_collisions,boole_random_precalc,coll_freq, &
                                 & file_id_transp_diff_coef,file_id_psi2,file_id_std_psi2,i_integrator_type,idiffcoef_output, &
-                                & nu_star)
+                                & nu_star,file_id_loss_events,file_id_loss_summary)
+            close(file_id_loss_events)
+            close(file_id_loss_summary)
 !
             select case(idiffcoef_output)
                 case(1)
@@ -186,11 +192,12 @@
             use mono_energetic_transp_coef_settings_mod, only: boole_collisions, boole_random_precalc, i_integrator_type, &
                                        & filename_transp_diff_coef, filename_delta_s_squared, filename_std_dvt_delta_s_squared, &
                                        & idiffcoef_output, energy_eV, v_E, n_particles, n_nu_scans, nu_star_start, &
-                                       & nu_exp_basis
+                                       & nu_exp_basis,flight_time_multiplier
 !
             implicit none
 !
             integer                                     :: i,file_id_psi2,file_id_std_psi2,file_id_transp_diff_coef
+            integer                                     :: file_id_loss_events,file_id_loss_summary
             integer(kind=8)                             :: n_time_steps
             double precision                            :: tau_bounce,coll_freq,tau_collision,t_step, nu_star
             double precision                            :: q_saf
@@ -213,6 +220,8 @@
                     open(newunit=file_id_psi2,file=filename_delta_s_squared)
                     open(newunit=file_id_std_psi2,file=filename_std_dvt_delta_s_squared)
             end select
+            open(newunit=file_id_loss_events,file='lost_particle_events.dat',status='replace')
+            open(newunit=file_id_loss_summary,file='loss_summary.dat',status='replace')
 !
             print *, 'Mono-energetic radial transport coefficient - Scan over normalized collisionality:'
             print *, ''
@@ -247,7 +256,8 @@
                 t_step = minval([tau_bounce/20.d0,tau_collision/20.d0]);
 !
                 !Define number of steps
-                n_time_steps = int(10.d0* maxval([tau_collision,tau_bounce**2/tau_collision])/t_step) !(not couting initial measurement)
+                n_time_steps = int(flight_time_multiplier &
+                                   & * maxval([tau_collision,tau_bounce**2/tau_collision])/t_step)
 
                 print *, 'Number of time steps (measurements)',n_time_steps
                 print *, 'Total physical orbit flight time per particle',n_time_steps*t_step
@@ -256,9 +266,11 @@
 !
                 call calc_flux_deviation(n_particles,n_time_steps,t_step,vmod,boole_collisions,boole_random_precalc,coll_freq, &
                                     & file_id_transp_diff_coef,file_id_psi2,file_id_std_psi2,i_integrator_type,idiffcoef_output, &
-                                    & nu_star)
+                                    & nu_star,file_id_loss_events,file_id_loss_summary)
 !
             enddo !n_nu_scans
+            close(file_id_loss_events)
+            close(file_id_loss_summary)
 !
             select case(idiffcoef_output)
                 case(1)
