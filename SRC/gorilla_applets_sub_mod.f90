@@ -88,6 +88,10 @@
             x_start = pos_fluxtv_mat(1,1:3)
 !
             !----------- Compute electrostatic potential for normalized ExB drift velocity v_E -----------!
+            if(grid_kind.ne.3 .and. v_E.ne.0.d0) then
+                error stop 'v_E /= 0 is only supported for grid_kind=3'
+            endif
+!
             if(grid_kind.eq.3) then
 !
                dphi = 2.d0*pi/100.d0
