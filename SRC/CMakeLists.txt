@@ -2,6 +2,7 @@ add_library(GORILLA_APPLETS STATIC
   alpha_lifetime_gorilla_mod.f90
   boltzmann_mod.f90
   gorilla_applets_types_mod.f90
+  collision_conservation_mod.f90
   collis_ions_mod.f90
   direct_vmec_integrator_mod.f90
   divertor_heat_loads_mod.f90

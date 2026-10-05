@@ -25,6 +25,17 @@ target_include_directories(test_transport_normalization.x
 
 add_test(NAME transport_normalization COMMAND test_transport_normalization.x)
 
+if(EXISTS "${CMAKE_SOURCE_DIR}/SRC/collision_conservation_mod.f90")
+    add_executable(test_collision_conservation.x
+        test_collision_conservation.f90
+    )
+    target_link_libraries(test_collision_conservation.x GORILLA_APPLETS)
+    target_include_directories(test_collision_conservation.x
+        PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+
+    add_test(NAME collision_conservation COMMAND test_collision_conservation.x)
+endif()
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_test(
@@ -91,4 +102,17 @@ GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
 GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/helical_core_rectangular_work;\
 HELICAL_CORE_GRID_KIND=1"
+)
+
+add_test(
+    NAME collision_energy_conservation
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_collision_energy_conservation.py
+)
+set_tests_properties(collision_energy_conservation PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
+GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/collision_energy_conservation_work"
 )

@@ -3,6 +3,18 @@ module utils_parallelised_particle_pushing_mod
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
     implicit none
+
+    !Collision energy/momentum ledger, filled only if in%boole_write_collision_energy_diagnostics
+    !(see write_collision_energy_diagnostics in boltzmann_mod)
+    type collision_ledger_t
+    real(dp) :: energy = 0.0_dp          !sum r*delta_epsilon over all collisions [erg]
+    real(dp) :: energy_abs = 0.0_dp      !sum r*|delta_epsilon| [erg]
+    real(dp) :: momentum = 0.0_dp        !sum r*m_t*delta_vpar [g cm/s]
+    real(dp) :: momentum_abs = 0.0_dp    !sum r*m_t*|delta_vpar| [g cm/s]
+    integer  :: n_collisions = 0
+    end type collision_ledger_t
+
+    type(collision_ledger_t) :: collision_ledger
    
 contains
 
@@ -12,7 +24,7 @@ subroutine print_progress(num_particles,kpart,n)
     logical :: print_progress_for_every_particle = .false.
 
     if ((.not.print_progress_for_every_particle).and.(num_particles.gt.10)) then
-        if (modulo(kpart,int(num_particles/100)).eq.0) then
+        if (modulo(kpart,max(1,num_particles/100)).eq.0) then !max avoids modulo by zero for 11 to 99 particles
             print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
         endif
     else
@@ -139,8 +151,9 @@ end subroutine add_local_counter_to_counter
 
 subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species_in, iswmode_in)
 
-    use gorilla_applets_types_mod, only: in, time_t
+    use gorilla_applets_types_mod, only: in, time_t, c, weights
     use find_tetra_mod, only: find_tetra
+    use tetra_physics_mod, only: particle_mass
 
     integer, intent(in) :: i, n
     integer, intent(in), optional :: species_in
@@ -151,6 +164,7 @@ subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, specie
     real(dp), intent(inout) :: vpar, vperp
     type(time_t) :: t
     integer :: ind_tetr, iface
+    real(dp) :: vpar_save, vperp_save, delta_epsilon, delta_vpar, r
 
     if (present(species_in)) species = species_in
     !iswmode options:
@@ -162,10 +176,25 @@ subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, specie
 
     if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
     if (.not.(ind_tetr.eq.-1)) then
+        vpar_save = vpar
+        vperp_save = vperp
         if (in%boole_preserve_energy_and_momentum_during_collisions) then
             call collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
         else
             call collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
+        endif
+        if (in%boole_write_collision_energy_diagnostics) then
+            !same marker-to-background ratio as in collisions_with_background_updates
+            r = c%weight_factor*weights%w(n,species)*1.0e-4_dp
+            delta_epsilon = particle_mass/2*(vpar**2 + vperp**2 - vpar_save**2 - vperp_save**2)
+            delta_vpar = vpar - vpar_save
+            !$omp critical
+            collision_ledger%energy = collision_ledger%energy + r*delta_epsilon
+            collision_ledger%energy_abs = collision_ledger%energy_abs + r*abs(delta_epsilon)
+            collision_ledger%momentum = collision_ledger%momentum + r*particle_mass*delta_vpar
+            collision_ledger%momentum_abs = collision_ledger%momentum_abs + r*particle_mass*abs(delta_vpar)
+            collision_ledger%n_collisions = collision_ledger%n_collisions + 1
+            !$omp end critical
         endif
     endif
 
@@ -176,8 +205,9 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     use gorilla_applets_types_mod, only: in, c, time_t, start, weights
     use collis_ions, only: stost
     use collis_ions, only: collis_init
+    use collision_conservation_mod, only: update_background_reservoir
     use tetra_physics_mod, only: particle_mass,particle_charge
-    use constants, only: echarge,amp
+    use constants, only: echarge, ev2erg
     use gorilla_applets_settings_mod, only: i_option
 
     integer, intent(in) :: i, n, species, iswmode
@@ -190,12 +220,11 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     real(dp), dimension(3) :: randnum
     real(dp), dimension(1) :: m, z, dens, temp, efcolf,velrat,enrat
     real(dp) :: vpar_background
-    real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar, vpar_mat_save, vpar_mat
+    real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar
     integer :: err, j, p
-    real(dp) ::  w_v, w_t, particle_to_background_coupling_strength, t_max
+    real(dp) :: marker_to_background_ratio, particle_to_background_coupling_strength, t_max
+    real(dp) :: temperature_erg
 
-    w_v = 1.0_dp
-    w_t = 1.0_dp
     particle_to_background_coupling_strength = 0.0001_dp
 
     do j = 1,c%n-1
@@ -238,15 +267,16 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         delta_vpar = vpar - vpar_save
         delta_epsilon = particle_mass/2*(vpar**2 + vperp**2 - vpar_save**2 - vperp_save**2)
 
-        vpar_mat_save = c%vpar_mat(j,ind_tetr)
-        
+        marker_to_background_ratio = c%weight_factor*weights%w(n,species)* &
+            particle_to_background_coupling_strength
+
         !$omp critical
-        c%vpar_mat(j,ind_tetr) = vpar_mat_save - &
-                            c%weight_factor*weights%w(n,species)*delta_vpar/w_v*particle_to_background_coupling_strength
-        vpar_mat = c%vpar_mat(j,ind_tetr)
-        c%temp_mat(j,ind_tetr) = c%temp_mat(j,ind_tetr) + particle_mass/3*(vpar_mat_save**2 - vpar_mat**2) - &
-                            2.0_dp/3.0_dp*c%weight_factor*weights%w(n,species)*delta_epsilon/w_t &
-                            *particle_to_background_coupling_strength
+        temperature_erg = c%temp_mat(j,ind_tetr)*ev2erg
+        call update_background_reservoir(particle_mass, c%mass(j), &
+            marker_to_background_ratio, delta_vpar, delta_epsilon, &
+            c%vpar_mat(j,ind_tetr), temperature_erg &
+        )
+        c%temp_mat(j, ind_tetr) = temperature_erg/ev2erg
         !$omp end critical
     enddo
 
