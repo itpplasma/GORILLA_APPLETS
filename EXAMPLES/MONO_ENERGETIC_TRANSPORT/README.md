@@ -54,6 +54,10 @@ run is not automatically a better local transport estimate.
 `iota`, particle speed, collision frequency, time step, and seed settings. The
 reported standard collisionality uses
 `nu* = R0*nu_collision/(abs(iota)*speed)` for both EFIT and VMEC fields.
+This is the DKES convention. For VMEC (`grid_kind=3`) earlier versions used
+`nu* = R0*nu_collision/speed`, so the same input `nu_star` now gives a
+collision frequency smaller by `abs(iota)`. To reproduce an old VMEC scan
+point, use `nu_star_old/abs(iota)`. EFIT results are unchanged.
 
 For paired full-field and `n=0` estimates, set `boole_psi_mat=.true.` and
 `boole_write_particle_histories=.true.` and `boole_random_precalc=.true.`, then
@@ -61,7 +65,9 @@ run both fields with the same executable and `random_seed_filename` contents.
 `particle_histories.dat` contains
 `nu*`, marker index, step, physical time, and `s` through each marker's last
 valid step. Pair rows by marker and step; use `lost_particle_events.dat` for
-the censoring reason and loss position.
+the censoring reason and loss position. Both runs must have identical
+`transport_metadata.dat` rows, in particular `time_step_s` and `n_steps`;
+otherwise rows with the same step index do not describe the same time.
 
 ## Input files
 

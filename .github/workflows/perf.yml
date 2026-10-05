@@ -60,9 +60,14 @@ jobs:
         working-directory: candidate
         run: make
 
+      # Only the Python drivers record timings, and they only need the main
+      # executable. Fortran unit tests from the candidate TESTS/ tree may use
+      # routines the baseline SRC does not have, so do not build them here.
       - name: Build baseline
         working-directory: baseline
-        run: make
+        run: |
+          make configure
+          cmake --build BUILD --target gorilla_applets_main.x
 
       - name: Benchmark candidate (best of $RUNS)
         working-directory: candidate
