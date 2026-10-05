@@ -193,7 +193,7 @@ subroutine write_collision_energy_diagnostics(temp_mat_initial, vpar_mat_initial
     enddo
     endif
 
-    !marker energies weighted with the final r_n (the first collision of each marker may have used a different r)
+    !marker energies weighted with the final r_n, which is also the r used in every collision of that marker
     marker_energy_initial = 0.0_dp
     marker_energy_final = 0.0_dp
     do n = 1, in%num_particles
@@ -265,6 +265,11 @@ subroutine parallelised_particle_pushing(v0)
             !$omp end critical
 
             call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
+
+            !zero time step only initialises the marker (tetrahedron and weight), so that the first collision
+            !already uses the final particle weight
+            call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,0.0_dp,particle_status,ind_tetr,iface,n,&
+                        & local_tetr_moments, local_counter,t%remain)
 
             i = 0
             do while (t%confined.lt.in%time_step)

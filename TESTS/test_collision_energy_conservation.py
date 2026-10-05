@@ -32,10 +32,16 @@ a single exchange. TOL = 1e-8 leaves three orders of magnitude of headroom
 while any real bookkeeping error (missing mass ratio, erg added to eV) gives
 O(1e-2..1).
 
-Not tested here: the invariant sum_n r_n eps_n + E_res built from final marker
-states. The first collision of each marker happens before
-calc_particle_weights_and_jperp applies the Jacobian factor to w_n, so it uses
-a different r than all later collisions, and that invariant does not hold yet.
+A second check uses the marker states instead of the ledger, with the final
+per-marker ratio r_n:
+
+    rel_err_state = |d(sum_n r_n eps_n) + dE_res| / sum r |d_eps|
+
+It also fails if the first collision of a marker uses a different r than the
+later ones (weights not yet initialised before the first collision gave ~3e-4).
+Unlike the ledger it includes the pusher's energy drift: a control run with
+boole_collisions = .false. (env BOOLE_COLLISIONS=0) gives a marker energy drift
+of ~2e-8 of the exchanged energy, so TOL_STATE = 1e-6.
 
 Paths are passed in by TESTS/CMakeLists.txt via environment variables.
 """
@@ -51,6 +57,7 @@ except ImportError:
     sys.exit("f90nml is required to run this test (pip install f90nml)")
 
 TOL = 1.0e-8
+TOL_STATE = 1.0e-6
 
 
 def env_path(name: str) -> Path:
@@ -200,12 +207,17 @@ rel_err_momentum = abs(diag["delta_reservoir_momentum"] + diag["collision_moment
     / diag["collision_momentum_exchange_abs"]
 print(f"rel_err_energy                     {rel_err_energy: .3e}  (tol {TOL:.0e})")
 print(f"rel_err_momentum                   {rel_err_momentum: .3e}  (tol {TOL:.0e})")
+rel_err_state = abs(diag["marker_energy_final"] - diag["marker_energy_initial"]
+                    + diag["delta_reservoir_energy"]) / diag["collision_energy_exchange_abs"]
+print(f"rel_err_state                      {rel_err_state: .3e}  (tol {TOL_STATE:.0e})")
 
 failures = []
 if not rel_err_energy < TOL:
     failures.append(f"energy not conserved: rel_err_energy = {rel_err_energy:.3e}")
 if not rel_err_momentum < TOL:
     failures.append(f"momentum not conserved: rel_err_momentum = {rel_err_momentum:.3e}")
+if not rel_err_state < TOL_STATE:
+    failures.append(f"marker + reservoir energy not conserved: rel_err_state = {rel_err_state:.3e}")
 if failures:
     sys.exit("FAIL: " + "; ".join(failures))
 
