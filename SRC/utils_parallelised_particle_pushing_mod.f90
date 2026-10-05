@@ -223,6 +223,7 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar
     integer :: err, j, p
     real(dp) :: marker_to_background_ratio, particle_to_background_coupling_strength, t_max
+    real(dp) :: temperature_erg
 
     particle_to_background_coupling_strength = 0.0001_dp
 
@@ -270,11 +271,12 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
             particle_to_background_coupling_strength
 
         !$omp critical
-        c%temp_mat(j,ind_tetr) = c%temp_mat(j,ind_tetr)*ev2erg
+        temperature_erg = c%temp_mat(j,ind_tetr)*ev2erg
         call update_background_reservoir(particle_mass, c%mass(j), &
             marker_to_background_ratio, delta_vpar, delta_epsilon, &
-            c%vpar_mat(j,ind_tetr), c%temp_mat(j,ind_tetr))
-        c%temp_mat(j,ind_tetr) = c%temp_mat(j,ind_tetr)/ev2erg
+            c%vpar_mat(j,ind_tetr), temperature_erg &
+        )
+        c%temp_mat(j, ind_tetr) = temperature_erg/ev2erg
         !$omp end critical
     enddo
 
