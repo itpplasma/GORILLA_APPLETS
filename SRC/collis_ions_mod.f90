@@ -14,6 +14,22 @@ real(dp), public :: nu_scale_factor = 1.0_dp
 real(dp), public :: ou_nu_dtau = 0.0_dp
 
 contains
+! Shared exact OU transition. xi is one standard normal variate; the caller
+! controls random streams so paired characteristics use identical collisions.
+subroutine exact_ou_velocity(velocity, variance, nu_dt, xi)
+    real(dp), intent(inout) :: velocity
+    real(dp), intent(in) :: variance, nu_dt, xi
+    real(dp) :: decay, noise_variance
+    decay = exp(-nu_dt)
+    ! Stable small-step evaluation of 1-exp(-2 nu dt).
+    if (nu_dt < 1e-5_dp) then
+        noise_variance = 2*nu_dt*(1-nu_dt+2*nu_dt**2/3)
+    else
+        noise_variance = 1-decay**2
+    end if
+    velocity = velocity*decay + sqrt(variance*noise_variance)*xi
+end subroutine exact_ou_velocity
+
 !
 !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
@@ -285,9 +301,7 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override
         call random_number(u_bm)
         u_bm(1) = max(u_bm(1), tiny(1.0_dp))
         xi_ou = sqrt(-2.0_dp * log(u_bm(1))) * cos(2.0_dp * acos(-1.0_dp) * u_bm(2))
-        decay_ou = exp(-nu_step * dtau)
-        vpar_norm = vpar_norm * decay_ou &
-                  + sqrt(sigma_eq2 * (1.0_dp - decay_ou**2)) * xi_ou
+        call exact_ou_velocity(vpar_norm, sigma_eq2, nu_step * dtau, xi_ou)
       else
         if (present(randnum)) then
           ur = randnum(3)

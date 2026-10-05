@@ -18,14 +18,14 @@ program gorilla_cylindrical_response
     if (trim(header)/='GK_BACKGROUND_V1') error stop 'wrong background format'
     read(unit,*) M,N,model,mmode,nmode
     read(unit,*) L,rm,clight
-    if (model/=0) error stop 'cylindrical provider implements number-conserving OU model 0 only'
+    if (model/=0.and.model/=1) error stop 'cylindrical provider supports electron models 0/1'
     if (N<1 .or. refinement<1) error stop 'invalid grid or quadrature refinement'
     allocate(background(N,13))
     do j=1,N
         read(unit,*) background(j,:)
     end do
     close(unit)
-    call assemble_cylindrical_electrons(background,M,L,clight,blocks,refinement)
+    call assemble_cylindrical_electrons(background,M,L,clight,blocks,refinement,model)
     open(newunit=unit,file=trim(output_path),status='new',action='write')
     write(unit,'(a)') 'GK_RESPONSE_V1'
     write(unit,*) M,N,model,mmode,nmode
@@ -41,5 +41,5 @@ program gorilla_cylindrical_response
         end do
     end do
     close(unit)
-    print *, 'Wrote drift-kinetic cylindrical electron response; OU model 0, refinement=',refinement
+    print *, 'Wrote drift-kinetic cylindrical electron response; model=',model,' refinement=',refinement
 end program

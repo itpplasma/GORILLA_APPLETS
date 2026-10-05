@@ -16,7 +16,7 @@ module anomalous_transport_displacement_mod
 contains
 
 subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp, &
-                                           d_local, rho_bounds)
+                                           d_local, rho_bounds, recover_lost, reflected, random_vector)
 !
 ! Computes the displacement vector for anomalous transport and applies it.
 !
@@ -45,6 +45,11 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
 !   rho_bounds(2) - grid_kind = 5 only: minor-radius window [rho_lo, rho_hi];
 !               an end point outside is reflected back into it (zero-flux
 !               boundary), so the marker does not leave the annular mesh.
+!   recover_lost - default true retains legacy axis-directed recovery. False
+!               returns any mesh loss to the caller without a second displacement.
+!   reflected - reports an endpoint reflection (optional diagnostic).
+!   random_vector - returns the existing three unit-variance draws for a paired
+!               analytical control variate; does not change their distribution.
 !
     use tetra_physics_mod, only: tetra_physics,isinside
     use collis_ions, only: getran
@@ -58,6 +63,9 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     real(dp), intent(in)                  :: dt, vpar, vperp
     real(dp), intent(in), optional        :: d_local
     real(dp), intent(in), optional        :: rho_bounds(2)
+    logical, intent(in), optional         :: recover_lost
+    logical, intent(out), optional        :: reflected
+    real(dp), intent(out), optional       :: random_vector(3)
 
     real(dp), dimension(3) :: displacement, xi, V_c, x_new, x_save, displacement_towards_axis
 
@@ -66,6 +74,7 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     real(dp), dimension(3) :: h_contra, x_local
     real(dp) :: R_local, sqrt_2dt, dist_to_axis, displacement_magnitude
     real(dp) :: D_eff
+    real(dp) :: before_reflection(3)
     logical :: boole_lost_inside
     type(counter_t) :: dummy_counter
     real(dp) :: vpar_dummy, vperp_dummy
@@ -100,6 +109,7 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     call getran(0, xi(1))
     call getran(0, xi(2))
     call getran(0, xi(3))
+    if (present(random_vector)) random_vector = xi
 
     ! Compute displacement: Delta x^i = sqrt(2 * dt) * alpha^{ij} * xi_j + V_c^i * dt
     ! Note: alpha_perp_mat is lower triangular, so alpha^{ij} * xi_j expands as:
@@ -112,8 +122,12 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     displacement(3) = sqrt_2dt * (alpha_perp_mat(3,1) * xi(1) + alpha_perp_mat(3,2) * xi(2) &
                                 + alpha_perp_mat(3,3) * xi(3)) + V_c(3) * dt
 
-    if (present(rho_bounds) .and. grid_kind.eq.5) &
+    if (present(reflected)) reflected = .false.
+    if (present(rho_bounds) .and. grid_kind.eq.5) then
+        before_reflection = displacement
         call reflect_displacement_rho(x, displacement, rho_bounds)
+        if (present(reflected)) reflected = any(displacement /= before_reflection)
+    end if
 
     ! Save original state before displacement
     x_save = x
@@ -121,6 +135,10 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     iface_save = iface
 
     call displace_by_straight_line(x, ind_tetr, iface, displacement, vpar, vperp)
+
+    if (ind_tetr.eq.-1 .and. present(recover_lost)) then
+        if (.not.recover_lost) return
+    end if
 
     ! Check if particle was lost and attempt recovery
     if (ind_tetr.eq.-1) then
