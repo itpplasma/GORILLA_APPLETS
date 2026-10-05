@@ -125,6 +125,11 @@ class _StageContext:
 
     def __exit__(self, exc_type, exc, tb):
         elapsed = time.perf_counter() - self.t0
+        # A stage that crashed (e.g. a baseline binary rejecting a namelist key
+        # the candidate test sets) has no meaningful runtime; leave it missing.
+        if exc_type is not None:
+            print(f"TIMING: {self.timer.test_name}/{self.label} failed, not recorded")
+            return
         self.timer.stages[self.label] = elapsed
         print(f"TIMING: {self.timer.test_name}/{self.label} = {elapsed:.3f} s")
         self.timer.write()
