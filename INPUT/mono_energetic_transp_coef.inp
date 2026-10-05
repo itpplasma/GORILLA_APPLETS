@@ -40,8 +40,11 @@
 !
  !Option for precomputation of above random numbers
  !1 ... compute seed with a random number
- !2 ... load seed from file 'seed.dat'
+ !2 ... load seed from random_seed_filename
  seed_option = 2 ,
+!
+ !Seed-state file. Reuse its contents and the executable for paired full/n=0 runs.
+ random_seed_filename = 'seed.inp' ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
@@ -58,6 +61,14 @@
 !
  !Filename for evolution of standard deviation of mean value of $(\Delta s)^2$
  filename_std_dvt_delta_s_squared = 'std_psi2.dat' ,
+!
+ !Write one row per valid marker/time sample for an external paired estimator.
+ !Requires boole_psi_mat = .true.
+ boole_write_particle_histories = .false. ,
+ filename_particle_histories = 'particle_histories.dat' ,
+!
+ !Resolved q, iota, collision frequency, time step, and random-stream metadata.
+ filename_transport_metadata = 'transport_metadata.dat' ,
 !
 !------------------------------------------------------------------------------------------------------------!
 !
