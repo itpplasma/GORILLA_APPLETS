@@ -92,3 +92,22 @@ GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/helical_core_rectangular_work;\
 HELICAL_CORE_GRID_KIND=1"
 )
+
+add_executable(write_chartmap_fixture.x
+    write_chartmap_fixture.f90
+)
+target_link_libraries(write_chartmap_fixture.x netcdf netcdff)
+
+add_test(
+    NAME mono_energetic_transport_chartmap
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_mono_energetic_transport_chartmap.py
+)
+set_tests_properties(mono_energetic_transport_chartmap PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
+GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+CHARTMAP_FIXTURE_BIN=$<TARGET_FILE:write_chartmap_fixture.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/mono_energetic_transport_chartmap_work"
+)
