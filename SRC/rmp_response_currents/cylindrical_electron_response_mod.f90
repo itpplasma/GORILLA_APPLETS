@@ -8,7 +8,7 @@ module cylindrical_electron_response_mod
     implicit none
     private
     public :: assemble_cylindrical_electrons, close_energy_response, restore_cylindrical_energy
-    public :: damped_ou_moments,assemble_diffused_cylinder
+    public :: damped_ou_moments,assemble_diffused_cylinder,assemble_adiabatic_charge
 contains
     subroutine damped_ou_moments(x1,x2,damping,moments,info,energy_moments)
         ! Frozen Fourier diffusion adds damping*I to the OU Hermite operator.
@@ -59,6 +59,26 @@ contains
                 info=0;return
             end if
             previous=current;energy_previous=energy_current;order=2*order
+        end do
+    end subroutine
+    subroutine assemble_adiabatic_charge(background,M,L,channels,adiabatic)
+        ! The -1/(4*pi*lambda_D^2) charge term carried only by the analytical
+        ! reference: a weighted control variate must restore it when beta<1.
+        real(real64),intent(in) :: background(:,:),L
+        integer,intent(in) :: M,channels
+        complex(real64),allocatable,intent(out) :: adiabatic(:,:,:)
+        complex(real64),parameter :: ii=(0.0_real64,1.0_real64)
+        real(real64),parameter :: pi=acos(-1.0_real64)
+        real(real64),allocatable :: wave(:)
+        integer :: dim,N,j,col
+        N=size(background,1);dim=2*M+1
+        allocate(adiabatic(dim,dim,channels),wave(dim));adiabatic=0
+        wave=2*pi*real([(j-M-1,j=1,dim)],real64)/L
+        do j=1,N
+            do col=1,dim
+                adiabatic(:,col,1)=adiabatic(:,col,1)-exp(-ii*wave*background(j,1))/N &
+                    *exp(ii*wave(col)*background(j,1))/(4*pi*background(j,5)**2)
+            end do
         end do
     end subroutine
     subroutine assemble_diffused_cylinder(background,M,L,clight,diffusion,channels,reference)

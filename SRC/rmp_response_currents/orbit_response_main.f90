@@ -4,7 +4,8 @@ program gorilla_orbit_response
     use, intrinsic :: iso_fortran_env, only: dp=>real64
     use omp_lib, only: omp_set_dynamic, omp_get_num_threads, omp_get_wtime
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-    use cylindrical_electron_response_mod, only: assemble_cylindrical_electrons, close_energy_response,assemble_diffused_cylinder
+    use cylindrical_electron_response_mod, only: assemble_cylindrical_electrons, close_energy_response,assemble_diffused_cylinder, &
+        assemble_adiabatic_charge
     use orbit_timestep_gorilla_mod, only: initialize_gorilla, orbit_timestep_gorilla
     use gorilla_settings_mod, only: load_gorilla_inp
     use tetra_grid_settings_mod, only: load_tetra_grid_inp, R0_analytic_circ, n_field_periods_manual, &
@@ -29,11 +30,31 @@ program gorilla_orbit_response
     logical :: cylinder_only=.false.,marker_streams=.false.
     real(dp) :: anomalous_diffusion_coefficient=0.0_dp, diffusion_step_cm=0.1_dp
     integer :: transport_boundary=0
+    ! Opt-in diagnostic: trace only split_radii and save real and reference
+    ! source integrals separately at lag checkpoints; no response is written.
+    integer :: split_count=0,split_stride=8
+    ! Opt-in: orient the virtual reference kick projection at the marker's
+    ! current poloidal angle instead of its initial one. Conditional radial and
+    ! binormal increment covariances are unchanged, so the analytical
+    ! diffused reference remains its exact expectation.
+    logical :: comoving_reference=.false.
+    ! Opt-in weighted control variate per source column p and channel k:
+    ! estimate = mean(real) - beta*(mean(reference)-exact reference).
+    ! Any fixed beta is unbiased; beta=1 is the paired reference, beta=0 the
+    ! real path plus the adiabatic charge. Weights: orbit_reference_weights.dat.
+    logical :: reference_weights=.false.,track_real=.false.
+    real(dp),allocatable :: weights(:,:)
+    complex(dp),allocatable :: adiabatic(:,:,:)
+    real(dp) :: split_radii(16)=0.0_dp
+    integer,parameter :: split_checks=4
+    logical :: split_active=.false.
+    integer,allocatable :: split_columns(:)
     integer :: diffusion_kicks=0,diffusion_reflections=0,diffusion_respawns=0
     real(dp) :: diffusion_bounds(2)
     real(dp) :: diffusion_edge_flux
     namelist /orbit_response/ radial_samples,markers,batches,seed,lag_nu,nu_dt,phase_step,cylinder_only,n_respawn_max, &
-        orbit_threads,marker_streams,anomalous_diffusion_coefficient,diffusion_step_cm,transport_boundary
+        orbit_threads,marker_streams,anomalous_diffusion_coefficient,diffusion_step_cm,transport_boundary, &
+        split_count,split_stride,split_radii,comoving_reference,reference_weights
     real(dp) :: L,rm,clight,r0,bg0(13),qn,coef0,coef,end_t
     real(dp) :: closure_error,rcond,max_closure_error=0.0_dp,min_closure_rcond=1.0_dp
     real(dp) :: max_radial_excursion=0.0_dp,phase_error=0.0_dp,spawn_error=0.0_dp
@@ -73,6 +94,9 @@ program gorilla_orbit_response
         logical :: initialized,probe_initialized
         complex(dp),allocatable :: local(:,:),previous(:,:),present_source(:,:),source_phase(:)
         complex(dp) :: hphase,cphase
+        complex(dp),allocatable :: real_local(:,:),real_previous(:,:),real_present(:,:)
+        real(dp) :: next_check
+        integer :: check
     end type
     type(marker_report),allocatable :: reports(:)
     integer :: event,actual_threads=1,progress_unit,timing_unit
@@ -151,11 +175,24 @@ program gorilla_orbit_response
         if(model==1) call write_response('orbit_energy_base.dat',bare_blocks)
         call assemble_diffused_cylinder(background,M,L,clight,anomalous_diffusion_coefficient,channels,diffused_reference)
         call write_response('orbit_transport_reference.dat',diffused_reference)
+        if(reference_weights) then
+            call read_reference_weights()
+            call assemble_adiabatic_charge(background,M,L,channels,adiabatic)
+            do k=1,channels
+                do col=1,d
+                    diffused_reference(:,col,k)=weights(col,k)*diffused_reference(:,col,k) &
+                        +(1-weights(col,k))*adiabatic(:,col,k)
+                end do
+            end do
+            track_real=.true.
+        end if
         if(model==1) then
             call move_alloc(diffused_reference,bare_blocks)
         else
             call move_alloc(diffused_reference,blocks)
         end if
+    else if(reference_weights) then
+        error stop 'reference weights require positive diffusion'
     end if
     allocate(wave(d),corrections(d,d,channels,batches),marker_local(d,9,markers),reports(markers))
     if(marker_streams) allocate(marker_seeds(seed_size,markers),seed_draws(seed_size,markers),master_seed(seed_size))
@@ -173,6 +210,10 @@ program gorilla_orbit_response
     open(newunit=progress_unit,file='orbit_progress.dat',status='new')
     write(progress_unit,'(a)') '# radial_sample cumulative_trace_seconds'
     trace_start=omp_get_wtime()
+    if(split_count>0) then
+        call run_split_diagnostic()
+        stop
+    end if
     do ir=1,radial_samples
         ! Midpoint quadrature of the same absolute, periodized radial coordinate.
         r0=background(1,1)+(real(ir,dp)-0.5_dp)*L/radial_samples
@@ -306,8 +347,14 @@ program gorilla_orbit_response
             sqrt(sum(abs(cylinder_closed-blocks)**2)/sum(abs(blocks)**2))
     end if
     do k=1,4
-        write(unit,'(a,i0,1x,es24.16)') 'relative_block_correction_',k, &
-            sqrt(sum(abs(mean_blocks(:,:,k)-blocks(:,:,k))**2)/sum(abs(blocks(:,:,k))**2))
+        ! Weighted references can zero a deterministic block; normalize by the result.
+        if(reference_weights) then
+            write(unit,'(a,i0,1x,es24.16)') 'relative_block_correction_',k, &
+                sqrt(sum(abs(mean_blocks(:,:,k)-blocks(:,:,k))**2)/sum(abs(mean_blocks(:,:,k))**2))
+        else
+            write(unit,'(a,i0,1x,es24.16)') 'relative_block_correction_',k, &
+                sqrt(sum(abs(mean_blocks(:,:,k)-blocks(:,:,k))**2)/sum(abs(blocks(:,:,k))**2))
+        end if
     end do
     close(unit)
     open(newunit=timing_unit,file='orbit_timing.dat',status='new')
@@ -316,10 +363,12 @@ program gorilla_orbit_response
     write(timing_unit,'(a,es24.16)') 'closure_output_seconds ',omp_get_wtime()-closure_start
     close(timing_unit)
 contains
-    subroutine trace_marker(ir,im,result,report,stream_seed)
+    subroutine trace_marker(ir,im,result,report,stream_seed,split_out,split_extra)
         integer,intent(in) :: ir,im
         integer,intent(in),optional :: stream_seed(:)
         complex(dp),intent(out) :: result(d,9)
+        complex(dp),intent(out),optional :: split_out(:,:,:)
+        real(dp),intent(out),optional :: split_extra(:,:)
         type(marker_report),intent(out) :: report
         type(marker_state) :: s
         integer :: spawn_iteration
@@ -397,12 +446,22 @@ contains
         s%previous=0
         s%vc_phase=0
         s%t=0
+        if(track_real) then
+            allocate(s%real_local(d,3),s%real_previous(d,3),s%real_present(d,3))
+            s%real_local=0
+        end if
+        if(split_active) then
+            s%check=1
+            s%next_check=end_t/2**(split_checks-1)
+        end if
         call sources(s)
         s%previous=s%present_source
+        if(track_real) s%real_previous=s%real_present
         do while(s%t<end_t)
             s%phase_rate=max(abs(bg0(4))+abs(bg0(3))*max(abs(s%vc),bg0(7)), &
                 abs(s%bgt(4))+abs(s%bgt(3))*max(abs(s%vp),s%bgt(7)))
             s%dt=min(nu_dt/max(bg0(6),s%bgt(6)),phase_step/max(s%phase_rate,1.0_dp),end_t-s%t)
+            if(split_active) s%dt=min(s%dt,s%next_check-s%t)
             s%vc_old=s%vc
             call advance_response_step(s,-0.5_dp*s%dt,s%t)
             call random_number(s%rand2)
@@ -417,7 +476,23 @@ contains
             s%local(:,1:2)=s%local(:,1:2)+0.5_dp*s%dt*(s%previous(:,1:2)+s%present_source(:,1:2))
             if(model==1) s%local(:,7)=s%local(:,7)+0.5_dp*s%dt*(s%previous(:,3)+s%present_source(:,3))
             s%previous=s%present_source
+            if(track_real) then
+                s%real_local=s%real_local+0.5_dp*s%dt*(s%real_previous+s%real_present)
+                s%real_previous=s%real_present
+            end if
+            if(split_active) then
+                if(s%t>=s%next_check-1e-12_dp*end_t) then
+                    split_out(:,1:2,s%check)=s%local(split_columns,1:2)
+                    split_out(:,3:4,s%check)=s%real_local(split_columns,1:2)
+                    split_extra(:,s%check)=[s%rnow-r0,s%reference_radial_displacement, &
+                        real(s%hphase),aimag(s%hphase),real(s%cphase),aimag(s%cphase), &
+                        real(s%n_respawn_used,dp),s%v0]
+                    s%check=s%check+1
+                    s%next_check=2*s%next_check
+                end if
+            end if
         end do
+        if(split_active.and.s%check/=split_checks+1) error stop 'split checkpoints missed'
         if(s%n_respawn_used>0) s%n_respawn_markers=s%n_respawn_markers+1
         s%max_respawns_per_marker=max(s%max_respawns_per_marker,s%n_respawn_used)
         s%local(:,3:4)=s%local(:,1:2)*s%v0
@@ -426,8 +501,84 @@ contains
             s%local(:,8)=s%local(:,7)*s%v0
             s%local(:,9)=s%local(:,7)*s%p0
         end if
+        if(reference_weights) call weight_reference(s)
         result=s%local
         report=s%marker_report
+    end subroutine
+    subroutine run_split_diagnostic()
+        ! Same per-radius setup and per-marker streams as the production loop.
+        complex(dp),allocatable :: split_out(:,:,:,:)
+        real(dp),allocatable :: split_extra(:,:,:)
+        complex(dp),allocatable :: marker_dummy(:,:,:)
+        integer :: is,out_unit,ncol
+        if(split_count>size(split_radii).or.split_stride<1) error stop 'invalid split diagnostic'
+        split_columns=[(j,j=1,d,split_stride)]
+        ncol=size(split_columns)
+        split_active=.true.
+        track_real=.true.
+        allocate(split_out(ncol,4,split_checks,markers),split_extra(8,split_checks,markers),marker_dummy(d,9,markers))
+        open(newunit=out_unit,file='orbit_split_diagnostic.bin',access='stream',form='unformatted',status='new')
+        write(out_unit) split_count,markers,ncol,split_checks,M
+        write(out_unit) split_radii(1:split_count),L,lag_nu
+        write(out_unit) split_columns-M-1
+        do is=1,split_count
+            r0=split_radii(is)
+            call sample_background(r0,bg0)
+            coef0=bg0(9)+bg0(10)
+            end_t=lag_nu/bg0(6)
+            if(marker_streams) then
+                call random_number(seed_draws)
+                marker_seeds=int(seed_draws*real(huge(1),dp))
+                call random_seed(get=master_seed)
+                !$omp parallel do default(none) num_threads(orbit_threads) schedule(dynamic,1) &
+                !$omp shared(marker_seeds,marker_dummy,reports,split_out,split_extra,is,markers)
+                do im=1,markers
+                    call trace_marker(is,im,marker_dummy(:,:,im),reports(im),marker_seeds(:,im), &
+                        split_out(:,:,:,im),split_extra(:,:,im))
+                end do
+                !$omp end parallel do
+                call random_seed(put=master_seed)
+            else
+                do im=1,markers
+                    call trace_marker(is,im,marker_dummy(:,:,im),reports(im),split_out=split_out(:,:,:,im), &
+                        split_extra=split_extra(:,:,im))
+                end do
+            end if
+            write(out_unit) bg0(6),split_out,split_extra
+            print *, 'Split diagnostic radius ',is,'/',split_count
+            flush(6)
+        end do
+        close(out_unit)
+    end subroutine
+    subroutine weight_reference(s)
+        ! Channels follow the same velocity factors as the paired difference.
+        type(marker_state),intent(inout) :: s
+        complex(dp) :: real_path(d,9)
+        real_path=0
+        real_path(:,1:2)=s%real_local(:,1:2)
+        real_path(:,3:4)=real_path(:,1:2)*s%v0
+        if(model==1) then
+            real_path(:,7)=s%real_local(:,3)
+            real_path(:,5:6)=real_path(:,1:2)*s%p0
+            real_path(:,8)=real_path(:,7)*s%v0
+            real_path(:,9)=real_path(:,7)*s%p0
+        end if
+        s%local(:,1:channels)=(1-weights)*real_path(:,1:channels)+weights*s%local(:,1:channels)
+    end subroutine
+    subroutine read_reference_weights()
+        integer :: u,file_m,file_channels,row
+        character(64) :: tag
+        open(newunit=u,file='orbit_reference_weights.dat',status='old')
+        read(u,'(a)') tag
+        if(trim(tag)/='GK_REFERENCE_WEIGHTS_V1') error stop 'wrong reference weight format'
+        read(u,*) file_m,file_channels
+        if(file_m/=M.or.file_channels/=channels) error stop 'reference weights do not match M/channels'
+        allocate(weights(d,channels))
+        do row=1,d
+            read(u,*) weights(row,:)
+        end do
+        close(u)
+        if(.not.all(ieee_is_finite(weights))) error stop 'invalid reference weights'
     end subroutine
     subroutine reduce_report(report)
         type(marker_report),intent(in) :: report
@@ -458,6 +609,7 @@ contains
         count_steps=max(1,ceiling(2*anomalous_diffusion_coefficient*lag_step/diffusion_step_cm**2))
         delta_t=lag_step/count_steps
         do kick=1,count_steps
+            if(comoving_reference) call set_reference_frame(s,atan2(s%x(3),s%x(1)-R0_analytic_circ),s%x(1))
             if(transport_boundary==1) then
                 call anomalous_transport_displacement(s%x,s%tetr,s%iface,delta_t,s%vp,s%vperp, &
                     anomalous_diffusion_coefficient,rho_bounds=diffusion_bounds,recover_lost=.false., &
@@ -494,12 +646,17 @@ contains
         ! This virtual reference has no radial boundary or geometry drift;
         ! the real reflected path remains in the traced difference.
         type(marker_state),intent(inout) :: s
-        real(dp) :: a,c,htheta,hphi,norm,Rlocal,h(3),sintheta,costheta
+        call set_reference_frame(s,s%theta0,s%x(1))
+    end subroutine
+    subroutine set_reference_frame(s,theta,Rlocal)
+        type(marker_state),intent(inout) :: s
+        real(dp),intent(in) :: theta,Rlocal
+        real(dp) :: a,c,htheta,hphi,norm,h(3),sintheta,costheta
         a=mmode/r0;c=nmode*n_field_periods_manual/R0_analytic_circ
         htheta=(a*bg0(3)-c*bg0(2))/(a*a+c*c)
         hphi=(c*bg0(3)+a*bg0(2))/(a*a+c*c)
         norm=sqrt(htheta*htheta+hphi*hphi);htheta=htheta/norm;hphi=hphi/norm
-        sintheta=sin(s%theta0);costheta=cos(s%theta0);Rlocal=s%x(1)
+        sintheta=sin(theta);costheta=cos(theta)
         h=[-htheta*sintheta,hphi/Rlocal,htheta*costheta]
         call compute_diffusion_cholesky(h,Rlocal,anomalous_diffusion_coefficient,s%reference_factor)
         s%reference_radial_covector=[costheta,0.0_dp,sintheta]
@@ -640,6 +797,7 @@ contains
         s%present_source(:,1)=ii*clight*s%bgt(2)/s%bgt(13)*s%coef*s%source_phase
         s%present_source(:,2)=-s%vp/s%bgt(13)*s%coef*s%source_phase
         if(model==1) s%present_source(:,3)=s%bgt(6)*((s%vp/s%bgt(7))**2-1.0_dp)*s%source_phase
+        if(track_real) s%real_present=s%present_source(:,1:3)
         s%cphase=exp(ii*s%vc_phase)
         if(anomalous_diffusion_coefficient>0) s%cphase=exp(ii*(s%vc_phase+s%reference_diffusion_phase))
         s%coef=coef0+0.5_dp*bg0(10)*(s%vc/bg0(7))**2
