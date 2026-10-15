@@ -74,3 +74,23 @@ add_executable(gorilla_orbit_response.x
 set_target_properties(gorilla_orbit_response.x PROPERTIES
     Fortran_MODULE_DIRECTORY "${CMAKE_BINARY_DIR}/orbit_modules")
 target_link_libraries(gorilla_orbit_response.x GORILLA_APPLETS ${LAPACK_LIBRARIES})
+
+# Static gyrokinetic ions with full perpendicular-velocity Bessel quadrature.
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/ion_modules")
+add_executable(gorilla_cylindrical_ion_response.x
+    SRC/rmp_response_currents/cylindrical_electron_response_mod.f90
+    SRC/rmp_response_currents/cylindrical_ion_response_mod.f90
+    SRC/rmp_response_currents/cylindrical_ion_response_main.f90)
+set_target_properties(gorilla_cylindrical_ion_response.x PROPERTIES
+    Fortran_MODULE_DIRECTORY "${CMAKE_BINARY_DIR}/ion_modules")
+target_link_libraries(gorilla_cylindrical_ion_response.x GORILLA ${LAPACK_LIBRARIES})
+
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/ion_orbit_modules")
+add_executable(gorilla_orbit_ion_response.x
+    SRC/rmp_response_currents/cylindrical_electron_response_mod.f90
+    SRC/rmp_response_currents/cylindrical_ion_response_mod.f90
+    SRC/rmp_response_currents/cylindrical_ion_mu_response_mod.f90
+    SRC/rmp_response_currents/orbit_ion_response_main.f90)
+set_target_properties(gorilla_orbit_ion_response.x PROPERTIES
+    Fortran_MODULE_DIRECTORY "${CMAKE_BINARY_DIR}/ion_orbit_modules")
+target_link_libraries(gorilla_orbit_ion_response.x GORILLA_APPLETS ${LAPACK_LIBRARIES})
