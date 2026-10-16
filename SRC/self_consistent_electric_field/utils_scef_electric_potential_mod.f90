@@ -228,9 +228,10 @@ subroutine calc_rho_on_vertices
         endif
     enddo
 
-    !set rho on even flux surfaces
+    !set rho on even flux surfaces: volume-weighted average of the two adjacent shells
     do ns = 2,grid_size(1),2
-        value_to_be_set = 0.5_dp*(ep%rho_flux_layer(ns-1)+ep%rho_flux_layer(ns))
+        value_to_be_set = (ep%rho_flux_layer(ns-1)*g%s_shell_volumes(ns-1) + ep%rho_flux_layer(ns)*g%s_shell_volumes(ns)) &
+                          /(g%s_shell_volumes(ns-1) + g%s_shell_volumes(ns))
         !remove this line in the future >
         !value_to_be_set = -sin(dble(ns-1)/dble(grid_size(1))*pi)
         !value_to_be_set = dble(ns)/dble(grid_size(1))
