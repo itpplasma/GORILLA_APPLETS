@@ -116,6 +116,31 @@ subroutine print_errors_for_bad_inputs
         stop
     endif
 
+    if ((in%update_dimension.ne.1) .and. (in%update_dimension.ne.3)) then
+        print*, 'Error: update_dimension must be 1 (flux-surface updates) or 3 (3D updates).'
+        print*, 'Program terminated'
+        stop
+    endif
+
+    if ((in%update_dimension.eq.3) .and. (.not.all(in%boole_honest_tracing))) then
+        print*, 'Error: update_dimension = 3 requires boole_honest_tracing = .true. for both species; &
+                 &the random walk only resolves the radial direction.'
+        print*, 'Program terminated'
+        stop
+    endif
+
+    if ((in%update_dimension.eq.3) .and. (in%n_source_updates.gt.0)) then
+        print*, 'Error: update_dimension = 3 is not implemented together with source tuning; set n_source_updates = 0.'
+        print*, 'Program terminated'
+        stop
+    endif
+
+    if ((in%update_dimension.eq.3) .and. in%boole_static_ne) then
+        print*, 'Error: update_dimension = 3 is not implemented for boole_static_ne = .true.'
+        print*, 'Program terminated'
+        stop
+    endif
+
     if (in%quasineutrality_tol.lt.0.0_dp) then
         print*, 'Error: quasineutrality_tol must be >= 0 (0 = no early exit).'
         print*, 'Program terminated'

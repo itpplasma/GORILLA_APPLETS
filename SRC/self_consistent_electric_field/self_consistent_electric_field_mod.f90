@@ -26,7 +26,7 @@ subroutine calc_self_consistent_electric_field
     use utils_scef_particle_init_mod, only: calc_starting_conditions, calc_desired_density_profile, &
     initialize_particle_source, update_particle_source, write_particle_source
     use utils_scef_electric_potential_mod, only: allocate_electric_potential_type, initialize_flux_shell_grid, &
-    delete_scef_output_files
+    delete_scef_output_files, initialize_3d_update_grid
     use utils_scef_diffusion_mod, only: calc_diffusion_coefficients
 
     integer :: species, source_step
@@ -53,6 +53,7 @@ subroutine calc_self_consistent_electric_field
     call unlink_files
     call delete_scef_output_files
     call print_errors_for_bad_inputs
+    if (in%update_dimension.eq.3) call initialize_3d_update_grid
 
     !Prep diffusion coefficients once per species that will use the random walk.
     !Skipping this step reuses the cached A_and_B_species<species>.dat if present.

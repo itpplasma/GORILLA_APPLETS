@@ -48,7 +48,7 @@ subroutine perform_electric_potential_update(i)
         stop
     endif
 
-    one_d%boole_print_densities = .true.
+    one_d%boole_print_densities = (in%update_dimension.eq.1)   !flux-shell densities exist only for 1D updates
 
     call calc_phi_elec_from_rho(i)
 
@@ -61,18 +61,26 @@ end subroutine perform_electric_potential_update
 
 function calc_quasineutrality_mismatch() result(mismatch)
 
-    !Volume-weighted relative charge imbalance sum|n_e-n_i|V / sum(n_e+n_i)V of the shell densities
-    !in one_d%densities (species 1 = ions, 2 = electrons). Equals the volume average of
-    !|n_s - n_mean| / n_mean, so it is robust against Monte Carlo noise in single shells and
-    !against the nearly empty edge shells, where pointwise relative deviations blow up.
+    !Volume-weighted relative charge imbalance sum|n_e-n_i|V / sum(n_e+n_i)V (species 1 = ions,
+    !2 = electrons), over the flux shells (one_d%densities) for 1D updates and over the prisms for
+    !3D updates, which also sees imbalances within flux surfaces. Equals the volume average of
+    !|n_s - n_mean| / n_mean, so it is robust against Monte Carlo noise in single cells and
+    !against the nearly empty edge cells, where pointwise relative deviations blow up.
 
-    use gorilla_applets_types_mod, only: g, one_d
+    use gorilla_applets_types_mod, only: g, one_d, in, output
 
-    real(dp) :: mismatch, denom
+    real(dp) :: mismatch, numer, denom
 
-    denom = sum((one_d%densities(:,1) + one_d%densities(:,2)) * g%s_shell_volumes)
+    if (in%update_dimension.eq.1) then
+        numer = sum(abs(one_d%densities(:,1) - one_d%densities(:,2)) * g%s_shell_volumes)
+        denom = sum((one_d%densities(:,1) + one_d%densities(:,2)) * g%s_shell_volumes)
+    else
+        numer = sum(abs(real(output%prism_moments(1,:,1)) - real(output%prism_moments(1,:,2))) * output%prism_volumes)
+        denom = sum((real(output%prism_moments(1,:,1)) + real(output%prism_moments(1,:,2))) * output%prism_volumes)
+    endif
+
     if (denom > 0.0_dp) then
-        mismatch = sum(abs(one_d%densities(:,1) - one_d%densities(:,2)) * g%s_shell_volumes) / denom
+        mismatch = numer / denom
     else
         mismatch = 0.0_dp
     endif
@@ -81,7 +89,7 @@ end function calc_quasineutrality_mismatch
 
 subroutine calc_phi_elec_from_rho(i)
 
-    use gorilla_applets_types_mod, only: in, ep, start, output
+    use gorilla_applets_types_mod, only: in, ep, start, output, exit_data
     use constants, only: ev2erg, eps, echarge
 
     integer, intent(in) :: i
@@ -93,46 +101,47 @@ subroutine calc_phi_elec_from_rho(i)
     ep%phi_elec_from_rho = 0
     if (i.gt.0) then
         ep%average_abs_phi_elec_from_rho(i) = 0
-        ep%total_tracing_time(i) = 0
+        ep%total_tracing_time(i) = sum(exit_data%t_confined(1:in%num_particles, 1:2))   !both species, all particles
     endif
 
+    !rho on all vertices: from flux-shell averages (1D) or from the charge per hexahedron (3D)
     if (in%update_dimension.eq.1) then
-
         call calc_average_charge_density_per_flux_layer(i)
         call calc_rho_on_vertices
-
-        ! if (i.eq.1) ep%mean_abs_rho_at_first_update = sum(abs(ep%rho_vert))/size(ep%rho_vert)
-
-        ! if (ep%mean_abs_rho_at_first_update.gt.eps**2) then
-        !     factor = in%energy_eV*ev2erg/echarge/ep%mean_abs_rho_at_first_update
-        ! else
-        !     factor = 1.0_dp
-        ! endif
-
-
-        factor = in%energy_eV*ev2erg/(echarge**2*in%density)!T/(n_0*e^2)= 4*pi*r_D^2
-
-        !decrease factor in case very few particles are simulated
-        !if (in%n_particles.lt.100.0_dp) factor = factor*in%n_particles/100.0_dp
-
-
-        ep%phi_elec_from_rho =  ep%rho_vert*factor
-
-        if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho/3.0_dp !factor 3.0_dp is there to be on the safe side and avoid overshooting
-
-        !if (i.gt.0) ep%phi_elec_from_rho = ep%phi_elec_from_rho/sqrt(dble(i))
-
-        ! ep%phi_elec_from_rho = ep%phi_elec_from_rho*(3.5d3*1.6022d-12/4.8032d-10)/maxval(abs(ep%phi_elec_from_rho))
-        ! if (i.gt.1) ep%phi_elec_from_rho=0
-        ! print*, 'maximum phi is', maxval(ep%phi_elec_from_rho), 'minimum phi is', minval(ep%phi_elec_from_rho)
-
+    else
+        call calc_rho_on_vertices_3d
     endif
+
+    ! if (i.eq.1) ep%mean_abs_rho_at_first_update = sum(abs(ep%rho_vert))/size(ep%rho_vert)
+
+    ! if (ep%mean_abs_rho_at_first_update.gt.eps**2) then
+    !     factor = in%energy_eV*ev2erg/echarge/ep%mean_abs_rho_at_first_update
+    ! else
+    !     factor = 1.0_dp
+    ! endif
+
+
+    factor = in%energy_eV*ev2erg/(echarge**2*in%density)!T/(n_0*e^2)= 4*pi*r_D^2
+
+    !decrease factor in case very few particles are simulated
+    !if (in%n_particles.lt.100.0_dp) factor = factor*in%n_particles/100.0_dp
+
+
+    ep%phi_elec_from_rho =  ep%rho_vert*factor
+
+    if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho/3.0_dp !factor 3.0_dp is there to be on the safe side and avoid overshooting
+
+    !if (i.gt.0) ep%phi_elec_from_rho = ep%phi_elec_from_rho/sqrt(dble(i))
+
+    ! ep%phi_elec_from_rho = ep%phi_elec_from_rho*(3.5d3*1.6022d-12/4.8032d-10)/maxval(abs(ep%phi_elec_from_rho))
+    ! if (i.gt.1) ep%phi_elec_from_rho=0
+    ! print*, 'maximum phi is', maxval(ep%phi_elec_from_rho), 'minimum phi is', minval(ep%phi_elec_from_rho)
 
 end subroutine calc_phi_elec_from_rho
 
 subroutine calc_average_charge_density_per_flux_layer(i)
 
-    use gorilla_applets_types_mod, only:  g, output, ep, in, start, one_d, exit_data, weights
+    use gorilla_applets_types_mod, only:  g, output, ep, in, start, one_d, weights
     use tetra_grid_mod, only: nvert, verts_sthetaphi
     use tetra_grid_settings_mod, only: grid_size
     use constants, only: echarge
@@ -149,12 +158,6 @@ subroutine calc_average_charge_density_per_flux_layer(i)
         if (.not.allocated(one_d%densities)) allocate(one_d%densities(grid_size(1),in%n_species))
         one_d%densities = 0.0_dp
     endif
-
-    do j = 1,in%num_particles
-        do species = 1,2
-            if (i.gt.0) ep%total_tracing_time(i) = ep%total_tracing_time(i) + exit_data%t_confined(j,species)
-        enddo
-    enddo
 
     !If in%boole_static_ne compute electron_densities
     if (in%boole_static_ne) then
@@ -264,6 +267,75 @@ subroutine calc_rho_on_vertices
 
 end subroutine calc_rho_on_vertices
 
+subroutine calc_rho_on_vertices_3d
+
+    !3D counterpart of calc_rho_on_vertices. Output: the charge density ep%rho_vert on every vertex.
+    !1) Contributing vertices (even index in s, theta and phi; see initialize_3d_update_grid) get the
+    !   volume-averaged charge density of their hexahedra, sum(rho*V)/vol_vert.
+    !2) All other vertices are interpolated linearly, one direction after another: theta, then phi
+    !   (uniform spacing, periodic), then s (weighted with the s-spacings). As in the 1D update, surface 1
+    !   is extrapolated, the outer surface gets the boundary value -<rho>_V (volume average over the whole
+    !   domain) and, for an odd number of shells, surface ns is extrapolated.
+
+    use gorilla_applets_types_mod, only: g, ep, in, output, start
+    use tetra_grid_settings_mod, only: grid_size
+
+    integer :: ns, nphi, ntheta, ih, species, js, jtheta, jphi, js_last_even
+    real(dp) :: charge_times_volume, total_charge
+    real(dp), dimension(grid_size(1)) :: ds
+    real(dp), dimension(:,:,:), allocatable :: rho   !(theta, s, phi): same memory order as the vertex index
+
+    ns = grid_size(1)
+    nphi = grid_size(2)
+    ntheta = grid_size(3)
+    js_last_even = ns - mod(ns,2)
+    ds = g%s_vertices(2:ns+1) - g%s_vertices(1:ns)
+
+    !1) Contributing vertices
+    ep%rho_vert = 0.0_dp
+    total_charge = 0.0_dp
+    do ih = 1, size(g%hexa_to_vert)
+        charge_times_volume = 0.0_dp
+        do species = 1, in%n_species
+            charge_times_volume = charge_times_volume + start%particle_charge(species) * &
+                (real(output%prism_moments(1,2*ih-1,species))*output%prism_volumes(2*ih-1) + &
+                 real(output%prism_moments(1,2*ih,species))*output%prism_volumes(2*ih))
+        enddo
+        total_charge = total_charge + charge_times_volume
+        if (g%hexa_to_vert(ih).gt.0) ep%rho_vert(g%hexa_to_vert(ih)) = ep%rho_vert(g%hexa_to_vert(ih)) + charge_times_volume
+    enddo
+    where (g%vol_vert.gt.0.0_dp) ep%rho_vert = ep%rho_vert/g%vol_vert
+
+    rho = reshape(ep%rho_vert, [ntheta, ns+1, nphi])
+
+    !2a) Odd theta on the contributing (s, phi) positions: mean of the two theta-neighbours (periodic)
+    do jphi = 2, nphi, 2
+        do js = 2, js_last_even, 2
+            do jtheta = 1, ntheta-1, 2
+                rho(jtheta,js,jphi) = 0.5_dp*(rho(modulo(jtheta-2,ntheta)+1,js,jphi) + rho(jtheta+1,js,jphi))
+            enddo
+        enddo
+    enddo
+
+    !2b) Odd phi on the contributing s-surfaces: mean of the two phi-neighbours (periodic)
+    do jphi = 1, nphi-1, 2
+        do js = 2, js_last_even, 2
+            rho(:,js,jphi) = 0.5_dp*(rho(:,js,modulo(jphi-2,nphi)+1) + rho(:,js,jphi+1))
+        enddo
+    enddo
+
+    !2c) s-direction: odd inner surfaces interpolated, surface 1 extrapolated, outer boundary value
+    do js = 3, js_last_even-1, 2
+        rho(:,js,:) = (rho(:,js-1,:)*ds(js) + rho(:,js+1,:)*ds(js-1))/(ds(js-1) + ds(js))
+    enddo
+    rho(:,1,:) = rho(:,2,:) + (rho(:,2,:) - rho(:,3,:))*(ds(1)/ds(2))
+    if (mod(ns,2).eq.1) rho(:,ns,:) = rho(:,ns-1,:) + (rho(:,ns-1,:) - rho(:,ns-2,:))*(ds(ns-1)/ds(ns-2))
+    rho(:,ns+1,:) = -total_charge/sum(output%prism_volumes)
+
+    ep%rho_vert = reshape(rho, [size(ep%rho_vert)])
+
+end subroutine calc_rho_on_vertices_3d
+
 subroutine print_data(i, source_step)
 
     use gorilla_applets_types_mod, only: c, output, grid_t, in, ep, exit_data, counter, s, one_d, filenames, g
@@ -276,7 +348,9 @@ subroutine print_data(i, source_step)
     character(len=100) :: filename_ep, filename_ed, tag, filename_phi_elec, filename_phi_elec_1d, filename_ion_densities, &
                           filename_lost, filename_ef, filename_s, filename_1d
     character(len=32) :: i_str, source_step_str
-    logical :: boole_1d_output = .true.
+    logical :: boole_1d_output
+
+    boole_1d_output = (in%update_dimension.eq.1)
 
     if (i.eq.1 .and. source_step.eq.1) then
         filename_ef = filenames%electric_field
@@ -306,9 +380,11 @@ subroutine print_data(i, source_step)
     endif
 
     filename_ep = 'rho_per_vertex_during_electric_potential_update_' // trim(tag) // '.dat'
-    !open(newunit = ep_unit, file = filename_ep)
-    !write(ep_unit,'(ES20.10E4)') ep%rho_vert
-    !close(ep_unit)
+    if (.not.boole_1d_output) then
+        open(newunit = ep_unit, file = filename_ep)
+        write(ep_unit,'(ES20.10E4)') ep%rho_vert
+        close(ep_unit)
+    endif
 
     ! filename_s = 's_statistics_after_electric_potential_update' // trim(tag) // '.dat'
     ! k = size(s%time)
@@ -318,12 +394,14 @@ subroutine print_data(i, source_step)
     ! enddo
     ! close(s_unit)
 
-    filename_phi_elec_1d = 'phi_elec_1d_' // trim(tag) // '.dat'
-    open(newunit = pe_unit, file = filename_phi_elec_1d)
-    do k = 1, grid_size(1)+1
-        write(pe_unit,'(ES20.10E4)') phi_elec(g%vertices_per_flux_surface(k, 1))
-    enddo
-    close(pe_unit)
+    if (boole_1d_output) then
+        filename_phi_elec_1d = 'phi_elec_1d_' // trim(tag) // '.dat'
+        open(newunit = pe_unit, file = filename_phi_elec_1d)
+        do k = 1, grid_size(1)+1
+            write(pe_unit,'(ES20.10E4)') phi_elec(g%vertices_per_flux_surface(k, 1))
+        enddo
+        close(pe_unit)
+    endif
 
     if (.not.boole_1d_output) then
         filename_phi_elec = 'phi_elec_after_electric_potential_update_' // trim(tag) // '.dat'
@@ -424,6 +502,115 @@ subroutine associate_flux_labels_with_tetrahedra_and_vertices
     enddo
 
 end subroutine associate_flux_labels_with_tetrahedra_and_vertices
+
+subroutine initialize_3d_update_grid
+
+    !One-time setup for 3D potential updates (update_dimension = 3).
+    !
+    !Output (stored on g):
+    !  g%hexa_to_vert(ih) : index of the vertex that hexahedron ih contributes its charge to,
+    !                       or 0 if it contributes to no vertex (only the outermost shell when the
+    !                       number of shells is odd; the outer boundary is set separately)
+    !  g%vol_vert(iv)     : summed volume of all hexahedra contributing to vertex iv
+    !                       (0 for vertices nobody contributes to)
+    !With these, the volume-averaged charge at a contributing vertex iv is
+    !  rho(iv) = sum over ih with hexa_to_vert(ih) = iv of rho(ih)*V(ih), divided by vol_vert(iv).
+    !
+    !Idea (as for 1D updates): the charge is assigned to every second vertex in each of the s-, theta-
+    !and phi-directions only, and the remaining vertices are interpolated afterwards. With that choice
+    !each hexahedron has exactly one contributing vertex among its eight corners (the corner with even
+    !indices in all directions), so no charge is counted twice or left out. In s this reproduces the
+    !1D grouping: surface 2k collects shells 2k-1 and 2k.
+    !
+    !Indexing: hexahedron ih = (iphi-1)*ns*ntheta + (is-1)*ntheta + itheta consists of prisms 2*ih-1, 2*ih
+    !and tetrahedra 6*(ih-1)+1 ... 6*ih (see associate_flux_labels_with_tetrahedra_and_vertices). This is
+    !verified against the grid connectivity, and the routine stops if it does not hold.
+
+    use gorilla_applets_types_mod, only: g, output
+    use tetra_grid_settings_mod, only: grid_size
+    use tetra_grid_mod, only: nvert, ntetr, tetra_grid
+
+    integer :: ns, nphi, ntheta, n_hexa, ih, is, itheta, iphi, js, jtheta, jphi, t, k, j
+    integer, dimension(8) :: corners
+
+    ns = grid_size(1)
+    nphi = grid_size(2)
+    ntheta = grid_size(3)
+    n_hexa = ns*nphi*ntheta
+
+    if ((mod(ntheta,2).ne.0) .or. (mod(nphi,2).ne.0)) then
+        print*, 'Error: 3D potential updates (update_dimension = 3) need an even number of cells in theta and phi, &
+                 &got n_theta = ', ntheta, ', n_phi = ', nphi
+        stop
+    endif
+    if ((ntetr.ne.6*n_hexa) .or. (nvert.ne.ntheta*(ns+1)*nphi)) then
+        print*, 'Error: 3D potential updates assume 6 tetrahedra per hexahedron and ntheta*(ns+1)*nphi vertices, &
+                 &got ntetr = ', ntetr, ', nvert = ', nvert
+        stop
+    endif
+
+    allocate(g%hexa_to_vert(n_hexa), g%vol_vert(nvert))
+    g%vol_vert = 0.0_dp
+
+    do iphi = 1,nphi
+        do is = 1,ns
+            do itheta = 1,ntheta
+                ih = (iphi-1)*ns*ntheta + (is-1)*ntheta + itheta
+
+                !Consistency check of the assumed ordering against the actual grid connectivity:
+                !the vertices of the hexahedron's six tetrahedra must be exactly its eight corners
+                k = 0
+                do js = is, is+1
+                    do jphi = iphi, iphi+1
+                        do jtheta = itheta, itheta+1
+                            k = k + 1
+                            corners(k) = vertex_index(js, jtheta, jphi)
+                        enddo
+                    enddo
+                enddo
+                do t = 6*(ih-1)+1, 6*ih
+                    do j = 1,4
+                        if (.not.any(corners.eq.tetra_grid(t)%ind_knot(j))) then
+                            print*, 'Error: tetrahedron ', t, ' is not part of hexahedron ', ih, &
+                                    ' as assumed for 3D potential updates.'
+                            stop
+                        endif
+                    enddo
+                enddo
+
+                !Contributing corner: even index in every direction. Theta and phi are periodic with an
+                !even number of cells, so this corner never wraps around.
+                js     = is     + mod(is,2)
+                jtheta = itheta + mod(itheta,2)
+                jphi   = iphi   + mod(iphi,2)
+                if (js.gt.ns) then
+                    g%hexa_to_vert(ih) = 0
+                else
+                    g%hexa_to_vert(ih) = vertex_index(js, jtheta, jphi)
+                    g%vol_vert(g%hexa_to_vert(ih)) = g%vol_vert(g%hexa_to_vert(ih)) &
+                                                     + output%prism_volumes(2*ih-1) + output%prism_volumes(2*ih)
+                endif
+            enddo
+        enddo
+    enddo
+
+    !Every hexahedron counted exactly once (apart from the outermost shell for odd ns)
+    if (mod(ns,2).eq.0) then
+        if (abs(sum(g%vol_vert) - sum(output%prism_volumes)).gt.1.0d-10*sum(output%prism_volumes)) then
+            print*, 'Error: volumes assigned for 3D potential updates do not add up to the total volume.'
+            stop
+        endif
+    endif
+
+contains
+
+    integer function vertex_index(js, jtheta, jphi)
+        !Vertex index with periodic wrap-around in theta and phi
+        integer, intent(in) :: js, jtheta, jphi
+        vertex_index = (mod(jphi-1,nphi))*(ns+1)*ntheta + (js-1)*ntheta + mod(jtheta-1,ntheta) + 1
+    end function vertex_index
+
+end subroutine initialize_3d_update_grid
 
 subroutine calc_s_vertices
 
