@@ -98,5 +98,10 @@
   reduced_output = .false. ,
 !
   !Relaxation factor alpha in S_new = S - alpha*(n - n_target)*exit_time_correction (0 < alpha <= 1)
-  source_relaxation_factor = 1.0d0
+  source_relaxation_factor = 1.0d0 ,
+!
+  !Intermediate source steps stop their electric potential updates early once
+  !sum|n_e-n_i|V / sum(n_e+n_i)V <= quasineutrality_tol (0 = always run all updates).
+  !The last source step always runs all n_electric_potential_updates.
+  quasineutrality_tol = 0.1d0
 /

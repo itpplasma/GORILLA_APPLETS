@@ -148,14 +148,14 @@ subroutine update_particle_source
     !Richardson step S := S - alpha * (n - n_target) using the last inner-iteration
     !density in one_d%densities. Values live on s-vertices; the shell-averaged
     !one_d%densities is projected to vertices by midpoint averaging (nearest-shell
-    !at the two boundaries). Logs the relative electron/ion mismatch and the
-    !|n - n_target| / |n_target| residual.
+    !at the two boundaries). Logs the |n - n_target| / |n_target| residual (the
+    !electron/ion mismatch is logged after every electric potential update).
 
     use gorilla_applets_types_mod, only: in, g, one_d, desired_density, particle_source
     use tetra_grid_settings_mod, only: grid_size, sfc_s_min
 
     integer :: k, ns_g
-    real(dp) :: alpha, ei_mismatch, target_mismatch, denom, s_cutoff_low, s_cutoff_high
+    real(dp) :: alpha, target_mismatch, denom, s_cutoff_low, s_cutoff_high
     real(dp), dimension(:), allocatable :: n_shell, n_vert, target_shell
 
     ns_g = grid_size(1)
@@ -183,13 +183,6 @@ subroutine update_particle_source
                                  /(g%s_vertices(k+1) - g%s_vertices(k))
     enddo
 
-    denom = sum(0.5_dp*(one_d%densities(:,1) + one_d%densities(:,2)) * g%s_shell_volumes)
-    if (denom > 0.0_dp) then
-        ei_mismatch = sum(abs(one_d%densities(:,1) - one_d%densities(:,2)) * g%s_shell_volumes) / denom
-    else
-        ei_mismatch = 0.0_dp
-    endif
-
     target_shell(:) = 0.5_dp*(desired_density%value(1:ns_g) + desired_density%value(2:ns_g+1))
     denom = sum(target_shell * g%s_shell_volumes)
     if (denom > 0.0_dp) then
@@ -198,8 +191,7 @@ subroutine update_particle_source
         target_mismatch = 0.0_dp
     endif
 
-    print*, 'source update: relative electron/ion density mismatch = ', ei_mismatch
-    print*, 'source update: relative |n - n_target| / |n_target|    = ', target_mismatch
+    print*, 'source update: relative |n - n_target| / |n_target| = ', target_mismatch
 
 end subroutine update_particle_source
 

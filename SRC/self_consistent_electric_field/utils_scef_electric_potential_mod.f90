@@ -32,7 +32,7 @@ subroutine initialize_flux_shell_grid
 
 end subroutine initialize_flux_shell_grid
 
-subroutine perform_electric_potential_update(i, source_step)
+subroutine perform_electric_potential_update(i)
 
     use gorilla_applets_types_mod, only: c, output, grid_t, in, ep, one_d
     use gorilla_settings_mod, only: boole_time_Hamiltonian, coord_system
@@ -40,10 +40,9 @@ subroutine perform_electric_potential_update(i, source_step)
     use tetra_physics_mod, only: make_tetra_physics, phi_elec
     use field_mod, only: ipert
 
-    integer, intent(in) :: i, source_step
+    integer, intent(in) :: i
     real(dp) :: r=0.0_dp !under-relaxation factor
     logical :: boole_print_1d_data = .false.
-    logical :: boole_write_this_iteration
 
     if (boole_time_Hamiltonian.eqv..false.) then
         print*, "Error, variable 'boole_time_Hamiltonian' must be set to '.true.' for electric potential update to work"
@@ -59,10 +58,27 @@ subroutine perform_electric_potential_update(i, source_step)
     ! boole_keep_phi_elec=.true. prevents make_tetra_physics from overwriting phi_elec
     call make_tetra_physics(coord_system, ipert, boole_keep_phi_elec=.true.)
 
-    boole_write_this_iteration = (.not.in%reduced_output) .or. (i.eq.max(in%n_electric_potential_updates,1))
-    if (i.gt.0 .and. boole_write_this_iteration) call print_data(i, source_step)
-
 end subroutine perform_electric_potential_update
+
+function calc_quasineutrality_mismatch() result(mismatch)
+
+    !Volume-weighted relative charge imbalance sum|n_e-n_i|V / sum(n_e+n_i)V of the shell densities
+    !in one_d%densities (species 1 = ions, 2 = electrons). Equals the volume average of
+    !|n_s - n_mean| / n_mean, so it is robust against Monte Carlo noise in single shells and
+    !against the nearly empty edge shells, where pointwise relative deviations blow up.
+
+    use gorilla_applets_types_mod, only: g, one_d
+
+    real(dp) :: mismatch, denom
+
+    denom = sum((one_d%densities(:,1) + one_d%densities(:,2)) * g%s_shell_volumes)
+    if (denom > 0.0_dp) then
+        mismatch = sum(abs(one_d%densities(:,1) - one_d%densities(:,2)) * g%s_shell_volumes) / denom
+    else
+        mismatch = 0.0_dp
+    endif
+
+end function calc_quasineutrality_mismatch
 
 subroutine calc_phi_elec_from_rho(i)
 

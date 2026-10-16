@@ -109,11 +109,17 @@ subroutine run_scef_iterations(source_step)
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared
     use utils_scef_particle_init_mod, only: calc_starting_conditions
     use utils_scef_particle_pushing_mod, only: parallelised_particle_pushing
-    use utils_scef_electric_potential_mod, only: perform_electric_potential_update
+    use utils_scef_electric_potential_mod, only: perform_electric_potential_update, calc_quasineutrality_mismatch, print_data
     use utils_scef_diffusion_mod, only: calc_density_via_random_walk
 
     integer, intent(in) :: source_step
     integer :: i, species
+    real(dp) :: mismatch
+    logical :: boole_allow_early_exit, boole_converged, boole_last_update
+
+    !Intermediate source steps only need a field good enough for the next source update, so they
+    !may stop once quasineutral; the last (or only) source step always runs all updates.
+    boole_allow_early_exit = (source_step.lt.in%n_source_updates) .and. (in%quasineutrality_tol.gt.0.0_dp)
 
     do i = 1, max(in%n_electric_potential_updates,1)
         if (.not.in%boole_static_ne) call calc_starting_conditions
@@ -146,7 +152,17 @@ subroutine run_scef_iterations(source_step)
             ep%rho_prism = ep%rho_prism + real(output%prism_moments(1,:,species))*start%particle_charge(species)
         enddo
 
-        call perform_electric_potential_update(i, source_step)
+        call perform_electric_potential_update(i)
+
+        mismatch = calc_quasineutrality_mismatch()
+        print*, 'quasineutrality mismatch sum|n_e-n_i|V / sum(n_e+n_i)V = ', mismatch
+        boole_converged = boole_allow_early_exit .and. (mismatch.le.in%quasineutrality_tol)
+        boole_last_update = boole_converged .or. (i.eq.max(in%n_electric_potential_updates,1))
+        if ((.not.in%reduced_output) .or. boole_last_update) call print_data(i, source_step)
+        if (boole_converged) then
+            print*, 'source step ', source_step, ': quasineutral after electric potential update ', i, ', moving on'
+            exit
+        endif
     enddo
 
 end subroutine run_scef_iterations

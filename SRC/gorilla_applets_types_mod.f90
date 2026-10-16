@@ -137,6 +137,7 @@ module gorilla_applets_types_mod
     integer  :: n_source_updates = 1                !used in self consistent electric field: outer source-tuning iterations
     logical  :: reduced_output = .false.            !used in self consistent electric field: write files only on the last EP update per source iteration
     real(dp) :: source_relaxation_factor = 1.0_dp   !used in self consistent electric field: alpha in S := S - alpha*(n - n_target)*factor_from_tracing_time
+    real(dp) :: quasineutrality_tol = 0.0_dp        !used in self consistent electric field: early-exit tolerance on sum|n_e-n_i|V / sum(n_e+n_i)V (0 = off)
     end type input_t
 
     type(input_t) :: in
