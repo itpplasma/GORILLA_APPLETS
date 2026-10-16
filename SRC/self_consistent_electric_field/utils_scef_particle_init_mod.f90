@@ -135,7 +135,6 @@ subroutine write_particle_source(source_step)
 
     write(source_step_str, '(I0)') source_step
     filename = 'particle_source_' // trim(source_step_str) // '.dat'
-    call unlink(filename)
     open(newunit = file_id, file = filename)
     do k = 1, grid_size(1)+1
         write(file_id,*) g%s_vertices(k), particle_source%value(k)

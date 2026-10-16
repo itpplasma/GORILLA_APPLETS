@@ -273,8 +273,7 @@ subroutine print_data(i, source_step)
         close(ef_unit)
     endif
 
-    filename_lost = 'number_of_lost_particles.dat'
-    if (i.eq.1 .and. source_step.eq.1) call unlink(filename_lost)
+    filename_lost = 'number_of_lost_particles.dat'   !removed at startup by delete_scef_output_files
     open(newunit = l_unit, file = filename_lost,position = 'append')
     write(l_unit,*) source_step, i, counter%lost_particles
     close(l_unit)
@@ -285,7 +284,6 @@ subroutine print_data(i, source_step)
 
     if (one_d%boole_print_densities.eqv..true.) then
         filename_1d = 'one_d_densities' // trim(tag) // '.dat'
-        call unlink(filename_1d)
         open(newunit = one_d_unit, file = filename_1d)
         do j = 1,grid_size(1)
             write(one_d_unit,*) one_d%densities(j,:)
@@ -294,13 +292,11 @@ subroutine print_data(i, source_step)
     endif
 
     filename_ep = 'rho_per_vertex_during_electric_potential_update_' // trim(tag) // '.dat'
-    call unlink(filename_ep)
     !open(newunit = ep_unit, file = filename_ep)
     !write(ep_unit,'(ES20.10E4)') ep%rho_vert
     !close(ep_unit)
 
     ! filename_s = 's_statistics_after_electric_potential_update' // trim(tag) // '.dat'
-    ! call unlink(filename_s)
     ! k = size(s%time)
     ! open(newunit = s_unit, file = filename_s)
     ! do j = 1,k
@@ -309,7 +305,6 @@ subroutine print_data(i, source_step)
     ! close(s_unit)
 
     filename_phi_elec_1d = 'phi_elec_1d_' // trim(tag) // '.dat'
-    call unlink(filename_phi_elec_1d)
     open(newunit = pe_unit, file = filename_phi_elec_1d)
     do k = 1, grid_size(1)+1
         write(pe_unit,'(ES20.10E4)') phi_elec(g%vertices_per_flux_surface(k, 1))
@@ -318,20 +313,17 @@ subroutine print_data(i, source_step)
 
     if (.not.boole_1d_output) then
         filename_phi_elec = 'phi_elec_after_electric_potential_update_' // trim(tag) // '.dat'
-        call unlink(filename_phi_elec)
         open(newunit = pe_unit, file = filename_phi_elec)
         write(pe_unit,'(ES20.10E4)') phi_elec
         close(pe_unit)
 
         filename_ion_densities = 'ion_densities_after_electric_potential_update_' // trim(tag) // '.dat'
-        call unlink(filename_ion_densities)
         open(newunit = id_unit, file = filename_ion_densities)
         write(id_unit,'(ES20.10E4)') real(output%prism_moments(1,:,1))
         close(id_unit)
     endif
 
     ! filename_ed = 'exit_data_' // trim(tag) // '.dat'
-    ! call unlink(filename_ed)
     ! open(newunit = ed_unit, file = filename_ed)
     ! do j=1,in%num_particles
     !     write(ed_unit,*) exit_data%t_confined(j,1), dble(exit_data%integration_step(j,1)), exit_data%x(:,j,1)
@@ -351,6 +343,29 @@ subroutine print_data(i, source_step)
     print*, "Total tracing time is ", ep%total_tracing_time(i)
 
 end subroutine print_data
+
+subroutine delete_scef_output_files
+
+    !Single startup cleanup of the SCEF-specific outputs (the shared ones are handled by
+    !unlink_files), so the writers can simply open their files and the working directory only
+    !holds files of the current run. The per-iteration files (<name>_<source_step>_<i>.dat,
+    !particle_source_<k>.dat) are removed by pattern: a shorter run would otherwise leave stale
+    !higher-index files behind. number_of_lost_particles.dat is appended to during the run.
+    !Keep this in sync with print_data above and write_particle_source in
+    !utils_scef_particle_init_mod. Cached inputs such as A_and_B_species<k>.dat are deliberately kept.
+
+    call execute_command_line('rm -f'                                                  // &
+                              ' number_of_lost_particles.dat'                          // &
+                              ' phi_elec_1d_*_*.dat'                                   // &
+                              ' one_d_densities*_*.dat'                                // &
+                              ' phi_elec_after_electric_potential_update_*.dat'        // &
+                              ' ion_densities_after_electric_potential_update_*.dat'   // &
+                              ' rho_per_vertex_during_electric_potential_update_*.dat' // &
+                              ' s_statistics_after_electric_potential_update*_*.dat'   // &
+                              ' exit_data_*_*.dat'                                     // &
+                              ' particle_source_*.dat')
+
+end subroutine delete_scef_output_files
 
 subroutine associate_flux_labels_with_tetrahedra_and_vertices
 
