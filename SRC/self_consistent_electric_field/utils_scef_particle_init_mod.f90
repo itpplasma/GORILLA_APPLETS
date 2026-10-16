@@ -61,15 +61,17 @@ end subroutine calc_starting_conditions
 
 subroutine initialize_particle_source
 
-    !Allocate particle_source and initialise it to the desired density profile.
-    !Must be called after calc_desired_density_profile.
+    !Allocate particle_source and initialise it. With source tuning (n_source_updates > 0) the
+    !desired density profile is the initial guess, so this must be called after
+    !calc_desired_density_profile. Without tuning the source is fixed to the constant in%density,
+    !which reproduces the uniform marker weights of set_weight.
 
-    use gorilla_applets_types_mod, only: g, desired_density, particle_source
+    use gorilla_applets_types_mod, only: in, g, desired_density, particle_source
     use tetra_grid_settings_mod, only: grid_size
 
     integer :: k
 
-    if (.not.allocated(desired_density%value)) then
+    if (in%n_source_updates.gt.0 .and. .not.allocated(desired_density%value)) then
         print*, 'Error: initialize_particle_source called before calc_desired_density_profile.'
         stop
     endif
@@ -77,7 +79,11 @@ subroutine initialize_particle_source
     if (.not.allocated(particle_source%value)) allocate(particle_source%value(grid_size(1)+1))
     if (.not.allocated(particle_source%grad))  allocate(particle_source%grad(grid_size(1)))
 
-    particle_source%value(:) = desired_density%value(:)
+    if (in%n_source_updates.gt.0) then
+        particle_source%value(:) = desired_density%value(:)
+    else
+        particle_source%value(:) = in%density
+    endif
 
     do k = 1, grid_size(1)
         particle_source%grad(k) = (particle_source%value(k+1) - particle_source%value(k)) &

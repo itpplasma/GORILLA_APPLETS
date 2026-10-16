@@ -91,6 +91,7 @@
   boole_recompute_D(2) = .false. ,
 !
   !Outer source-tuning iterations (each does n_electric_potential_updates SCEF updates then updates the particle source)
+  !0 = fixed source: a single SCEF round with a constant source equal to density, no source updates
   n_source_updates = 20 ,
 !
   !Write output files only on the last electric-potential update per source iteration

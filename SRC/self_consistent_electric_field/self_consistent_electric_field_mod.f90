@@ -44,7 +44,7 @@ subroutine calc_self_consistent_electric_field
 
     call initialize_exit_data
     call initialize_flux_shell_grid
-    call calc_desired_density_profile
+    if (in%n_source_updates.gt.0) call calc_desired_density_profile   !target density only matters for source tuning
     call initialize_particle_source
     call calc_poloidal_flux(verts_sthetaphi)
     call allocate_electric_potential_type
@@ -60,13 +60,17 @@ subroutine calc_self_consistent_electric_field
         endif
     enddo
 
+    !n_source_updates = 0 runs a single SCEF round with the fixed source set in initialize_particle_source.
+    !particle_source_<k>.dat holds the source used in round k (plus the state after the final update).
+    call write_particle_source(1)
     do source_step = 1, max(in%n_source_updates, 1)
         if (in%boole_static_ne) call calc_starting_conditions   !fresh weights (source may have changed since last iter)
-        call write_particle_source(source_step)
         call run_scef_iterations(source_step)
-        call update_particle_source
+        if (in%n_source_updates.gt.0) then
+            call update_particle_source
+            call write_particle_source(source_step + 1)
+        endif
     enddo
-    call write_particle_source(max(in%n_source_updates, 1) + 1)   !state after the final update
 
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
     call write_data_to_files

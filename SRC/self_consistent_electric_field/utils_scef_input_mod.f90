@@ -107,6 +107,12 @@ subroutine print_errors_for_bad_inputs
         stop
     endif
 
+    if (in%n_source_updates.lt.0) then
+        print*, 'Error: n_source_updates must be >= 0 (0 = fixed source, no source tuning).'
+        print*, 'Program terminated'
+        stop
+    endif
+
 end subroutine print_errors_for_bad_inputs
 
 end module utils_scef_input_mod
