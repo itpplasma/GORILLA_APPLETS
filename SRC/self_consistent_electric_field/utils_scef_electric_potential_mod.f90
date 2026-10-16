@@ -9,10 +9,9 @@ contains
 subroutine allocate_electric_potential_type
 
     use gorilla_applets_types_mod, only: ep, in
-    use tetra_grid_mod, only: ntetr, nvert
+    use tetra_grid_mod, only: nvert
     use tetra_grid_settings_mod, only: grid_size
 
-    allocate(ep%rho_prism(ntetr/3))
     allocate(ep%rho_flux_layer(grid_size(1)))
     allocate(ep%rho_vert(nvert))
     allocate(ep%phi_elec_from_rho(nvert))
@@ -88,7 +87,6 @@ subroutine calc_phi_elec_from_rho(i)
     integer, intent(in) :: i
     real(dp) :: factor
 
-    ep%rho_prism = 0
     ep%rho_flux_layer = 0
     ep%rho_vert = 0
 

@@ -104,7 +104,7 @@ subroutine run_scef_iterations(source_step)
     !times and update the electric potential each time. source_step is the source-update
     !iteration index, passed to perform_electric_potential_update for file naming.
 
-    use gorilla_applets_types_mod, only: in, ep, output, start, exit_data
+    use gorilla_applets_types_mod, only: in, ep, output, exit_data
     use utils_data_pre_and_post_processing_mod, only: prepare_next_round_of_parallelised_particle_pushing, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared
     use utils_scef_particle_init_mod, only: calc_starting_conditions
@@ -145,11 +145,9 @@ subroutine run_scef_iterations(source_step)
         if (max(ep%mean_exit_time(1), ep%mean_exit_time(2)) > 0.0_dp) then
             ep%exit_time_correction = in%time_step / max(ep%mean_exit_time(1), ep%mean_exit_time(2))
         endif
-        ep%rho_prism = 0
         do species = 1,2
             if ((species.eq.2).and.(in%boole_static_ne)) cycle
             output%prism_moments(1,:,species) = output%prism_moments(1,:,species) * ep%exit_time_correction
-            ep%rho_prism = ep%rho_prism + real(output%prism_moments(1,:,species))*start%particle_charge(species)
         enddo
 
         call perform_electric_potential_update(i)

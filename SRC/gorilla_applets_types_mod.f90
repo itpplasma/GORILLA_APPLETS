@@ -199,7 +199,6 @@ module gorilla_applets_types_mod
     type(grid_t) :: g
 
     type electric_potential_t
-    real(dp), dimension(:), allocatable :: rho_prism
     real(dp), dimension(:), allocatable :: rho_flux_layer
     real(dp), dimension(:), allocatable :: rho_vert
     real(dp), dimension(:), allocatable :: phi_elec_from_rho
