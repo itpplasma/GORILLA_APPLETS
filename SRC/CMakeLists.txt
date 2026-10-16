@@ -40,8 +40,8 @@ add_library(GORILLA_APPLETS STATIC
   )
 target_link_libraries(GORILLA_APPLETS 
   GORILLA
-  blas
-  lapack
+  ${LAPACK_LIBRARIES}
+  ${BLAS_LIBRARIES}
   netcdf
   netcdff
 )
