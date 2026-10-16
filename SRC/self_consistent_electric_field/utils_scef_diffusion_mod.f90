@@ -24,7 +24,7 @@ subroutine calc_diffusion_coefficients(species)
 
     integer, intent(in) :: species
 
-    integer :: ns, i, n_particles, file_id, n_ignored, ns_start
+    integer :: ns, i, n_particles, file_id, n_ignored
     real(dp) :: extrapolation_factor, A, B, offset, tau_calibration, v0, v_max, weights_before_redistribution
     real(dp) :: standard_deviation, dummy
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
@@ -72,16 +72,13 @@ subroutine calc_diffusion_coefficients(species)
 
     s%time = [(start%t(species)/s%k*i,i = 1,s%k)]
 
-    ns_start = 15
-
-    do ns = ns_start,grid_size(1)
+    do ns = 2,grid_size(1)
 
         print*, 'ns = ', ns, '/', grid_size(1)
 
 
         !Initiate particles of `species` at the different flux surfaces leaving out the boundaries
         s%s0 = g%s_vertices(ns)
-        s%s0 = 0.5d0
 
         call RANDOM_NUMBER(rand_matrix)
         call set_starting_positions(rand_matrix,(/species/), s%s0)
@@ -92,7 +89,7 @@ subroutine calc_diffusion_coefficients(species)
 
         call prepare_next_round_of_parallelised_particle_pushing(species)
 
-        if (ns.eq.ns_start) then
+        if (ns.eq.2) then
             call calc_collision_coefficients_for_all_tetrahedra(species)
 
             v0 = start%v0(species)
