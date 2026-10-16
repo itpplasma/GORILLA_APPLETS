@@ -127,7 +127,7 @@ subroutine run_scef_iterations(source_step)
             if ((species.eq.2).and.(in%boole_static_ne)) cycle
             call prepare_next_round_of_parallelised_particle_pushing(species)
             if (.not.in%boole_honest_tracing(species)) then
-                call calc_density_via_random_walk(species, i)
+                call calc_density_via_random_walk(species)
             else
                 if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
                 call parallelised_particle_pushing(species,i,boole_diffusion_coefficient=.false.)

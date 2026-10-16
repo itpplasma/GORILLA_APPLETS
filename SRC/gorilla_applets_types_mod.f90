@@ -236,6 +236,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:,:), allocatable :: grad_B           ! (grid_size,   species)
     real(dp), dimension(4,2)              :: polynomial_coefficients_for_B
     real(dp), dimension(3,2)              :: polynomial_coefficients_for_A
+    logical,  dimension(2)                :: boole_cached_data_loaded = .false. ! (species) A_and_B_species<k>.dat read in
     end type diffusion_coefficients
 
     type(diffusion_coefficients) dc

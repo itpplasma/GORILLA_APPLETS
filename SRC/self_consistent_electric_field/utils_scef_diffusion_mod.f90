@@ -202,10 +202,11 @@ subroutine calc_diffusion_coefficients(species)
 
 end subroutine calc_diffusion_coefficients
 
-subroutine calc_density_via_random_walk(species, iteration_step)
-    !Random-walk substitute for direct pushing of `species`. On the first
-    !iteration_step it loads the cached A_and_B_<species>.dat; on later steps
-    !it derives the convection coefficient from the current electric field.
+subroutine calc_density_via_random_walk(species)
+    !Random-walk substitute for direct pushing of `species`. The field-free cached
+    !A_and_B_<species>.dat is read in once per species; the convection coefficient is
+    !then always derived from the current electric field (which reproduces the cached
+    !one for E = 0), so the potential carries over between source steps.
 
     use gorilla_applets_types_mod, only: in, time_t, dc, ep, g, output, start, exit_data, weights, filenames
     use tetra_grid_settings_mod, only: grid_size, sfc_s_min
@@ -216,7 +217,7 @@ subroutine calc_density_via_random_walk(species, iteration_step)
     use utils_scef_electric_potential_mod, only: fill_vector_parts_with_value
     use utils_scef_particle_pushing_mod, only: calc_particle_weights_and_jperp
 
-    integer, intent(in) :: species, iteration_step
+    integer, intent(in) :: species
 
     real(dp) :: delta_x, delta_t, xi, A, B, cell_size, B_fit, A_fit, p
     integer :: i, ns, k, num_steps_min, count_lost_particles, num_particles, particle_multiplication
@@ -281,11 +282,11 @@ subroutine calc_density_via_random_walk(species, iteration_step)
     ! dc%grad_B = 0.0_dp
 
 
-    if (iteration_step.eq.1) then
+    if (.not.dc%boole_cached_data_loaded(species)) then
         call get_diffusion_coefficient_data(species, boole_use_fit_function)
-    else
-        call calc_convection_coefficient_from_electric_field(species, boole_use_fit_function)
+        dc%boole_cached_data_loaded(species) = .true.
     endif
+    call calc_convection_coefficient_from_electric_field(species, boole_use_fit_function)
 
     t%step = in%time_step
     num_steps_min = 1000
