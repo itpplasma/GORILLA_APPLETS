@@ -19,7 +19,7 @@ subroutine calc_diffusion_coefficients(species)
     use russian_roulette_mod, only: prepare_russian_roulette
     use tetra_grid_settings_mod, only: sfc_s_min
     use utils_scef_particle_init_mod, only: allocate_start_type, set_particle_type_specifications, set_starting_positions, &
-                                            set_rest_of_individual_particle_specifications, set_weight
+                                            set_rest_of_individual_particle_specifications, set_weight, allocate_weights
     use utils_scef_particle_pushing_mod, only: parallelised_particle_pushing
 
     integer, intent(in) :: species
@@ -64,6 +64,7 @@ subroutine calc_diffusion_coefficients(species)
     s%boole_large_distance = .false.
 
     call allocate_start_type(s%n_particles)
+    call allocate_weights(s%n_particles)
     call set_particle_type_specifications
     start%v0(species) = start%v0(species)*sqrt(s%temperature/in%energy_eV)
     call initialize_exit_data(s%n_particles)
