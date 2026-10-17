@@ -477,6 +477,7 @@ subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
     use constants, only: pi
+    use marker_distribution_mod, only: linear_profile_slope
 
     integer, intent(in) :: n, ind_tetr, species
     real(dp), dimension(3), intent(in) :: z_save
@@ -486,9 +487,9 @@ subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
 
     call calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
 
-    !So far, we work with densities that decline like (1.1_dp - s_value)/1.1_dp, so -v^r\partial f/\partial r turns into
-    !-v^r*1.0_dp/1.1_dp(-f)=v_r*f/1.1_dp
-    weights%w(n,species) = weights%w(n,species) * v_r /1.1_dp!vpar
+    !Densities follow the linear profile f = f_M*linear_profile_factor(r), so -v^r\partial f/\partial r turns into
+    !-v^r*linear_profile_slope*f_M
+    weights%w(n,species) = -weights%w(n,species) * v_r * linear_profile_slope
 
 end subroutine adapt_weights_delta_f
 
@@ -533,7 +534,7 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     use supporting_functions_mod, only: bmod_func
     use gorilla_settings_mod, only: coord_system
     use tetra_grid_settings_mod, only: grid_kind
-    use marker_distribution_mod, only: evaluate_distribution_3d, evaluate_distribution_1d, pdf_boltzmann
+    use marker_distribution_mod, only: evaluate_distribution_3d, evaluate_distribution_1d, pdf_boltzmann, linear_profile_factor
 
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
@@ -596,8 +597,7 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
     endif
 
     if ((.not.in%boole_delta_f).and.(in%boole_linear_density_simulation)) then
-        ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
-        density = density*(1.1_dp - s_value)/1.1_dp
+        density = density*linear_profile_factor(s_value)
     endif
 
     pdf_gyroangle = 1/(2*pi)
@@ -610,8 +610,7 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
         q = start%particle_charge(species)
         Phi_elec = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
         if (in%boole_linear_temperature_simulation) then
-            ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
-            T = T*(1.1_dp - s_value)/1.1_dp
+            T = T*linear_profile_factor(s_value)
         endif
         f = pdf_boltzmann(density,T,m,energy_erg,q,Phi_elec)
         omega_c = bmod_func(z_save,ind_tetr)/start%cm_over_e(species)

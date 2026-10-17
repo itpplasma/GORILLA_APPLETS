@@ -92,6 +92,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     use supporting_functions_mod, only: bmod_func
     use gorilla_settings_mod, only: coord_system
     use tetra_grid_settings_mod, only: grid_kind
+    use marker_distribution_mod, only: linear_profile_factor
 
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
@@ -136,8 +137,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
         endif
     endif
     if (in%boole_linear_density_simulation) then
-        ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
-        weights%w(n,species) = weights%w(n,species)*(1.1_dp - s_value)/1.1_dp
+        weights%w(n,species) = weights%w(n,species)*linear_profile_factor(s_value)
     endif
 
     if (.not. in%boole_monoenergetic) then
@@ -147,8 +147,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
             weights%w(n,species) = weights%w(n,species)*sqrt(start%energy(n,species)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
                         & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/(in%energy_eV*ev2erg))
         else
-            ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
-            temperature = in%energy_eV*ev2erg*(1.1_dp - s_value)/1.1_dp
+            temperature = in%energy_eV*ev2erg*linear_profile_factor(s_value)
             weights%w(n,species) = weights%w(n,species)*sqrt(start%energy(n,species)*ev2erg)/temperature**1.5_dp* &
             & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
         endif

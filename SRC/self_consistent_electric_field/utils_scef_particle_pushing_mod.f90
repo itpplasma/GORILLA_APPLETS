@@ -444,6 +444,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     use constants, only: ev2erg, pi
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
+    use marker_distribution_mod, only: linear_profile_factor
 
     logical, intent(in) :: boole_diffusion_coefficient
     real(dp), intent(in) :: vpar, vperp
@@ -458,7 +459,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     !print*, 'weight before = ', weights%w(n,species), n
 
     if (in%boole_linear_density_simulation) then
-        weights%w(n,species) = weights%w(n,species)*(1.0_dp-0.9_dp*x(1))
+        weights%w(n,species) = weights%w(n,species)*linear_profile_factor(x(1))
     endif
 
     if (boole_diffusion_coefficient) then
@@ -488,8 +489,8 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
             weights%w(n,species) =weights%w(n,species)/temperature**1.5_dp* &
                         & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
         else
-            temperature = in%energy_eV*ev2erg*(1.0_dp-0.9*x(1))
-            if (boole_diffusion_coefficient) temperature = s%temperature*ev2erg*(1.0_dp-0.9*x(1))
+            temperature = in%energy_eV*ev2erg*linear_profile_factor(x(1))
+            if (boole_diffusion_coefficient) temperature = s%temperature*ev2erg*linear_profile_factor(x(1))
             weights%w(n,species) = weights%w(n,species)/temperature**1.5_dp* &
                         & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
         endif

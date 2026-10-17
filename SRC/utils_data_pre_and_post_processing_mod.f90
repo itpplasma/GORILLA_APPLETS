@@ -378,6 +378,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     use collis_ions, only: collis_init
     use gorilla_settings_mod, only: coord_system
     use gorilla_applets_settings_mod, only: i_option
+    use marker_distribution_mod, only: linear_profile_factor
 
     integer, intent(in), optional :: species_in
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
@@ -423,14 +424,12 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
                 stop
             endif
 
-            ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
             if (in%boole_linear_density_simulation) then
-                c%dens_mat(:,i) = in%density * (1.1_dp - s_value) / 1.1_dp
+                c%dens_mat(:,i) = in%density * linear_profile_factor(s_value)
             endif
 
-            ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
             if (in%boole_linear_temperature_simulation) then
-                c%temp_mat(:,i) = in%energy_eV * (1.1_dp - s_value) / 1.1_dp
+                c%temp_mat(:,i) = in%energy_eV * linear_profile_factor(s_value)
             endif
 
             if (boole_analytic_temperature_profile) then

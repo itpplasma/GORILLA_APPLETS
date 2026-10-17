@@ -1,10 +1,18 @@
 module marker_distribution_mod
 
+    !Distributions used for markers and their weights: the sampling (marker) distributions with
+    !their tables for evaluation and sampling, as well as the physical distribution functions the
+    !weights are built from (pdf_boltzmann and the linear profile shape linear_profile_factor).
+
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
     implicit none
 
     integer, parameter :: default_table_size = 1000
+
+    !Linear density/temperature profiles (boole_linear_density_simulation, boole_linear_temperature_simulation)
+    !fall linearly from 1 on the axis (x = 0) to 0.1 at the boundary (x = 1), x = normalised radial coordinate
+    real(dp), parameter :: linear_profile_slope = -0.9_dp   !d(linear_profile_factor)/dx
 
     !---------------------------------------------------------------------------
     ! Unified abstract interface for PDF functions
@@ -396,5 +404,17 @@ function pdf_boltzmann(n,T,m,energy,q,Phi) result(val)
 
     val = n*(2*pi*T*m)**(-1.5_dp)*exp(-(energy+q*Phi)/T)
 end function pdf_boltzmann
+
+pure function linear_profile_factor(x) result(factor)
+
+    !Shape factor of the linear density/temperature profiles at normalised radial coordinate x
+    !(flux label s, or normalised poloidal flux): 1 on the axis, 0.1 at the boundary
+
+    real(dp), intent(in) :: x
+    real(dp) :: factor
+
+    factor = 1.0_dp + linear_profile_slope*x
+
+end function linear_profile_factor
 
 end module marker_distribution_mod
