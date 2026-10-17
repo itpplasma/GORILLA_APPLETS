@@ -43,7 +43,6 @@ subroutine calc_self_consistent_electric_field
 
     !if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
 
-    call initialize_exit_data
     call initialize_flux_shell_grid
     if (in%n_source_updates.gt.0) call calc_desired_density_profile   !target density only matters for source tuning
     call initialize_particle_source
@@ -62,6 +61,7 @@ subroutine calc_self_consistent_electric_field
             call calc_diffusion_coefficients(species)
         endif
     enddo
+    call initialize_exit_data   !after the calibration, which sizes exit_data for its own test particles
 
     !n_source_updates = 0 runs a single SCEF round with the fixed source set in initialize_particle_source.
     !particle_source_<k>.dat holds the source used in round k (plus the state after the final update).
