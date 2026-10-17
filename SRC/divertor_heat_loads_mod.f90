@@ -399,8 +399,26 @@ subroutine calc_starting_conditions
     call allocate_start_type
     call allocate_weights
     call set_start_type(rand_matrix)
+    call init_marker_distributions
 
 end subroutine calc_starting_conditions
+
+subroutine init_marker_distributions
+
+    !The markers are placed deterministically (set_start_type), but their weights are evaluated as for
+    !markers sampled uniformly in the box (R, phi, Z) with uniform pitch and energy
+
+    use gorilla_applets_types_mod, only: start, g
+    use constants, only: pi
+    use marker_distribution_mod, only: pdf_flat, init_distribution_3d
+    use utils_data_pre_and_post_processing_mod, only: init_velocity_space_distributions
+
+    if (.not. start%dist_position%initialized) then
+        call init_distribution_3d(start%dist_position, pdf_flat, [g%amin, 0.0_dp, g%cmin], [g%amax, 2*pi, g%cmax])
+    endif
+    call init_velocity_space_distributions
+
+end subroutine init_marker_distributions
 
 subroutine set_start_type(rand_matrix)
 

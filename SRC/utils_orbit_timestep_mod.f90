@@ -85,78 +85,115 @@ end subroutine initialize_constants_of_motion
 
 subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species_in)
 
-    use gorilla_applets_types_mod, only: in, flux, start, weights
+    !Marker weight and perpendicular invariant, shared by all applets:
+    !    w = f * J_x * J_y / (pdf_position * pdf_velocity_space)
+    !f is the physical distribution (monoenergetic, or Boltzmann with optional linear density and
+    !temperature profiles), J_x and J_y are the Jacobians of position and velocity space, and the pdfs are
+    !the sampling densities of the markers, evaluated from start%dist_position, start%dist_lambda and
+    !start%dist_energy (these must be initialised, also when the markers are placed deterministically).
+
+    use gorilla_applets_types_mod, only: in, start, weights, g
     use tetra_physics_mod, only: tetra_physics
-    use constants, only: ev2erg
+    use constants, only: ev2erg, pi
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
     use gorilla_settings_mod, only: coord_system
-    use tetra_grid_settings_mod, only: grid_kind
-    use marker_distribution_mod, only: linear_profile_factor
+    use marker_distribution_mod, only: evaluate_distribution_3d, evaluate_distribution_1d, pdf_boltzmann, &
+                                       linear_profile_factor
 
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
     integer, intent(in) :: n,ind_tetr
     integer, intent(in), optional :: species_in
-    integer :: species = 1
-    real(dp) :: local_poloidal_flux, phi_elec_func, temperature
-    real(dp) :: r, phi, z
-    real(dp) :: s_value
+    integer :: species
+    real(dp) :: r, z, s_value, x_global(3)
+    real(dp) :: density, T, m, q, energy_erg, Phi_elec, omega_c, f, J_x, J_y
+    real(dp) :: pdf_position, pdf_lambda, pdf_energy_erg, pdf_gyroangle, pdf_velocity_space
 
+    species = 1
     if (present(species_in)) species = species_in
 
-    !This factor is added here even though it is a global factor, because in%energy_eV*ev2erg is of the order of 10^(-9) and by
-    !only including it here, it is possible to estimate the order of magnitude of start%weight before entering this routine
-    !(this is necessary for the energy and momentum conserving collision operator)
-    if (.not. in%boole_monoenergetic) weights%w(n,species) =  weights%w(n,species)*in%energy_eV*ev2erg
-
+    m = start%particle_mass(species)
     r = z_save(1)
-    phi = z_save(2)
     z = z_save(3)
+    x_global = z_save + tetra_physics(ind_tetr)%x1
 
-    if (in%boole_refined_sqrt_g) then
-        weights%w(n,species) = weights%w(n,species)* (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
-                                        &  (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
-    else
-        weights%w(n,species) = weights%w(n,species)*(r + tetra_physics(ind_tetr)%x1(1))
-    endif
-
+    !Physical density and temperature, optionally with linear radial profiles
+    !(for delta-f, the density gradient enters through adapt_weights_delta_f instead)
+    density = in%density
+    T = in%energy_eV*ev2erg
     if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then
-        if (coord_system == 2) then
-            ! Flux coordinates: use s-coordinate directly (s ranges from sfc_s_min to 1)
-            s_value = tetra_physics(ind_tetr)%x1(1) + z_save(1)
-        else if (grid_kind /= 3) then
-            ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
-            local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
-            s_value = local_poloidal_flux / flux%poloidal_max
-        else
-            ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
-            print*, 'Error in calc_particle_weights_and_jperp: Computing radial coordinate from A_phi is only valid for &
-                    &axisymmetric devices. For stellarators (grid_kind=3), use flux coordinates (coord_system=2).'
-            stop
-        endif
-    endif
-    if (in%boole_linear_density_simulation) then
-        weights%w(n,species) = weights%w(n,species)*linear_profile_factor(s_value)
+        s_value = calc_radial_coordinate(ind_tetr, z_save)
+        if (in%boole_linear_density_simulation.and.(.not.in%boole_delta_f)) density = density*linear_profile_factor(s_value)
+        if (in%boole_linear_temperature_simulation) T = T*linear_profile_factor(s_value)
     endif
 
-    if (.not. in%boole_monoenergetic) then
-        !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts have been added before)
-        phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
-        if (.not. in%boole_linear_temperature_simulation) then
-            weights%w(n,species) = weights%w(n,species)*sqrt(start%energy(n,species)*ev2erg)/(in%energy_eV*ev2erg)**1.5_dp* &
-                        & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/(in%energy_eV*ev2erg))
-        else
-            temperature = in%energy_eV*ev2erg*linear_profile_factor(s_value)
-            weights%w(n,species) = weights%w(n,species)*sqrt(start%energy(n,species)*ev2erg)/temperature**1.5_dp* &
-            & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
-        endif
+    !Spatial Jacobian
+    if (coord_system.eq.2) then
+        J_x = abs(tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save))
+    elseif (in%boole_refined_sqrt_g) then
+        J_x = (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
+            & (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
+    else
+        J_x = r + tetra_physics(ind_tetr)%x1(1)
     endif
 
-    start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
+    !Sampling densities of the markers
+    pdf_position = evaluate_distribution_3d(start%dist_position, x_global)
+    pdf_lambda = evaluate_distribution_1d(start%dist_lambda, start%pitch(n,species))
+    pdf_gyroangle = 1.0_dp/(2.0_dp*pi)
+
+    !Physical distribution and velocity-space Jacobian
+    if (in%boole_monoenergetic) then
+        f = density*pdf_gyroangle/(2.0_dp*start%v0(species))
+        J_y = start%v0(species)
+        pdf_velocity_space = pdf_lambda*pdf_gyroangle
+    else
+        q = start%particle_charge(species)
+        energy_erg = start%energy(n,species)*ev2erg
+        pdf_energy_erg = evaluate_distribution_1d(start%dist_energy, start%energy(n,species))/ev2erg
+        Phi_elec = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
+        f = pdf_boltzmann(density,T,m,energy_erg,q,Phi_elec)
+        omega_c = bmod_func(z_save,ind_tetr)/start%cm_over_e(species)
+        J_y = m**2*omega_c
+        pdf_velocity_space = pdf_lambda*pdf_energy_erg*pdf_gyroangle*omega_c*sqrt(m/(2.0_dp*energy_erg))
+    endif
+
+    !A point source has a degenerate position distribution (evaluated as 1): the markers represent the
+    !particles of the whole sampling box
+    if (in%boole_point_source) f = f*((g%amax-g%amin)*(g%cmax-g%cmin)*2*pi)
+
+    weights%w(n,species) = f*J_x*J_y/(pdf_position*pdf_velocity_space)
+    start%jperp(n,species) = m*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
     !-1 because of negative gyrophase
 
 end subroutine calc_particle_weights_and_jperp
+
+function calc_radial_coordinate(ind_tetr, z_save) result(s_value)
+
+    !Normalised radial coordinate of a position inside tetrahedron ind_tetr: the flux label s in flux
+    !coordinates, the normalised poloidal flux for axisymmetric devices in cylindrical coordinates
+
+    use gorilla_applets_types_mod, only: flux
+    use tetra_physics_mod, only: tetra_physics
+    use gorilla_settings_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
+
+    integer, intent(in) :: ind_tetr
+    real(dp), dimension(3), intent(in) :: z_save
+    real(dp) :: s_value
+
+    if (coord_system == 2) then
+        s_value = tetra_physics(ind_tetr)%x1(1) + z_save(1)
+    else if (grid_kind /= 3) then
+        s_value = (tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)) / flux%poloidal_max
+    else
+        print*, 'Error in calc_radial_coordinate: Computing radial coordinate from A_phi is only valid for &
+                &axisymmetric devices. For stellarators (grid_kind=3), use flux coordinates (coord_system=2).'
+        stop
+    endif
+
+end function calc_radial_coordinate
 
 subroutine compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
 

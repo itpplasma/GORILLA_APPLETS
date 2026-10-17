@@ -254,23 +254,18 @@ subroutine set_weights
 
 end subroutine set_weights
 
-subroutine set_rest_of_start_type()
+subroutine init_velocity_space_distributions()
+
+    !Marker distributions of pitch (uniform on [-1, 1]) and energy (fixed for monoenergetic runs,
+    !uniform on [0, 5*T] otherwise), used for sampling and for evaluating the marker weights
 
     use gorilla_applets_types_mod, only: in, start
-    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
-    use gorilla_applets_settings_mod, only: i_option
-    use constants, only: echarge,ame,clight
-    use constants, only: ev2erg
-    use marker_distribution_mod, only: pdf_flat, init_distribution_1d, sample_array_1d
+    use marker_distribution_mod, only: pdf_flat, init_distribution_1d
 
-    integer :: i_species
-
-    ! Initialize lambda (pitch angle) distribution if not already done
     if (.not. start%dist_lambda%initialized) then
         call init_distribution_1d(start%dist_lambda, pdf_flat, -1.0_dp, 1.0_dp)
     endif
 
-    ! Initialize energy distribution if not already done
     if (.not. start%dist_energy%initialized) then
         if (in%boole_monoenergetic) then
             call init_distribution_1d(start%dist_energy, pdf_flat, in%energy_eV, in%energy_eV)
@@ -278,6 +273,21 @@ subroutine set_rest_of_start_type()
             call init_distribution_1d(start%dist_energy, pdf_flat, 0.0_dp, 5.0_dp*in%energy_eV)
         endif
     endif
+
+end subroutine init_velocity_space_distributions
+
+subroutine set_rest_of_start_type()
+
+    use gorilla_applets_types_mod, only: in, start
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
+    use gorilla_applets_settings_mod, only: i_option
+    use constants, only: echarge,ame,clight
+    use constants, only: ev2erg
+    use marker_distribution_mod, only: sample_array_1d
+
+    integer :: i_species
+
+    call init_velocity_space_distributions
 
     ! Sample pitch and energy for all species
     do i_species = 1, in%n_species
