@@ -48,6 +48,7 @@ add_link_options(-g -fbacktrace -ffpe-trap=zero,overflow -fbounds-check -fopenmp
 
 add_subdirectory(SRC)
 add_subdirectory(SRC_CORE)
+add_subdirectory(SRC/generated)
 
 add_executable(gorilla_applets_main.x
   SRC/gorilla_applets_main.f90
@@ -59,6 +60,9 @@ target_link_libraries(gorilla_applets_main.x
 target_include_directories(gorilla_applets_main.x PUBLIC ${CMAKE_BINARY_DIR}/SRC_CORE)
 # Analytic moment oracle; no equilibrium or orbit calculation is required.
 include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(TESTS/deltaf_kernels)
+endif()
 if(BUILD_TESTING)
     add_executable(test_rmp_profile_moments.x
         SRC/rmp_response_currents/rmp_profile_moments_mod.f90
