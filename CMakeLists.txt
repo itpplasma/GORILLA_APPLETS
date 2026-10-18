@@ -157,3 +157,18 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_BINARY_DIR}/measure_test_modules)
     add_test(NAME rmp_gc_measure COMMAND test_rmp_gc_measure.x)
 endif()
+
+if(BUILD_TESTING)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME rmp_fm_stationarity
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/TESTS/test_rmp_fm_stationarity.py)
+    set_tests_properties(rmp_fm_stationarity PROPERTIES
+        ENVIRONMENT
+            "APPLETS_ROOT=${CMAKE_CURRENT_SOURCE_DIR};\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/rmp_fm_stationarity_work;\
+OMP_NUM_THREADS=4"
+        PROCESSORS 4
+        TIMEOUT 900)
+endif()
