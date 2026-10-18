@@ -3,7 +3,7 @@ program test_ou_collision_invariant
     use collis_ions, only: stost, ou_nu_dtau
     implicit none
     real(dp) :: z(5), dt, ef(1), vr(1), er(1), draws(3)
-    real(dp) :: perpendicular, vpar, moment, expected_variance
+    real(dp) :: perpendicular, vpar, moment, expected_variance, dt_slow, dt_fast
     integer :: ierr, j, seed_size
     integer, allocatable :: seed(:)
     integer, parameter :: samples = 100000
@@ -50,6 +50,23 @@ program test_ou_collision_invariant
     ! Seven standard errors of an independent Gaussian second-moment estimator.
     if (abs(moment/expected_variance-1.0_dp) > &
         7.0_dp*sqrt(2.0_dp/real(samples, dp))) error stop 5
+
+    ! Without an external rate the OU rate and step must not depend on the
+    ! marker speed: a v_par-dependent step length biases the time-sampled
+    ! distribution towards fast markers (a Maxwellian heats up).
+    ef = 1.0e-3_dp
+    vr = 1.0_dp
+    er = 1.0_dp
+    do j = 1, 2
+        if (j == 1) ou_nu_dtau = 0.1_dp
+        if (j == 2) ou_nu_dtau = 0.0_dp
+        z = [0.0_dp, 0.0_dp, 0.0_dp, 0.2_dp, 0.5_dp]
+        call stost(ef, vr, er, z, dt_slow, 5, ierr, tau=1.0e30_dp, randnum=draws)
+        z = [0.0_dp, 0.0_dp, 0.0_dp, 3.0_dp, 0.5_dp]
+        call stost(ef, vr, er, z, dt_fast, 5, ierr, tau=1.0e30_dp, randnum=draws)
+        if (abs(dt_fast/dt_slow - 1.0_dp) > 1.0e-12_dp) error stop 6
+    end do
+
     print *, 'PASS: OU perpendicular invariant, zero speed and Gaussian moment', &
         moment, expected_variance
 end program test_ou_collision_invariant
