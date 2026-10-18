@@ -32,7 +32,7 @@
 !
       logical :: file_exist,boole_t_finished
       integer :: iface,i,j,k,l,m,n,ind_tetr,ind_tetr_save,iper,io_error
-      integer :: ind_tetr_temp,ipert
+      integer :: ind_tetr_temp,ipert,fluxtv_unit
       integer(kind=8) :: counter_mappings,counter_t_steps
       double precision :: phi_start, R_torus,R0,Z0,t_pass,t_remain, &
                           vmod,vpar,vperp,fluxtv_tetra,t_sum, &
@@ -141,26 +141,26 @@
 !
       inquire(file=filename_fluxtv_precomp ,exist = file_exist)
       if(file_exist) then
-        open(unit=20,file=filename_fluxtv_precomp,status='old',iostat=io_error)
-        if(io_error.eq.0) close(unit=20,status='delete')
+        open(newunit=fluxtv_unit,file=filename_fluxtv_precomp,status='old',iostat=io_error)
+        if(io_error.eq.0) close(unit=fluxtv_unit,status='delete')
       else
         !print *,'Error: Could not open and delete existing file'
         print *,'No existing file. Created new one to store data.'
       endif
-      open(unit=20,file=filename_fluxtv_precomp,status='new',action='write', &
+      open(newunit=fluxtv_unit,file=filename_fluxtv_precomp,status='new',action='write', &
       & iostat=io_error)
 !
       if ( io_error == 0) then
-        write(20,*) shape(pos_fluxtv_mat(:,1:4))
-        write(20,*) grid_configuration
+        write(fluxtv_unit,*) shape(pos_fluxtv_mat(:,1:4))
+        write(fluxtv_unit,*) grid_configuration
         do i = 1,nt_steps
-          write(20,*) pos_fluxtv_mat(i,1:4)
+          write(fluxtv_unit,*) pos_fluxtv_mat(i,1:4)
         enddo
       else
         write(*,*) 'Beim OEffenen der Datei ist ein Fehler Nr.', &
         io_error,' aufgetreten'
       end if
-      close(unit=20)
+      close(unit=fluxtv_unit)
 !
 !       !If symmetry flux coordinates are used, transform to cylindrical coordinates
 !       if(coord_system.eq.2) then
@@ -184,13 +184,13 @@
 !
         implicit none
 !
-        integer :: i
+        integer :: i, fluxtv_unit
 !
         if(.not.(allocated(pos_fluxtv_mat))) then
             !Read the coordinates data
-            open(unit = 22, file=filename_fluxtv_load, status='old',action = 'read')
-            read(22,*) pos_fluxtv_mat_shape(1),pos_fluxtv_mat_shape(2)
-            read(22,*) grid_configuration
+            open(newunit = fluxtv_unit, file=filename_fluxtv_load, status='old',action = 'read')
+            read(fluxtv_unit,*) pos_fluxtv_mat_shape(1),pos_fluxtv_mat_shape(2)
+            read(fluxtv_unit,*) grid_configuration
 !
             !Check, if Fluxtube volume was correctly computed before diffusion coefficent computation
             if(any(grid_configuration.ne.[grid_kind,coord_system,grid_size(1),grid_size(2),grid_size(3)])) then
@@ -202,9 +202,9 @@
 !
             allocate(pos_fluxtv_mat(1:pos_fluxtv_mat_shape(1),1:pos_fluxtv_mat_shape(2)))
             do i=1,pos_fluxtv_mat_shape(1)
-                read(22,*) pos_fluxtv_mat(i,1:pos_fluxtv_mat_shape(2))
+                read(fluxtv_unit,*) pos_fluxtv_mat(i,1:pos_fluxtv_mat_shape(2))
             enddo
-            close(unit = 22)
+            close(unit = fluxtv_unit)
         endif
 !
     end subroutine load_flux_tube_volume
