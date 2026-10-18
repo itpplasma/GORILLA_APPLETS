@@ -91,11 +91,15 @@ subroutine write_vertex_coordinates
 
     ! Also dump per-vertex (s, theta_SFL, phi) so post-processing can
     ! compute coherent (m,n) Fourier projections of cell moments.
-    open(newunit = st_unit, file = 'vertex_sthetaphi.dat')
-    do i = 1, nvert
-        write(st_unit,101) verts_sthetaphi(1, i), verts_sthetaphi(2, i), verts_sthetaphi(3, i)
-    end do
-    close(st_unit)
+    ! Rectangular and SOLEDGE3X-EIRENE grids have no flux coordinates.
+    if (allocated(verts_sthetaphi)) then
+        open(newunit = st_unit, file = 'vertex_sthetaphi.dat')
+        do i = 1, nvert
+            write(st_unit,101) verts_sthetaphi(1, i), verts_sthetaphi(2, i), &
+                verts_sthetaphi(3, i)
+        end do
+        close(st_unit)
+    end if
 
 end subroutine write_vertex_coordinates
 
