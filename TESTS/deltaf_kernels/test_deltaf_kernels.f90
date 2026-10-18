@@ -19,8 +19,8 @@ program test_deltaf_kernels
     use deltaf_circular_flux_label_kernel, only: evaluate_deltaf_circular_flux_label
     use deltaf_canonical_momentum_kernel, only: evaluate_deltaf_canonical_momentum
     use deltaf_weight_kernel, only: evaluate_deltaf_weight
-    use field_analytic_circ_mod, only: set_field_analytic_circ, field_analytic_circ
-    use field_eq_mod, only: psif
+    use field_analytic_circ_mod, only: set_field_analytic_circ, field_analytic_circ, &
+        psi_pol_analytic_circ
     use boozer_chartmap_mod, only: load_boozer_chartmap, evaluate_boozer_chartmap
     implicit none
 
@@ -101,7 +101,7 @@ contains
         real(dp) :: dbzdr, dbzdp, dbzdz, bmod_g, dbmod_dr_g
         integer :: i, j
 
-        call set_field_analytic_circ(r0, a, b0, q0, q1)
+        call set_field_analytic_circ(r0, a, b0, q0, q1, 2)
         do i = 1, 4
             do j = 1, 5
                 radius = 0.2_dp*a*i
@@ -118,7 +118,8 @@ contains
                 call check_close("circular |B| vs GORILLA", out(1), bmod_g, 1.0e-13_dp)
                 call check_close("circular d|B|/dr vs GORILLA", out(2), dbmod_dr_g, &
                     1.0e-11_dp)
-                call check_close("circular psi_pol vs GORILLA psif", out(4), psif, 1.0e-13_dp)
+                call check_close("circular psi_pol vs GORILLA psi_pol", out(4), &
+                    psi_pol_analytic_circ(radius), 1.0e-13_dp)
                 call check_close("circular h_phi vs GORILLA R B_phi/B", out(8), &
                     rr*bp/bmod_g, 1.0e-13_dp)
                 call check_close("circular R_major", out(11), rr, 1.0e-15_dp)
