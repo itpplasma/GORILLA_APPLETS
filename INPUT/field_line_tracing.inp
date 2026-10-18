@@ -29,15 +29,6 @@
   !Start all particles from the same physical position
   boole_point_source = .false.,
 !
-  !include a collision operator
-  boole_collisions = .false.,
-!
-  !precalcualte random numbers for collisions
-  boole_precalc_collisions = .false.,
-!
-  !Simulated density of particles
-  density = 1,
-!
   !refined jacobian determinant
   boole_refined_sqrt_g = .true.,
 !
