@@ -7,6 +7,17 @@ target_include_directories(test_multi_species_collision.x
 
 add_test(NAME multi_species_collision COMMAND test_multi_species_collision.x)
 
+add_executable(test_thread_seed.x
+    test_thread_seed.f90
+)
+target_link_libraries(test_thread_seed.x GORILLA_APPLETS)
+target_include_directories(test_thread_seed.x
+    PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+
+add_test(NAME thread_seed COMMAND test_thread_seed.x)
+set_tests_properties(thread_seed PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
 add_executable(test_transport_loss_moments.x
     test_transport_loss_moments.f90
 )
