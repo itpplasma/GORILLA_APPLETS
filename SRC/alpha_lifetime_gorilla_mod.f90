@@ -23,9 +23,11 @@
 !
         subroutine load_alpha_lifetime_inp()
 !
-            open(unit=71, file='alpha_lifetime.inp', status='unknown')
-            read(71,nml=alpha_lifetimenml)
-            close(71)
+            integer :: inp_unit
+!
+            open(newunit=inp_unit, file='alpha_lifetime.inp', status='unknown')
+            read(inp_unit,nml=alpha_lifetimenml)
+            close(inp_unit)
 
             print *,'GORILLA: Loaded input data from alpha_lifetime.inp'
 !
@@ -38,7 +40,7 @@
             integer, intent(in)     :: n_particles
             integer,dimension(:), allocatable :: seed
             double precision, dimension(:), allocatable :: rd_seed
-            integer :: j,n
+            integer :: j,n,seed_unit
 !
             allocate(rd_start_position(n_particles))
             allocate(rd_start_pitchpar(n_particles))
@@ -59,16 +61,16 @@
                     seed = int(rd_seed*10.d0)
                     deallocate(rd_seed)
 !
-                    open(85,file='seed.inp')
-                    write(85,*) n
-                    write(85,*) seed
-                    close(85)
+                    open(newunit=seed_unit,file='seed.inp')
+                    write(seed_unit,*) n
+                    write(seed_unit,*) seed
+                    close(seed_unit)
                 case(2) !Load seed
-                    open(unit = 85, file='seed.inp', status='old',action = 'read')
-                    read(85,*) n
+                    open(newunit = seed_unit, file='seed.inp', status='old',action = 'read')
+                    read(seed_unit,*) n
                     allocate(seed(n))
-                    read(85,*) seed
-                    close(85)
+                    read(seed_unit,*) seed
+                    close(seed_unit)
             end select
 !
             CALL RANDOM_SEED (PUT=seed)
@@ -111,7 +113,7 @@
 !
             double precision :: vmod,pitchpar,vpar,vperp,t_remain,t_confined,tau_out_can
             integer :: kpart,i,n,ind_tetr,iface,n_lost_particles,ierr
-            integer :: n_start, n_end, i_part
+            integer :: n_start, n_end, i_part, alpha_unit
             double precision, dimension(3) :: x_rand_beg,x
             double precision, dimension(:), allocatable :: xi
             logical :: boole_initialized,boole_particle_lost
@@ -162,7 +164,7 @@
 !------------------------------------------------------------------------------------------------------------!
 !
             !Open file for writing alpha_life_time_gorilla
-            open(99,file=filename_alpha_lifetime)
+            open(newunit=alpha_unit,file=filename_alpha_lifetime)
 !
 
             !Precompute random numbers
@@ -185,7 +187,7 @@
 !
             !$OMP PARALLEL DEFAULT(NONE) &
             !$OMP& SHARED(n_particles,pos_fluxtv_mat,xi,n_lost_particles,kpart,vmod,time_step,i_integrator_type, &
-            !$OMP& dtau,dtaumin,rd_start_position,rd_start_pitchpar,boole_random_precalc,n_start,n_end) &
+            !$OMP& dtau,dtaumin,rd_start_position,rd_start_pitchpar,boole_random_precalc,n_start,n_end,alpha_unit) &
             !$OMP& PRIVATE(n,boole_particle_lost,i,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized, &
             !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr,tau_out_can)
             !$OMP DO
@@ -257,8 +259,8 @@ print *, kpart, ' / ', n_particles, 'particle: ', n, 'thread: ' !, omp_get_threa
 !
                         !Write results in file
                         !$omp critical
-                            !write(99,*) n, boole_particle_lost , x_rand_beg ,pitchpar,x(1),t_confined
-                            write(99,*) t_confined
+                            !write(alpha_unit,*) n, boole_particle_lost , x_rand_beg ,pitchpar,x(1),t_confined
+                            write(alpha_unit,*) t_confined
                         !$omp end critical
 !
                     case(2)
@@ -285,10 +287,11 @@ print *, kpart, ' / ', n_particles, 'particle: ', n, 'thread: ' !, omp_get_threa
             !$OMP END DO
             !$OMP END PARALLEL
 !
-!            close(99)
+            close(alpha_unit)
 print *, 'Number of lost particles',n_lost_particles
-!open(99,file='confined_fraction.dat')
-!write(99,*) 1.d0-dble(n_lost_particles)/dble(n_particles)
+!open(alpha_unit,file='confined_fraction.dat')
+!write(alpha_unit,*) 1.d0-dble(n_lost_particles)/dble(n_particles)
+!close(alpha_unit)
 !
             !Deallocate random numbers
             if(boole_random_precalc) then
