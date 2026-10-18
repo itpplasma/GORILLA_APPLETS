@@ -11,7 +11,8 @@ loader (uniform physical volume, untruncated Maxwellian, antithetic pairs).
 Checks, with independent analytic oracles and one marker per antithetic pair:
   * the loaded and the final markers follow the analytic window density in
     rho^2 and geometric poloidal angle, E/T ~ Gamma(3/2) and uniform pitch
-    (chi-square tests), after more than eight collision times;
+    (chi-square tests inside a band inset from the window edges), after
+    more than eight collision times;
   * no marker is lost and the nonlinear weights stay at round-off;
   * a fixed external seed.inp reproduces the run bit for bit with several
     OpenMP threads, and a different seed.inp changes it.
@@ -34,6 +35,7 @@ TEMPERATURE_EV = 1000.0
 DENSITY = 1.2e14
 P_MIN = 1.0e-4
 MIN_COLLISION_TIMES = 8.0
+RHO_MARGIN = 1.5  # cm
 
 
 def env_path(name):
@@ -218,21 +220,31 @@ def read_final(case_dir):
 
 def check_distribution(label, markers, geometry, failures):
     r0, rho2_lo, rho2_hi = geometry
+    # The window is a geometric annulus, but the invariant surfaces of the
+    # piecewise-linear mesh field are polygons (sagitta ~0.5 cm here), so the
+    # density next to the window edges relaxes. Test inside a band inset by
+    # RHO_MARGIN, which exceeds the largest observed radial excursion.
+    band_lo = (math.sqrt(rho2_lo) + RHO_MARGIN) ** 2
+    band_hi = (math.sqrt(rho2_hi) - RHO_MARGIN) ** 2
     odd = [markers[n] for n in sorted(markers) if n % 2 == 1]
-    rho2 = [(m[0] - r0) ** 2 + m[1] ** 2 for m in odd]
-    theta = [math.atan2(m[1], m[0] - r0) for m in odd]
-    energy = [m[2] for m in odd]
-    pitch = [m[3] for m in odd]
+    rho2_all = [(m[0] - r0) ** 2 + m[1] ** 2 for m in odd]
+    band = [m for m, r2 in zip(odd, rho2_all) if band_lo <= r2 < band_hi]
+    rho2 = [(m[0] - r0) ** 2 + m[1] ** 2 for m in band]
+    theta = [math.atan2(m[1], m[0] - r0) for m in band]
+    energy = [m[2] for m in band]
+    pitch = [m[3] for m in band]
 
     nb = 10
-    rho2_edges = [rho2_lo + (rho2_hi - rho2_lo) * k / nb for k in range(nb + 1)]
+    rho2_edges = [band_lo + (band_hi - band_lo) * k / nb for k in range(nb + 1)]
 
     def rho2_cdf(x):
+        # Uniform physical volume makes rho^2 uniform over the whole window;
+        # markers outside the band form the remaining chi-square cell.
         return min(max((x - rho2_lo) / (rho2_hi - rho2_lo), 0.0), 1.0)
 
-    # Uniform physical volume: density in (rho^2, theta) is proportional to R.
-    rho3 = rho2_hi ** 1.5 - rho2_lo ** 1.5
-    c_amp = (2.0 / 3.0) * rho3 / (r0 * (rho2_hi - rho2_lo))
+    # Density in (rho^2, theta) proportional to R = r0 + rho cos(theta).
+    rho3 = band_hi ** 1.5 - band_lo ** 1.5
+    c_amp = (2.0 / 3.0) * rho3 / (r0 * (band_hi - band_lo))
 
     def theta_cdf(x):
         return ((x + math.pi) + c_amp * math.sin(x)) / (2.0 * math.pi)
@@ -246,7 +258,7 @@ def check_distribution(label, markers, geometry, failures):
     def pitch_cdf(x):
         return min(max(0.5 * (x + 1.0), 0.0), 1.0)
 
-    tests = (("rho^2", rho2, rho2_cdf, rho2_edges),
+    tests = (("rho^2", rho2_all, rho2_cdf, rho2_edges),
              ("theta", theta, theta_cdf, theta_edges),
              ("E/T", energy, maxwell_energy_cdf, energy_edges),
              ("pitch", pitch, pitch_cdf, pitch_edges))
