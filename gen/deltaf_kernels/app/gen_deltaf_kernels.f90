@@ -1,0 +1,479 @@
+program gen_deltaf_kernels
+    ! FortSym generator for the pointwise kernels of the linear delta-f NTV
+    ! momentum-source estimator in GORILLA_APPLETS. Output: SRC/generated/.
+    ! Regenerate with
+    !     cd gen/deltaf_kernels && fpm run gen_deltaf_kernels -- ../../SRC/generated
+    ! and check with gen/deltaf_kernels/check_generated.sh. The consumer build
+    ! needs no CAS; the emitted files are committed.
+    !
+    ! Units are Gaussian (cm, G, erg, statC), as in GORILLA. mu is the magnetic
+    ! moment m v_perp**2/(2 B) in erg/G; GORILLA's perpinv = -v_perp**2/(2 B),
+    ! so mu = -particle_mass*perpinv.
+    !
+    ! ------------------------------------------------------------------------
+    ! 1. Guiding-centre Lagrangian and canonical toroidal momentum
+    ! ------------------------------------------------------------------------
+    ! GORILLA integrates L = (e/c A_k + m v_par h_k) dx^k/dt - H with
+    ! H = m v_par**2/2 + mu B + e Phi and h_k = B_k/B (covariant). Here the
+    ! vector potential and the covariant field components B_k are axisymmetric;
+    ! a perturbation enters only through B = |B| (and Phi). This is the
+    ! "Bmod_only_fixed_surfaces" model of the circular campaign and of
+    ! GORILLA's Boozer chartmap (grid_kind = 6): there B_theta(s), B_phi(s) and
+    ! A_phi(s) are flux functions and Bmod(s,theta,zeta) carries delta B.
+    ! No delta A_par (no magnetic flutter / islands) is assumed.
+    !
+    !   p_phi = e A_phi/c + m v_par h_phi.
+    !
+    ! Euler-Lagrange in phi gives, with dA/dphi = 0 and
+    ! dh_k/dphi = -h_k d ln B/dphi (B_k fixed),
+    !   dp_phi/dt = m v_par (dh_k/dphi) dx^k/dt - mu dB/dphi - e dPhi/dphi
+    !             = -(mu + m v_par**2/B) dB/dphi - e dPhi/dphi,
+    ! because the Euler-Lagrange equation in v_par is h_k dx^k/dt = v_par.
+    ! Identity [P1] below proves the first equality from the constraint.
+    ! Equivalently, in canonical variables (theta, p_theta, phi, p_phi) with
+    ! Boozer flux-function covariant components, p_theta and p_phi fix s and
+    ! kappa = v_par/B, so H = m kappa**2 B**2/2 + mu B + e Phi and
+    !   dH/dphi|_canonical = (mu + m v_par**2/B) dB/dphi + e dPhi/dphi   [P2].
+    ! NOTE: mu gB(3) + e gPhi(3) (GORILLA tetra_physics_mod.f90:60-61) is the
+    ! phi-derivative of H at fixed (x, v_par); the canonical torque also needs
+    ! the m v_par**2/B dB/dphi term, which GORILLA's orbits carry through the
+    ! phi gradients gh1(3), gh2(3), gh3(3) of the interpolated h_k.
+    !
+    ! ------------------------------------------------------------------------
+    ! 2. Linear delta-f along unperturbed orbits
+    ! ------------------------------------------------------------------------
+    ! H = H0 + H1, H0 axisymmetric, H1 = (mu + m v_par**2/B0) delta B
+    ! + e delta Phi to first order (at fixed canonical momenta). Background
+    !   f0 = F(p_phi, H0) = n(psi*) (m/(2 pi T(psi*)))**1.5
+    !        * exp(-(H0 - e Phi0(psi*))/T(psi*)),   psi* = c p_phi/e,
+    ! the canonical Maxwellian. p_phi and H0 are exact invariants of the
+    ! unperturbed axisymmetric guiding-centre motion, so {f0, H0} = 0 [P3]
+    ! exactly: no spurious finite-orbit-width drive. The Vlasov equation
+    ! df/dt = {f, H}-flow with the canonical bracket
+    ! {A, B} = sum_i (dA/dq_i dB/dp_i - dA/dp_i dB/dq_i), linearised:
+    !   d delta f/dt|_0 = -{f0, H1} + C
+    !     = dF/dp_phi|_H dH1/dphi + dF/dH0 dH1/dt|_0 + C               [P4].
+    ! The second term is a total derivative along the unperturbed orbit
+    ! (dF/dH0 is constant there); its adiabatic response dF/dH0 H1 gives no
+    ! net torque because H1 dH1/dphi = d(H1**2/2)/dphi averages to zero over
+    ! phi. The non-adiabatic part g = w f0 obeys
+    !   dw/dt = d ln f0/dp_phi|_H0 * dH1/dphi        (C omitted here),
+    ! with
+    !   d ln f0/dp_phi|_H0 = (c/e) [ n'/n + e Phi0'/T
+    !                                + ((H0 - e Phi0)/T - 3/2) T'/T ],
+    ! primes d/dpsi* evaluated at psi*, proved against the chain rule [P5].
+    ! The momentum-source torque estimator is
+    !   T_phi = sum_i w_i <-dH1/dphi>_i,   since dp_phi/dt = -dH1/dphi.
+    !
+    ! ------------------------------------------------------------------------
+    ! 3. Charts
+    ! ------------------------------------------------------------------------
+    ! Circular (GORILLA grid_kind = 5, field_analytic_circ_mod): R = R0 +
+    ! r cos(theta), Z = r sin(theta), q = q0 + q1 (r/a)**2 (q1 > 0 required),
+    ! psi_pol = B0 a**2/(2 q1) ln(q/q0) (= GORILLA psif = covariant A_phi),
+    ! B_phi = B0 R0 (covariant), B_theta = B0 r**2/(R q) (covariant),
+    ! B = (B0/R) sqrt(R0**2 + r**2/q**2); radial label s = (r/a)**2.
+    ! Boozer (grid_kind = 6, boozer_chartmap_mod): s, theta_B, zeta_B with
+    ! A_phi(s), B_phi(s) and the total B supplied from the chart.
+    ! Harmonic on either chart: delta B = b_mn(s) cos(m theta - n phi),
+    ! delta Phi = Phi_mn(s) cos(m theta - n phi); b_mn, Phi_mn and their
+    ! s-derivatives are caller data.
+    use, intrinsic :: iso_fortran_env, only: output_unit
+    use fortsym_string, only: str_t, str, chars
+    use fortsym_arena, only: arena_t
+    use fortsym_expr, only: expr_t, sym, num, func, pi_expr, operator(+), &
+        operator(-), operator(*), operator(/), operator(**), sin, cos, exp, log, &
+        sqrt
+    use fortsym_diff, only: diff, partial_derivative
+    use fortsym_subs, only: subs_many
+    use fortsym_print, only: print_expr
+    use fortsym_kernel, only: emit_kernel, kernel_spec_t, KERNEL_SUBROUTINE
+    use fortsym_engine, only: engine_result_t
+    use fortsym_engine_native, only: native_engine_t, make_native_engine
+    use fortsym_engine_symengine, only: symengine_engine_t, make_symengine_engine
+    use fortsym_check, only: suite_t, suite_begin, suite_end, check_identity
+    implicit none
+
+    character(*), parameter :: FORTSYM_REVISION = &
+        "fortsym@8a418e2efe40dd9a01231a0900f71caad7858360"
+    character(*), parameter :: GENERATOR = &
+        "gen/deltaf_kernels/app/gen_deltaf_kernels.f90"
+    character(*), parameter :: REGENERATE = &
+        "cd gen/deltaf_kernels && fpm run gen_deltaf_kernels -- ../../SRC/generated"
+
+    type(arena_t), target :: arena
+    type(native_engine_t) :: native
+    type(symengine_engine_t) :: symeng
+    type(suite_t) :: suite
+    character(len=4096) :: output_dir
+
+    ! Physical symbols.
+    type(expr_t) :: mass, charge, c_light, mu, vpar
+    ! Harmonic.
+    type(expr_t) :: m_pol, n_tor, theta, phi, s, alpha
+    type(expr_t) :: bmn, dbmn_ds, phimn, dphimn_ds
+    type(expr_t) :: b_of_s, phi_of_s, db1, dphi1
+    ! Circular chart.
+    type(expr_t) :: r0, a_minor, b0, q0, q1, r, q, r_major, psi_pol, bmod_c
+    type(expr_t) :: b_theta_c, b_phi_c, psi_star, s_star
+    ! Boozer chart.
+    type(expr_t) :: aphi, bphi_cov, bmod
+    ! Canonical Maxwellian.
+    type(expr_t) :: h0, p_phi, dens, ddens, temp, dtemp, phi0, dphi0
+    type(expr_t) :: n_f, t_f, phi0_f, lnf0, dlnf0_closed, dlnf0
+    type(expr_t) :: db1_dphi, dphi1_dphi, dh1_dphi
+    ! Canonical pairs for the bracket identities.
+    type(expr_t) :: th, pth, ph, pph
+
+    if (command_argument_count() /= 1) then
+        write (output_unit, "(a)") "usage: gen_deltaf_kernels OUTPUT_DIR"
+        error stop 2
+    end if
+    call get_command_argument(1, output_dir)
+
+    call arena%init()
+    native = make_native_engine(arena)
+    symeng = make_symengine_engine(arena)
+
+    mass = sym(arena, "mass")
+    charge = sym(arena, "charge")
+    c_light = sym(arena, "c_light")
+    mu = sym(arena, "mu")
+    vpar = sym(arena, "vpar")
+    m_pol = sym(arena, "m_pol")
+    n_tor = sym(arena, "n_tor")
+    theta = sym(arena, "theta")
+    phi = sym(arena, "phi")
+    s = sym(arena, "s")
+    bmn = sym(arena, "bmn")
+    dbmn_ds = sym(arena, "dbmn_ds")
+    phimn = sym(arena, "phimn")
+    dphimn_ds = sym(arena, "dphimn_ds")
+
+    call suite_begin(suite, "GORILLA_APPLETS linear delta-f kernels")
+
+    ! ---------------------------------------------------------------- harmonic
+    alpha = m_pol*theta - n_tor*phi
+    b_of_s = func("b_mn", [s])
+    phi_of_s = func("Phi_mn", [s])
+    db1 = b_of_s*cos(alpha)
+    dphi1 = phi_of_s*cos(alpha)
+    call emit_harmonic()
+
+    ! ---------------------------------------------------------------- circular
+    r0 = sym(arena, "R0")
+    a_minor = sym(arena, "a_minor")
+    b0 = sym(arena, "B0")
+    q0 = sym(arena, "q0")
+    q1 = sym(arena, "q1")
+    r = sym(arena, "r")
+    q = q0 + q1*(r/a_minor)**2
+    r_major = r0 + r*cos(theta)
+    psi_pol = b0*a_minor**2/(2*q1)*log(q/q0)
+    bmod_c = b0/r_major*sqrt(r0**2 + r**2/q**2)
+    b_theta_c = b0*r**2/(r_major*q)
+    b_phi_c = b0*r0
+    call prove_circular()
+    call emit_circular()
+
+    ! ---------------------------------------------------- canonical momentum
+    aphi = sym(arena, "aphi")
+    bphi_cov = sym(arena, "bphi_cov")
+    bmod = sym(arena, "bmod")
+    p_phi = charge*aphi/c_light + mass*vpar*bphi_cov/bmod
+    call emit_kernel_file("deltaf_canonical_momentum_kernel", &
+        "evaluate_deltaf_canonical_momentum", &
+        [character(len=16) :: "mass", "charge", "c_light", "vpar", "aphi", &
+        "bphi_cov", "bmod"], &
+        [simplified(p_phi), simplified(c_light*p_phi/charge), &
+        simplified(diff(p_phi, vpar))], &
+        [character(len=16) :: "p_phi", "psi_star", "dp_phi_dvpar"])
+
+    ! ------------------------------------------------------ torque and weights
+    call prove_torque()
+    call prove_bracket()
+
+    h0 = sym(arena, "h0")
+    psi_star = sym(arena, "psi_star")
+    dens = sym(arena, "dens")
+    ddens = sym(arena, "ddens_dpsi")
+    temp = sym(arena, "temp")
+    dtemp = sym(arena, "dtemp_dpsi")
+    phi0 = sym(arena, "phi0")
+    dphi0 = sym(arena, "dphi0_dpsi")
+    p_phi = sym(arena, "p_phi")
+    n_f = func("n_profile", [c_light*p_phi/charge])
+    t_f = func("T_profile", [c_light*p_phi/charge])
+    phi0_f = func("Phi0_profile", [c_light*p_phi/charge])
+    lnf0 = log(n_f) + 3*log(mass/(2*pi_expr(arena)*t_f))/2 &
+        - (h0 - charge*phi0_f)/t_f
+    dlnf0_closed = c_light/charge*(diff(n_f, p_phi)/n_f*charge/c_light &
+        + charge*diff(phi0_f, p_phi)*charge/c_light/t_f &
+        + ((h0 - charge*phi0_f)/t_f - num(arena, 3)/2) &
+        *diff(t_f, p_phi)*charge/c_light/t_f)
+    dlnf0 = diff(lnf0, p_phi)
+    ! [P5] chain rule of the canonical Maxwellian against the closed form.
+    call check_identity(suite, native, "P5 dlnf0/dp_phi closed form", &
+        dlnf0 - dlnf0_closed)
+    lnf0 = profile_values(lnf0)
+    dlnf0 = profile_values(dlnf0)
+
+    db1_dphi = sym(arena, "db1_dphi")
+    dphi1_dphi = sym(arena, "dphi1_dphi")
+    dh1_dphi = (mu + mass*vpar**2/bmod)*db1_dphi + charge*dphi1_dphi
+    call emit_kernel_file("deltaf_weight_kernel", "evaluate_deltaf_weight", &
+        [character(len=16) :: "mass", "charge", "c_light", "mu", "vpar", &
+        "bmod", "h0", "dens", "ddens_dpsi", "temp", "dtemp_dpsi", "phi0", &
+        "dphi0_dpsi", "db1_dphi", "dphi1_dphi"], &
+        [simplified(lnf0), simplified(dlnf0), simplified(dh1_dphi), &
+        simplified(dlnf0*dh1_dphi), simplified(-dh1_dphi)], &
+        [character(len=16) :: "ln_f0", "dlnf0_dpphi", "dh1_dphi", "dw_dt", &
+        "torque_sample"])
+
+    call suite_end(suite)
+
+contains
+
+    !> Harmonic delta B, delta Phi and their (s, theta, phi) derivatives.
+    subroutine emit_harmonic()
+        type(expr_t) :: roots(8)
+
+        roots(1) = db1
+        roots(2) = diff(db1, s)
+        roots(3) = diff(db1, theta)
+        roots(4) = diff(db1, phi)
+        roots(5) = dphi1
+        roots(6) = diff(dphi1, s)
+        roots(7) = diff(dphi1, theta)
+        roots(8) = diff(dphi1, phi)
+        roots = harmonic_values(roots)
+        call emit_kernel_file("deltaf_harmonic_kernel", &
+            "evaluate_deltaf_harmonic", &
+            [character(len=16) :: "m_pol", "n_tor", "bmn", "dbmn_ds", "phimn", &
+            "dphimn_ds", "theta", "phi"], simplified_all(roots), &
+            [character(len=16) :: "db1", "db1_ds", "db1_dtheta", "db1_dphi", &
+            "dphi1", "dphi1_ds", "dphi1_dtheta", "dphi1_dphi"])
+    end subroutine emit_harmonic
+
+    !> Circular-chart equilibrium, canonical flux label and its inverse.
+    subroutine emit_circular()
+        type(expr_t) :: roots(11), sv, dpsi_ds
+
+        sv = (r/a_minor)**2
+        dpsi_ds = diff(psi_pol, r)/diff(sv, r)
+        roots(1) = bmod_c
+        roots(2) = diff(bmod_c, r)
+        roots(3) = diff(bmod_c, theta)
+        roots(4) = psi_pol
+        roots(5) = diff(psi_pol, r)
+        roots(6) = dpsi_ds
+        roots(7) = b_theta_c/bmod_c
+        roots(8) = b_phi_c/bmod_c
+        roots(9) = sv
+        roots(10) = diff(sv, r)
+        roots(11) = r_major
+        call emit_kernel_file("deltaf_circular_chart_kernel", &
+            "evaluate_deltaf_circular_chart", &
+            [character(len=16) :: "R0", "a_minor", "B0", "q0", "q1", "r", "theta"], &
+            simplified_all(roots), &
+            [character(len=16) :: "bmod", "dbmod_dr", "dbmod_dtheta", "psi_pol", &
+            "dpsi_dr", "dpsi_ds", "h_theta", "h_phi", "s", "ds_dr", "R_major"])
+
+        ! Inverse of psi_pol(s): s* = (q0/q1) (exp(2 q1 psi*/(B0 a**2)) - 1).
+        psi_star = sym(arena, "psi_star")
+        s_star = q0/q1*(exp(2*q1*psi_star/(b0*a_minor**2)) - 1)
+        call emit_kernel_file("deltaf_circular_flux_label_kernel", &
+            "evaluate_deltaf_circular_flux_label", &
+            [character(len=16) :: "a_minor", "B0", "q0", "q1", "psi_star"], &
+            [simplified(s_star), simplified(diff(s_star, psi_star))], &
+            [character(len=16) :: "s_star", "ds_dpsi_star"])
+    end subroutine emit_circular
+
+    !> Circular-chart identities.
+    subroutine prove_circular()
+        type(expr_t) :: sv, s_of_psi
+
+        ! GORILLA field_analytic_circ_mod: B_Z = (1/R) dpsi/dR = B0 (R-R0)/(R q)
+        ! along r at theta = 0, i.e. dpsi/dr = B0 r/q.
+        call check_identity(suite, native, "C1 dpsi/dr = B0 r/q", &
+            diff(psi_pol, r) - b0*r/q)
+        ! Unit field: B**2 = (B_phi/R)**2 + (B_theta/r)**2 for the covariant
+        ! components of the orthogonal (r, theta, phi) chart.
+        call check_identity(suite, symeng, "C2 |h| = 1", &
+            (b_phi_c/r_major)**2 + (b_theta_c/r)**2 - bmod_c**2)
+        ! Inverse flux label: d s*/d psi* matches 1/(dpsi/ds) at psi* = psi(r).
+        sv = (r/a_minor)**2
+        s_of_psi = q0/q1*(exp(2*q1*psi_pol/(b0*a_minor**2)) - 1)
+        call check_identity(suite, symeng, "C3 s*(psi(r)) = (r/a)**2", &
+            s_of_psi - sv)
+    end subroutine prove_circular
+
+    !> [P1], [P2]: the canonical torque from the Euler-Lagrange equation.
+    subroutine prove_torque()
+        type(expr_t) :: b_s, b_t, b_p, bm, xd_s, xd_t, xd_p, el_force, kappa
+        type(expr_t) :: h_c, phi_f, sv
+
+        sv = sym(arena, "s")
+        bm = func("B", [sv, theta, phi])
+        b_s = func("B_s", [sv, theta])
+        b_t = func("B_theta", [sv, theta])
+        b_p = func("B_phi", [sv, theta])
+        xd_s = sym(arena, "sdot")
+        xd_t = sym(arena, "thetadot")
+        ! The v_par Euler-Lagrange equation h_k x'^k = v_par fixes phidot.
+        xd_p = (vpar*bm - b_s*xd_s - b_t*xd_t)/b_p
+        el_force = mass*vpar*(diff(b_s/bm, phi)*xd_s + diff(b_t/bm, phi)*xd_t &
+            + diff(b_p/bm, phi)*xd_p)
+        call check_identity(suite, native, &
+            "P1 m v_par dh_k/dphi x'^k = -m v_par**2/B dB/dphi", &
+            el_force + mass*vpar**2/bm*diff(bm, phi))
+
+        ! Canonical H at fixed (s, kappa = v_par/B), determined by p_theta and
+        ! p_phi without reference to phi for flux-function B_theta, B_phi.
+        kappa = sym(arena, "kappa")
+        phi_f = func("Phi", [sv, theta, phi])
+        h_c = mass*kappa**2*bm**2/2 + mu*bm + charge*phi_f
+        call check_identity(suite, native, &
+            "P2 dH/dphi|canonical = (mu + m v_par**2/B) dB/dphi + e dPhi/dphi", &
+            subs_many(diff(h_c, phi), [kappa], [vpar/bm]) &
+            - ((mu + mass*vpar**2/bm)*diff(bm, phi) + charge*diff(phi_f, phi)))
+    end subroutine prove_torque
+
+    !> [P3], [P4]: stationarity of f0 and the linearised Vlasov source.
+    subroutine prove_bracket()
+        type(expr_t) :: hz, h1, f0
+
+        th = sym(arena, "q_theta")
+        pth = sym(arena, "p_theta")
+        ph = sym(arena, "q_phi")
+        pph = sym(arena, "p_phi_c")
+        hz = func("H0", [th, pth, pph])
+        h1 = func("H1", [th, pth, ph, pph])
+        f0 = func("F", [pph, hz])
+        call check_identity(suite, native, "P3 {f0, H0} = 0", &
+            bracket(f0, hz))
+        ! -{f0,H1} = dF/dp_phi dH1/dphi + dF/dH0 {H1, H0}.
+        call check_identity(suite, native, &
+            "P4 -{f0,H1} = F_p dH1/dphi + F_H dH1/dt|0", &
+            -bracket(f0, h1) - (fp(pph, hz)*diff(h1, ph) &
+            + fh(pph, hz)*bracket(h1, hz)))
+    end subroutine prove_bracket
+
+    !> Canonical bracket in (q_theta, p_theta), (q_phi, p_phi_c).
+    function bracket(fa, fb) result(res)
+        type(expr_t), intent(in) :: fa, fb
+        type(expr_t) :: res
+
+        res = diff(fa, th)*diff(fb, pth) - diff(fa, pth)*diff(fb, th) &
+            + diff(fa, ph)*diff(fb, pph) - diff(fa, pph)*diff(fb, ph)
+    end function bracket
+
+    !> dF/dp_phi at fixed H0 and dF/dH0, as FortSym's canonical partials.
+    function fp(pv, hv) result(res)
+        type(expr_t), intent(in) :: pv, hv
+        type(expr_t) :: res
+        type(expr_t) :: x
+
+        x = sym(arena, "fp_probe")
+        res = subs_many(diff(func("F", [x, hv]), x), [x], [pv])
+    end function fp
+
+    function fh(pv, hv) result(res)
+        type(expr_t), intent(in) :: pv, hv
+        type(expr_t) :: res
+        type(expr_t) :: x
+
+        x = sym(arena, "fh_probe")
+        res = subs_many(diff(func("F", [pv, x]), x), [x], [hv])
+    end function fh
+
+    !> Replace the opaque harmonic profiles by caller data symbols.
+    function harmonic_values(e) result(res)
+        type(expr_t), intent(in) :: e(:)
+        type(expr_t) :: res(size(e))
+        integer :: k
+
+        do k = 1, size(e)
+            res(k) = subs_many(e(k), [diff(b_of_s, s), diff(phi_of_s, s), &
+                b_of_s, phi_of_s], [dbmn_ds, dphimn_ds, bmn, phimn])
+        end do
+    end function harmonic_values
+
+    !> Replace the opaque profiles n, T, Phi0 at psi* by caller data symbols.
+    function profile_values(e) result(res)
+        type(expr_t), intent(in) :: e
+        type(expr_t) :: res
+
+        res = subs_many(e, [partial_derivative(n_f, 1), &
+            partial_derivative(t_f, 1), partial_derivative(phi0_f, 1), &
+            n_f, t_f, phi0_f], [ddens, dtemp, dphi0, dens, temp, phi0])
+    end function profile_values
+
+    function simplified(e) result(res)
+        type(expr_t), intent(in) :: e
+        type(expr_t) :: res
+        type(engine_result_t) :: rr
+
+        rr = symeng%simplify(e)
+        if (rr%ok) then
+            res = rr%value
+        else
+            res = e
+        end if
+    end function simplified
+
+    function simplified_all(e) result(res)
+        type(expr_t), intent(in) :: e(:)
+        type(expr_t) :: res(size(e))
+        integer :: k
+
+        do k = 1, size(e)
+            res(k) = simplified(e(k))
+        end do
+    end function simplified_all
+
+    subroutine emit_kernel_file(module_name, procedure_name, arg_names, roots, &
+            output_names)
+        character(*), intent(in) :: module_name, procedure_name
+        character(*), intent(in) :: arg_names(:), output_names(:)
+        type(expr_t), intent(in) :: roots(:)
+        type(kernel_spec_t) :: spec
+        type(str_t) :: emitted
+        character(:), allocatable :: path
+        integer :: unit, ios, k
+        logical :: ok
+
+        if (size(roots) /= size(output_names)) error stop "arity mismatch"
+        spec%name = str(procedure_name)
+        spec%module_name = str(module_name)
+        spec%mode = KERNEL_SUBROUTINE
+        spec%pure_procedure = .true.
+        spec%temp_prefix = str("t")
+        spec%generator = str(GENERATOR)
+        spec%generator_revision = str(FORTSYM_REVISION)
+        spec%regenerate_command = str(REGENERATE)
+        allocate (spec%args(size(arg_names)), spec%outputs(size(output_names)))
+        do k = 1, size(arg_names)
+            spec%args(k) = str(trim(arg_names(k)))
+        end do
+        do k = 1, size(output_names)
+            spec%outputs(k) = str(trim(output_names(k)))
+        end do
+        emitted = emit_kernel(roots, spec, ok)
+        if (.not. ok .or. len(chars(emitted)) == 0) then
+            write (output_unit, "(a)") "refused: "//module_name
+            do k = 1, size(roots)
+                write (output_unit, "(a)") "  root: "//chars(print_expr(roots(k)))
+            end do
+            error stop "fortsym refused a generated kernel"
+        end if
+        path = trim(output_dir)//"/"//module_name//".f90"
+        open (newunit=unit, file=path, status="replace", action="write", &
+            iostat=ios)
+        if (ios /= 0) error stop "cannot open generated kernel output"
+        write (unit, "(a)") chars(emitted)
+        close (unit)
+        write (output_unit, "(a)") "wrote "//path
+    end subroutine emit_kernel_file
+
+end program gen_deltaf_kernels
