@@ -1,0 +1,11 @@
+&GORILLA_APPLETS_NML
+ i_option = 15 ,
+ filename_fluxtv_precomp = 'fluxtubevolume.dat' ,
+ start_pos_x1 = 0.6d0 ,
+ start_pos_x2 = 0.00013d0 ,
+ start_pos_x3 = 0.00013d0 ,
+ t_step_fluxtv = 1.d-3 ,
+ nt_steps_fluxtv = 100000 ,
+ energy_eV_fluxtv = 3.d3 ,
+ filename_fluxtv_load = 'fluxtubevolume.dat' ,
+/
