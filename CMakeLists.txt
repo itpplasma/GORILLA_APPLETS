@@ -120,6 +120,24 @@ if(BUILD_TESTING)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(test_canonical_ntv_kernel.x TESTS/test_canonical_ntv_kernel.f90)
+    target_link_libraries(test_canonical_ntv_kernel.x GORILLA_APPLETS)
+    add_test(NAME canonical_ntv_kernel COMMAND test_canonical_ntv_kernel.x)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME canonical_ntv
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/TESTS/test_canonical_ntv.py)
+    set_tests_properties(canonical_ntv PROPERTIES
+        ENVIRONMENT
+            "APPLETS_ROOT=${CMAKE_CURRENT_SOURCE_DIR};\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/canonical_ntv_work;\
+OMP_NUM_THREADS=4"
+        PROCESSORS 4
+        TIMEOUT 600)
+endif()
+
+if(BUILD_TESTING)
     add_executable(test_ou_collision_invariant.x
         SRC_CORE/constants_mod.f90
         SRC/collis_ions_mod.f90

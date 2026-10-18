@@ -9,6 +9,7 @@ module utils_rmp_response_currents_mod
     use rmp_profile_moments_mod, only: deposit_profile_moments
     use rmp_volume_loading_mod, only: volume_candidate, analytic_window_volume
     use rmp_maxwellian_loading_mod, only: maxwellian_from_uniforms
+    use canonical_ntv_mod, only: boole_canonical_ntv, species_temperature_eV
 
     implicit none
 
@@ -260,6 +261,7 @@ contains
 subroutine read_rmp_response_currents_inp_into_type
 
     use gorilla_applets_types_mod, only: in
+    use canonical_ntv_mod, only: canonical_ntv_nml_read
     use collis_ions,               only: collis_nu_scale_factor => nu_scale_factor, &
                                          ou_nu_dtau
 
@@ -358,6 +360,8 @@ subroutine read_rmp_response_currents_inp_into_type
 
     ! Propagate nu_scale_factor to collis_ions module variable used inside stost.
     collis_nu_scale_factor = nu_scale_factor
+
+    call canonical_ntv_nml_read('rmp_response_currents.inp')
 
     print '(a, f10.4)', ' nu_scale_factor (stost rate multiplier) = ', collis_nu_scale_factor
 
@@ -638,6 +642,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     use tetra_grid_settings_mod, only: grid_kind, grid_size, R0_analytic_circ, &
                                        a_analytic_circ
     use constants, only: pi
+    use canonical_ntv_mod, only: canonical_ntv_allocate, canonical_ntv_end, &
+        canonical_ntv_write
 
     integer, intent(in)                               :: species
     integer, intent(in), optional                     :: n_particles_in
@@ -667,6 +673,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     integer                                           :: ibatch
     logical                                           :: thread_flag = .true.
     logical                                           :: respawn_success
+    real(dp)                                          :: vpar_coll
 
     if (present(n_particles_in)) then
         n_particles = n_particles_in
@@ -675,6 +682,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     endif
 
     if (in%boole_delta_f) call allocate_delta_f_per_particle(n_particles, in%n_species)
+    if (boole_canonical_ntv) call canonical_ntv_allocate(n_particles)
 
     ! With the radial profile deposit (n_prof_bins > 0) the per-tetrahedron
     ! moments are not accumulated; allocate a dummy column only (the two
@@ -732,10 +740,10 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP&        prof_acc, prof_count, boole_reflect_window, rho_win, prof_t_burn, &
     !$OMP&        max_rel_dH, max_abs_w, sum_w2, n_w2, max_dH_T, n_mh_prop, n_mh_rej, &
     !$OMP&        boole_nonlinear_weight, boole_mh_collisions, boole_physical_profile_time, &
-    !$OMP&        boole_gc_phase_measure) &
+    !$OMP&        boole_gc_phase_measure, boole_canonical_ntv) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
     !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local, n_da_sub, i_da_sub) &
-    !$OMP& PRIVATE(prof_local, prof_marker, ibatch) &
+    !$OMP& PRIVATE(prof_local, prof_marker, ibatch, vpar_coll) &
     !$OMP& FIRSTPRIVATE(thread_flag)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
@@ -799,10 +807,13 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
             do while (t%confined.lt.trace_time_n)
                 i = i + 1
 
-                if (i == 1 .and. boole_nonlinear_weight .and. in%boole_delta_f) &
+                if (i == 1 .and. canonical_loading() .and. in%boole_delta_f) then
                     call set_birth_factor(n, species, x, vpar, vperp)
+                    if (boole_canonical_ntv) call ntv_record_birth(n, species, x, vpar, vperp)
+                end if
                 if (in%boole_collisions) then
-                    if (boole_nonlinear_weight .and. boole_mh_collisions &
+                    vpar_coll = vpar
+                    if (canonical_loading() .and. boole_mh_collisions &
                         .and. in%boole_delta_f) then
                         call carry_out_collisions_mh(i, n, t, x, vpar, vperp, &
                                                      ind_tetr, iface, species)
@@ -811,6 +822,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                                                   iface, species, &
                                                   iswmode_in=in%i_collision_mode)
                     end if
+                    if (boole_canonical_ntv .and. i > 1) call ntv_record_collision( &
+                        n, species, ind_tetr, x, vpar_coll, vpar)
                     t%step = t%step / start%v0(species)
                     ! Collision-event diagnostics for marker n=1:
                     ! accumulate counters on every event (so end-of-run
@@ -910,6 +923,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
 
             i_total    = i
             t_actual_n = t%confined
+            if (boole_canonical_ntv) call canonical_ntv_end(n, &
+                ind_tetr == -1 .and. t%confined < trace_time_n, t%confined)
 
             if (ind_tetr == -1 .and. t%confined < trace_time_n) then
                 call handle_lost_particles(local_counter, particle_status%lost)
@@ -994,6 +1009,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     end if
 
     if (n_prof_bins > 0) call write_mn_profile('jpar_mn_profile.dat')
+    if (boole_canonical_ntv) call canonical_ntv_write(compute_spawn_volume(), &
+                                                      start%t(species))
 
     print*, 'Total tracing time / number of particles: ', t_tot/n_particles, 's'
     if (in%boole_delta_f .and. n_respawn_max > 0) then
@@ -1010,7 +1027,9 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly
     use tetra_physics_mod, only: tetra_physics
-    use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
+    use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type, &
+        boole_time_hamiltonian
+    use canonical_ntv_mod, only: ntv_point_t, canonical_ntv_push
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
@@ -1039,6 +1058,8 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
     logical                                      :: boole_t_finished, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
     type(optional_quantities_type)               :: optional_quantities
+    type(ntv_point_t)                            :: pt_a, pt_m, pt_b
+    real(dp)                                     :: vpar_pre, dt_ntv, w_ntv, s_a, s_b
 
     if (.not.particle_status%initialized) then
         call check_coordinate_domain(x)
@@ -1121,6 +1142,7 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
 
         ind_tetr_save = ind_tetr
         x_pre_push = x
+        vpar_pre = vpar
 
         select case(ipusher)
             case(1)
@@ -1164,6 +1186,19 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
             sum_w2_loc = sum_w2_loc + abs(weights%w(n, species))**2
             n_w2_loc = n_w2_loc + 1.0_dp
             lnf0_a = lnf0_b
+        else if (boole_canonical_ntv .and. ind_tetr_save /= -1) then
+            ! Canonical linear delta-f and full-f p_phi accumulators.
+            dt_ntv = t_pass
+            if (ipusher == 2 .and. boole_time_hamiltonian) &
+                dt_ntv = optional_quantities%t_hamiltonian
+            call ntv_point(ind_tetr_save, x_pre_push, vpar_pre, perpinv, species, &
+                           pt_a, s_a)
+            call ntv_point(ind_tetr_save, 0.5_dp * (x_pre_push + x_cell), &
+                           0.5_dp * (vpar_pre + vpar), perpinv, species, pt_m, s_a)
+            call ntv_point(ind_tetr_save, x_cell, vpar, perpinv, species, pt_b, s_b)
+            w_ntv = real(weights%w(n, species), dp)
+            call canonical_ntv_push(n, pt_a, pt_m, pt_b, s_b, dt_ntv, w_ntv)
+            weights%w(n, species) = cmplx(w_ntv, 0.0_dp, kind=dp)
         else if (in%boole_delta_f .and. ind_tetr_save /= -1) then
             call update_delta_f_weight(n, ind_tetr_save, &
                                        0.5_dp * (x_pre_push + x_cell), &
@@ -1562,7 +1597,7 @@ subroutine set_local_collision_background()
         do k = 1, 4
             x_c = x_c + 0.25_dp * verts_rphiz(:, tetra_grid(i)%ind_knot(k))
         end do
-        if (boole_nonlinear_weight) then
+        if (canonical_loading()) then
             s_c = eval_s0_local(i, x_c)
         else
             s_c = eval_s_local(i, x_c)
@@ -1758,6 +1793,81 @@ end subroutine barycentric_coords
 ! unperturbed A_phi (= psi_pol) at the vertices; its linear interpolant is
 ! exactly conserved along unperturbed field lines of the piecewise-linear mesh.
 ! ====================================================================
+
+! ====================================================================
+! Canonical f0(p_phi, H0) loading (birth factor, MH collisions, loader) is
+! shared by the nonlinear weights and the canonical NTV estimator.
+! ====================================================================
+logical function canonical_loading()
+    canonical_loading = boole_nonlinear_weight .or. boole_canonical_ntv
+end function canonical_loading
+
+! Background temperature of the loaded species [eV]: T_i for ions, T_e otherwise.
+real(dp) function loading_temperature_eV(pv, species) result(T)
+    use profile_data_mod, only: profile_values_t
+    use gorilla_applets_types_mod, only: start
+    type(profile_values_t), intent(in) :: pv
+    integer, intent(in) :: species
+    T = species_temperature_eV(pv%Te, pv%Ti, start%particle_charge(species))
+end function loading_temperature_eV
+
+! Unperturbed poloidal flux psi0 (the A_phi of f0) at x in cell ind_tetr.
+real(dp) function psi0_at(ind_tetr, x) result(psi0)
+    use tetra_grid_mod, only: tetra_grid
+    integer,  intent(in) :: ind_tetr
+    real(dp), intent(in) :: x(3)
+    real(dp) :: lam(4)
+    logical  :: ok
+    call barycentric_coords(ind_tetr, x, lam, ok)
+    psi0 = sum(lam * psi0_vert(tetra_grid(ind_tetr)%ind_knot(1:4)))
+end function psi0_at
+
+! Canonical NTV state of a marker at x in cell ind_tetr.
+subroutine ntv_point(ind_tetr, x, vpar, perpinv, species, pt, s0)
+    use canonical_ntv_mod, only: ntv_point_t, ntv_eval_point
+    use profile_data_mod, only: eval_s_from_psi_pol
+    integer,  intent(in)  :: ind_tetr, species
+    real(dp), intent(in)  :: x(3), vpar, perpinv
+    type(ntv_point_t), intent(out) :: pt
+    real(dp), intent(out) :: s0
+    real(dp) :: psi0
+    psi0 = psi0_at(ind_tetr, x)
+    s0 = eval_s_from_psi_pol(psi0)
+    call ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s0, pt)
+end subroutine ntv_point
+
+! Birth record of marker n at its spawn point (after set_birth_factor).
+subroutine ntv_record_birth(n, species, x, vpar, vperp)
+    use canonical_ntv_mod, only: ntv_point_t, canonical_ntv_birth
+    use find_tetra_mod, only: find_tetra
+    use tetra_physics_mod, only: tetra_physics
+    integer,  intent(in) :: n, species
+    real(dp), intent(in) :: x(3), vpar, vperp
+    integer  :: ind_tetr, iface
+    real(dp) :: xx(3), z(3), B, s0
+    type(ntv_point_t) :: pt
+    xx = x
+    call find_tetra(xx, vpar, vperp, ind_tetr, iface)
+    if (ind_tetr == -1) return
+    z = xx - tetra_physics(ind_tetr)%x1
+    B = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z)
+    call ntv_point(ind_tetr, xx, vpar, -0.5_dp * vperp**2 / B, species, pt, s0)
+    call canonical_ntv_birth(n, birth_factor(n, species), pt, s0)
+end subroutine ntv_record_birth
+
+! Collisional p_phi change of marker n (kick at fixed position in ind_tetr).
+subroutine ntv_record_collision(n, species, ind_tetr, x, vpar_old, vpar_new)
+    use canonical_ntv_mod, only: canonical_ntv_collision
+    use tetra_physics_mod, only: tetra_physics
+    integer,  intent(in) :: n, species, ind_tetr
+    real(dp), intent(in) :: x(3), vpar_old, vpar_new
+    real(dp) :: z(3), h_phi
+    if (ind_tetr == -1) return
+    z = x - tetra_physics(ind_tetr)%x1
+    h_phi = tetra_physics(ind_tetr)%h2_1 + sum(tetra_physics(ind_tetr)%gh2 * z)
+    call canonical_ntv_collision(n, species, h_phi, vpar_old, vpar_new)
+end subroutine ntv_record_collision
+
 subroutine init_nonlinear_weight()
 
     use tetra_grid_mod, only: verts_rphiz, nvert
@@ -1862,11 +1972,12 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_ml
     call eval_profiles(s_star, pvs)
     K0 = K + energy_drift &
         + start%particle_charge(species)*(pv0%Phi0 - pvs%Phi0)
-    Te_erg = pvs%Te * ev2erg
+    Te_erg = loading_temperature_eV(pvs, species) * ev2erg
     lnf0 = log(pvs%n_e) - 1.5_dp * log(Te_erg) - K0 / Te_erg
-    if (present(ln_mload)) &
-        ln_mload = -1.5_dp * log(pv0%Te * ev2erg) - K_random / (pv0%Te * ev2erg)
-    if (present(T0_erg)) T0_erg = pv0%Te * ev2erg
+    if (present(ln_mload)) ln_mload = &
+        -1.5_dp * log(loading_temperature_eV(pv0, species) * ev2erg) &
+        - K_random / (loading_temperature_eV(pv0, species) * ev2erg)
+    if (present(T0_erg)) T0_erg = loading_temperature_eV(pv0, species) * ev2erg
 
 end subroutine ln_f0_and_H
 
@@ -2041,9 +2152,9 @@ subroutine rescale_energies_to_local_temperature(species)
     real(dp) :: x(3), s_loc, u(4), energy_over_t, pitch
     type(profile_values_t) :: pv
 
-    if (boole_nonlinear_weight) &
+    if (canonical_loading()) &
         print *, 'Untruncated local Maxwellian loading; e_cutoff_factor ignored'
-    if (boole_nonlinear_weight) then
+    if (canonical_loading()) then
         if (in%boole_antithetic_variate) then
             if (mod(in%num_particles, 2) /= 0) &
                 error stop 'Antithetic loading requires even marker count'
@@ -2053,7 +2164,7 @@ subroutine rescale_energies_to_local_temperature(species)
     end if
     do n = 1, in%num_particles
         if (start%lost(n, species)) cycle
-        if (boole_nonlinear_weight) then
+        if (canonical_loading()) then
             if (in%boole_antithetic_variate) then
                 if (mod(n, 2) == 0) then
                     start%energy(n, species) = start%energy(n-1, species)
@@ -2065,22 +2176,22 @@ subroutine rescale_energies_to_local_temperature(species)
         x = start%x(:, n, species)
         call find_tetra(x, 0.0_dp, 0.0_dp, ind_tetr, iface)
         if (ind_tetr == -1) cycle
-        if (boole_nonlinear_weight) then
+        if (canonical_loading()) then
             s_loc = eval_s0_local(ind_tetr, x)
         else
             s_loc = eval_s_local(ind_tetr, x)
         end if
         call eval_profiles(s_loc, pv)
-        if (boole_nonlinear_weight) then
+        if (canonical_loading()) then
             call random_number(u)
             call maxwellian_from_uniforms(u, energy_over_t, pitch)
-            start%energy(n, species) = energy_over_t*pv%Te
+            start%energy(n, species) = energy_over_t*loading_temperature_eV(pv, species)
             start%pitch(n, species) = pitch
         else
             start%energy(n, species) = start%energy(n, species)*pv%Te/in%energy_eV
         end if
     end do
-    if (boole_nonlinear_weight) then
+    if (canonical_loading()) then
         open(newunit=output_unit, file='loaded_maxwellian.dat', &
             status='replace', action='write')
         write(output_unit, '(a)') '# marker R phi Z energy_eV energy_over_T pitch'
@@ -2090,7 +2201,7 @@ subroutine rescale_energies_to_local_temperature(species)
             if (ind_tetr == -1) error stop 'Loaded Maxwellian outside mesh'
             call eval_profiles(eval_s0_local(ind_tetr, x), pv)
             write(output_unit, *) n, x, start%energy(n, species), &
-                start%energy(n, species)/pv%Te, start%pitch(n, species)
+                start%energy(n, species)/loading_temperature_eV(pv, species), start%pitch(n, species)
         end do
         close(output_unit)
     end if
@@ -2221,7 +2332,7 @@ real(dp) function compute_spawn_volume() result(V_W)
     integer  :: n_prisms, p, knot1
     real(dp) :: s_p
 
-    if (boole_nonlinear_weight .or. boole_uniform_volume_sampling) then
+    if (canonical_loading() .or. boole_uniform_volume_sampling) then
         V_W = analytic_window_volume(R0_analytic_circ, a_analytic_circ, &
             s_inner_sample, s_outer_sample)/real(n_field_periods, dp)
         return
@@ -2442,7 +2553,7 @@ subroutine spawn_uniform_volume_analytic(species)
 
     if (grid_kind /= 5) error stop 'Volume loading requires analytic circular grid'
     if (coord_system /= 1) error stop 'Volume loading requires cylindrical coordinates'
-    if (boole_nonlinear_weight) then
+    if (canonical_loading()) then
         if (trim(energy_dist_kind) /= 'maxwellian') &
             error stop 'Nonlinear birth factor requires Maxwellian energy loading'
         if (.not. boole_local_energy_sampling) &
