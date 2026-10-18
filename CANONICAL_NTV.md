@@ -72,9 +72,11 @@ zero-sigma baseline and the drift gate.
 
 **Mesh drift (unperturbed field, no collisions).** On the piecewise-linear
 mesh, p_phi is not an exact invariant. The canonical label drifts by
-`|Delta s*|` with rms 5.7e-5 at `n2 = 24` over 2e-4 s for 1 keV electrons. The
-drift falls roughly as `n2^-2` (1.3e-5 at 48, 4.2e-6 at 96) and does not
-depend on the toroidal resolution `n3`.
+`|Delta s*|`. For 1 keV electrons at `n2 = 24` the rms is 5.7e-5 after 2e-4 s
+and 3.8e-4 after 2e-3 s, growing about as t^0.8. The drift falls as
+`n2^-1.6` to `n2^-2`: after 2e-4 s it is 1.3e-5 at 48 and 4.2e-6 at 96, after
+2e-3 s it is 1.2e-4 and 4.0e-5. It does not depend on the toroidal resolution
+`n3`.
 
 Tests: `canonical_ntv_kernel` checks the generated torque sample against a
 finite-difference dH/dphi at fixed p_phi along an orbit. `canonical_ntv` checks
