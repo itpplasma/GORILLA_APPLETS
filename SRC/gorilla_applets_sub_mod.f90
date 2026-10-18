@@ -88,6 +88,10 @@
             x_start = pos_fluxtv_mat(1,1:3)
 !
             !----------- Compute electrostatic potential for normalized ExB drift velocity v_E -----------!
+            if(grid_kind.ne.3 .and. v_E.ne.0.d0) then
+                error stop 'v_E /= 0 is only supported for grid_kind=3'
+            endif
+!
             if(grid_kind.eq.3) then
 !
                dphi = 2.d0*pi/100.d0
@@ -181,7 +185,7 @@
             print *, 'Number of particles', n_particles
 !
             select case(grid_kind)
-                case(1,2)
+                case(1,2,6)
                     !Define bounce time for Tokamak
                     !With the local q this is nu_star = R_0 nu_c q / v_mod = R_0 nu_c / (iota v_mod)
                     tau_bounce = 2.d0*pi*mag_axis_R0/vmod*abs(q_saf)
@@ -306,7 +310,7 @@
                 print *, 'Scan over normalized collisionality - Nr. ',i+1
                 print *, 'Normalized collisionality', nu_star
                 select case(grid_kind)
-                    case(1,2)
+                    case(1,2,6)
                         !Define bounce time for Tokamak
                         tau_bounce = 2.d0*pi*mag_axis_R0/vmod*abs(q_saf)
                         tau_collision = 1.d0/collision_frequency_from_nu_star(nu_star,mag_axis_R0,aiota,vmod)
@@ -453,6 +457,7 @@
             use fluxtv_mod, only: pos_fluxtv_mat
             use magdata_in_symfluxcoordinates_mod, only: magdata_in_symfluxcoord_ext
             use splint_vmec_data_mod, only: splint_vmec_data
+            use boozer_chartmap_mod, only: chartmap_iota
 !
             implicit none
 !
@@ -490,6 +495,14 @@
                     call splint_vmec_data(s_start,theta_start,varphi_start,A_phi,A_theta, &
                                           & dA_phi_ds,dA_theta_ds,aiota,R,Z,alam,dR_ds, &
                                           & dR_dt,dR_dp,dZ_ds,dZ_dt,dZ_dp,dl_ds,dl_dt,dl_dp)
+                    if(abs(aiota) <= tiny(aiota)) error stop 'local rotational transform is zero'
+                    q_saf = 1.d0/aiota
+                case(6)
+                    if(coord_system.ne.2) then
+                        error stop 'grid_kind=6 transport requires coord_system=2 for local iota'
+                    endif
+                    s_start = pos_fluxtv_mat(1,1)
+                    aiota = chartmap_iota(s_start)
                     if(abs(aiota) <= tiny(aiota)) error stop 'local rotational transform is zero'
                     q_saf = 1.d0/aiota
                 case(1)
