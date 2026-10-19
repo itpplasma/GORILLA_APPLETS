@@ -238,11 +238,20 @@ on `(rho, theta_B, zeta_B)` nodes (`SRC/rmp_response_currents/chartmap_ntv_mod.f
   is corrected by `ln f0(B0) - ln f0(B) + 2 ln(B0/B)` at fixed `v_par` and
   `mu` (zero on an axisymmetric mesh). The torque follows from the CRN second
   difference of `P dh_mesh` (NTV part) and of `P (pphi_end - pphi_birth)`.
-- **E_r.** Zero on the chartmap (`eps_Phi = 0`, empty `er_profile_file`):
-  GORILLA's prescribed-E_r loader evaluates the EFIT field and the strong-E
-  terms exclude direct flux grids. A radial `Phi0(s)` enters f0 through the
-  profiles (`Er.dat`) already; a mesh potential `Phi(s)` on the chartmap
-  vertices (`phi_elec`) is the missing hook.
+- **E_r.** With `ntv_mesh_phi0 = .true.` (default off) the mesh potential on
+  the chartmap vertices is set to the profile potential `Phi0(s)` of f0
+  (`Er.dat`: `Phi0 = -int E_r dr_eff`, see profile_data_mod), and the mesh
+  physics is rebuilt (`flux_mesh_potential_mod`). Orbits (ExB) and
+  `f0(p_phi, H0)` then use the same `Phi0`; the toroidal ExB frequency is
+  `Omega_E = c dPhi0/dA_phi`. The potential is linear in each tetrahedron, so
+  the mesh `dPhi0/ds` is the secant of the radial cell (error
+  `|Phi0''| ds_cell/2`); `n1` must resolve the E_r profile. CTest
+  `flux_mesh_potential_chartmap`: field-line-label rate equals the cell secant
+  to 2e-3 at s = 0.2, 0.4, 0.8 and `Omega_E(s)` the analytic value within the
+  element bound; `Phi0 = 0` leaves orbits bitwise unchanged. Off: the mesh
+  keeps `eps_Phi A_theta` (`eps_Phi = 0`, empty `er_profile_file`;
+  GORILLA's prescribed-E_r loader serves EFIT grids only), while f0 still
+  sees `Phi0` from `Er.dat`, so a nonzero `Er.dat` needs the option.
 - **Mesh drift.** Sigma = 0, no collisions, 1 keV-scale electrons, 2e-4 s,
   16384 markers: rms `|Delta s*|` 6.1e-5, 1.9e-5, 5.9e-6 for `n2` = 24, 48,
   96 (about `n2^-1.7`), as on `grid_kind = 5` (5.7e-5, 1.3e-5, 4.2e-6). On
