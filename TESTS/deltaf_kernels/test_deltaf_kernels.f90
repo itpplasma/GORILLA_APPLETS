@@ -7,8 +7,8 @@ program test_deltaf_kernels
     use deltaf_harmonic_kernel, only: evaluate_deltaf_harmonic
     use deltaf_circular_chart_kernel, only: evaluate_deltaf_circular_chart
     use deltaf_weight_kernel, only: evaluate_deltaf_weight
-    use field_analytic_circ_mod, only: set_field_analytic_circ, field_analytic_circ
-    use field_eq_mod, only: psif
+    use field_analytic_circ_mod, only: set_field_analytic_circ, field_analytic_circ, &
+        psi_pol_analytic_circ
     implicit none
 
     real(dp), parameter :: pi = 4.0_dp*atan(1.0_dp)
@@ -85,7 +85,7 @@ contains
         real(dp) :: dbzdr, dbzdp, dbzdz, bmod_g, dbmod_dr_g
         integer :: i, j
 
-        call set_field_analytic_circ(r0, a, b0, q0, q1)
+        call set_field_analytic_circ(r0, a, b0, q0, q1, 2)
         do i = 1, 4
             do j = 1, 5
                 radius = 0.2_dp*a*i
@@ -102,7 +102,8 @@ contains
                 call check_close("circular |B| vs GORILLA", out(1), bmod_g, 1.0e-13_dp)
                 call check_close("circular d|B|/dr vs GORILLA", out(2), dbmod_dr_g, &
                     1.0e-11_dp)
-                call check_close("circular psi_pol vs GORILLA psif", out(4), psif, 1.0e-13_dp)
+                call check_close("circular psi_pol vs GORILLA psi_pol", out(4), &
+                    psi_pol_analytic_circ(radius), 1.0e-13_dp)
                 call check_close("circular h_phi vs GORILLA R B_phi/B", out(8), &
                     rr*bp/bmod_g, 1.0e-13_dp)
                 call check_close("circular R_major", out(11), rr, 1.0e-15_dp)
