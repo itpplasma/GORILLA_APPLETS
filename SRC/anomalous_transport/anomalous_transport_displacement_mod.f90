@@ -16,7 +16,8 @@ module anomalous_transport_displacement_mod
 contains
 
 subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp, &
-                                           d_local, rho_bounds, recover_lost, reflected, random_vector)
+                                           d_local, rho_bounds, recover_lost, reflected, random_vector, noise_in, &
+                                           time_sign)
 !
 ! Computes the displacement vector for anomalous transport and applies it.
 !
@@ -50,6 +51,13 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
 !   reflected - reports an endpoint reflection (optional diagnostic).
 !   random_vector - returns the existing three unit-variance draws for a paired
 !               analytical control variate; does not change their distribution.
+!   time_sign - optional sign of the Hamiltonian time steps that follow the kick
+!               (default +1). Face disambiguation must use the velocity direction
+!               of that subsequent motion: backward characteristics (-1) leave a
+!               face the forward velocity enters. Does not change the kick itself.
+!   noise_in  - optional three unit-variance draws supplied by the caller (e.g. a
+!               separate stream for paired-with/without-diffusion estimators);
+!               when absent, the legacy getran draws are used.
 !
     use tetra_physics_mod, only: tetra_physics,isinside
     use collis_ions, only: getran
@@ -66,8 +74,11 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     logical, intent(in), optional         :: recover_lost
     logical, intent(out), optional        :: reflected
     real(dp), intent(out), optional       :: random_vector(3)
+    real(dp), intent(in), optional        :: noise_in(3)
+    real(dp), intent(in), optional        :: time_sign
 
     real(dp), dimension(3) :: displacement, xi, V_c, x_new, x_save, displacement_towards_axis
+    real(dp) :: direction_sign
 
     ! Cholesky decomposition of the perpendicular diffusion tensor
     real(dp), dimension(3,3) :: alpha_perp_mat
@@ -106,9 +117,13 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     call compute_correction_velocity(ind_tetr, h_contra, R_local, D_eff, V_c)
 
     ! Generate random numbers with zero mean and unit variance
-    call getran(0, xi(1))
-    call getran(0, xi(2))
-    call getran(0, xi(3))
+    if (present(noise_in)) then
+        xi = noise_in
+    else
+        call getran(0, xi(1))
+        call getran(0, xi(2))
+        call getran(0, xi(3))
+    end if
     if (present(random_vector)) random_vector = xi
 
     ! Compute displacement: Delta x^i = sqrt(2 * dt) * alpha^{ij} * xi_j + V_c^i * dt
@@ -134,7 +149,10 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     ind_tetr_save = ind_tetr
     iface_save = iface
 
-    call displace_by_straight_line(x, ind_tetr, iface, displacement, vpar, vperp)
+    direction_sign = 1.0_dp
+    if (present(time_sign)) direction_sign = sign(1.0_dp, time_sign)
+    call displace_by_straight_line(x, ind_tetr, iface, displacement, vpar, vperp, direction_sign, &
+                                   present(time_sign))
 
     if (ind_tetr.eq.-1 .and. present(recover_lost)) then
         if (.not.recover_lost) return
@@ -174,7 +192,8 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
                 displacement_towards_axis(1) = displacement_towards_axis(1) * displacement_magnitude / dist_to_axis
                 displacement_towards_axis(3) = displacement_towards_axis(3) * displacement_magnitude / dist_to_axis
             endif
-            call displace_by_straight_line(x, ind_tetr, iface, displacement_towards_axis, vpar, vperp)
+            call displace_by_straight_line(x, ind_tetr, iface, displacement_towards_axis, vpar, vperp, &
+                                           direction_sign, present(time_sign))
         endif
     endif
 
@@ -359,7 +378,8 @@ subroutine compute_correction_velocity(ind_tetr, h_contra, R_local, D_perp, V_c)
 end subroutine compute_correction_velocity
 
 ! ====================================================================
-subroutine displace_by_straight_line(x, ind_tetr, iface, displacement, vpar, vperp)
+subroutine displace_by_straight_line(x, ind_tetr, iface, displacement, vpar, vperp, time_sign, &
+                                     crossed_faces_exit)
 !
 ! Displaces a particle along a straight line through the tetrahedral mesh.
 !
@@ -379,6 +399,14 @@ subroutine displace_by_straight_line(x, ind_tetr, iface, displacement, vpar, vpe
 !   displacement(3) - Displacement vector in cylindrical (R, phi, Z) coordinates
 !   vpar        - Parallel velocity (for edge disambiguation)
 !   vperp       - Perpendicular velocity (for edge disambiguation)
+!   time_sign   - Sign of the subsequent Hamiltonian time steps (+1 forward)
+!   crossed_faces_exit - Response-provider traversal: a face the ray moves out
+!                 through while the point already lies on or outside it is
+!                 crossed at zero length (its intersection parameter -d/(n.dir)
+!                 is a path length, so a roundoff distance on a shallow face
+!                 maps to a large negative t that the legacy test rejects).
+!                 No intersection then means a lost marker, never a full move
+!                 inside the old cell. Legacy callers keep the old behaviour.
 !
     use tetra_physics_mod, only: tetra_physics
     use tetra_grid_mod, only: tetra_grid
@@ -392,7 +420,8 @@ subroutine displace_by_straight_line(x, ind_tetr, iface, displacement, vpar, vpe
     real(dp), dimension(3), intent(inout) :: x
     integer, intent(inout)                :: ind_tetr, iface
     real(dp), dimension(3), intent(in)    :: displacement
-    real(dp), intent(in)                  :: vpar, vperp
+    real(dp), intent(in)                  :: vpar, vperp, time_sign
+    logical, intent(in)                   :: crossed_faces_exit
 
     real(dp) :: remaining_distance, distance_to_face, dist_min, total_distance
     real(dp), dimension(3) :: direction, z_rel
@@ -429,7 +458,15 @@ subroutine displace_by_straight_line(x, ind_tetr, iface, displacement, vpar, vpe
         z_rel = x - tetra_physics(ind_tetr)%x1
 
         ! Find intersection with tetrahedron faces
-        call find_tetra_face_intersection(z_rel, direction, ind_tetr, distance_to_face, hit_face)
+        call find_tetra_face_intersection(z_rel, direction, ind_tetr, distance_to_face, hit_face, &
+                                          crossed_faces_exit)
+
+        if (hit_face == 0 .and. crossed_faces_exit) then
+            ! A closed cell always has an exit along any direction.
+            ind_tetr = -1
+            iface = -1
+            return
+        endif
 
         if (hit_face == 0) then
             ! No valid intersection found - this shouldn't happen if particle is inside
@@ -516,7 +553,7 @@ subroutine displace_by_straight_line(x, ind_tetr, iface, displacement, vpar, vpe
 
                 z(1:3) = x - tetra_physics(ind_tetr)%x1
 
-                call initialize_pusher_tetra_rk_mod(ind_tetr, x, iface_new, vpar, 1.0_dp)
+                call initialize_pusher_tetra_rk_mod(ind_tetr, x, iface_new, vpar, time_sign)
 
                 cur_dist_value = normal_distances_func(z(1:3))
 
@@ -573,7 +610,7 @@ end subroutine displace_by_straight_line
 
 ! ====================================================================
 subroutine find_tetra_face_intersection(start_point, direction, ind_tetr, &
-                                        distance_to_face, hit_face)
+                                        distance_to_face, hit_face, crossed_faces_exit)
 !
 ! Finds the intersection of a ray with a tetrahedron's faces.
 !
@@ -615,6 +652,7 @@ subroutine find_tetra_face_intersection(start_point, direction, ind_tetr, &
     integer,  intent(in)  :: ind_tetr
     real(dp), intent(out) :: distance_to_face
     integer,  intent(out) :: hit_face
+    logical,  intent(in), optional :: crossed_faces_exit
 
     real(dp) :: normal_dot_dir, normal_dist_0, t_intersect, dist_min
     real(dp) :: best_normal_dot_dir
@@ -649,6 +687,11 @@ subroutine find_tetra_face_intersection(start_point, direction, ind_tetr, &
         ! Solve for t: normal_dist_0 + t * normal_dot_dir = 0
         ! => t = -normal_dist_0 / normal_dot_dir
         t_intersect = -normal_dist_0 / normal_dot_dir
+
+        if (present(crossed_faces_exit)) then
+            ! On or outside a face while moving out through it: cross now.
+            if (crossed_faces_exit .and. normal_dist_0 <= 0.0_dp) t_intersect = 0.0_dp
+        endif
 
         ! Accept intersections in forward direction (t >= -dist_min to handle numerical noise)
         if (t_intersect < -dist_min) cycle

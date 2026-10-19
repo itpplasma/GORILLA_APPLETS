@@ -30,6 +30,9 @@ program gorilla_orbit_response
     logical :: cylinder_only=.false.,marker_streams=.false.
     real(dp) :: anomalous_diffusion_coefficient=0.0_dp, diffusion_step_cm=0.1_dp
     integer :: transport_boundary=0
+    ! Uniform shift of all injection radii [cm]; zero keeps the legacy positions.
+    ! Drift-free equilibrium paths otherwise travel inside radial mesh faces.
+    real(dp) :: radial_sample_shift_cm=0.0_dp
     ! Opt-in diagnostic: trace only split_radii and save real and reference
     ! source integrals separately at lag checkpoints; no response is written.
     integer :: split_count=0,split_stride=8
@@ -54,7 +57,7 @@ program gorilla_orbit_response
     real(dp) :: diffusion_edge_flux
     namelist /orbit_response/ radial_samples,markers,batches,seed,lag_nu,nu_dt,phase_step,cylinder_only,n_respawn_max, &
         orbit_threads,marker_streams,anomalous_diffusion_coefficient,diffusion_step_cm,transport_boundary, &
-        split_count,split_stride,split_radii,comoving_reference,reference_weights
+        split_count,split_stride,split_radii,comoving_reference,reference_weights,radial_sample_shift_cm
     real(dp) :: L,rm,clight,r0,bg0(13),qn,coef0,coef,end_t
     real(dp) :: closure_error,rcond,max_closure_error=0.0_dp,min_closure_rcond=1.0_dp
     real(dp) :: max_radial_excursion=0.0_dp,phase_error=0.0_dp,spawn_error=0.0_dp
@@ -122,6 +125,8 @@ program gorilla_orbit_response
     if(radial_samples<2*M+1.or.markers<1.or.batches<2.or.mod(markers,batches)/=0) &
         error stop 'need radial_samples >= 2M+1 and equal independent batches'
     if(min(lag_nu,nu_dt,phase_step)<=0.0_dp) error stop 'invalid orbit quadrature'
+    if(.not.ieee_is_finite(radial_sample_shift_cm).or.2*abs(radial_sample_shift_cm)*radial_samples>=L) &
+        error stop 'radial_sample_shift_cm must stay inside half a sample spacing'
     if(orbit_threads<1) error stop 'orbit_threads must be positive'
     if(orbit_threads>1.and..not.marker_streams) error stop 'threading requires marker_streams'
     call omp_set_dynamic(.false.)
@@ -216,7 +221,7 @@ program gorilla_orbit_response
     end if
     do ir=1,radial_samples
         ! Midpoint quadrature of the same absolute, periodized radial coordinate.
-        r0=background(1,1)+(real(ir,dp)-0.5_dp)*L/radial_samples
+        r0=background(1,1)+(real(ir,dp)-0.5_dp)*L/radial_samples+radial_sample_shift_cm
         call sample_background(r0,bg0)
         qn=bg0(5)**(-2)/(4*pi)*bg0(7)**2*bg0(13)/(bg0(8)*clight)
         output_phase=exp(-ii*wave*r0)/real(radial_samples,dp)
@@ -613,11 +618,11 @@ contains
             if(transport_boundary==1) then
                 call anomalous_transport_displacement(s%x,s%tetr,s%iface,delta_t,s%vp,s%vperp, &
                     anomalous_diffusion_coefficient,rho_bounds=diffusion_bounds,recover_lost=.false., &
-                    reflected=reflected,random_vector=noise)
+                    reflected=reflected,random_vector=noise,time_sign=-1.0_dp)
                 if(s%tetr==-1) error stop 'reflected diffusion displacement lost; no hidden axis recovery'
             else
                 call anomalous_transport_displacement(s%x,s%tetr,s%iface,delta_t,s%vp,s%vperp, &
-                    anomalous_diffusion_coefficient,recover_lost=.false.,random_vector=noise)
+                    anomalous_diffusion_coefficient,recover_lost=.false.,random_vector=noise,time_sign=-1.0_dp)
                 reflected=.false.
                 if(s%tetr==-1) then
                     ! This split kick consumes delta_t. On mesh exit discard
