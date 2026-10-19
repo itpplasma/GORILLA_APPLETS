@@ -172,6 +172,19 @@ WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/canonical_ntv_work;\
 OMP_NUM_THREADS=4"
         PROCESSORS 4
         TIMEOUT 600)
+    add_executable(test_canonical_ntv_fax.x TESTS/test_canonical_ntv_fax.f90)
+    target_link_libraries(test_canonical_ntv_fax.x GORILLA_APPLETS)
+    add_test(NAME canonical_ntv_fax_kernel COMMAND test_canonical_ntv_fax.x)
+    add_test(NAME canonical_ntv_fax
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/TESTS/test_canonical_ntv_fax.py)
+    set_tests_properties(canonical_ntv_fax PROPERTIES
+        ENVIRONMENT
+            "APPLETS_ROOT=${CMAKE_CURRENT_SOURCE_DIR};\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/canonical_ntv_fax_work;\
+OMP_NUM_THREADS=1"
+        TIMEOUT 600)
     add_test(NAME canonical_ntv_lorentz
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/TESTS/test_canonical_ntv_lorentz.py)
