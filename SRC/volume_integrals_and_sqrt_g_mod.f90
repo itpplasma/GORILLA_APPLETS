@@ -322,7 +322,7 @@ subroutine calc_volume_integrals
 
     refined_prism_volumes = abs(refined_prism_volumes)*2*pi/(grid_size(2)*n_field_periods)
     elec_pot_vec = abs(elec_pot_vec)*2*pi/(grid_size(2)*n_field_periods*prism_volumes)
-    n_b = abs(n_b)*2*pi/(grid_size(2)*n_field_periods*prism_volumes)   ! was '**' (typo): grid_size(2)**n_field_periods overflows int64 at large N -> SIGILL
+    n_b = abs(n_b)*2*pi/(grid_size(2)*n_field_periods*prism_volumes)
 
     ! Sanitise the auxiliary integrals for the few degenerate thin-R prisms whose
     ! z/r-gradient terms overflowed (straight-cylinder limit). prism_volumes is
