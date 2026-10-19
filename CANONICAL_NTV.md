@@ -91,25 +91,78 @@ The physical Lorentz operator `C_L` conserves a local isotropic distribution,
 not `f0`. `f0` depends on `lambda` through
 `p_phi = (e/c) psi + m v lambda h_phi`, and
 `d ln f0/d lambda = m v h_phi d ln f0/dp_phi ~ rho_pol/L_n`, so `C_L f0 != 0`.
-There are two consistent treatments:
+Two kick models keep the weight equation consistent:
 
 1. **MH kicks** (`ntv_lorentz_mh = .true.`, default; also `boole_mh_collisions`
    for the OU kicks). Here `C_MH = C_L - d_lambda[nu (1 - lambda^2)/2 (d_lambda
    ln f0) .]` + O(dt). This is `C_L` plus an `O(rho_pol/L_n)` pitch friction
-   that makes `f0` exactly stationary. It matches the thin-orbit theory
-   (NEO-RT, NEO-2), where the background is stationary and its axisymmetric
-   neoclassical distortion is not part of the NTV drive.
+   that makes `f0` exactly stationary.
 2. **Plain kicks** (`ntv_lorentz_mh = .false.`). The `P`-weighted ensemble then
    evolves as `f0 + df_A(t)`, where `df_A` is the axisymmetric neoclassical
    response to the source `C_L f0`. Its direct torque `int df_A (-dH1/dphi)`
-   vanishes because `df_A` does not depend on `phi`. The weight equation still
-   drives with `d ln f0/dp_phi` and misses `-{df_A, H1}`, an `O(rho_pol/L_n)`
-   relative term.
+   vanishes because `df_A` does not depend on `phi`, and the weight equation
+   still drives with `d ln f0/dp_phi` only.
 
-Both treatments agree to `O(rho_pol/L_n)`. An explicit source weight
-`dw_A/dt = C_L f0/f0` together with plain kicks would count `df_A` twice: the
-plain kicks already carry it in the marker density. The MH rejection fraction
-is the size of the operator change.
+In both the NTV drive is `-{f0, H1}` alone. This is not the complete
+collisional drive. The stationary axisymmetric solution of the physical
+operator is `f_M + f_AX` with `f_AX = G + h`: `G = f0 - f_M` is the canonical
+shift, `h` the collisional remainder, which is non-zero in the passing region
+and in the trapped-passing boundary layer. The term `-{h, H1}` is of the same
+order in `rho*` as the drive `-{G, H1}`. NEO-2-QL includes it in production (`nobounceaver`,
+Kernbichler et al. PPCF 58 (2016) 104001 Eq. (28), Kasilov et al. PoP 21
+(2014) 092506 Eq. (65)). The term vanishes as `nu -> 0`: there `h` is a function
+of the invariants in the passing region and zero for trapped particles. Plain
+kicks do not supply it: the weights are still driven by `d ln f0/dp_phi`. An
+explicit source weight `dw_A/dt = C_L f0/f0` together with plain kicks would
+count `df_A` twice, because the plain kicks already carry it in the marker
+density. The MH rejection fraction is the size of the operator change.
+
+### Collisional background drive (`ntv_fax_file`, opt-in)
+
+`ntv_fax_file` adds the mirror-force part of `-{h, H1}` to the weight equation
+(default off; with it unset the code path and results are those of the
+estimator without it). In `(x, v, lambda)` the kinetic energy is conserved
+and `h` is axisymmetric, so only the perturbed mirror force acts on it:
+
+    d lambda/dt = -(v (1 - lambda^2)/2) b.grad ln B,
+    dw/dt += -delta(d lambda/dt) d(h/f0)/d lambda
+           = (d ln f0/dp_phi) mu (h_phi/R)^2 (d chi/d lambda) dB1/dphi,
+
+with `h/f0 = (d ln f0/dp_phi) m v h_phi chi`, so `chi = lambda h/G` and
+`chi = lambda` for `h = G`. For an m = 0 harmonic `b.grad = b^phi d/dphi` and
+`b^phi = h_phi/R^2`; other `m` are rejected. The perturbed radial drift
+acting on `h` is `O(rho*)` smaller and is dropped, as in NEO-2. The kernels
+`deltaf_fax_coordinates_kernel` and `deltaf_fax_weight_kernel` are generated
+(`gen/deltaf_kernels`, identities F1-F3). F3 checks the normalisation and sign
+against the existing source: for `chi = lambda` (`d chi/d lambda = 1`) the
+kernel returns `(d ln f0/dp_phi) mu (h_phi/R)^2 dB1/dphi`. This is the `mu`
+part of the canonical source, i.e. the mirror force on `G`. The remaining
+part, `m v_par^2/B dB1/dphi`, is the perturbed radial drift on `f_M`.
+
+The table holds `d chi/d lambda` on a grid of
+- `vartheta = branch arccos(1 - 2 (B - Bmin)/(Bmax - Bmin))`, where `branch`
+  is the sign of `dB` along `b`, i.e. along the motion of `lambda > 0`, and
+- the signed pitch `lambda = v_par/v` in `[-1, 1]`.
+
+At fixed position `chi` is one function of the signed `lambda`, continuous
+through the turning point `lambda = 0`, so `d chi/d lambda` stays finite there
+(`d chi/d eta` grows as `1/lambda`). These labels do not depend on the
+poloidal angle or orientation convention of the code that solved for `h`.
+`Bmin` and `Bmax` are those of the circular surface through the marker
+(outboard and inboard midplane of the analytic field). This is local
+thin-orbit use of a single-surface table. Format: `#` header lines,
+`n_theta n_lambda`, the `vartheta` grid (increasing, spanning `[-pi, pi]`),
+the `lambda` grid (increasing, spanning `[-1, 1]`), then `n_theta` rows of
+`n_lambda` values. Lookup is bilinear and clamped to the table.
+
+The table is built outside the code from the axisymmetric NEO-2-QL solution
+`g_k0` (drive k = 1) as `h = g_k0 - G`. In NEO-2 the `sigma = +1` solution
+moves towards `+phi_mfl`, so `branch = sign(d B/d phi_mfl)`.
+
+NEO-2 also has the term `-(B_n/B_0) L_C g_k0`, which is not included. Our
+reading, not yet checked separately, is that it comes from the Boozer `|B|`
+perturbation changing `b.grad phi`, which GORILLA's perturbation model does
+not have. Removing it changes the NEO-2 result by about 1 % (`coll0` patch).
 
 ## Checkpoints, conversion to D_s, weight control
 
