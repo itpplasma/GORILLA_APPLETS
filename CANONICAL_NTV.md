@@ -186,16 +186,17 @@ runs without the drive), D_s/NEO-RT:
 | 64 | 1e-2 | 0.214 | 0.168 +- 0.002 | 0.165 |
 | 16 | 1e-3 | 0.561 | 0.535 +- 0.007 | 0.534 |
 | 64 | 1e-3 | 0.310 | 0.295 +- 0.004 | 0.288 |
-| 16 | 1e-6 | 1.069 | 0.975 +- 0.031 | 1.032 |
+| 16 | 1e-6 | 0.978 | 0.975 +- 0.031 | 1.032 |
 
 The paired change is -21.6 % (F = 16 and 64) at `nu* = 1e-2` and -4.7 % at
 `1e-3`. NEO-2 with only this mirror term on `h` changes by -19.9 % and -4.8 %.
 With `vartheta -> -vartheta` (orientation check) the change is -28.1 %. At
-`nu* = 1e-6` NEO-2 changes by -0.4 %, but the drive adds variance and shifts
-the result by -8.8 +- 3.4 %. This shift is not explained. The `h` table there
-has a resolution-limited jump at the trapped-passing boundary, and finite
-orbits cross that boundary, while the table is thin-orbit. Leave the drive
-off at `nu* <~ 1e-4`, where NEO-2 measures the term below 2 %.
+`nu* = 1e-6` the paired change is -0.30 +- 0.04 % and NEO-2 changes by
+-0.4 %, so the drive vanishes as `nu -> 0` and adds no visible variance
+(per-seed changes -0.2 to -0.5 %). The `h` table is continuous there; it
+goes to zero at the trapped-passing boundary. Pair only runs with the same
+mesh: an earlier comparison against a coarser radial mesh (40 instead of
+137 cells, D_s/NEO-RT 1.069) gave a spurious -8.8 +- 3.4 %.
 
 NEO-2 also has the term `-(B_n/B_0) L_C g_k0`, which is not included. Our
 reading, not yet checked separately, is that it comes from the Boozer `|B|`
