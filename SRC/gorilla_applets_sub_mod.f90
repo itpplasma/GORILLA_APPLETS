@@ -61,6 +61,9 @@
             use fluxtv_mod, only: pos_fluxtv_mat,load_flux_tube_volume
             use splint_vmec_data_mod, only: splint_vmec_data
             use sub_alpha_lifetime_can_mod, only: integrate_mfl_can
+            use tetra_grid_settings_mod, only: netcdf_filename
+            use boozer_chartmap_mod, only: load_boozer_chartmap, evaluate_boozer_chartmap, &
+                                           chartmap_torflux, chartmap_nfp
 !
             implicit none
 !
@@ -71,7 +74,9 @@
             double precision                            :: Bcovar_r,Bcovar_vartheta,Bcovar_varphi,bmod,ds_dr
             double precision                            :: xi,mag_axis_bmod
             double precision                            :: eps_Phi
-            integer                                     :: i,ierr
+            integer                                     :: i,j,ierr
+            integer,parameter :: nang = 64
+            double precision, dimension(6) :: a_h
             integer,parameter :: npoi = 100000
             double precision :: dphi,phibeg,rbeg,zbeg,bmod00
             double precision, dimension(3,npoi) :: xstart
@@ -88,8 +93,28 @@
             x_start = pos_fluxtv_mat(1,1:3)
 !
             !----------- Compute electrostatic potential for normalized ExB drift velocity v_E -----------!
-            if(grid_kind.ne.3 .and. v_E.ne.0.d0) then
-                error stop 'v_E /= 0 is only supported for grid_kind=3'
+            if(grid_kind.ne.3 .and. grid_kind.ne.6 .and. v_E.ne.0.d0) then
+                error stop 'v_E /= 0 is only supported for grid_kind=3 and 6'
+            endif
+!
+            !Boozer chartmap: A_theta = torflux*s, B_00 = mean of |B| over the start surface
+            if(grid_kind.eq.6 .and. v_E.ne.0.d0) then
+               call load_boozer_chartmap(netcdf_filename)
+               s = x_start(1)
+               bmod00 = 0.d0
+               do j = 0, nang-1
+                  do i = 0, nang-1
+                     theta = 2.d0*pi*i/nang
+                     varphi = 2.d0*pi*j/(nang*chartmap_nfp)
+                     call evaluate_boozer_chartmap(s,theta,varphi,a_h(1),a_h(2),a_h(3), &
+                                                   a_h(4),a_h(5),a_h(6),bmod,sqg)
+                     bmod00 = bmod00 + bmod/nang**2
+                  enddo
+               enddo
+               ds_dr = radial_metric_ds_dr(s,bmod00,chartmap_torflux)
+               eps_Phi = v_E*vmod*bmod00/(chartmap_torflux*ds_dr*clight)
+               call set_eps_Phi(eps_Phi)
+               print *, 'eps_Phi', eps_Phi
             endif
 !
             if(grid_kind.eq.3) then
