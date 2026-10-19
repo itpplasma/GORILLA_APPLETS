@@ -176,6 +176,27 @@ NEO-2 `hmirror` reduction. In
 NEO-2 the `sigma = +1` solution enters at `ibeg`, so it moves towards
 `+phi_mfl`, and `branch = sign(d B/d phi_mfl)`. The table is independent of
 the orbit-width scaling `F` at fixed `nu*` (identical for F = 16 and 64).
+Validation on the circular case (bench_aug30835
+`ntv_circular/outputs/fax_drive`, 8 seeds of 16384 markers paired with the
+runs without the drive), D_s/NEO-RT:
+
+| F | nu* | without | with | NEO-2 production |
+|---|---|---|---|---|
+| 16 | 1e-2 | 0.429 | 0.336 +- 0.003 | 0.330 |
+| 64 | 1e-2 | 0.214 | 0.168 +- 0.002 | 0.165 |
+| 16 | 1e-3 | 0.561 | 0.535 +- 0.007 | 0.534 |
+| 64 | 1e-3 | 0.310 | 0.295 +- 0.004 | 0.288 |
+| 16 | 1e-6 | 1.069 | 0.975 +- 0.031 | 1.032 |
+
+The paired change is -21.6 % (F = 16 and 64) at `nu* = 1e-2` and -4.7 % at
+`1e-3`. NEO-2 with only this mirror term on `h` changes by -19.9 % and -4.8 %.
+With `vartheta -> -vartheta` (orientation check) the change is -28.1 %. At
+`nu* = 1e-6` NEO-2 changes by -0.4 %, but the drive adds variance and shifts
+the result by -8.8 +- 3.4 %. This shift is not explained. The `h` table there
+has a resolution-limited jump at the trapped-passing boundary, and finite
+orbits cross that boundary, while the table is thin-orbit. Leave the drive
+off at `nu* <~ 1e-4`, where NEO-2 measures the term below 2 %.
+
 NEO-2 also has the term `-(B_n/B_0) L_C g_k0`, which is not included. Our
 reading, not yet checked separately, is that it comes from the Boozer `|B|`
 perturbation changing `b.grad phi`, which GORILLA's perturbation model does
