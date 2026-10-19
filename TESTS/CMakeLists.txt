@@ -111,3 +111,23 @@ GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 CHARTMAP_FIXTURE_BIN=$<TARGET_FILE:write_chartmap_fixture.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/mono_energetic_transport_chartmap_work"
 )
+
+add_executable(test_flux_mesh_potential_driver.x
+    test_flux_mesh_potential_driver.f90
+)
+target_link_libraries(test_flux_mesh_potential_driver.x GORILLA_APPLETS)
+target_include_directories(test_flux_mesh_potential_driver.x
+    PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+
+add_test(
+    NAME flux_mesh_potential_chartmap
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_flux_mesh_potential.py
+)
+set_tests_properties(flux_mesh_potential_chartmap PROPERTIES
+    ENVIRONMENT
+        "GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
+DRIVER_BIN=$<TARGET_FILE:test_flux_mesh_potential_driver.x>;\
+CHARTMAP_WRITER_BIN=$<TARGET_FILE:write_circular_boozer_chartmap.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/flux_mesh_potential_work"
+)
