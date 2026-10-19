@@ -116,9 +116,6 @@ subroutine load_profiles(profile_dir, equil_mapping_file)
     ! Local arrays for equil mapping
     integer :: n_equil
     real(dp), allocatable :: r_equil(:), q_equil(:), psi_pol_equil(:), psi_tor_equil(:)
-    ! Local arrays for raw profiles
-    integer :: n_raw
-    real(dp), allocatable :: r_raw(:), val_raw(:)
     ! Mapped profiles on s grid
     real(dp), allocatable :: ne_mapped(:), Te_mapped(:), Ti_mapped(:), Er_mapped(:), Phi_mapped(:)
     real(dp) :: psi_tor_edge, ds

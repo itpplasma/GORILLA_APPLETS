@@ -310,7 +310,6 @@ end subroutine allocate_delta_f_per_particle
 ! ====================================================================
 subroutine calc_starting_conditions_rmp_response_currents(verts)
 
-    use gorilla_applets_types_mod, only: in, start
 
     real(dp), dimension(:,:), allocatable, intent(out), optional :: verts
 
@@ -804,7 +803,7 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g, weights
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, in, time_t, g, weights
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
     use utils_orbit_timestep_mod, only: initialize_constants_of_motion, compute_radial_fluxes, &
         identify_particles_entering_annulus, update_local_tetr_moments
@@ -1143,7 +1142,6 @@ subroutine eval_wdot_s(ind_tetr, x, vpar, vperp, species, wdot_s)
 
     use gorilla_applets_types_mod, only: in, start
     use tetra_physics_mod, only: tetra_physics, coord_system
-    use tetra_grid_mod, only: tetra_grid, verts_sthetaphi
     use constants, only: ev2erg, clight
     use profile_data_mod, only: eval_profiles, profile_values_t
     use perturbation_field_mod, only: eval_delta_B_s, eval_delta_E_s
@@ -1575,7 +1573,7 @@ end subroutine bias_starting_positions_to_s_window
 ! ====================================================================
 subroutine spawn_equidistant_in_s(species, n_spawned)
 
-    use gorilla_applets_types_mod, only: in, start, g
+    use gorilla_applets_types_mod, only: in, start
     use tetra_grid_settings_mod, only: sfc_s_min, sfc_s_max, grid_size, n_extra_rings, &
                                        grid_kind, R0_analytic_circ, a_analytic_circ
     use tetra_physics_mod, only: coord_system
@@ -1877,7 +1875,6 @@ subroutine dump_start_positions(filename, species)
 
     use gorilla_applets_types_mod, only: in, start
     use tetra_physics_mod, only: tetra_physics
-    use tetra_grid_mod, only: tetra_grid, verts_sthetaphi
     use find_tetra_mod, only: find_tetra
 
     character(len=*), intent(in) :: filename

@@ -15,7 +15,7 @@ subroutine calc_rmp_response_currents
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, output, weights
+    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, output
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
         get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &

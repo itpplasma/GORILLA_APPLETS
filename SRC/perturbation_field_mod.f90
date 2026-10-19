@@ -94,7 +94,7 @@ subroutine load_perturbation_field(delta_B_file, equil_mapping_file, m_mode, n_m
     real(dp), allocatable :: r_equil(:), psi_tor_equil(:), r_map(:)
     real(dp), allocatable :: r_raw(:), dB_re_raw(:), dB_im_raw(:)
     character(len=512) :: line
-    real(dp) :: psi_tor_edge, frac, r_val, re_val, im_val
+    real(dp) :: psi_tor_edge, frac
 
     pert_m_mode = m_mode
     pert_n_mode = n_mode
