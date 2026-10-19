@@ -42,7 +42,7 @@ module canonical_ntv_mod
         canonical_ntv_birth, canonical_ntv_push, canonical_ntv_collision, &
         canonical_ntv_end, canonical_ntv_write, ntv_harmonic_dphi, &
         ntv_theta_of_x, species_temperature_eV, ntv_point_t, ntv_eval_point, &
-        ntv_lorentz_proposal, ntv_fax_load_table, ntv_fax_dchi_deta
+        ntv_lorentz_proposal, ntv_fax_load_table, ntv_fax_dchi_dlambda
     public :: n_ntv_cols, ntv_col_names
 
     logical  :: boole_canonical_ntv = .false.
@@ -84,10 +84,11 @@ module canonical_ntv_mod
     real(dp) :: ntv_w_reset_dt = 0.0_dp
     real(dp) :: ntv_w_reset_burn = 0.0_dp
     !> Collisional background drive (default off: empty). Table of
-    !> D = d chi/d eta_hat on (vartheta, eta_hat) for sigma = +-1, with
+    !> d chi/d lambda on (vartheta, lambda = v_par/v), with
     !> h/f0 = (d ln f0/dp_phi) m v h_phi chi the non-canonical part of the
     !> axisymmetric collisional solution (bench ntv_circular/fax_background.py
-    !> from NEO-2). Adds dw/dt = -delta(dlambda/dt) d(h/f0)/dlambda (m = 0).
+    !> from NEO-2). Adds dw/dt = -delta(dlambda/dt) d(h/f0)/dlambda
+    !> = (d ln f0/dp_phi) mu (h_phi/R)**2 (d chi/d lambda) d dB/dphi (m = 0).
     character(len=512) :: ntv_fax_file = ''
 
     namelist /canonical_ntv_nml/ boole_canonical_ntv, ntv_m_pol, ntv_n_tor, &
@@ -119,10 +120,10 @@ module canonical_ntv_mod
     integer :: n_tab = 0
     real(dp), allocatable :: tab_s(:), tab_b(:), tab_b2(:), tab_p(:), tab_p2(:)
 
-    !> Collisional background drive: on/off, D table (eta_hat, vartheta) for
-    !> sigma = +1 and -1, and Bmin, Bmax of the circular surface of radius rho.
+    !> Collisional background drive: on/off, table d chi/d lambda
+    !> (lambda, vartheta), and Bmin, Bmax of the circular surface of radius rho.
     logical :: fax_on = .false.
-    real(dp), allocatable :: fax_vt(:), fax_eta(:), fax_dp(:,:), fax_dm(:,:)
+    real(dp), allocatable :: fax_vt(:), fax_lam(:), fax_tab(:,:)
     integer, parameter :: n_fax_rho = 2001
     real(dp) :: fax_drho = 0.0_dp, fax_spol = 1.0_dp
     real(dp) :: fax_bmin(n_fax_rho), fax_bmax(n_fax_rho)
@@ -322,7 +323,7 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     real(dp) :: db1_dphi, dphi1_dphi, ln_f0, dw_dt, torque, h0, dens, ddens, temp
     real(dp) :: dtemp, phi0, dphi0
     type(profile_values_t) :: pv0, pvs
-    real(dp) :: bmin, bmax, branch, lam, eta_hat, vtheta, bclamp
+    real(dp) :: bmin, bmax, branch, lam, vtheta, bclamp
 
     mass = start%particle_mass(species)
     charge = start%particle_charge(species)
@@ -362,10 +363,9 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     if (bmax <= bmin) return
     bclamp = min(max(pt%bmod, bmin), bmax)
     call evaluate_deltaf_fax_coordinates(mass, pt%mu, vpar, bclamp, bmin, bmax, &
-        branch, lam, eta_hat, vtheta)
-    call evaluate_deltaf_fax_weight(mass, pt%mu, vpar, bclamp, bmax, pt%h_phi, &
-        x(1), pt%dlnf0_dpphi, db1_dphi, &
-        ntv_fax_dchi_deta(vtheta, eta_hat, vpar >= 0.0_dp), pt%dw_fax)
+        branch, lam, vtheta)
+    call evaluate_deltaf_fax_weight(pt%mu, pt%h_phi, x(1), pt%dlnf0_dpphi, &
+        db1_dphi, ntv_fax_dchi_dlambda(vtheta, lam), pt%dw_fax)
 end subroutine ntv_eval_point
 
 !> Records the birth state of marker n (P: birth factor f0/g0).
@@ -560,13 +560,13 @@ subroutine write_reset()
     close(u)
 end subroutine write_reset
 
-!> Reads the collisional background table: n_theta n_eta, vartheta(n_theta)
-!> (increasing, spanning [-pi, pi]), eta_hat(n_eta) (increasing), then
-!> D(sigma = +1) and D(sigma = -1), each n_theta rows of n_eta values
+!> Reads the collisional background table: n_theta n_lambda, vartheta(n_theta)
+!> (increasing, spanning [-pi, pi]), lambda(n_lambda) (increasing, spanning
+!> [-1, 1]), then d chi/d lambda as n_theta rows of n_lambda values
 !> ('#' header lines first).
 subroutine ntv_fax_load_table(fname)
     character(len=*), intent(in) :: fname
-    integer :: u, ios, nt, ne
+    integer :: u, ios, nt, nl
     character(len=1) :: c
 
     open(newunit=u, file=fname, status='old', action='read', iostat=ios)
@@ -577,37 +577,30 @@ subroutine ntv_fax_load_table(fname)
         if (c /= '#') exit
     end do
     backspace(u)
-    read(u, *, iostat=ios) nt, ne
-    if (ios /= 0 .or. nt < 2 .or. ne < 2) error stop 'canonical NTV: bad ntv_fax_file size'
-    if (allocated(fax_vt)) deallocate(fax_vt, fax_eta, fax_dp, fax_dm)
-    allocate(fax_vt(nt), fax_eta(ne), fax_dp(ne, nt), fax_dm(ne, nt))
-    read(u, *, iostat=ios) fax_vt, fax_eta, fax_dp, fax_dm
+    read(u, *, iostat=ios) nt, nl
+    if (ios /= 0 .or. nt < 2 .or. nl < 2) error stop 'canonical NTV: bad ntv_fax_file size'
+    if (allocated(fax_vt)) deallocate(fax_vt, fax_lam, fax_tab)
+    allocate(fax_vt(nt), fax_lam(nl), fax_tab(nl, nt))
+    read(u, *, iostat=ios) fax_vt, fax_lam, fax_tab
     close(u)
     if (ios /= 0) error stop 'canonical NTV: ntv_fax_file truncated'
-    if (any(fax_vt(2:) <= fax_vt(:nt - 1)) .or. any(fax_eta(2:) <= fax_eta(:ne - 1))) &
+    if (any(fax_vt(2:) <= fax_vt(:nt - 1)) .or. any(fax_lam(2:) <= fax_lam(:nl - 1))) &
         error stop 'canonical NTV: ntv_fax_file grids must increase'
-    print '(a, i0, a, i0, 2a)', ' Canonical NTV collisional background: ', nt, ' x ', ne, &
+    print '(a, i0, a, i0, 2a)', ' Canonical NTV collisional background: ', nt, ' x ', nl, &
         ' table ', trim(fname)
 end subroutine ntv_fax_load_table
 
-!> D = d chi/d eta_hat at (vartheta, eta_hat) for sigma = +1 (plus) or -1,
-!> bilinear, clamped to the table.
-function ntv_fax_dchi_deta(vtheta, eta_hat, plus) result(d)
-    real(dp), intent(in) :: vtheta, eta_hat
-    logical,  intent(in) :: plus
-    real(dp) :: d, ft, fe
-    integer :: it, ie
+!> d chi/d lambda at (vartheta, lambda), bilinear, clamped to the table.
+function ntv_fax_dchi_dlambda(vtheta, lam) result(d)
+    real(dp), intent(in) :: vtheta, lam
+    real(dp) :: d, ft, fl
+    integer :: it, il
 
     call bracket(fax_vt, vtheta, it, ft)
-    call bracket(fax_eta, eta_hat, ie, fe)
-    if (plus) then
-        d = (1.0_dp - ft) * ((1.0_dp - fe) * fax_dp(ie, it) + fe * fax_dp(ie + 1, it)) &
-            + ft * ((1.0_dp - fe) * fax_dp(ie, it + 1) + fe * fax_dp(ie + 1, it + 1))
-    else
-        d = (1.0_dp - ft) * ((1.0_dp - fe) * fax_dm(ie, it) + fe * fax_dm(ie + 1, it)) &
-            + ft * ((1.0_dp - fe) * fax_dm(ie, it + 1) + fe * fax_dm(ie + 1, it + 1))
-    end if
-end function ntv_fax_dchi_deta
+    call bracket(fax_lam, lam, il, fl)
+    d = (1.0_dp - ft) * ((1.0_dp - fl) * fax_tab(il, it) + fl * fax_tab(il + 1, it)) &
+        + ft * ((1.0_dp - fl) * fax_tab(il, it + 1) + fl * fax_tab(il + 1, it + 1))
+end function ntv_fax_dchi_dlambda
 
 !> Interval lo (x(lo) <= xv <= x(lo+1)) and fraction, clamped to the grid.
 pure subroutine bracket(x, xv, lo, frac)

@@ -87,7 +87,7 @@ program gen_deltaf_kernels
     ! Kasilov et al. PoP 21 (2014) 092506 Eq. (65)). Split f_AX = G + h with
     ! the canonical shift G = f0 - f_M = m v_par h_phi df0/dp_phi (to first
     ! order in rho*), and write the collisional remainder as
-    !   h/f0 = (d ln f0/dp_phi) m v h_phi chi(position, eta_hat, sigma),
+    !   h/f0 = (d ln f0/dp_phi) m v h_phi chi(position, lambda),
     ! i.e. chi = lambda h/G with lambda = v_par/v, so chi = lambda for h = G.
     ! chi is imported from the axisymmetric NEO-2 solution (thin orbit, local).
     ! The canonical weight source -{f0, H1}/f0 already contains G; the missing
@@ -101,10 +101,10 @@ program gen_deltaf_kernels
     !   dw/dt|_fax = -delta(d lambda/dt) d(h/f0)/d lambda
     !              = (d ln f0/dp_phi) m v**2 (h_phi/R)**2 (1-lambda**2)/2
     !                * d chi/d lambda * (d dB/dphi)/B,
-    ! with eta_hat = (1-lambda**2) Bmax/B (= 1 at the trapped-passing
-    ! boundary), d chi/d lambda = -2 lambda (Bmax/B) D, D = d chi/d eta_hat
-    ! [F2]. This is the mirror term of Kernbichler Eq. (28) on h
-    ! (-sigma eta d/d eta, NEO-2 f0_ttmp). Check [F3]: for h = G (chi = lambda)
+    ! with d chi/d lambda at fixed position from a table [F2] (finite at the
+    ! turning point lambda = 0, unlike d chi/d eta). This is the mirror term of
+    ! Kernbichler Eq. (28) on h, -sigma eta d/d eta = (1-lambda**2)/(2|lambda|)
+    ! d/d lambda (NEO-2 f0_ttmp). Check [F3]: for h = G (chi = lambda)
     ! the kernel returns (d ln f0/dp_phi) mu (h_phi/R)**2 d(dB)/dphi, the mu
     ! part of the canonical source (d ln f0/dp_phi) dH1/dphi: the canonical
     ! drive is the radial drift on f_M plus exactly this mirror term on G.
@@ -268,7 +268,7 @@ program gen_deltaf_kernels
     bmin = sym(arena, "bmin")
     bmax = sym(arena, "bmax")
     branch = sym(arena, "branch")
-    dchi = sym(arena, "dchi_deta")
+    dchi = sym(arena, "dchi_dlambda")
     h_phi = sym(arena, "h_phi")
     r_maj = sym(arena, "r_major")
     kappa_f = sym(arena, "dlnf0_dpphi")
@@ -335,9 +335,9 @@ contains
 
     !> Coordinates and weight source of the collisional background drive.
     subroutine emit_fax()
-        type(expr_t) :: v, lam, eta_hat, mu_lam, gpar, lam_dot, chi_f, hf0, src
+        type(expr_t) :: v, lam, mu_lam, gpar, lam_dot, chi_f, hf0, src
         type(expr_t) :: speed, lam_s, src_g
-        type(expr_t) :: roots(3)
+        type(expr_t) :: roots(2)
 
         ! Symbols of the (x, v, lambda) chart at fixed position.
         v = sym(arena, "v")
@@ -350,45 +350,39 @@ contains
             "F1 dlambda/dt = -(v (1-lambda**2)/2) b.grad ln B", &
             lam_dot + v*(1 - lam**2)/2*gpar/bmod)
 
-        ! [F2] chain rule to eta_hat.
-        eta_hat = (1 - lam**2)*bmax/bmod
-        chi_f = func("chi", [eta_hat])
-        call check_identity(suite, symeng, &
-            "F2 (1-lambda**2)/2 dchi/dlambda = -lambda eta_hat dchi/deta_hat", &
-            (1 - lam**2)/2*diff(chi_f, lam) &
-            + lam*eta_hat*partial_derivative(chi_f, 1))
-
         ! Source -delta(lambda') d(h/f0)/dlambda with
         ! delta(lambda') = -(v (1-lambda**2)/2) b.grad(dB/B),
         ! b.grad(dB/B) = (h_phi/R**2) (d dB/dphi)/B for an m = 0 harmonic.
+        chi_f = func("chi", [lam])
         hf0 = kappa_f*mass*v*h_phi*chi_f
         src = (v*(1 - lam**2)/2)*(h_phi/r_maj**2)*(db1_dphi/bmod)*diff(hf0, lam)
+        ! [F2] the table derivative is the lambda derivative of chi.
+        call check_identity(suite, native, "F2 d(h/f0)/dlambda = kappa m v h_phi chi'", &
+            diff(hf0, lam) - kappa_f*mass*v*h_phi*partial_derivative(chi_f, 1))
         src = subs_many(src, [partial_derivative(chi_f, 1)], [dchi])
         ! In the caller's variables: v**2 = vpar**2 + 2 mu B/m, lambda = vpar/v.
         speed = sqrt(vpar**2 + 2*mu*bmod/mass)
         lam_s = vpar/speed
         src = subs_many(subs_many(src, [lam], [lam_s]), [v], [speed])
 
-        ! [F3] h = G: chi = lambda = sigma sqrt(1 - eta_hat B/Bmax), so
-        ! d chi/d eta_hat = -B/(2 Bmax lambda); the source is the mu part of
-        ! the canonical drive with b^phi h_phi = (h_phi/R)**2.
-        src_g = subs_many(src, [dchi], [-bmod/(2*bmax*lam_s)])
+        ! [F3] h = G: chi = lambda, d chi/d lambda = 1; the source is the mu part
+        ! of the canonical drive with b^phi h_phi = (h_phi/R)**2.
+        src_g = subs_many(src, [dchi], [num(arena, 1)])
         call check_identity(suite, symeng, &
             "F3 chi = lambda gives (dlnf0/dp_phi) mu (h_phi/R)**2 d dB/dphi", &
             src_g - kappa_f*mu*(h_phi/r_maj)**2*db1_dphi)
 
         roots(1) = lam_s
-        roots(2) = (1 - lam_s**2)*bmax/bmod
-        roots(3) = branch*acos(1 - 2*(bmod - bmin)/(bmax - bmin))
+        roots(2) = branch*acos(1 - 2*(bmod - bmin)/(bmax - bmin))
         call emit_kernel_file("deltaf_fax_coordinates_kernel", &
             "evaluate_deltaf_fax_coordinates", &
             [character(len=16) :: "mass", "mu", "vpar", "bmod", "bmin", "bmax", &
             "branch"], simplified_all(roots), &
-            [character(len=16) :: "lambda", "eta_hat", "vartheta"])
+            [character(len=16) :: "lambda", "vartheta"])
         call emit_kernel_file("deltaf_fax_weight_kernel", &
             "evaluate_deltaf_fax_weight", &
-            [character(len=16) :: "mass", "mu", "vpar", "bmod", "bmax", "h_phi", &
-            "r_major", "dlnf0_dpphi", "db1_dphi", "dchi_deta"], &
+            [character(len=16) :: "mu", "h_phi", "r_major", "dlnf0_dpphi", &
+            "db1_dphi", "dchi_dlambda"], &
             [simplified(src)], [character(len=16) :: "dw_dt_fax"])
     end subroutine emit_fax
 

@@ -20,21 +20,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_canonical_ntv_lorentz as base  # noqa: E402
 
-N_THETA, N_ETA = 7, 5
+N_THETA, N_LAMBDA = 7, 5
 
 
 def write_table(path, value):
     import math
     vts = [-math.pi + 2.0 * math.pi * j / (N_THETA - 1) for j in range(N_THETA)]
-    etas = [0.0, 0.5, 1.0, 1.2, 2.0]
-    rows = [" ".join(f"{value * (1.0 + 0.1 * j):.16e}" for _ in etas)
+    lams = [-1.0, -0.5, 0.0, 0.5, 1.0]
+    rows = [" ".join(f"{value * (1.0 + 0.1 * j + 0.2 * l):.16e}" for l in lams)
             for j in range(N_THETA)]
-    neg = [" ".join(f"{-value * (1.0 + 0.1 * j):.16e}" for _ in etas)
-           for j in range(N_THETA)]
-    path.write_text("# test table\n" + f"{N_THETA} {N_ETA}\n"
+    path.write_text("# test table\n" + f"{N_THETA} {N_LAMBDA}\n"
                     + " ".join(f"{v:.16e}" for v in vts) + "\n"
-                    + " ".join(f"{e:.16e}" for e in etas) + "\n"
-                    + "\n".join(rows + neg) + "\n")
+                    + " ".join(f"{x:.16e}" for x in lams) + "\n"
+                    + "\n".join(rows) + "\n")
 
 
 def case(name, n_particles, m_pol=0, table=None):

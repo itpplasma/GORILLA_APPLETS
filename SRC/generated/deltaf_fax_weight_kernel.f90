@@ -9,16 +9,14 @@ module deltaf_fax_weight_kernel
     public :: evaluate_deltaf_fax_weight
 contains
 
-    pure subroutine evaluate_deltaf_fax_weight(mass, mu, vpar, bmod, bmax, h_phi, r_major, dlnf0_dpphi, &
-            db1_dphi, dchi_deta, dw_dt_fax)
+    pure subroutine evaluate_deltaf_fax_weight(mu, h_phi, r_major, dlnf0_dpphi, db1_dphi, dchi_dlambda, &
+            dw_dt_fax)
         use, intrinsic :: iso_fortran_env, only: dp => real64
         implicit none
-        real(dp), intent(in) :: mass, mu, vpar, bmod, bmax, h_phi, r_major, dlnf0_dpphi, db1_dphi, &
-            dchi_deta
+        real(dp), intent(in) :: mu, h_phi, r_major, dlnf0_dpphi, db1_dphi, dchi_dlambda
         real(dp), intent(out) :: dw_dt_fax
 
-        dw_dt_fax = -bmax*db1_dphi*dchi_deta*dlnf0_dpphi*mu*vpar*sqrt(mass)*h_phi**2*2/(bmod*sqrt(bmod* &
-            mu*2 + mass*vpar**2)*r_major**2)
+        dw_dt_fax = db1_dphi*dchi_dlambda*dlnf0_dpphi*mu*h_phi**2/r_major**2
 
     end subroutine evaluate_deltaf_fax_weight
 

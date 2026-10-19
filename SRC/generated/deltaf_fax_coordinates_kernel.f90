@@ -10,17 +10,15 @@ module deltaf_fax_coordinates_kernel
 contains
 
     pure subroutine evaluate_deltaf_fax_coordinates(mass, mu, vpar, bmod, bmin, bmax, branch, lambda, &
-            eta_hat, vartheta)
+            vartheta)
         use, intrinsic :: iso_fortran_env, only: dp => real64
         implicit none
         real(dp), intent(in) :: mass, mu, vpar, bmod, bmin, bmax, branch
-        real(dp), intent(out) :: lambda, eta_hat, vartheta
-        real(dp) :: t1, t2
+        real(dp), intent(out) :: lambda, vartheta
+        real(dp) :: t1
 
-        t1 = vpar**2
-        t2 = -bmin
-        lambda = vpar/sqrt(t1 + bmod*mu*2/mass)
-        eta_hat = bmax*mu*2/(bmod*mu*2 + mass*t1)
+        t1 = -bmin
+        lambda = vpar/sqrt(vpar**2 + bmod*mu*2/mass)
         vartheta = branch*acos(-(bmod - bmin)*2/(bmax - bmin) + 1)
 
     end subroutine evaluate_deltaf_fax_coordinates

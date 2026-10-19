@@ -132,8 +132,7 @@ and `h` is axisymmetric, so only the perturbed mirror force acts on it:
 
     d lambda/dt = -(v (1 - lambda^2)/2) b.grad ln B,
     dw/dt += -delta(d lambda/dt) d(h/f0)/d lambda
-           = (d ln f0/dp_phi) m v^2 (h_phi/R)^2 (1 - lambda^2)/2
-             * (d chi/d lambda) (d dB/dphi)/B,
+           = (d ln f0/dp_phi) mu (h_phi/R)^2 (d chi/d lambda) dB1/dphi,
 
 with `h/f0 = (d ln f0/dp_phi) m v h_phi chi`, so `chi = lambda h/G` and
 `chi = lambda` for `h = G`. For an m = 0 harmonic `b.grad = b^phi d/dphi` and
@@ -141,31 +140,39 @@ with `h/f0 = (d ln f0/dp_phi) m v h_phi chi`, so `chi = lambda h/G` and
 acting on `h` is `O(rho*)` smaller and is dropped, as in NEO-2. The kernels
 `deltaf_fax_coordinates_kernel` and `deltaf_fax_weight_kernel` are generated
 (`gen/deltaf_kernels`, identities F1-F3). F3 checks the normalisation and sign
-against the existing source: for `chi = lambda` the kernel returns
-`(d ln f0/dp_phi) mu (h_phi/R)^2 dB1/dphi`. This is the `mu` part of the
-canonical source, i.e. the mirror force on `G`. The remaining part,
-`m v_par^2/B dB1/dphi`, is the perturbed radial drift on `f_M`.
+against the existing source: for `chi = lambda` (`d chi/d lambda = 1`) the
+kernel returns `(d ln f0/dp_phi) mu (h_phi/R)^2 dB1/dphi`. This is the `mu`
+part of the canonical source, i.e. the mirror force on `G`. The remaining
+part, `m v_par^2/B dB1/dphi`, is the perturbed radial drift on `f_M`.
 
-The table holds `D = d chi/d eta_hat` on a grid of
+The table holds `d chi/d lambda` on a grid of
 - `vartheta = branch arccos(1 - 2 (B - Bmin)/(Bmax - Bmin))`, where `branch`
   is the sign of `dB` along `b`, i.e. along the motion of `lambda > 0`, and
-- `eta_hat = (1 - lambda^2) Bmax/B`, equal to 1 on the trapped-passing
-  boundary,
+- the signed pitch `lambda = v_par/v` in `[-1, 1]`.
 
-for `sigma = sign(lambda) = +-1`. These labels do not depend on the poloidal
-angle or orientation convention of the code that solved for `h`. `Bmin` and
-`Bmax` are those of the circular surface through the marker (outboard and
-inboard midplane of the analytic field). This is local thin-orbit use of a
-single-surface table. Format: `#` header lines, `n_theta n_eta`, the
-`vartheta` grid (increasing, spanning `[-pi, pi]`), the `eta_hat` grid
-(increasing), then `D` for `sigma = +1` and for `sigma = -1`, each `n_theta`
-rows of `n_eta` values. Lookup is bilinear and clamped to the table.
+At fixed position `chi` is one function of the signed `lambda`, continuous
+through the turning point `lambda = 0`, so `d chi/d lambda` stays finite there
+(`d chi/d eta` grows as `1/lambda`). These labels do not depend on the
+poloidal angle or orientation convention of the code that solved for `h`.
+`Bmin` and `Bmax` are those of the circular surface through the marker
+(outboard and inboard midplane of the analytic field). This is local
+thin-orbit use of a single-surface table. Format: `#` header lines,
+`n_theta n_lambda`, the `vartheta` grid (increasing, spanning `[-pi, pi]`),
+the `lambda` grid (increasing, spanning `[-1, 1]`), then `n_theta` rows of
+`n_lambda` values. Lookup is bilinear and clamped to the table.
 
 The bench script `ntv_circular/fax_background.py` builds the table from the
 NEO-2-QL axisymmetric solution `g_k0` (drive k = 1, band integrals over eta,
 dumped by a diagnostic patch of `ripple_solver_ArnoldiO2`). It uses
 `h = g_k0 - G` with `G = c lambda/bhat` and `c = -scalefac_kG bcovar_phi_hat`.
-For `nu* = 1e-6` the trapped `chi` is below 0.007, which checks this `c`. In
+For `nu* = 1e-6` the trapped `chi` is below 0.007, which checks this `c`. Band means of `chi` are placed at the band means of `|lambda|`
+and differentiated per field-line step. Averaged over the NEO-2 eta bands, the
+resulting mirror source reproduces NEO-2's own `f0_ttmp` computed from `h`
+(a diagnostic NEO-2 run with only this term, `hmirror`): the projection is 0.99 and the rms difference
+17 %, mostly in the last band before each turning point. A first table in
+`(vartheta, eta)` had a 1/lambda derivative at the turning points. It
+reproduced only 0.71-0.80 of that source and in delta-f gave 0.80 of the
+NEO-2 `hmirror` reduction. In
 NEO-2 the `sigma = +1` solution enters at `ibeg`, so it moves towards
 `+phi_mfl`, and `branch = sign(d B/d phi_mfl)`. The table is independent of
 the orbit-width scaling `F` at fixed `nu*` (identical for F = 16 and 64).
