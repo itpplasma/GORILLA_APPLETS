@@ -5,10 +5,12 @@ CTest driver: mono-energetic transport on a Boozer chartmap (grid_kind = 6).
 Writes a manufactured chartmap with constant iota = 0.4 and two field
 periods, runs i_option = 1 (fluxtube volume) and i_option = 2 (single nu*),
 and checks that transport_metadata.dat carries the chartmap iota and the
-standard nu* normalization. D11 itself is not compared.
+standard nu* normalization, then reruns i_option = 2 with v_E /= 0 and
+checks eps_Phi against the v_E normalization. D11 itself is not compared.
 
 Paths are passed in by TESTS/CMakeLists.txt via environment variables.
 """
+import math
 import os
 import shutil
 import subprocess
@@ -127,4 +129,17 @@ if abs(reconstructed_nu_star - nu_star) > 1.0e-12 * nu_star:
 if int(meta[10]) != FIXTURE_NFP:
     sys.exit(f"FAIL: metadata field periods {meta[10]} differ from chartmap {FIXTURE_NFP}")
 
-print(f"PASS: chartmap iota={aiota:g} q={q_saf:g} nu*={nu_star:g}")
+# Nonzero E_r: eps_Phi = v_E*v*B_00/(c*torflux*ds/dr) with r = sqrt(s*torflux/(pi*B_00))
+mono["transpcoefnml"]["v_e"] = 1.0e-2
+mono.write(str(WORK_DIR / "mono_energetic_transp_coef.inp"), force=True)
+out = subprocess.run([str(BINARY)], cwd=WORK_DIR, check=True,
+                     capture_output=True, text=True).stdout
+printed = {w[0]: float(w[1]) for w in map(str.split, out.splitlines())
+           if len(w) == 2 and w[0] in ("vmod", "eps_Phi")}
+s0, bmod00, torflux, clight = 0.5, 1.0e3, 2.0e8, 2.9979e10
+ds_dr = 2.0 * math.sqrt(s0 * math.pi * bmod00 / torflux)
+expected = 1.0e-2 * printed["vmod"] * bmod00 / (clight * torflux * ds_dr)
+if abs(printed["eps_Phi"] / expected - 1.0) > 1.0e-10:
+    sys.exit(f"FAIL: eps_Phi {printed['eps_Phi']!r}, expected {expected!r}")
+
+print(f"PASS: chartmap iota={aiota:g} q={q_saf:g} nu*={nu_star:g} eps_Phi={expected:g}")
