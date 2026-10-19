@@ -24,7 +24,7 @@ module profile_data_mod
     private
     public :: load_profiles, eval_profiles, cleanup_profiles
     public :: eval_q, get_psi_tor_edge
-    public :: eval_s_from_psi_pol, eval_ds_dreff
+    public :: eval_s_from_psi_pol, eval_ds_dreff, eval_s_and_ds_dpsi_from_psi_pol
     public :: profile_values_t
     public :: load_kim_nu, eval_kim_nu, kim_nu_loaded
     public :: load_da_profile, eval_da_profile, da_profile_loaded
@@ -587,6 +587,29 @@ real(dp) function eval_s_from_psi_pol(psi_pol_val) result(s_val)
     end if
     s_val = max(0.0_dp, min(1.0_dp, s_val))
 end function eval_s_from_psi_pol
+
+! ============================================================
+! s(psi_pol) as eval_s_from_psi_pol and its derivative ds/dpsi_pol;
+! the derivative is zero where s is clamped (outside the table or [0, 1]).
+! ============================================================
+subroutine eval_s_and_ds_dpsi_from_psi_pol(psi_pol_val, s_val, ds_dpsi)
+    real(dp), intent(in)  :: psi_pol_val
+    real(dp), intent(out) :: s_val, ds_dpsi
+
+    s_val = 0.0_dp
+    ds_dpsi = 0.0_dp
+    if (ns_psipol < 2 .or. .not. profiles_loaded) return
+    if (psi_pol_val <= psi_pol_sorted(1)) then
+        s_val = s_of_psi_pol_spl(1)
+    else if (psi_pol_val >= psi_pol_sorted(ns_psipol)) then
+        s_val = s_of_psi_pol_spl(ns_psipol)
+    else
+        call splint_with_deriv(ns_psipol, psi_pol_sorted, s_of_psi_pol_spl, &
+                               s_of_psi_pol_dd, psi_pol_val, s_val, ds_dpsi)
+    end if
+    if (s_val < 0.0_dp .or. s_val > 1.0_dp) ds_dpsi = 0.0_dp
+    s_val = max(0.0_dp, min(1.0_dp, s_val))
+end subroutine eval_s_and_ds_dpsi_from_psi_pol
 
 ! ============================================================
 ! PRIVATE: Read equil_r_q_psi.dat mapping file
