@@ -43,7 +43,9 @@ subroutine calc_rmp_response_currents
         n_respawn_max, n_prof_bins, da_profile_file, boole_mh_collisions, &
         boole_local_energy_sampling, rescale_energies_to_local_temperature
     use profile_data_mod, only: load_profiles, load_kim_nu
-    use canonical_ntv_mod, only: boole_canonical_ntv, canonical_ntv_init, ntv_lorentz_nu
+    use canonical_ntv_mod, only: boole_canonical_ntv, canonical_ntv_init, ntv_lorentz_nu, &
+                                 ntv_mesh_phi0, ntv_profile_phi0
+    use flux_mesh_potential_mod, only: set_flux_mesh_potential
     use chartmap_ntv_mod, only: chartmap_mesh_setup
     use tetra_grid_settings_mod, only: netcdf_filename
     use perturbation_field_mod, only: init_constant_perturbation, load_perturbation_field, &
@@ -118,6 +120,13 @@ subroutine calc_rmp_response_currents
         if (in%boole_collisions .and. .not. boole_mh_collisions &
             .and. .not. ntv_lorentz_nu > 0.0_dp) &
             error stop 'canonical NTV requires MH collisions (f0 invariance)'
+        ! Mesh potential = profile potential Phi0(s) of f0 (orbits and f0
+        ! see the same E_r). Only the vertex potential changes.
+        if (ntv_mesh_phi0) then
+            if (grid_kind /= 6) error stop &
+                'canonical NTV: ntv_mesh_phi0 needs the chartmap mesh (grid_kind 6)'
+            call set_flux_mesh_potential(ntv_profile_phi0, ipert)
+        end if
         call canonical_ntv_init()
     end if
 

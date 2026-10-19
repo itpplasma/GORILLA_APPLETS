@@ -41,7 +41,8 @@ module canonical_ntv_mod
         ntv_phimn, ntv_profile_file, ntv_theta_kind, ntv_output_file, &
         ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
         ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, ntv_lorentz_mh, &
-        ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn
+        ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn, ntv_mesh_phi0, &
+        ntv_profile_phi0
     public :: canonical_ntv_nml_read, canonical_ntv_init, canonical_ntv_allocate, &
         canonical_ntv_birth, canonical_ntv_push, canonical_ntv_collision, &
         canonical_ntv_end, canonical_ntv_write, ntv_harmonic_dphi, &
@@ -101,12 +102,18 @@ module canonical_ntv_mod
     !> after the burn-in ntv_w_reset_burn (file canonical_ntv_reset.dat).
     real(dp) :: ntv_w_reset_dt = 0.0_dp
     real(dp) :: ntv_w_reset_burn = 0.0_dp
+    !> Flux-coordinate meshes (grid_kind 6): set the mesh potential on the
+    !> vertices to the profile potential Phi0(s) of f0 (Er.dat of profile_dir),
+    !> so the ExB drift of the orbits and f0(p_phi, H0) use the same Phi0.
+    !> .false.: the mesh keeps eps_Phi*A_theta (zero for eps_Phi = 0).
+    logical  :: ntv_mesh_phi0 = .false.
 
     namelist /canonical_ntv_nml/ boole_canonical_ntv, ntv_m_pol, ntv_n_tor, &
         ntv_amplitude, ntv_bmn, ntv_phimn, ntv_profile_file, ntv_theta_kind, &
         ntv_output_file, ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
         ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, &
-        ntv_lorentz_mh, ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn
+        ntv_lorentz_mh, ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn, &
+        ntv_mesh_phi0
 
     !> Loss kinds (column loss_kind): grid exit (last mesh surface or inner
     !> boundary), wall contour, s_outer_cut.
@@ -150,6 +157,18 @@ module canonical_ntv_mod
     end type ntv_point_t
 
 contains
+
+!> Profile potential Phi0(s) [statV] of f0 (profile_data_mod, from Er.dat):
+!> the radial potential set on the mesh vertices with ntv_mesh_phi0.
+function ntv_profile_phi0(s) result(phi)
+    use profile_data_mod, only: eval_profiles, profile_values_t
+    real(dp), intent(in) :: s
+    real(dp) :: phi
+    type(profile_values_t) :: pv
+
+    call eval_profiles(s, pv)
+    phi = pv%Phi0
+end function ntv_profile_phi0
 
 !> Reads canonical_ntv_nml from unit file fname; a missing group keeps defaults.
 subroutine canonical_ntv_nml_read(fname)
