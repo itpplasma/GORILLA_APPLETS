@@ -408,6 +408,8 @@ subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num, second
     !https://stackoverflow.com/questions/51893720/correctly-setting-random-seeds-for-repeatability, also check
     !https://stats.stackexchange.com/questions/354373/what-exactly-is-a-seed-in-a-random-number-generator)
 
+    use utils_data_pre_and_post_processing_mod, only: master_seed
+
     integer, intent(in) :: thread_num
     integer, intent(in), optional :: second_factor
     real(dp) :: randnum
@@ -422,9 +424,13 @@ subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num, second
         else
             state(i) = (state(i)+thread_num)*i
         endif
+        state(i) = state(i) + thread_num
+        ! Mix in seed.inp so that the thread streams follow the run seed
+        if (allocated(master_seed)) &
+            state(i) = ieor(state(i), master_seed(modulo(i - 1, size(master_seed)) + 1))
     enddo
 
-    call random_seed(put=state+thread_num)
+    call random_seed(put=state)
 
     do i = 1,n
         call random_number(randnum)
