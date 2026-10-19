@@ -9,7 +9,8 @@ module utils_rmp_response_currents_mod
     use rmp_profile_moments_mod, only: deposit_profile_moments
     use rmp_volume_loading_mod, only: volume_candidate, analytic_window_volume
     use rmp_maxwellian_loading_mod, only: maxwellian_from_uniforms
-    use canonical_ntv_mod, only: boole_canonical_ntv, species_temperature_eV
+    use canonical_ntv_mod, only: boole_canonical_ntv, species_temperature_eV, ntv_h_phi, &
+        ntv_marker_rng, canonical_ntv_mark_loss, loss_wall, loss_outer_cut
 
     implicit none
 
@@ -740,7 +741,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP&        prof_acc, prof_count, boole_reflect_window, rho_win, prof_t_burn, &
     !$OMP&        max_rel_dH, max_abs_w, sum_w2, n_w2, max_dH_T, n_mh_prop, n_mh_rej, &
     !$OMP&        boole_nonlinear_weight, boole_mh_collisions, boole_physical_profile_time, &
-    !$OMP&        boole_gc_phase_measure, boole_canonical_ntv) &
+    !$OMP&        boole_gc_phase_measure, boole_canonical_ntv, ntv_marker_rng) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
     !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local, n_da_sub, i_da_sub) &
     !$OMP& PRIVATE(prof_local, prof_marker, ibatch, vpar_coll) &
@@ -775,6 +776,11 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
 
         do l = 1, iantithetic
             n = (p-1)*iantithetic + l
+            ! Canonical NTV: one random stream per marker (common random numbers
+            ! of the +-sigma/0 runs, independent of losses of earlier markers).
+            if (boole_canonical_ntv .and. ntv_marker_rng .and. &
+                .not. in%boole_precalc_collisions) &
+                call initialise_seed_for_random_numbers_for_each_thread(n, 7)
 
             !$omp atomic update
             kpart = kpart + 1
@@ -1026,9 +1032,10 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly
-    use tetra_physics_mod, only: tetra_physics
+    use tetra_physics_mod, only: tetra_physics, coord_system
     use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type, &
         boole_time_hamiltonian
+    use wall_contour_mod, only: wall_active
     use canonical_ntv_mod, only: ntv_point_t, canonical_ntv_push
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
@@ -1159,8 +1166,19 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         ! x(2) by one period (iper_phi); every evaluation in ind_tetr_save below
         ! (weights, deposit phase, energy check) must use the unshifted position.
         x_cell = x
-        if (iper_phi /= 0) x_cell(2) = x(2) &
-            + real(iper_phi, dp) * 2.0_dp * pi / real(n_field_periods, dp)
+        if (coord_system == 2) then
+            ! (s, theta, phi): the handover may shift phi = x(3) by a field period
+            ! and theta = x(2) by 2 pi (iper_theta is not returned); take the
+            ! periodic image next to the start of the push.
+            x_cell(3) = x(3) - 2.0_dp * pi / real(n_field_periods, dp) &
+                * anint((x(3) - x_pre_push(3)) * real(n_field_periods, dp) &
+                        / (2.0_dp * pi))
+            x_cell(2) = x(2) - 2.0_dp * pi * anint((x(2) - x_pre_push(2)) &
+                                                   / (2.0_dp * pi))
+        else if (iper_phi /= 0) then
+            x_cell(2) = x(2) &
+                + real(iper_phi, dp) * 2.0_dp * pi / real(n_field_periods, dp)
+        end if
 
         t%remain = t%remain - t_pass
 
@@ -1251,6 +1269,17 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         ! and phase-space-volume normalisation are untouched.
         if (ind_tetr /= -1 .and. s_outer_cut < 1.0_dp) then
             if (eval_s_local(ind_tetr, x) > s_outer_cut) then
+                if (boole_canonical_ntv) call canonical_ntv_mark_loss(n, loss_outer_cut)
+                ind_tetr = -1
+                exit
+            end if
+        end if
+
+        ! Optional wall / limiter contour (loss_wall_file): loss at the first
+        ! push that ends outside the poloidal polygon.
+        if (ind_tetr /= -1 .and. wall_active()) then
+            if (.not. inside_loss_wall(x)) then
+                if (boole_canonical_ntv) call canonical_ntv_mark_loss(n, loss_wall)
                 ind_tetr = -1
                 exit
             end if
@@ -1811,13 +1840,23 @@ real(dp) function loading_temperature_eV(pv, species) result(T)
     T = species_temperature_eV(pv%Te, pv%Ti, start%particle_charge(species))
 end function loading_temperature_eV
 
-! Unperturbed poloidal flux psi0 (the A_phi of f0) at x in cell ind_tetr.
+! Unperturbed poloidal flux psi0 (the A_phi of f0) at x in cell ind_tetr: the
+! linear interpolant of psi0_vert. On the chartmap (coord_system 2) psi0_vert
+! is the mesh A_phi itself (A axisymmetric in every run of a set), so the
+! interpolant is the cell's A_phi in the cell's periodic frame; barycentric
+! coordinates from verts_rphiz serve the cylindrical grids.
 real(dp) function psi0_at(ind_tetr, x) result(psi0)
     use tetra_grid_mod, only: tetra_grid
+    use tetra_physics_mod, only: tetra_physics, coord_system
     integer,  intent(in) :: ind_tetr
     real(dp), intent(in) :: x(3)
     real(dp) :: lam(4)
     logical  :: ok
+    if (coord_system == 2) then
+        psi0 = tetra_physics(ind_tetr)%Aphi1 &
+            + sum(tetra_physics(ind_tetr)%gAphi * (x - tetra_physics(ind_tetr)%x1))
+        return
+    end if
     call barycentric_coords(ind_tetr, x, lam, ok)
     psi0 = sum(lam * psi0_vert(tetra_grid(ind_tetr)%ind_knot(1:4)))
 end function psi0_at
@@ -1864,7 +1903,7 @@ subroutine ntv_record_collision(n, species, ind_tetr, x, vpar_old, vpar_new)
     real(dp) :: z(3), h_phi
     if (ind_tetr == -1) return
     z = x - tetra_physics(ind_tetr)%x1
-    h_phi = tetra_physics(ind_tetr)%h2_1 + sum(tetra_physics(ind_tetr)%gh2 * z)
+    h_phi = ntv_h_phi(ind_tetr, z)
     call canonical_ntv_collision(n, species, h_phi, vpar_old, vpar_new)
 end subroutine ntv_record_collision
 
@@ -1877,6 +1916,10 @@ subroutine init_nonlinear_weight()
     integer  :: iv
     real(dp) :: rho
 
+    if (grid_kind == 6 .and. boole_canonical_ntv) then
+        call init_psi0_vert_chartmap()
+        return
+    end if
     if (grid_kind /= 5) then
         print *, 'ERROR: boole_nonlinear_weight requires grid_kind = 5'
         stop
@@ -1890,19 +1933,137 @@ subroutine init_nonlinear_weight()
 
 end subroutine init_nonlinear_weight
 
+! Boozer chartmap (grid_kind 6, x = (s, theta, phi)): psi0 = A_phi(s) of the
+! chartmap at the vertices, the same function as the mesh A_phi.
+subroutine init_psi0_vert_chartmap()
+    use tetra_grid_mod, only: verts_sthetaphi, nvert
+    use boozer_chartmap_mod, only: evaluate_boozer_chartmap
+    integer  :: iv
+    real(dp) :: d(7), aphi
+
+    if (allocated(psi0_vert)) deallocate(psi0_vert)
+    allocate(psi0_vert(nvert))
+    do iv = 1, nvert
+        call evaluate_boozer_chartmap(verts_sthetaphi(1, iv), verts_sthetaphi(2, iv), &
+            verts_sthetaphi(3, iv), d(1), d(2), aphi, d(3), d(4), d(5), d(6), d(7))
+        psi0_vert(iv) = aphi
+    end do
+end subroutine init_psi0_vert_chartmap
+
+! Poloidal position (R, Z) of x inside the loss-wall polygon.
+logical function inside_loss_wall(x) result(inside)
+    use tetra_physics_mod, only: coord_system
+    use tetra_grid_settings_mod, only: grid_kind
+    use boozer_chartmap_mod, only: evaluate_chartmap_geometry
+    use wall_contour_mod, only: wall_contains
+    real(dp), intent(in) :: x(3)
+    real(dp) :: r, phi_cyl, z, dr_ds, dz_ds
+
+    if (coord_system == 1) then
+        inside = wall_contains(x(1), x(3))
+    else if (grid_kind == 6) then
+        call evaluate_chartmap_geometry(x(1), x(2), x(3), r, phi_cyl, z, dr_ds, dz_ds)
+        inside = wall_contains(r, z)
+    else
+        error stop 'loss wall: needs cylindrical coordinates or a chartmap grid'
+    end if
+end function inside_loss_wall
+
+! ====================================================================
+! Full-f on a perturbed chartmap mesh: the markers start from the same
+! physical distribution f0 of the unperturbed invariants in every run of a
+! +-sigma/0 set (the delta-f initial condition). Positions are loaded with
+! the axisymmetric Jacobian J0 (B0 = zeta average of the mesh |B|), the
+! physical volume element is J = J0 (B0/B)^2, and the birth factor of the
+! mesh f0 is corrected by
+!   ln f0(psi0 + (cm/e) vpar B_phi/B0, K0(B0)) - ln f0(.., B/..) + 2 ln(B0/B)
+! at fixed vpar and mu = m vperp^2/(2B). Zero for an axisymmetric mesh.
+! ====================================================================
+real(dp) function chartmap_birth_log_factor(x, vpar, vperp, species) result(dlnp)
+    use chartmap_ntv_mod, only: chartmap_point
+    use gorilla_applets_types_mod, only: start
+    real(dp), intent(in) :: x(3), vpar, vperp
+    integer, intent(in) :: species
+    real(dp) :: b, b0, j0, bphi, aphi, eperp
+
+    call chartmap_point(x(1), x(2), x(3), b, b0, j0, bphi, aphi)
+    dlnp = 0.0_dp
+    if (b == b0) return
+    eperp = 0.5_dp * start%particle_mass(species) * vperp**2
+    dlnp = ln_f0_point(aphi, bphi / b0, vpar, eperp * b0 / b, species) &
+         - ln_f0_point(aphi, bphi / b, vpar, eperp, species) + 2.0_dp * log(b0 / b)
+end function chartmap_birth_log_factor
+
+! ln F0 of ln_f0_and_H at given psi0, covariant h_phi, vpar and mu B.
+real(dp) function ln_f0_point(psi0, h_phi, vpar, mub, species) result(lnf0)
+    use gorilla_applets_types_mod, only: start
+    use profile_data_mod, only: eval_profiles, profile_values_t, eval_s_from_psi_pol
+    use constants, only: ev2erg
+    real(dp), intent(in) :: psi0, h_phi, vpar, mub
+    integer, intent(in) :: species
+    real(dp) :: s0, s_star, K0, T_erg
+    type(profile_values_t) :: pv0, pvs
+
+    s0 = max(0.0_dp, min(1.0_dp, eval_s_from_psi_pol(psi0)))
+    s_star = max(0.0_dp, min(1.0_dp, eval_s_from_psi_pol(psi0 &
+        + start%cm_over_e(species) * vpar * h_phi)))
+    call eval_profiles(s0, pv0)
+    call eval_profiles(s_star, pvs)
+    K0 = 0.5_dp * start%particle_mass(species) * vpar**2 + mub &
+        + start%particle_charge(species) * (pv0%Phi0 - pvs%Phi0)
+    T_erg = loading_temperature_eV(pvs, species) * ev2erg
+    lnf0 = log(pvs%n_e) - 1.5_dp * log(T_erg) - K0 / T_erg
+end function ln_f0_point
+
+! Uniform physical-volume loading in the s window on a chartmap grid
+! (rejection with the axisymmetric Jacobian J0 over one toroidal period).
+subroutine spawn_uniform_volume_chartmap(species)
+    use gorilla_applets_types_mod, only: in, start
+    use tetra_grid_settings_mod, only: n_field_periods, sfc_s_min, sfc_s_max
+    use chartmap_ntv_mod, only: chartmap_point, chartmap_window_volume
+    use find_tetra_mod, only: find_tetra
+    use constants, only: pi
+    integer, intent(in) :: species
+    integer :: n, attempt, ind_tetr, iface
+    real(dp) :: u(4), x(3), volume, j0_max, b, b0, j0, bphi, aphi
+    logical :: placed
+
+    if (s_inner_sample < sfc_s_min) error stop 'Spawn window below mesh domain'
+    if (s_outer_sample > sfc_s_max) error stop 'Spawn window above mesh domain'
+    if (s_outer_sample <= s_inner_sample) error stop 'Empty spawn window'
+    call chartmap_window_volume(s_inner_sample, s_outer_sample, n_field_periods, &
+        volume, j0_max)
+    do n = 1, in%num_particles
+        placed = .false.
+        do attempt = 1, 10000
+            call random_number(u)
+            x(1) = s_inner_sample + u(1) * (s_outer_sample - s_inner_sample)
+            x(2) = 2.0_dp * pi * u(2)
+            x(3) = 2.0_dp * pi * u(3) / real(n_field_periods, dp)
+            call chartmap_point(x(1), x(2), x(3), b, b0, j0, bphi, aphi)
+            if (abs(j0) > j0_max) error stop 'Chartmap loading: J0 above rejection bound'
+            if (u(4) * j0_max > abs(j0)) cycle
+            call find_tetra(x, 0.0_dp, 0.0_dp, ind_tetr, iface)
+            if (ind_tetr == -1) &
+                error stop 'Volume candidate outside mesh; shrink window or refine grid'
+            start%x(:, n, species) = x
+            start%lost(n, species) = .false.
+            placed = .true.
+            exit
+        end do
+        if (.not. placed) error stop 'Uniform-volume rejection budget exhausted'
+    end do
+    print *, 'Markers loaded uniformly in chartmap physical volume (J0)'
+end subroutine spawn_uniform_volume_chartmap
+
 real(dp) function eval_s0_local(ind_tetr, x) result(s0)
 
-    use tetra_grid_mod, only: tetra_grid
     use profile_data_mod, only: eval_s_from_psi_pol
 
     integer,  intent(in) :: ind_tetr
     real(dp), intent(in) :: x(3)
 
-    real(dp) :: lam(4)
-    logical  :: ok
-
-    call barycentric_coords(ind_tetr, x, lam, ok)
-    s0 = eval_s_from_psi_pol(sum(lam * psi0_vert(tetra_grid(ind_tetr)%ind_knot(1:4))))
+    s0 = eval_s_from_psi_pol(psi0_at(ind_tetr, x))
     s0 = max(0.0_dp, min(1.0_dp, s0))
 
 end function eval_s0_local
@@ -1918,7 +2079,6 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_ml
     use tetra_physics_mod, only: tetra_physics
     use gorilla_applets_types_mod, only: start
     use profile_data_mod, only: eval_profiles, profile_values_t, eval_s_from_psi_pol
-    use tetra_grid_mod, only: tetra_grid
     use constants, only: ev2erg
     use gorilla_settings_mod, only: boole_strong_electric_field
 
@@ -1934,9 +2094,8 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_ml
     ! with); T0_erg: T_e(s0)
     real(dp), intent(out), optional :: ln_mload, T0_erg
 
-    real(dp) :: z(3), B, K, Te_erg, Phi, h_phi, psi0, lam(4), s0, s_star, K0
+    real(dp) :: z(3), B, K, Te_erg, Phi, h_phi, psi0, s0, s_star, K0
     real(dp) :: energy_drift, drift_phi, K_random
-    logical  :: ok
     type(profile_values_t) :: pv0, pvs
 
     z = x - tetra_physics(ind_tetr)%x1
@@ -1961,9 +2120,8 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_ml
     ! unperturbed field, h_phi covariant) and K0* = K + q (Phi0(s0) - Phi0(s*))
     ! are both conserved on unperturbed orbits, including magnetic drifts, so
     ! the weight changes only through the perturbation.
-    call barycentric_coords(ind_tetr, x, lam, ok)
-    psi0 = sum(lam * psi0_vert(tetra_grid(ind_tetr)%ind_knot(1:4)))
-    h_phi = tetra_physics(ind_tetr)%h2_1 + sum(tetra_physics(ind_tetr)%gh2 * z)
+    psi0 = psi0_at(ind_tetr, x)
+    h_phi = ntv_h_phi(ind_tetr, z)
     s0 = max(0.0_dp, min(1.0_dp, eval_s_from_psi_pol(psi0)))
     s_star = max(0.0_dp, min(1.0_dp, &
         eval_s_from_psi_pol(psi0 + start%cm_over_e(species) &
@@ -2016,6 +2174,7 @@ subroutine set_birth_factor(n, species, x, vpar, vperp)
 
     use find_tetra_mod, only: find_tetra
     use tetra_physics_mod, only: tetra_physics
+    use tetra_grid_settings_mod, only: grid_kind
 
     integer,  intent(in) :: n, species
     real(dp), intent(in) :: x(3), vpar, vperp
@@ -2033,6 +2192,7 @@ subroutine set_birth_factor(n, species, x, vpar, vperp)
     B = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z)
     perpinv = -0.5_dp * vperp**2 / B
     call ln_f0_and_H(ind_tetr, xx, vpar, perpinv, species, lnf0, H, ln_mload=ln_mload)
+    if (grid_kind == 6) lnf0 = lnf0 + chartmap_birth_log_factor(xx, vpar, vperp, species)
     birth_factor(n, species) = exp(lnf0 - ln_mload)
     if (boole_gc_phase_measure) birth_factor(n, species) = &
         birth_factor(n, species)*phase_measure_ratio(ind_tetr, xx, vpar, species)
@@ -2092,8 +2252,11 @@ subroutine carry_out_collisions_mh(i, n, t, x, vpar, vperp, ind_tetr, iface, spe
         phase_measure_ratio(ind_tetr, x, vpar0, species), &
         phase_measure_ratio(ind_tetr, x, vpar, species))
     n_mh_prop_loc = n_mh_prop_loc + 1.0_dp
+    ! Canonical NTV: draw the acceptance number on every proposal so that the
+    ! collision stream of a marker stays aligned between the +-sigma/0 runs.
+    if (boole_canonical_ntv) call random_number(u)
     if (dlog < 0.0_dp) then
-        call random_number(u)
+        if (.not. boole_canonical_ntv) call random_number(u)
         if (u > exp(dlog)) then
             vpar = vpar0
             vperp = vperp0
@@ -2327,11 +2490,17 @@ real(dp) function compute_spawn_volume() result(V_W)
     use gorilla_applets_types_mod, only: output
     use tetra_grid_mod, only: tetra_grid, verts_sthetaphi, ntetr
     use tetra_grid_settings_mod, only: R0_analytic_circ, a_analytic_circ, &
-        n_field_periods
+        n_field_periods, grid_kind
+    use chartmap_ntv_mod, only: chartmap_window_volume
 
     integer  :: n_prisms, p, knot1
     real(dp) :: s_p
 
+    if (grid_kind == 6 .and. boole_canonical_ntv) then
+        call chartmap_window_volume(s_inner_sample, s_outer_sample, n_field_periods, &
+            V_W, s_p)
+        return
+    end if
     if (canonical_loading() .or. boole_uniform_volume_sampling) then
         V_W = analytic_window_volume(R0_analytic_circ, a_analytic_circ, &
             s_inner_sample, s_outer_sample)/real(n_field_periods, dp)
@@ -2551,6 +2720,12 @@ subroutine spawn_uniform_volume_analytic(species)
     real(dp) :: u(4), x(3), acceptance
     logical :: placed
 
+    if (grid_kind == 6 .and. boole_canonical_ntv) then
+        if (trim(energy_dist_kind) /= 'maxwellian' .or. .not. boole_local_energy_sampling) &
+            error stop 'Canonical loading requires local Maxwellian energy loading'
+        call spawn_uniform_volume_chartmap(species)
+        return
+    end if
     if (grid_kind /= 5) error stop 'Volume loading requires analytic circular grid'
     if (coord_system /= 1) error stop 'Volume loading requires cylindrical coordinates'
     if (canonical_loading()) then

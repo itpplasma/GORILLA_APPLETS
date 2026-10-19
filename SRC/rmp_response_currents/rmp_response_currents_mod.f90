@@ -44,6 +44,8 @@ subroutine calc_rmp_response_currents
         boole_local_energy_sampling, rescale_energies_to_local_temperature
     use profile_data_mod, only: load_profiles, load_kim_nu
     use canonical_ntv_mod, only: boole_canonical_ntv, canonical_ntv_init
+    use chartmap_ntv_mod, only: chartmap_mesh_setup
+    use tetra_grid_settings_mod, only: netcdf_filename
     use perturbation_field_mod, only: init_constant_perturbation, load_perturbation_field, &
                                       init_step_perturbation, load_eperp_field, boole_skip_phase
 
@@ -52,6 +54,11 @@ subroutine calc_rmp_response_currents
     call get_ipert()
     call initialize_gorilla(i_option,ipert)
     call validate_profile_clock()
+    ! Boozer chartmap: the flux table psi_pol = A_phi(s) of the chartmap is the
+    ! equil_mapping_file of the profiles (psi* -> s inverse), as grid_kind 5
+    ! writes its analytic one.
+    if (grid_kind == 6 .and. boole_canonical_ntv) &
+        call chartmap_mesh_setup(trim(netcdf_filename), trim(equil_mapping_file))
 
     call set_moment_specifications
     call initialise_output

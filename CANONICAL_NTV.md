@@ -14,6 +14,10 @@ The RMP applet (`i_option = 15`) has an optional estimator for the toroidal torq
   ntv_profile_file = '' ,           ! optional table: s, b_mn [G], Phi_mn [statV]
   ntv_theta_kind = 1 ,              ! 1 straight-field-line angle, 0 geometric
   ntv_output_file = 'canonical_ntv_markers.dat' ,
+  ntv_chartmap_file = '' ,          ! chartmap whose |B| harmonics give dB1 (grid_kind 6)
+  ntv_m_max = -1 ,                  ! chartmap modes m = -ntv_m_max..ntv_m_max; <0: m = ntv_m_pol
+  loss_wall_file = '' ,             ! optional (R, Z) [cm] wall polygon as loss boundary
+  ntv_marker_rng = .true. ,         ! one random stream per marker (CRN)
 /
 ```
 
@@ -37,9 +41,19 @@ The RMP applet (`i_option = 15`) has an optional estimator for the toroidal torq
   species with no restoring term. Its `p_phi` change is tallied separately.
 - **Time.** Push times are physical when `boole_time_hamiltonian` is set
   (polynomial pusher). Otherwise the tracer time is used.
-- **Restrictions.** Only `grid_kind = 5` is supported. The estimator cannot be
-  combined with nonlinear weights, respawn, the profile deposit or anomalous
-  kicks.
+- **Charts.** `grid_kind = 5` with `coord_system = 1` (analytic circular field,
+  cylindrical coordinates, harmonic in the angle of `ntv_theta_kind`) and
+  `grid_kind = 6` with `coord_system = 2` (Boozer chartmap, `x = (s, theta_B,
+  phi_B)`, harmonic in the Boozer angles); see "Chartmap route".
+- **Restrictions.** The estimator cannot be combined with nonlinear weights,
+  respawn, the profile deposit or anomalous kicks.
+- **Common random numbers.** With `ntv_marker_rng` (default) every marker
+  reseeds its random stream from `seed.inp` and its index, and the MH
+  collision step draws its acceptance number on every proposal. The
+  `+sigma/-sigma/0` runs then share starts and collision streams marker by
+  marker, also when orbits differ (full-f) or earlier markers are lost. The
+  number of kicks still depends on the local collision time step, so the
+  streams of perturbed full-f orbits slowly lose alignment.
 
 ## Output
 
@@ -58,6 +72,9 @@ spawn volume and the trace time. The columns are:
 | `dpphi_coll` | p_phi change by the collision kicks, `m h_phi Delta v_par` |
 | `pphi_end`, `s_end`, `sstar_end`, `t_end` | state at the end of the trace or at the loss |
 | `n_push`, `dlnf0_dpphi_birth` | number of pushes, `d ln f0/dp_phi` at birth |
+| `dh_mesh` | full-f `int (-dH/dphi) dt` with the toroidal derivatives of the mesh `|B|` and `Phi` |
+| `psi_birth`, `psi_end` | `psi0` (the `A_phi` of f0) at birth and at the end or loss |
+| `loss_kind` | 0 confined, 1 grid exit (last mesh surface or inner boundary), 2 wall, 3 `s_outer_cut` |
 
 The delta-f torque in the spawn window is `V/N sum P tq_deltaf / T_trace`.
 
@@ -66,9 +83,10 @@ seed (CRN). For each marker,
 `Delta p_phi = dpphi_orbit + dpphi_coll`, and for a lost marker `pphi_end` is
 the p_phi it carries out. The NTV, delta-B-loss and axisymmetric-loss parts
 are computed outside the code (bench_aug30835 `ntv_circular/ntv_decomposition.py`).
-For this, the mesh must carry the same perturbation as the analytic harmonic.
-In `grid_kind = 5` the mesh field is unperturbed, so full-f runs give only the
-zero-sigma baseline and the drift gate.
+For this, the mesh must carry the perturbation: use a perturbed chartmap
+(`grid_kind = 6`, "Chartmap route"). In `grid_kind = 5` the mesh field is
+unperturbed, so full-f runs give only the zero-sigma baseline and the drift
+gate.
 
 **Mesh drift (unperturbed field, no collisions).** On the piecewise-linear
 mesh, p_phi is not an exact invariant. The canonical label drifts by
@@ -82,3 +100,72 @@ Tests: `canonical_ntv_kernel` checks the generated torque sample against a
 finite-difference dH/dphi at fixed p_phi along an orbit. `canonical_ntv` checks
 the zero-sigma weights and the drift, and that the torque is quadratic and even
 in sigma with CRN.
+
+## Chartmap route (grid_kind 6)
+
+The Boozer chartmap (GORILLA `boozer_chartmap_mod`, libneo `neo2bc2chartmap`,
+or the circular chartmaps of bench_aug30835 `ntv_circular`) has axisymmetric
+`A_theta = torflux s`, `A_phi(s)`, `B_theta(rho)`, `B_phi(rho)` and a 3D `|B|`
+on `(rho, theta_B, zeta_B)` nodes (`SRC/rmp_response_currents/chartmap_ntv_mod.f90`).
+
+- **Flux label.** At start-up the applet writes `equil_mapping_file` from the
+  chartmap nodes (`psi_pol = A_phi(s)`, `psi_tor = torflux s`,
+  `q = -torflux/A_phi'`, mean minor radius `r_eff`), as `grid_kind = 5` writes
+  its analytic table. `profile_data_mod` inverts it, `psi* -> s*`. Profiles
+  `n(r)`, `T(r)` refer to this `r_eff`. `psi0` is the mesh `A_phi`, which is
+  axisymmetric in every run of a set.
+- **Loading.** Uniform physical volume in the spawn window by rejection with
+  the axisymmetric Jacobian `J0 = (B_phi torflux - B_theta A_phi')/B0^2`,
+  `B0` the zeta average of the mesh `|B|` on the chartmap zeta nodes. The
+  starts depend only on `J0` and the seed, so the `+sigma/-sigma/0` meshes
+  share them.
+- **Delta-f.** Mesh: the axisymmetric chartmap. `ntv_chartmap_file`: a
+  perturbed chartmap; its `|B|` is projected onto
+  `bc cos(m theta - n zeta) + bs sin(m theta - n zeta)` for `n = ntv_n_tor` on
+  the rho nodes (exact discrete Fourier projection), splined in `s` and scaled
+  by `ntv_amplitude`. `dB1/dphi` comes from the generated harmonic kernel (the
+  sine part at a phase shifted by `pi/2`). Without `ntv_chartmap_file` the
+  single harmonic `ntv_bmn`/`ntv_profile_file` is used in the Boozer angles.
+- **Full-f.** Mesh: the perturbed chartmap (`netcdf_filename`), `ntv_amplitude = 0`.
+  The orbits move in the perturbed `|B|`; `dh_mesh` accumulates
+  `int -(mu + m v_par^2/B) dB/dphi|mesh dt` (generated `deltaf_weight_kernel`),
+  `dpphi_orbit` the p_phi change from the mesh `A_phi`, `h_phi`. All runs of a
+  set start from the same physical distribution, the f0 of the unperturbed
+  invariants (the delta-f initial condition): the birth factor of the mesh f0
+  is corrected by `ln f0(B0) - ln f0(B) + 2 ln(B0/B)` at fixed `v_par` and
+  `mu` (zero on an axisymmetric mesh). The torque follows from the CRN second
+  difference of `P dh_mesh` (NTV part) and of `P (pphi_end - pphi_birth)`.
+- **E_r.** Zero on the chartmap (`eps_Phi = 0`, empty `er_profile_file`):
+  GORILLA's prescribed-E_r loader evaluates the EFIT field and the strong-E
+  terms exclude direct flux grids. A radial `Phi0(s)` enters f0 through the
+  profiles (`Er.dat`) already; a mesh potential `Phi(s)` on the chartmap
+  vertices (`phi_elec`) is the missing hook.
+- **Not supported on chartmaps.** The refined sqrt(g) prism volumes
+  (`boole_refined_sqrt_g`, cylindrical only; moments only).
+
+Tests: `canonical_ntv_chartmap_unit` writes the Boozer chartmap of the analytic
+circular field (`write_circular_boozer_chartmap.x`; for this field
+`(r, theta*, phi)` are Boozer coordinates) and checks the field, the Jacobian
+against the geometry, the Fourier projection, the flux table against GORILLA's
+analytic table, the `J0` window volume and the wall polygon.
+`canonical_ntv_chartmap` runs the applet: (a) zero weights and the mesh drift
+at sigma = 0; (b) chartmap-file harmonic equals the analytic harmonic (same
+markers, rel. 4e-14); (c) analytic route and chartmap route agree
+statistically; (d) full-f on the perturbed meshes against delta-f: per marker
+the odd part of the full-f response equals the linear delta-f response (corr
+0.9997 for `dh_mesh` with collisions, slope 0.95: the mesh resolves the m = 3
+harmonic with 24 poloidal points); the quadratic part agrees within its
+(large) statistical error; (e) the wall loss boundary.
+
+## Loss boundary
+
+A marker is lost (`lost = 1`) when its guiding centre leaves the mesh before
+the trace time: through the last mesh surface `sfc_s_max` (or the inner
+boundary `sfc_s_min`), `loss_kind = 1`; or when it enters a cell beyond
+`s_outer_cut`, `loss_kind = 3`. With `loss_wall_file` (default off) a closed
+polygon of `R Z` vertices [cm] (a g-file limiter `RLIM, ZLIM` times 100)
+is a further loss boundary: a push ending outside it (even-odd rule) is the
+loss, `loss_kind = 2`. Coordinates: `(x1, x3)` on cylindrical grids, the
+chartmap geometry on `grid_kind = 6`. The wall must lie inside the mesh to
+act; outside it the grid exit comes first. `pphi_end`, `psi_end`, `s_end`
+and `t_end` record the loss.
