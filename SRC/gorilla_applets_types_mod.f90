@@ -1,6 +1,6 @@
 module gorilla_applets_types_mod
 
-    use, intrinsic :: iso_fortran_env, only: dp => real64
+    use, intrinsic :: iso_fortran_env, only: dp => real64, int64
     use marker_distribution_mod, only: distribution_3d_t, distribution_1d_t
 
     implicit none
@@ -53,9 +53,9 @@ module gorilla_applets_types_mod
     type counter_t
     integer :: lost_particles = 0
     integer :: lost_inside = 0
-    integer :: tetr_pushings = 0
+    integer(int64) :: tetr_pushings = 0
     integer :: phi_0_mappings = 0
-    integer :: integration_steps = 0
+    integer(int64) :: integration_steps = 0
     end type counter_t
 
     type(counter_t) :: counter
@@ -132,6 +132,7 @@ module gorilla_applets_types_mod
     integer  :: n_mappings_ignored !Used in divertor_heat_loads
     real(dp) :: lambda !Used in divertor_heat_loads
     integer  :: i_collision_mode = 1 !rmp_response_currents: stost iswmode (1=Coulomb, 5=Euler-Maruyama OU on v_par)
+    integer  :: n_background_species = 2
     end type input_t
 
     type(input_t) :: in
