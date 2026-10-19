@@ -111,3 +111,25 @@ GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 CHARTMAP_FIXTURE_BIN=$<TARGET_FILE:write_chartmap_fixture.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/mono_energetic_transport_chartmap_work"
 )
+
+add_executable(test_exb_precession_driver.x
+    test_exb_precession_driver.f90
+)
+target_link_libraries(test_exb_precession_driver.x GORILLA_APPLETS)
+target_include_directories(test_exb_precession_driver.x
+    PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+
+add_test(
+    NAME transport_exb_chartmap
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_transport_exb_chartmap.py
+)
+set_tests_properties(transport_exb_chartmap PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
+GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+EXB_DRIVER_BIN=$<TARGET_FILE:test_exb_precession_driver.x>;\
+CHARTMAP_FIXTURE_BIN=$<TARGET_FILE:write_chartmap_fixture.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/transport_exb_chartmap_work"
+)
