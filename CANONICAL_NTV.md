@@ -109,8 +109,7 @@ collisional drive. The stationary axisymmetric solution of the physical
 operator is `f_M + f_AX` with `f_AX = G + h`: `G = f0 - f_M` is the canonical
 shift, `h` the collisional remainder, which is non-zero in the passing region
 and in the trapped-passing boundary layer. The term `-{h, H1}` is of the same
-order in `rho*` as the drive `-{G, H1}`; it is not `O(rho_pol/L_n)` relative,
-as stated here before. NEO-2-QL includes it in production (`nobounceaver`,
+order in `rho*` as the drive `-{G, H1}`. NEO-2-QL includes it in production (`nobounceaver`,
 Kernbichler et al. PPCF 58 (2016) 104001 Eq. (28), Kasilov et al. PoP 21
 (2014) 092506 Eq. (65)). On the circular m = 0, n = 3 case at s = 0.25, NEO-2
 without it is 1.30 times production at `nu* = 1e-2` and about 1.07 at `1e-3`
@@ -165,15 +164,12 @@ The bench script `ntv_circular/fax_background.py` builds the table from the
 NEO-2-QL axisymmetric solution `g_k0` (drive k = 1, band integrals over eta,
 dumped by a diagnostic patch of `ripple_solver_ArnoldiO2`). It uses
 `h = g_k0 - G` with `G = c lambda/bhat` and `c = -scalefac_kG bcovar_phi_hat`.
-For `nu* = 1e-6` the trapped `chi` is below 0.007, which checks this `c`. Band means of `chi` are placed at the band means of `|lambda|`
-and differentiated per field-line step. Averaged over the NEO-2 eta bands, the
+For `nu* = 1e-6` the trapped `chi` is below 0.007, which checks this `c`.
+Band means of `chi` are placed at the band means of `|lambda|` and
+differentiated per field-line step. Averaged over the NEO-2 eta bands, the
 resulting mirror source reproduces NEO-2's own `f0_ttmp` computed from `h`
-(a diagnostic NEO-2 run with only this term, `hmirror`): the projection is 0.99 and the rms difference
-17 %, mostly in the last band before each turning point. A first table in
-`(vartheta, eta)` had a 1/lambda derivative at the turning points. It
-reproduced only 0.71-0.80 of that source and in delta-f gave 0.80 of the
-NEO-2 `hmirror` reduction. In
-NEO-2 the `sigma = +1` solution enters at `ibeg`, so it moves towards
+(projection 0.99, rms difference 17 %, mostly in the last band before each
+turning point). In NEO-2 the `sigma = +1` solution enters at `ibeg`, so it moves towards
 `+phi_mfl`, and `branch = sign(d B/d phi_mfl)`. The table is independent of
 the orbit-width scaling `F` at fixed `nu*` (identical for F = 16 and 64).
 Validation on the circular case (bench_aug30835
@@ -188,15 +184,10 @@ runs without the drive), D_s/NEO-RT:
 | 64 | 1e-3 | 0.310 | 0.295 +- 0.004 | 0.288 |
 | 16 | 1e-6 | 0.978 | 0.975 +- 0.031 | 1.032 |
 
-The paired change is -21.6 % (F = 16 and 64) at `nu* = 1e-2` and -4.7 % at
-`1e-3`. NEO-2 with only this mirror term on `h` changes by -19.9 % and -4.8 %.
-With `vartheta -> -vartheta` (orientation check) the change is -28.1 %. At
-`nu* = 1e-6` the paired change is -0.30 +- 0.04 % and NEO-2 changes by
--0.4 %, so the drive vanishes as `nu -> 0` and adds no visible variance
-(per-seed changes -0.2 to -0.5 %). The `h` table is continuous there; it
-goes to zero at the trapped-passing boundary. Pair only runs with the same
-mesh: an earlier comparison against a coarser radial mesh (40 instead of
-137 cells, D_s/NEO-RT 1.069) gave a spurious -8.8 +- 3.4 %.
+The paired change is -21.6 % at `nu* = 1e-2`, -4.7 % at `1e-3` and
+-0.30 +- 0.04 % at `1e-6` (NEO-2 with only this mirror term on `h`: -19.9 %,
+-4.8 %, -0.4 %), so the drive vanishes as `nu -> 0`. Pair only runs on the
+same mesh.
 
 NEO-2 also has the term `-(B_n/B_0) L_C g_k0`, which is not included. Our
 reading, not yet checked separately, is that it comes from the Boozer `|B|`
