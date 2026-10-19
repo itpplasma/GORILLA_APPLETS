@@ -2,10 +2,13 @@ name: Performance comparison
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 jobs:
   perf:
+    # Full tier: upper layers of a PR stack skip it unless labeled full-ci.
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref == github.event.repository.default_branch || contains(github.event.pull_request.labels.*.name, 'full-ci')
     runs-on: ubuntu-24.04
 
     env:
