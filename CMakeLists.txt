@@ -51,10 +51,6 @@ endif()
 find_package(BLAS REQUIRED)
 find_package(LAPACK REQUIRED)
 find_package(netCDF REQUIRED)
-find_package(netCDF-Fortran REQUIRED)
-
-get_target_property(_NETCDFF_INC netCDF::netcdff INTERFACE_INCLUDE_DIRECTORIES)
-include_directories(${netCDF_INCLUDE_DIR} ${_NETCDFF_INC})
 
 # No -ffpe-trap=invalid: LAPACK dgesv produces transient NaN in the
 # make_tetra_physics OMP loop for grid_kind=5 with coord_system=2 (macOS ARM64).

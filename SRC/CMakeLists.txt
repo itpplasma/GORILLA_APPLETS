@@ -43,7 +43,7 @@ target_link_libraries(GORILLA_APPLETS
   ${BLAS_LIBRARIES}
   ${LAPACK_LIBRARIES}
   netCDF::netcdf
-  netCDF::netcdff
+  netcdff
 )
 target_include_directories(GORILLA_APPLETS PUBLIC ${CMAKE_BINARY_DIR}/SRC_CORE)
 
