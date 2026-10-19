@@ -18,8 +18,23 @@ The RMP applet (`i_option = 15`) has an optional estimator for the toroidal torq
   ntv_m_max = -1 ,                  ! chartmap modes m = -ntv_m_max..ntv_m_max; <0: m = ntv_m_pol
   loss_wall_file = '' ,             ! optional (R, Z) [cm] wall polygon as loss boundary
   ntv_marker_rng = .true. ,         ! one random stream per marker (CRN)
+  ntv_bmn_relative = .false. ,      ! .true.: b_mn is dB/B, dB1 = sigma b_mn B(x) cos
+  ntv_lorentz_nu = 0.0 ,            ! > 0: Lorentz kicks at this rate [1/s] (see below)
+  ntv_lorentz_dt = 0.0 ,            ! kick step [s]; <= 0: 1e-4/nu
+  ntv_lorentz_mh = .true. ,         ! MH-correct the Lorentz kicks to f0(p_phi, H0)
+  ntv_n_check = 0 ,                 ! per-marker checkpoints at k*ntv_check_dt
+  ntv_check_dt = 0.0 ,
+  ntv_w_reset_dt = 0.0 ,            ! weight control: reset w every ntv_w_reset_dt [s]
+  ntv_w_reset_burn = 0.0 ,          ! and tally the torque only after this burn-in [s]
 /
 ```
+
+The toroidal mode number must be a multiple of the mesh field-period count
+(`n_field_periods_manual` in `tetra_grid.inp` for `grid_kind = 5`): the mesh
+covers one period and markers are relocated into it, so a harmonic that is not
+periodic on that interval is wrong (for `n = 3` on the default two-period mesh,
+`int sin(3 phi)` over a period does not vanish and every marker picks up a secular
+`p_phi` drift). `canonical_ntv_init` stops in that case.
 
 ## Model
 
@@ -54,6 +69,90 @@ The RMP applet (`i_option = 15`) has an optional estimator for the toroidal torq
   marker, also when orbits differ (full-f) or earlier markers are lost. The
   number of kicks still depends on the local collision time step, so the
   streams of perturbed full-f orbits slowly lose alignment.
+
+## Monoenergetic Lorentz mode
+
+For monoenergetic transport coefficients (comparison with NEO-RT/NEO-2 at fixed
+`E/T`) set `energy_dist_kind = 'mono'` in `rmp_response_currents_nml`: the
+canonical loader then gives every marker the energy `energy_eV` and an isotropic
+pitch. The temperature and `Phi0` profiles must be flat (checked); then the birth
+factor `P = exp(ln F0 - ln M_T(s0))` is `f0` on the energy shell up to a
+constant. With `ntv_lorentz_nu > 0` the stost kicks are replaced by energy-
+and position-conserving pitch-angle scattering at the constant rate `nu`,
+`D_lambda_lambda = nu (1 - lambda^2)/2`. One kick over `dt` proposes
+`lambda' = lambda (1 - nu dt) + sqrt(nu (1 - lambda^2) dt) xi` (`xi` normal,
+`ntv_lorentz_proposal`). With `ntv_lorentz_mh` it is accepted with
+`min(1, pi(lambda') q(lambda|lambda') / (pi(lambda) q(lambda'|lambda)))`, where
+`pi = F0` (times the GC phase-space measure with `boole_gc_phase_measure`) per
+unit `lambda`. Uniform `lambda` is the invariant measure of the Lorentz
+operator at fixed speed, so the kick leaves `F0(p_phi, H0)` exactly invariant.
+Proposals with `|lambda'| >= 1` are rejected. The proposal and rejection counts
+are printed (`Canonical NTV MH collisions`).
+
+### Collisions and the canonical background
+
+The weights obey the linear equation along the stochastic marker paths,
+`dw/dt = S = (d ln f0/dp_phi) dH1/dphi`, and the kicks leave `w` and `P`
+unchanged. This is exact if the kick generator `C` leaves `f0` invariant:
+- `P` only reweights the initial law, `E_g0[P F(path)] = E_f0[F(path)]` for
+  every path functional. The unweighted markers relax from `g0` towards the
+  stationary law, but the `P`-weighted ensemble stays `f0` at all times.
+- With `C* f0 = 0`, `f0` is stationary for orbits plus kicks. The linear
+  response `d(df)/dt = L* df + f0 S` is then
+  `int df A = E_f0[w(t) A(z(t))]`, with `w = int_0^t S dt'` along the path
+  (time reversal of the stationary process).
+
+The physical Lorentz operator `C_L` conserves a local isotropic distribution,
+not `f0`. `f0` depends on `lambda` through
+`p_phi = (e/c) psi + m v lambda h_phi`, and
+`d ln f0/d lambda = m v h_phi d ln f0/dp_phi ~ rho_pol/L_n`, so `C_L f0 != 0`.
+There are two consistent treatments:
+
+1. **MH kicks** (`ntv_lorentz_mh = .true.`, default; also `boole_mh_collisions`
+   for the OU kicks). Here `C_MH = C_L - d_lambda[nu (1 - lambda^2)/2 (d_lambda
+   ln f0) .]` + O(dt). This is `C_L` plus an `O(rho_pol/L_n)` pitch friction
+   that makes `f0` exactly stationary. It matches the thin-orbit theory
+   (NEO-RT, NEO-2), where the background is stationary and its axisymmetric
+   neoclassical distortion is not part of the NTV drive.
+2. **Plain kicks** (`ntv_lorentz_mh = .false.`). The `P`-weighted ensemble then
+   evolves as `f0 + df_A(t)`, where `df_A` is the axisymmetric neoclassical
+   response to the source `C_L f0`. Its direct torque `int df_A (-dH1/dphi)`
+   vanishes because `df_A` does not depend on `phi`. The weight equation still
+   drives with `d ln f0/dp_phi` and misses `-{df_A, H1}`, an `O(rho_pol/L_n)`
+   relative term.
+
+Both treatments agree to `O(rho_pol/L_n)`. An explicit source weight
+`dw_A/dt = C_L f0/f0` together with plain kicks would count `df_A` twice: the
+plain kicks already carry it in the marker density. The effect is measured as
+a common-random-number difference of the two settings (bench_aug30835
+`ntv_circular/outputs/deltaf_rung1_*`). The MH rejection fraction is the size
+of the operator change.
+
+## Checkpoints, conversion to D_s, weight control
+
+`ntv_n_check > 0` writes `canonical_ntv_checkpoints.dat`. The header holds the
+times `k ntv_check_dt` (physical, Hamiltonian time). Each row holds the marker
+index, its physical trace time, then `dh_int`, `tq_deltaf` and `w` at the K
+checkpoints. Values are interpolated linearly within the push that crosses
+the checkpoint. After the marker's end or loss the final values are kept.
+
+With a constant `kappa = d ln f0/dp_phi` (flat `T`, density exponential in the
+poloidal flux), `w = -kappa X` with `X = dh_int`, and the trapezoidal tally gives
+exactly `tq_deltaf = -kappa X^2/2` (CTest `canonical_ntv_lorentz`). The delta-f
+`p_phi` flux `d<tq>/dt = -kappa D_pp` thus defines the monoenergetic diffusion
+coefficient `D_pp(t) = d<X^2>/dt / 2`, the running Green-Kubo integral of
+`dp_phi/dt = -dH1/dphi`. With `p_phi = (e/c) psi_pol` (psi per radian) the
+flux-surface coefficient is `D_s = D_pp (c/(e dpsi_pol/ds))^2`. This is the
+NEO-RT `D11 Dp (ds/dr)^2`, i.e. `Gamma^s = -D_s dn/ds`.
+
+`<w^2> = kappa^2 <X^2>` grows linearly in time once the resonant phase has
+decorrelated, and so does the variance of the flux over a fixed window. With
+`ntv_w_reset_dt > 0`, `w` is reset to zero at the first push after each
+multiple of the reset period. Each cycle is a fresh linear response of the
+`f0`-stationary ensemble. `canonical_ntv_reset.dat` holds per marker the torque
+integral and the time after the burn-in `ntv_w_reset_burn` of each cycle. The
+estimate is unbiased once the burn-in exceeds the time needed for the running
+Green-Kubo integral to converge. The variance per cycle is then bounded.
 
 ## Output
 
@@ -96,7 +195,11 @@ and 3.8e-4 after 2e-3 s, growing about as t^0.8. The drift falls as
 2e-3 s it is 1.2e-4 and 4.0e-5. It does not depend on the toroidal resolution
 `n3`.
 
-Tests: `canonical_ntv_kernel` checks the generated torque sample against a
+Tests: `ntv_lorentz_proposal` checks the MH Lorentz chain against
+`pi ~ exp(a lambda)` and the moments of one proposal. `canonical_ntv_lorentz`
+checks the mono/Lorentz mode: the identity `tq = -kappa X^2/2`, the checkpoint
+end values, the weight-reset bookkeeping and bound, and the field-period guard.
+`canonical_ntv_kernel` checks the generated torque sample against a
 finite-difference dH/dphi at fixed p_phi along an orbit. `canonical_ntv` checks
 the zero-sigma weights and the drift, and that the torque is quadratic and even
 in sigma with CRN.

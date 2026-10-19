@@ -39,13 +39,15 @@ module canonical_ntv_mod
     private
     public :: boole_canonical_ntv, ntv_m_pol, ntv_n_tor, ntv_amplitude, ntv_bmn, &
         ntv_phimn, ntv_profile_file, ntv_theta_kind, ntv_output_file, &
-        ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng
+        ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
+        ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, ntv_lorentz_mh, &
+        ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn
     public :: canonical_ntv_nml_read, canonical_ntv_init, canonical_ntv_allocate, &
         canonical_ntv_birth, canonical_ntv_push, canonical_ntv_collision, &
         canonical_ntv_end, canonical_ntv_write, ntv_harmonic_dphi, &
         ntv_theta_of_x, ntv_phi_index, ntv_h_phi, species_temperature_eV, &
         ntv_point_t, ntv_eval_point, canonical_ntv_mark_loss, loss_grid_exit, &
-        loss_wall, loss_outer_cut
+        loss_wall, loss_outer_cut, ntv_lorentz_proposal
     public :: n_ntv_cols, ntv_col_names
 
     logical  :: boole_canonical_ntv = .false.
@@ -75,9 +77,36 @@ module canonical_ntv_mod
     !> marker, independent of the thread partition and of earlier losses.
     logical  :: ntv_marker_rng = .true.
 
+    !> .true.: b_mn (constant or table) is the relative amplitude dB/B, and the
+    !> perturbation is dB1 = sigma b_mn B(x) cos(m theta - n phi) with the local
+    !> |B| of the mesh field (NEO-RT analytic convention epsmn, B1 = epsmn B).
+    logical  :: ntv_bmn_relative = .false.
+    !> Lorentz pitch-angle scattering at the constant rate ntv_lorentz_nu [1/s]
+    !> (D_lambda_lambda = nu (1 - lambda^2)/2, energy conserved), replacing the
+    !> stost kick when > 0. Step ntv_lorentz_dt [s] (<= 0: 1e-4/nu). With
+    !> ntv_lorentz_mh the Gaussian Euler proposal is Metropolis-Hastings
+    !> corrected so that the kick leaves f0(p_phi, H0) exactly invariant;
+    !> without it the kicks are the plain (physical) Lorentz operator, which
+    !> relaxes the marker ensemble away from f0 (C[f0] /= 0, see CANONICAL_NTV.md).
+    real(dp) :: ntv_lorentz_nu = 0.0_dp
+    real(dp) :: ntv_lorentz_dt = 0.0_dp
+    logical  :: ntv_lorentz_mh = .true.
+    !> Per-marker checkpoints of int -dH1/dphi dt, the delta-f torque integral
+    !> and w at the physical times k ntv_check_dt, k = 1..ntv_n_check
+    !> (file canonical_ntv_checkpoints.dat; 0: off).
+    integer  :: ntv_n_check = 0
+    real(dp) :: ntv_check_dt = 0.0_dp
+    !> Weight control (default off): w is reset to 0 at the physical times
+    !> k ntv_w_reset_dt; the torque integral of each cycle is accumulated only
+    !> after the burn-in ntv_w_reset_burn (file canonical_ntv_reset.dat).
+    real(dp) :: ntv_w_reset_dt = 0.0_dp
+    real(dp) :: ntv_w_reset_burn = 0.0_dp
+
     namelist /canonical_ntv_nml/ boole_canonical_ntv, ntv_m_pol, ntv_n_tor, &
         ntv_amplitude, ntv_bmn, ntv_phimn, ntv_profile_file, ntv_theta_kind, &
-        ntv_output_file, ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng
+        ntv_output_file, ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
+        ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, &
+        ntv_lorentz_mh, ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn
 
     !> Loss kinds (column loss_kind): grid exit (last mesh surface or inner
     !> boundary), wall contour, s_outer_cut.
@@ -95,6 +124,13 @@ module canonical_ntv_mod
 
     !> Per-marker records (n_ntv_cols, n_particles); one marker per thread.
     real(dp), allocatable :: rec(:,:)
+    !> Physical trace time of each marker (sum of the push times).
+    real(dp), allocatable :: tphys(:)
+    !> Checkpoints (ntv_n_check, n_particles): int -dH1/dphi dt, torque, w.
+    real(dp), allocatable :: chk_dh(:,:), chk_tq(:,:), chk_w(:,:)
+    integer,  allocatable :: chk_next(:)
+    !> Weight control: torque integral and time after burn-in, cycle start.
+    real(dp), allocatable :: rst_tq(:), rst_t(:), rst_t0(:)
 
     integer :: n_tab = 0
     real(dp), allocatable :: tab_s(:), tab_b(:), tab_b2(:), tab_p(:), tab_p2(:)
@@ -133,7 +169,7 @@ end subroutine canonical_ntv_nml_read
 
 !> Checks the configuration and loads the optional amplitude table.
 subroutine canonical_ntv_init()
-    use tetra_grid_settings_mod, only: grid_kind
+    use tetra_grid_settings_mod, only: grid_kind, n_field_periods
     use tetra_physics_mod, only: coord_system
     use wall_contour_mod, only: load_wall_contour
     integer :: u, ios, i
@@ -146,6 +182,25 @@ subroutine canonical_ntv_init()
     if (ntv_theta_kind /= 0 .and. ntv_theta_kind /= 1) &
         error stop 'canonical NTV: ntv_theta_kind must be 0 or 1'
     if (len_trim(loss_wall_file) > 0) call load_wall_contour(trim(loss_wall_file))
+    ! The mesh covers one field period 2 pi/n_field_periods and markers are
+    ! relocated into it, so the harmonic must be periodic on that interval.
+    if (n_field_periods < 1) error stop 'canonical NTV: n_field_periods must be >= 1'
+    if (mod(ntv_n_tor, n_field_periods) /= 0) &
+        error stop 'canonical NTV: ntv_n_tor must be a multiple of n_field_periods'
+    if (ntv_theta_kind /= 0 .and. ntv_theta_kind /= 1) &
+        error stop 'canonical NTV: ntv_theta_kind must be 0 or 1'
+    if (ntv_n_check < 0) error stop 'canonical NTV: ntv_n_check must be >= 0'
+    if (ntv_n_check > 0 .and. ntv_check_dt <= 0.0_dp) &
+        error stop 'canonical NTV: ntv_check_dt must be > 0 with checkpoints'
+    if (ntv_w_reset_dt < 0.0_dp .or. ntv_w_reset_burn < 0.0_dp) &
+        error stop 'canonical NTV: ntv_w_reset_dt and ntv_w_reset_burn must be >= 0'
+    if (ntv_w_reset_dt > 0.0_dp .and. ntv_w_reset_burn >= ntv_w_reset_dt) &
+        error stop 'canonical NTV: ntv_w_reset_burn must be < ntv_w_reset_dt'
+    if (ntv_lorentz_nu < 0.0_dp) error stop 'canonical NTV: ntv_lorentz_nu must be >= 0'
+    if (ntv_lorentz_nu > 0.0_dp .and. ntv_lorentz_dt <= 0.0_dp) &
+        ntv_lorentz_dt = 1.0e-4_dp / ntv_lorentz_nu
+    if (ntv_bmn_relative .and. len_trim(ntv_chartmap_file) > 0) error stop &
+        'canonical NTV: ntv_bmn_relative does not apply to chartmap harmonics'
     n_tab = 0
     if (len_trim(ntv_chartmap_file) > 0) then
         if (len_trim(ntv_profile_file) > 0) error stop &
@@ -226,6 +281,22 @@ subroutine canonical_ntv_allocate(n_particles)
     if (allocated(rec)) deallocate(rec)
     allocate(rec(n_ntv_cols, n_particles))
     rec = 0.0_dp
+    if (allocated(tphys)) deallocate(tphys)
+    allocate(tphys(n_particles))
+    tphys = 0.0_dp
+    if (allocated(chk_dh)) deallocate(chk_dh, chk_tq, chk_w, chk_next)
+    allocate(chk_dh(max(ntv_n_check, 1), n_particles), &
+             chk_tq(max(ntv_n_check, 1), n_particles), &
+             chk_w(max(ntv_n_check, 1), n_particles), chk_next(n_particles))
+    chk_dh = 0.0_dp
+    chk_tq = 0.0_dp
+    chk_w = 0.0_dp
+    chk_next = 1
+    if (allocated(rst_tq)) deallocate(rst_tq, rst_t, rst_t0)
+    allocate(rst_tq(n_particles), rst_t(n_particles), rst_t0(n_particles))
+    rst_tq = 0.0_dp
+    rst_t = 0.0_dp
+    rst_t0 = 0.0_dp
     do n = 1, n_particles
         rec(c_n, n) = real(n, dp)
     end do
@@ -286,9 +357,11 @@ pure function ntv_theta_of_x(x) result(theta)
 end function ntv_theta_of_x
 
 !> dB1/dphi and dPhi1/dphi of the scaled harmonic at (s, theta, phi).
-subroutine ntv_harmonic_dphi(s, theta, phi, db1_dphi, dphi1_dphi)
+subroutine ntv_harmonic_dphi(s, theta, phi, db1_dphi, dphi1_dphi, bmod)
     real(dp), intent(in)  :: s, theta, phi
     real(dp), intent(out) :: db1_dphi, dphi1_dphi
+    !> Local |B| (required with ntv_bmn_relative).
+    real(dp), intent(in), optional :: bmod
     real(dp) :: bmn, phimn, db1, db1_ds, db1_dth, dp1, dp1_ds, dp1_dth
 
     if (n_cm_modes > 0) then
@@ -304,6 +377,10 @@ subroutine ntv_harmonic_dphi(s, theta, phi, db1_dphi, dphi1_dphi)
         phimn = ntv_phimn
     end if
     bmn = ntv_amplitude * bmn
+    if (ntv_bmn_relative) then
+        if (.not. present(bmod)) error stop 'ntv_harmonic_dphi: bmod required'
+        bmn = bmn * bmod
+    end if
     phimn = ntv_amplitude * phimn
     ! Radial derivatives are not needed for dH1/dphi.
     call evaluate_deltaf_harmonic(real(ntv_m_pol, dp), real(ntv_n_tor, dp), bmn, &
@@ -386,7 +463,8 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     phi0 = pvs%Phi0
     dphi0 = pvs%dPhi0_ds * dsdpsi
 
-    call ntv_harmonic_dphi(s_mesh, ntv_theta_of_x(x), x(ip), db1_dphi, dphi1_dphi)
+    call ntv_harmonic_dphi(s_mesh, ntv_theta_of_x(x), x(ip), db1_dphi, dphi1_dphi, &
+                           pt%bmod)
     call evaluate_deltaf_weight(mass, charge, clight, pt%mu, vpar, pt%bmod, h0, &
         dens, ddens, temp, dtemp, phi0, dphi0, db1_dphi, dphi1_dphi, ln_f0, &
         pt%dlnf0_dpphi, pt%dh1_dphi, dw_dt, torque)
@@ -423,14 +501,46 @@ subroutine canonical_ntv_push(n, pa, pm, pb, s_end, dt, w)
     type(ntv_point_t), intent(in) :: pa, pm, pb
     real(dp), intent(in) :: s_end, dt
     real(dp), intent(inout) :: w
-    real(dp) :: w_old
+    real(dp) :: w_old, dtq, t0, t1, frac, tk, t_on, dh_old, tq_old
 
+    t0 = tphys(n)
+    t1 = t0 + dt
+    ! Weight control: reset w at the first push that starts at or after the
+    ! next cycle boundary (the cycle then starts at t0).
+    if (ntv_w_reset_dt > 0.0_dp) then
+        if (t0 >= rst_t0(n) + ntv_w_reset_dt) then
+            w = 0.0_dp
+            rst_t0(n) = t0
+        end if
+    end if
     w_old = w
+    dh_old = rec(c_dh, n)
+    tq_old = rec(c_tq, n)
     w = w + pm%dlnf0_dpphi * pm%dh1_dphi * dt
-    rec(c_tq, n) = rec(c_tq, n) - 0.5_dp * (w_old + w) * pm%dh1_dphi * dt
+    dtq = -0.5_dp * (w_old + w) * pm%dh1_dphi * dt
+    rec(c_tq, n) = rec(c_tq, n) + dtq
     rec(c_dh, n) = rec(c_dh, n) - pm%dh1_dphi * dt
     rec(c_dhm, n) = rec(c_dhm, n) - pm%dh_mesh_dphi * dt
     rec(c_psi1, n) = pb%psi0
+    if (ntv_w_reset_dt > 0.0_dp .and. dt > 0.0_dp) then
+        ! Part of the push after the burn-in of the current cycle.
+        t_on = rst_t0(n) + ntv_w_reset_burn
+        frac = max(0.0_dp, min(1.0_dp, (t1 - t_on) / dt))
+        rst_tq(n) = rst_tq(n) + frac * dtq
+        rst_t(n) = rst_t(n) + frac * dt
+    end if
+    ! Checkpoints crossed by this push, linear in time within the push.
+    do while (chk_next(n) <= ntv_n_check)
+        tk = real(chk_next(n), dp) * ntv_check_dt
+        if (tk > t1) exit
+        frac = 0.0_dp
+        if (dt > 0.0_dp) frac = max(0.0_dp, min(1.0_dp, (tk - t0) / dt))
+        chk_dh(chk_next(n), n) = dh_old + frac * (rec(c_dh, n) - dh_old)
+        chk_tq(chk_next(n), n) = tq_old + frac * (rec(c_tq, n) - tq_old)
+        chk_w(chk_next(n), n) = w_old + frac * (w - w_old)
+        chk_next(n) = chk_next(n) + 1
+    end do
+    tphys(n) = t1
     rec(c_dporb, n) = rec(c_dporb, n) + (pb%pphi - pa%pphi)
     rec(c_w, n) = w
     rec(c_pphi1, n) = pb%pphi
@@ -463,6 +573,14 @@ subroutine canonical_ntv_end(n, lost, t_end)
     else if (rec(c_kind, n) == 0.0_dp) then
         rec(c_kind, n) = real(loss_grid_exit, dp)
     end if
+    ! Checkpoints after the loss (or at the trace end) keep the final values:
+    ! a lost marker contributes nothing after its loss.
+    do while (chk_next(n) <= ntv_n_check)
+        chk_dh(chk_next(n), n) = rec(c_dh, n)
+        chk_tq(chk_next(n), n) = rec(c_tq, n)
+        chk_w(chk_next(n), n) = rec(c_w, n)
+        chk_next(n) = chk_next(n) + 1
+    end do
 end subroutine canonical_ntv_end
 
 !> Records why marker n is lost (loss_wall, loss_outer_cut); a loss without a
@@ -471,6 +589,27 @@ subroutine canonical_ntv_mark_loss(n, kind)
     integer, intent(in) :: n, kind
     if (allocated(rec)) rec(c_kind, n) = real(kind, dp)
 end subroutine canonical_ntv_mark_loss
+
+!> Gaussian Euler-Maruyama proposal of the Lorentz operator in the pitch
+!> lambda = v_par/v, d lambda = -nu lambda dt + sqrt(nu (1 - lambda^2) dt) xi,
+!> and log[q(lambda|lambda_new)/q(lambda_new|lambda)] for the Metropolis-Hastings
+!> acceptance. valid = .false. if |lambda_new| >= 1 (proposal rejected).
+pure subroutine ntv_lorentz_proposal(lam, nu_dt, xi, lam_new, log_q_ratio, valid)
+    real(dp), intent(in)  :: lam, nu_dt, xi
+    real(dp), intent(out) :: lam_new, log_q_ratio
+    logical,  intent(out) :: valid
+    real(dp) :: var_f, var_b
+
+    var_f = nu_dt * (1.0_dp - lam**2)
+    lam_new = lam * (1.0_dp - nu_dt) + sqrt(max(var_f, 0.0_dp)) * xi
+    log_q_ratio = 0.0_dp
+    valid = abs(lam_new) < 1.0_dp .and. var_f > 0.0_dp
+    if (.not. valid) return
+    var_b = nu_dt * (1.0_dp - lam_new**2)
+    log_q_ratio = -0.5_dp * log(var_b / var_f) &
+        - (lam - lam_new * (1.0_dp - nu_dt))**2 / (2.0_dp * var_b) &
+        + (lam_new - lam * (1.0_dp - nu_dt))**2 / (2.0_dp * var_f)
+end subroutine ntv_lorentz_proposal
 
 !> Writes the per-marker table and prints population sums (P-weighted).
 subroutine canonical_ntv_write(volume, trace_time)
@@ -498,6 +637,8 @@ subroutine canonical_ntv_write(volume, trace_time)
     sum_dp = sum(rec(c_p, :) * rec(c_dporb, :))
     sum_dc = sum(rec(c_p, :) * rec(c_dpcoll, :))
     max_w = maxval(abs(rec(c_w, :)))
+    if (ntv_n_check > 0) call write_checkpoints()
+    if (ntv_w_reset_dt > 0.0_dp) call write_reset()
     max_dp = maxval(abs(rec(c_dporb, :)))
     print '(a, es24.16)', ' Canonical NTV: sum P tq_deltaf = ', sum_tq
     print '(a, es24.16)', ' Canonical NTV: sum P dh_int = ', sum_dh
@@ -509,6 +650,41 @@ subroutine canonical_ntv_write(volume, trace_time)
     print '(a, es24.16)', ' Canonical NTV: max |dpphi_orbit| = ', max_dp
     print '(a, i0)', ' Canonical NTV: lost markers = ', nint(sum(rec(c_lost, :)))
 end subroutine canonical_ntv_write
+
+!> Checkpoint table: header with the times, then per marker n, t_phys and
+!> int -dH1/dphi dt (k = 1..K), the torque integral (k = 1..K) and w (k = 1..K).
+subroutine write_checkpoints()
+    integer :: u, n, k
+    character(len=32) :: fmt
+
+    open(newunit=u, file='canonical_ntv_checkpoints.dat', status='replace', &
+         action='write')
+    write(u, '(a, i0, a, es24.16)') '# canonical NTV checkpoints: K = ', &
+        ntv_n_check, ', dt_s = ', ntv_check_dt
+    write(u, '(a)') '# columns: n t_phys dh_int(1..K) tq_deltaf(1..K) w(1..K)'
+    write(u, '(a, *(1x, es24.16))') '# times_s', &
+        (real(k, dp) * ntv_check_dt, k = 1, ntv_n_check)
+    write(fmt, '(a, i0, a)') '(i10, ', 1 + 3 * ntv_n_check, '(1x, es24.16))'
+    do n = 1, size(rec, 2)
+        write(u, fmt) n, tphys(n), chk_dh(1:ntv_n_check, n), &
+            chk_tq(1:ntv_n_check, n), chk_w(1:ntv_n_check, n)
+    end do
+    close(u)
+end subroutine write_checkpoints
+
+!> Weight-control table: n, torque integral after burn-in, time after burn-in.
+subroutine write_reset()
+    integer :: u, n
+
+    open(newunit=u, file='canonical_ntv_reset.dat', status='replace', action='write')
+    write(u, '(a, 2es24.16)') '# canonical NTV weight reset: reset_dt_s burn_s ', &
+        ntv_w_reset_dt, ntv_w_reset_burn
+    write(u, '(a)') '# n tq_settled t_settled_s t_phys_s'
+    do n = 1, size(rec, 2)
+        write(u, '(i10, 3(1x, es24.16))') n, rst_tq(n), rst_t(n), tphys(n)
+    end do
+    close(u)
+end subroutine write_reset
 
 subroutine spline_second_derivatives(x, y, y2)
     real(dp), intent(in)  :: x(:), y(:)

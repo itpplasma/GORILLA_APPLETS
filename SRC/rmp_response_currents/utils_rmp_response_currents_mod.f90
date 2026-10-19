@@ -644,7 +644,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                                        a_analytic_circ
     use constants, only: pi
     use canonical_ntv_mod, only: canonical_ntv_allocate, canonical_ntv_end, &
-        canonical_ntv_write
+        canonical_ntv_write, ntv_lorentz_nu
 
     integer, intent(in)                               :: species
     integer, intent(in), optional                     :: n_particles_in
@@ -741,7 +741,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP&        prof_acc, prof_count, boole_reflect_window, rho_win, prof_t_burn, &
     !$OMP&        max_rel_dH, max_abs_w, sum_w2, n_w2, max_dH_T, n_mh_prop, n_mh_rej, &
     !$OMP&        boole_nonlinear_weight, boole_mh_collisions, boole_physical_profile_time, &
-    !$OMP&        boole_gc_phase_measure, boole_canonical_ntv, ntv_marker_rng) &
+    !$OMP&        boole_gc_phase_measure, boole_canonical_ntv, ntv_marker_rng, &
+    !$OMP&        ntv_lorentz_nu) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
     !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local, n_da_sub, i_da_sub) &
     !$OMP& PRIVATE(prof_local, prof_marker, ibatch, vpar_coll) &
@@ -819,7 +820,10 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                 end if
                 if (in%boole_collisions) then
                     vpar_coll = vpar
-                    if (canonical_loading() .and. boole_mh_collisions &
+                    if (boole_canonical_ntv .and. ntv_lorentz_nu > 0.0_dp) then
+                        call carry_out_lorentz_ntv(i, t, x, vpar, vperp, ind_tetr, &
+                            iface, species, trace_time_n)
+                    else if (canonical_loading() .and. boole_mh_collisions &
                         .and. in%boole_delta_f) then
                         call carry_out_collisions_mh(i, n, t, x, vpar, vperp, &
                                                      ind_tetr, iface, species)
@@ -1014,6 +1018,9 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
             lost_W, alive_W, alive_absW
     end if
 
+    if (boole_canonical_ntv .and. in%boole_collisions .and. n_mh_prop > 0.0_dp) &
+        print '(a, es12.4, a, es12.4)', ' Canonical NTV MH collisions: proposals = ', &
+            n_mh_prop, ', rejected fraction = ', n_mh_rej / max(n_mh_prop, 1.0_dp)
     if (n_prof_bins > 0) call write_mn_profile('jpar_mn_profile.dat')
     if (boole_canonical_ntv) call canonical_ntv_write(compute_spawn_volume(), &
                                                       start%t(species))
@@ -2267,6 +2274,82 @@ subroutine carry_out_collisions_mh(i, n, t, x, vpar, vperp, ind_tetr, iface, spe
 end subroutine carry_out_collisions_mh
 
 ! ====================================================================
+! Lorentz pitch-angle kick of the canonical NTV estimator at the constant rate
+! ntv_lorentz_nu (energy and position fixed), one step of ntv_lorentz_dt (capped
+! by the remaining trace time). With ntv_lorentz_mh the Gaussian Euler proposal
+! (ntv_lorentz_proposal) is accepted with
+!   min(1, pi(lambda') q(lambda|lambda') / (pi(lambda) q(lambda'|lambda))),
+! pi = F0 (times the GC phase-space measure if boole_gc_phase_measure) per unit
+! lambda, so the kick leaves F0(p_phi, H0) invariant exactly; uniform lambda is
+! the invariant measure of the Lorentz operator at fixed speed. Without MH,
+! out-of-range proposals are rejected and every other proposal is accepted
+! (plain Lorentz operator, which preserves a local isotropic distribution).
+! On return t%step is the step length times v0 (the caller divides by v0).
+! ====================================================================
+subroutine carry_out_lorentz_ntv(i, t, x, vpar, vperp, ind_tetr, iface, species, &
+                                 trace_time)
+
+    use gorilla_applets_types_mod, only: start, time_t
+    use tetra_physics_mod, only: tetra_physics
+    use find_tetra_mod, only: find_tetra
+    use canonical_ntv_mod, only: ntv_lorentz_nu, ntv_lorentz_dt, ntv_lorentz_mh, &
+        ntv_lorentz_proposal
+    use constants, only: pi
+
+    integer,      intent(in)    :: i, species
+    type(time_t), intent(inout) :: t
+    real(dp),     intent(inout) :: x(3), vpar, vperp
+    integer,      intent(inout) :: ind_tetr, iface
+    real(dp),     intent(in)    :: trace_time
+
+    real(dp) :: dt, v, lam, lam_new, log_q, u(2), xi, z(3), B, lnf_a, lnf_b, H
+    real(dp) :: vpar_new, vperp_new, dlog, u_acc
+    logical  :: valid
+
+    dt = min(ntv_lorentz_dt, trace_time - t%confined)
+    t%step = dt * start%v0(species)
+    if (i == 1) call find_tetra(x, vpar, vperp, ind_tetr, iface)
+    if (ind_tetr == -1 .or. dt <= 0.0_dp) return
+    v = sqrt(vpar**2 + vperp**2)
+    if (v <= 0.0_dp) return
+    lam = vpar / v
+    call random_number(u)
+    u(1) = max(u(1), tiny(1.0_dp))
+    xi = sqrt(-2.0_dp * log(u(1))) * cos(2.0_dp * pi * u(2))
+    call ntv_lorentz_proposal(lam, ntv_lorentz_nu * dt, xi, lam_new, log_q, valid)
+    ! Acceptance number drawn on every kick: the stream of a marker stays aligned
+    ! between the +-sigma/0 runs whatever the acceptance (CRN, full-f).
+    call random_number(u_acc)
+    n_mh_prop_loc = n_mh_prop_loc + 1.0_dp
+    if (.not. valid) then
+        n_mh_rej_loc = n_mh_rej_loc + 1.0_dp
+        return
+    end if
+    vpar_new = v * lam_new
+    vperp_new = v * sqrt(1.0_dp - lam_new**2)
+    if (ntv_lorentz_mh) then
+        z = x - tetra_physics(ind_tetr)%x1
+        B = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z)
+        call ln_f0_and_H(ind_tetr, x, vpar, -0.5_dp * vperp**2 / B, species, lnf_a, H)
+        call ln_f0_and_H(ind_tetr, x, vpar_new, -0.5_dp * vperp_new**2 / B, species, &
+                         lnf_b, H)
+        dlog = lnf_b - lnf_a + log_q
+        if (boole_gc_phase_measure) dlog = dlog + gc_log_measure_change( &
+            phase_measure_ratio(ind_tetr, x, vpar, species), &
+            phase_measure_ratio(ind_tetr, x, vpar_new, species))
+        if (dlog < 0.0_dp) then
+            if (u_acc > exp(dlog)) then
+                n_mh_rej_loc = n_mh_rej_loc + 1.0_dp
+                return
+            end if
+        end if
+    end if
+    vpar = vpar_new
+    vperp = vperp_new
+
+end subroutine carry_out_lorentz_ntv
+
+! ====================================================================
 ! (0,0) accounting at the end of a marker's trace (nonlinear mode): the
 ! deposit weight W = P w/(1 + w) of lost markers (at their loss) and of the
 ! surviving ones (at the end of the trace).
@@ -2345,7 +2428,16 @@ subroutine rescale_energies_to_local_temperature(species)
             s_loc = eval_s_local(ind_tetr, x)
         end if
         call eval_profiles(s_loc, pv)
-        if (canonical_loading()) then
+        if (canonical_loading() .and. trim(energy_dist_kind) == 'mono') then
+            ! Monoenergetic canonical loading (canonical NTV estimator only):
+            ! energy in%energy_eV, isotropic pitch. P = f0/g0 of set_birth_factor
+            ! is then f0 on the energy shell up to a constant only for a flat
+            ! temperature and potential.
+            call check_flat_shell_background(pv, species)
+            call random_number(u)
+            start%energy(n, species) = in%energy_eV
+            start%pitch(n, species) = 2.0_dp * u(1) - 1.0_dp
+        else if (canonical_loading()) then
             call random_number(u)
             call maxwellian_from_uniforms(u, energy_over_t, pitch)
             start%energy(n, species) = energy_over_t*loading_temperature_eV(pv, species)
@@ -2370,6 +2462,25 @@ subroutine rescale_energies_to_local_temperature(species)
     end if
 
 end subroutine rescale_energies_to_local_temperature
+
+! Monoenergetic canonical loading needs a flat temperature and potential, so
+! that ln F0 - ln M_T(s0) of set_birth_factor is ln f0 on the shell up to a
+! constant (the velocity factor of g0 is then a constant on the shell).
+subroutine check_flat_shell_background(pv, species)
+    use profile_data_mod, only: profile_values_t
+    use gorilla_applets_types_mod, only: start
+    use canonical_ntv_mod, only: species_temperature_eV
+    type(profile_values_t), intent(in) :: pv
+    integer, intent(in) :: species
+    real(dp) :: dT
+
+    if (.not. boole_canonical_ntv) &
+        error stop 'Monoenergetic canonical loading needs the canonical NTV estimator'
+    dT = species_temperature_eV(pv%dTe_ds, pv%dTi_ds, start%particle_charge(species))
+    if (abs(dT) > 1.0e-10_dp * loading_temperature_eV(pv, species) &
+        .or. abs(pv%dPhi0_ds) > 0.0_dp) &
+        error stop 'Monoenergetic canonical loading requires flat T and Phi0'
+end subroutine check_flat_shell_background
 
 ! ====================================================================
 ! Physics-normal flux label s at the particle position x inside tetra
@@ -2729,7 +2840,8 @@ subroutine spawn_uniform_volume_analytic(species)
     if (grid_kind /= 5) error stop 'Volume loading requires analytic circular grid'
     if (coord_system /= 1) error stop 'Volume loading requires cylindrical coordinates'
     if (canonical_loading()) then
-        if (trim(energy_dist_kind) /= 'maxwellian') &
+        if (trim(energy_dist_kind) /= 'maxwellian' .and. .not. (boole_canonical_ntv &
+            .and. trim(energy_dist_kind) == 'mono')) &
             error stop 'Nonlinear birth factor requires Maxwellian energy loading'
         if (.not. boole_local_energy_sampling) &
             error stop 'Nonlinear birth factor requires local Maxwellian loading'
