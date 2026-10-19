@@ -199,6 +199,11 @@ subroutine parallelised_particle_pushing(v0)
 
             call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
 
+            !zero time step only initialises the marker (tetrahedron and weight), so that the first collision
+            !already uses the final particle weight
+            call orbit_timestep_gorilla_boltzmann(x,vpar,vperp,0.0_dp,particle_status,ind_tetr,iface,n,&
+                        & local_tetr_moments, local_counter,t%remain)
+
             i = 0
             do while (t%confined.lt.in%time_step)
                 i = i+1

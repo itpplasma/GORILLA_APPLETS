@@ -2,7 +2,8 @@ program test_multi_species_collision
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use collis_ions, only: collis_init
-    use constants, only: amp, ame
+    use constants, only: amp, ame, ev2erg
+    use utils_parallelised_particle_pushing_mod, only: update_background_reservoir
 
     implicit none
 
@@ -11,6 +12,7 @@ program test_multi_species_collision
     all_passed = .true.
     call test_two_species(all_passed)
     call test_five_species(all_passed)
+    call test_background_reservoir(all_passed)
 
     if (.not. all_passed) then
         print *, 'FAIL: some tests failed'
@@ -170,5 +172,30 @@ subroutine test_five_species(all_passed)
     end if
 
 end subroutine test_five_species
+
+subroutine test_background_reservoir(all_passed)
+    ! Alpha marker with a signed (delta-f) weight on a deuterium background:
+    ! r*m_t*dv + d(m_b*u_b) = 0 and r*dE + d(m_b*u_b**2/2 + 3/2*T_b) = 0.
+
+    logical, intent(inout) :: all_passed
+
+    real(dp), parameter :: m_t = 4.0_dp*amp, m_b = 2.0_dp*amp, r = -0.3_dp
+    real(dp), parameter :: dv = 2.0e7_dp, de = 5.0e-9_dp, u0 = 1.0e6_dp, t0 = 1.0e3_dp
+    real(dp) :: u_b, temp_b
+
+    u_b = u0
+    temp_b = t0
+    call update_background_reservoir(m_t, m_b, r, dv, de, u_b, temp_b)
+
+    if (abs(r*m_t*dv + m_b*(u_b - u0)) > 1.0e-12_dp*m_b*abs(u_b)) then
+        print *, 'FAIL: background reservoir does not conserve momentum'
+        all_passed = .false.
+    end if
+    if (abs(r*de + m_b*(u_b**2 - u0**2)/2 + 1.5_dp*(temp_b - t0)*ev2erg) > 1.0e-12_dp*abs(de)) then
+        print *, 'FAIL: background reservoir does not conserve energy'
+        all_passed = .false.
+    end if
+
+end subroutine test_background_reservoir
 
 end program test_multi_species_collision

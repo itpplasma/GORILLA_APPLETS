@@ -12,7 +12,7 @@ subroutine print_progress(num_particles,kpart,n)
     logical :: print_progress_for_every_particle = .false.
 
     if ((.not.print_progress_for_every_particle).and.(num_particles.gt.10)) then
-        if (modulo(kpart,int(num_particles/100)).eq.0) then
+        if (modulo(kpart,max(1,num_particles/100)).eq.0) then
             print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
         endif
     else
@@ -190,12 +190,10 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     real(dp), dimension(3) :: randnum
     real(dp), dimension(1) :: m, z, dens, temp, efcolf,velrat,enrat
     real(dp) :: vpar_background
-    real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar, vpar_mat_save, vpar_mat
+    real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar
     integer :: err, j, p
-    real(dp) ::  w_v, w_t, particle_to_background_coupling_strength, t_max
+    real(dp) :: particle_to_background_coupling_strength, t_max
 
-    w_v = 1.0_dp
-    w_t = 1.0_dp
     particle_to_background_coupling_strength = 0.0001_dp
 
     do j = 1,c%n-1
@@ -238,19 +236,30 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         delta_vpar = vpar - vpar_save
         delta_epsilon = particle_mass/2*(vpar**2 + vperp**2 - vpar_save**2 - vperp_save**2)
 
-        vpar_mat_save = c%vpar_mat(j,ind_tetr)
-        
         !$omp critical
-        c%vpar_mat(j,ind_tetr) = vpar_mat_save - &
-                            c%weight_factor*weights%w(n,species)*delta_vpar/w_v*particle_to_background_coupling_strength
-        vpar_mat = c%vpar_mat(j,ind_tetr)
-        c%temp_mat(j,ind_tetr) = c%temp_mat(j,ind_tetr) + particle_mass/3*(vpar_mat_save**2 - vpar_mat**2) - &
-                            2.0_dp/3.0_dp*c%weight_factor*weights%w(n,species)*delta_epsilon/w_t &
-                            *particle_to_background_coupling_strength
+        call update_background_reservoir(particle_mass, c%mass(j), &
+            c%weight_factor*weights%w(n,species)*particle_to_background_coupling_strength, &
+            delta_vpar, delta_epsilon, c%vpar_mat(j,ind_tetr), c%temp_mat(j,ind_tetr))
         !$omp end critical
     enddo
 
 end subroutine collisions_with_background_updates
+
+pure subroutine update_background_reservoir(m_t, m_b, r, delta_vpar, delta_epsilon, u_b, temp_b)
+    !Background flow u_b and temperature temp_b [eV] take up the parallel momentum and energy [erg]
+    !that a test marker of mass m_t and signed marker-to-background ratio r gains in a collision.
+
+    use constants, only: ev2erg
+
+    real(dp), intent(in) :: m_t, m_b, r, delta_vpar, delta_epsilon
+    real(dp), intent(inout) :: u_b, temp_b
+    real(dp) :: u_b_old
+
+    u_b_old = u_b
+    u_b = u_b_old - r*m_t*delta_vpar/m_b
+    temp_b = temp_b - (2.0_dp*r*delta_epsilon + m_b*(u_b**2 - u_b_old**2))/(3.0_dp*ev2erg)
+
+end subroutine update_background_reservoir
 
 subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
 
