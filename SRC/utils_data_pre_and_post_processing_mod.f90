@@ -4,6 +4,8 @@ module utils_data_pre_and_post_processing_mod
 
     implicit none
 
+    integer, dimension(:), allocatable, protected :: master_seed
+
 contains
 
 subroutine set_seed_for_random_numbers
@@ -18,7 +20,7 @@ subroutine set_seed_for_random_numbers
     read(seed_inp_unit,*) seed
     close(seed_inp_unit)
     CALL RANDOM_SEED (PUT=seed)
-    deallocate(seed)
+    call move_alloc(seed, master_seed)
 
 end subroutine set_seed_for_random_numbers
 
