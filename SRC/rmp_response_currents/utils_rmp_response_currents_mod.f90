@@ -1610,8 +1610,8 @@ end subroutine init_regularisation_for_particle
 subroutine set_local_collision_background()
 
     use gorilla_applets_types_mod, only: in, c
-    use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
-    use tetra_physics_mod, only: particle_mass, particle_charge
+    use tetra_grid_mod, only: ntetr, verts_rphiz, verts_sthetaphi, tetra_grid
+    use tetra_physics_mod, only: particle_mass, particle_charge, coord_system
     use constants, only: echarge
     use collis_ions, only: collis_init
     use profile_data_mod, only: eval_profiles, profile_values_t
@@ -1629,9 +1629,16 @@ subroutine set_local_collision_background()
     allocate(efcolf_l(c%n), velrat_l(c%n), enrat_l(c%n), dens_l(c%n), temp_l(c%n))
     !$omp do
     do i = 1, ntetr
+        ! Cell centroid in mesh coordinates: (R, phi, Z) on cylindrical grids,
+        ! (s, theta, phi) on flux grids (chartmap, coord_system 2); the flux
+        ! label of eval_s0_local/eval_s_local is defined in mesh coordinates.
         x_c = 0.0_dp
         do k = 1, 4
-            x_c = x_c + 0.25_dp * verts_rphiz(:, tetra_grid(i)%ind_knot(k))
+            if (coord_system == 2) then
+                x_c = x_c + 0.25_dp * verts_sthetaphi(:, tetra_grid(i)%ind_knot(k))
+            else
+                x_c = x_c + 0.25_dp * verts_rphiz(:, tetra_grid(i)%ind_knot(k))
+            end if
         end do
         if (canonical_loading()) then
             s_c = eval_s0_local(i, x_c)
