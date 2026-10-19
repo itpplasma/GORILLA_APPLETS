@@ -40,6 +40,8 @@ add_library(GORILLA_APPLETS STATIC
     rmp_response_currents/rmp_profile_moments_mod.f90
   rmp_response_currents/rmp_volume_loading_mod.f90
   rmp_response_currents/rmp_maxwellian_loading_mod.f90
+  rmp_response_currents/chartmap_ntv_mod.f90
+  rmp_response_currents/wall_contour_mod.f90
   rmp_response_currents/canonical_ntv_mod.f90
   rmp_response_currents/utils_rmp_response_currents_mod.f90
   rmp_response_currents/rmp_response_currents_mod.f90
