@@ -16,6 +16,10 @@
 !>     separately; the kicks leave w unchanged, so Lorentz scattering is a
 !>     momentum sink of the test species without a restoring term);
 !>   * birth and end (loss) p_phi, s and time.
+!> Optional (ntv_fax_file): weight source of the collisional axisymmetric
+!> background f_AX = G + h beyond the canonical f0 (generated kernels
+!> deltaf_fax_coordinates_kernel and deltaf_fax_weight_kernel, see
+!> CANONICAL_NTV.md "Collisional background drive").
 !> The per-marker table (one row per marker, numeric columns, header line) is
 !> written for the external NTV / delta-B-loss / axisymmetric-loss
 !> decomposition of the paired +-sigma/0 runs.
@@ -33,6 +37,8 @@ module canonical_ntv_mod
     use deltaf_harmonic_kernel, only: evaluate_deltaf_harmonic
     use deltaf_weight_kernel, only: evaluate_deltaf_weight
     use chartmap_ntv_mod, only: chartmap_raw_t, read_chartmap_raw, chartmap_harmonic
+    use deltaf_fax_coordinates_kernel, only: evaluate_deltaf_fax_coordinates
+    use deltaf_fax_weight_kernel, only: evaluate_deltaf_fax_weight
 
     implicit none
 
@@ -42,13 +48,14 @@ module canonical_ntv_mod
         ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
         ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, ntv_lorentz_mh, &
         ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn, ntv_mesh_phi0, &
-        ntv_profile_phi0
+        ntv_profile_phi0, ntv_fax_file
     public :: canonical_ntv_nml_read, canonical_ntv_init, canonical_ntv_allocate, &
         canonical_ntv_birth, canonical_ntv_push, canonical_ntv_collision, &
         canonical_ntv_end, canonical_ntv_write, ntv_harmonic_dphi, &
         ntv_theta_of_x, ntv_phi_index, ntv_h_phi, species_temperature_eV, &
         ntv_point_t, ntv_eval_point, canonical_ntv_mark_loss, loss_grid_exit, &
-        loss_wall, loss_outer_cut, ntv_lorentz_proposal
+        loss_wall, loss_outer_cut, ntv_lorentz_proposal, ntv_fax_load_table, &
+        ntv_fax_dchi_dlambda
     public :: n_ntv_cols, ntv_col_names
 
     logical  :: boole_canonical_ntv = .false.
@@ -102,6 +109,13 @@ module canonical_ntv_mod
     !> after the burn-in ntv_w_reset_burn (file canonical_ntv_reset.dat).
     real(dp) :: ntv_w_reset_dt = 0.0_dp
     real(dp) :: ntv_w_reset_burn = 0.0_dp
+    !> Collisional background drive (default off: empty). Table of
+    !> d chi/d lambda on (vartheta, lambda = v_par/v), with
+    !> h/f0 = (d ln f0/dp_phi) m v h_phi chi the non-canonical part of the
+    !> axisymmetric collisional solution (from NEO-2). Adds dw/dt = -delta(dlambda/dt) d(h/f0)/dlambda
+    !> = (d ln f0/dp_phi) mu (h_phi/R)**2 (d chi/d lambda) d dB/dphi (m = 0).
+    character(len=512) :: ntv_fax_file = ''
+
     !> Flux-coordinate meshes (grid_kind 6): set the mesh potential on the
     !> vertices to the profile potential Phi0(s) of f0 (Er.dat of profile_dir),
     !> so the ExB drift of the orbits and f0(p_phi, H0) use the same Phi0.
@@ -113,7 +127,7 @@ module canonical_ntv_mod
         ntv_output_file, ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
         ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, &
         ntv_lorentz_mh, ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn, &
-        ntv_mesh_phi0
+        ntv_mesh_phi0, ntv_fax_file
 
     !> Loss kinds (column loss_kind): grid exit (last mesh surface or inner
     !> boundary), wall contour, s_outer_cut.
@@ -147,6 +161,13 @@ module canonical_ntv_mod
     integer :: n_cm_modes = 0
     integer, allocatable :: cm_m(:)
     real(dp), allocatable :: cm_s(:), cm_bc(:,:), cm_bc2(:,:), cm_bs(:,:), cm_bs2(:,:)
+    !> Collisional background drive: on/off, table d chi/d lambda
+    !> (lambda, vartheta), and Bmin, Bmax of the circular surface of radius rho.
+    logical :: fax_on = .false.
+    real(dp), allocatable :: fax_vt(:), fax_lam(:), fax_tab(:,:)
+    integer, parameter :: n_fax_rho = 2001
+    real(dp) :: fax_drho = 0.0_dp, fax_spol = 1.0_dp
+    real(dp) :: fax_bmin(n_fax_rho), fax_bmax(n_fax_rho)
 
     !> Local state of a marker at one point of the mesh field.
     type :: ntv_point_t
@@ -154,6 +175,8 @@ module canonical_ntv_mod
         real(dp) :: dlnf0_dpphi, dh1_dphi
         !> dH/dphi of the mesh field itself (full-f route) and psi0 = A_phi of f0.
         real(dp) :: dh_mesh_dphi, psi0
+        !> Collisional background weight source (0 without ntv_fax_file).
+        real(dp) :: dw_fax = 0.0_dp
     end type ntv_point_t
 
 contains
@@ -220,6 +243,13 @@ subroutine canonical_ntv_init()
         ntv_lorentz_dt = 1.0e-4_dp / ntv_lorentz_nu
     if (ntv_bmn_relative .and. len_trim(ntv_chartmap_file) > 0) error stop &
         'canonical NTV: ntv_bmn_relative does not apply to chartmap harmonics'
+    fax_on = len_trim(ntv_fax_file) > 0
+    if (fax_on) then
+        if (ntv_m_pol /= 0) error stop &
+            'canonical NTV: ntv_fax_file needs ntv_m_pol = 0 (b.grad = b^phi d/dphi)'
+        call ntv_fax_load_table(trim(ntv_fax_file))
+        call fax_surface_field()
+    end if
     n_tab = 0
     if (len_trim(ntv_chartmap_file) > 0) then
         if (len_trim(ntv_profile_file) > 0) error stop &
@@ -452,6 +482,7 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     real(dp) :: dtemp, phi0, dphi0, dummy(4)
     integer :: ip
     type(profile_values_t) :: pv0, pvs
+    real(dp) :: bmin, bmax, branch, lam, vtheta, bclamp
 
     mass = start%particle_mass(species)
     charge = start%particle_charge(species)
@@ -493,6 +524,15 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
         dens, ddens, temp, dtemp, phi0, dphi0, tetra_physics(ind_tetr)%gB(ip), &
         tetra_physics(ind_tetr)%gPhi(ip), dummy(1), dummy(2), pt%dh_mesh_dphi, &
         dummy(3), dummy(4))
+    pt%dw_fax = 0.0_dp
+    if (.not. fax_on) return
+    call fax_surface_b(x, bmin, bmax, branch)
+    if (bmax <= bmin) return
+    bclamp = min(max(pt%bmod, bmin), bmax)
+    call evaluate_deltaf_fax_coordinates(mass, pt%mu, vpar, bclamp, bmin, bmax, &
+        branch, lam, vtheta)
+    call evaluate_deltaf_fax_weight(pt%mu, pt%h_phi, x(1), pt%dlnf0_dpphi, &
+        db1_dphi, ntv_fax_dchi_dlambda(vtheta, lam), pt%dw_fax)
 end subroutine ntv_eval_point
 
 !> Records the birth state of marker n (P: birth factor f0/g0).
@@ -536,6 +576,7 @@ subroutine canonical_ntv_push(n, pa, pm, pb, s_end, dt, w)
     dh_old = rec(c_dh, n)
     tq_old = rec(c_tq, n)
     w = w + pm%dlnf0_dpphi * pm%dh1_dphi * dt
+    if (fax_on) w = w + pm%dw_fax * dt
     dtq = -0.5_dp * (w_old + w) * pm%dh1_dphi * dt
     rec(c_tq, n) = rec(c_tq, n) + dtq
     rec(c_dh, n) = rec(c_dh, n) - pm%dh1_dphi * dt
@@ -704,6 +745,127 @@ subroutine write_reset()
     end do
     close(u)
 end subroutine write_reset
+
+!> Reads the collisional background table: n_theta n_lambda, vartheta(n_theta)
+!> (increasing, spanning [-pi, pi]), lambda(n_lambda) (increasing, spanning
+!> [-1, 1]), then d chi/d lambda as n_theta rows of n_lambda values
+!> ('#' header lines first).
+subroutine ntv_fax_load_table(fname)
+    character(len=*), intent(in) :: fname
+    integer :: u, ios, nt, nl
+    character(len=1) :: c
+
+    open(newunit=u, file=fname, status='old', action='read', iostat=ios)
+    if (ios /= 0) error stop 'canonical NTV: cannot open ntv_fax_file'
+    do
+        read(u, '(a)', iostat=ios) c
+        if (ios /= 0) error stop 'canonical NTV: ntv_fax_file has no data'
+        if (c /= '#') exit
+    end do
+    backspace(u)
+    read(u, *, iostat=ios) nt, nl
+    if (ios /= 0 .or. nt < 2 .or. nl < 2) error stop 'canonical NTV: bad ntv_fax_file size'
+    if (allocated(fax_vt)) deallocate(fax_vt, fax_lam, fax_tab)
+    allocate(fax_vt(nt), fax_lam(nl), fax_tab(nl, nt))
+    read(u, *, iostat=ios) fax_vt, fax_lam, fax_tab
+    close(u)
+    if (ios /= 0) error stop 'canonical NTV: ntv_fax_file truncated'
+    if (any(fax_vt(2:) <= fax_vt(:nt - 1)) .or. any(fax_lam(2:) <= fax_lam(:nl - 1))) &
+        error stop 'canonical NTV: ntv_fax_file grids must increase'
+    print '(a, i0, a, i0, 2a)', ' Canonical NTV collisional background: ', nt, ' x ', nl, &
+        ' table ', trim(fname)
+end subroutine ntv_fax_load_table
+
+!> d chi/d lambda at (vartheta, lambda), bilinear, clamped to the table.
+function ntv_fax_dchi_dlambda(vtheta, lam) result(d)
+    real(dp), intent(in) :: vtheta, lam
+    real(dp) :: d, ft, fl
+    integer :: it, il
+
+    call bracket(fax_vt, vtheta, it, ft)
+    call bracket(fax_lam, lam, il, fl)
+    d = (1.0_dp - ft) * ((1.0_dp - fl) * fax_tab(il, it) + fl * fax_tab(il + 1, it)) &
+        + ft * ((1.0_dp - fl) * fax_tab(il, it + 1) + fl * fax_tab(il + 1, it + 1))
+end function ntv_fax_dchi_dlambda
+
+!> Interval lo (x(lo) <= xv <= x(lo+1)) and fraction, clamped to the grid.
+pure subroutine bracket(x, xv, lo, frac)
+    real(dp), intent(in) :: x(:), xv
+    integer,  intent(out) :: lo
+    real(dp), intent(out) :: frac
+    integer :: hi, k
+
+    lo = 1
+    hi = size(x)
+    do while (hi - lo > 1)
+        k = (hi + lo) / 2
+        if (x(k) > xv) then
+            hi = k
+        else
+            lo = k
+        end if
+    end do
+    frac = max(0.0_dp, min(1.0_dp, (xv - x(lo)) / (x(lo + 1) - x(lo))))
+end subroutine bracket
+
+!> |B| at the outboard (Bmin) and inboard (Bmax) midplane of the circular
+!> surfaces rho = |x - (R0, ., 0)| of the analytic field (grid_kind 5), and the
+!> sign of the poloidal circulation (B_Z at the outboard midplane).
+subroutine fax_surface_field()
+    use tetra_grid_settings_mod, only: R0_analytic_circ, a_analytic_circ
+    integer :: k
+    real(dp) :: rho, bz_out
+
+    fax_drho = 1.1_dp * a_analytic_circ / real(n_fax_rho - 1, dp)
+    do k = 1, n_fax_rho
+        rho = real(k - 1, dp) * fax_drho
+        fax_bmin(k) = bmod_rz(R0_analytic_circ + rho, 0.0_dp)
+        fax_bmax(k) = bmod_rz(R0_analytic_circ - rho, 0.0_dp)
+    end do
+    call field_bz(R0_analytic_circ + 0.5_dp * a_analytic_circ, bz_out)
+    fax_spol = sign(1.0_dp, bz_out)
+    if (any(fax_bmax(2:) <= fax_bmin(2:))) &
+        error stop 'canonical NTV: collisional background needs B larger inboard'
+end subroutine fax_surface_field
+
+function bmod_rz(r, z) result(b)
+    use field_divB0_mod, only: field
+    real(dp), intent(in) :: r, z
+    real(dp) :: b, br, bp, bz, d(9)
+
+    call field(r, 0.0_dp, z, br, bp, bz, d(1), d(2), d(3), d(4), d(5), d(6), &
+               d(7), d(8), d(9))
+    b = sqrt(br**2 + bp**2 + bz**2)
+end function bmod_rz
+
+subroutine field_bz(r, bz)
+    use field_divB0_mod, only: field
+    real(dp), intent(in) :: r
+    real(dp), intent(out) :: bz
+    real(dp) :: br, bp, d(9)
+
+    call field(r, 0.0_dp, 0.0_dp, br, bp, bz, d(1), d(2), d(3), d(4), d(5), d(6), &
+               d(7), d(8), d(9))
+end subroutine field_bz
+
+!> Bmin, Bmax of the surface through x = (R, phi, Z) and the branch
+!> sign(b.grad B): B grows from the outboard (theta = 0) to the inboard
+!> midplane, so b.grad B has the sign of fax_spol * Z.
+subroutine fax_surface_b(x, bmin, bmax, branch)
+    use tetra_grid_settings_mod, only: R0_analytic_circ
+    real(dp), intent(in) :: x(3)
+    real(dp), intent(out) :: bmin, bmax, branch
+    real(dp) :: rho, f
+    integer :: k
+
+    rho = sqrt((x(1) - R0_analytic_circ)**2 + x(3)**2)
+    f = rho / fax_drho
+    k = min(max(int(f) + 1, 1), n_fax_rho - 1)
+    f = min(max(f - real(k - 1, dp), 0.0_dp), 1.0_dp)
+    bmin = (1.0_dp - f) * fax_bmin(k) + f * fax_bmin(k + 1)
+    bmax = (1.0_dp - f) * fax_bmax(k) + f * fax_bmax(k + 1)
+    branch = fax_spol * sign(1.0_dp, x(3))
+end subroutine fax_surface_b
 
 subroutine spline_second_derivatives(x, y, y2)
     real(dp), intent(in)  :: x(:), y(:)
