@@ -16,7 +16,11 @@ Gates:
       the same amplitude (same markers): relative difference < 1e-6.
   (c) analytic route vs chartmap route, same harmonic, MH collisions: the
       delta-f torque estimates V/N sum P tq_deltaf agree within 4 combined
-      standard errors (different marker sets).
+      standard errors (different marker sets). The collision background is
+      the same on both routes: MH proposals per marker agree within 10% and
+      the MH rejection fractions within 0.02 (regression: on the chartmap the
+      cell centroids were taken from verts_rphiz instead of the flux
+      coordinates, so the local background was the edge profile).
   (d) full-f on the perturbed chartmap meshes (+sigma, -sigma, 0; common
       starts and per-marker collision streams) vs delta-f on the
       axisymmetric mesh with the harmonic of the +sigma file:
@@ -145,6 +149,16 @@ def run(case_dir, threads):
     return markers
 
 
+def read_mh(case_dir):
+    """(proposals, rejected fraction) of the MH collision kicks from run.log."""
+    text = (case_dir / "run.log").read_text()
+    m = re.search(r"Canonical NTV MH collisions: proposals =\s*(\S+), "
+                  r"rejected fraction =\s*(\S+)", text)
+    if m is None:
+        sys.exit(f"no MH collision summary in {case_dir}/run.log")
+    return float(m.group(1)), float(m.group(2))
+
+
 def read_volume(path):
     for line in path.read_text().splitlines():
         if line.startswith("# spawn_volume_cm3"):
@@ -246,6 +260,13 @@ def main():
             failures.append(f"analytic and chartmap routes disagree ({z:.2f} sigma)")
         if abs(mc["volume"] / m5["volume"] - 1.0) > 3.0e-3:
             failures.append("chartmap J0 volume differs from the analytic volume")
+        p5, r5 = read_mh(WORK_DIR / "c_analytic_route")
+        p6, r6 = read_mh(WORK_DIR / "b_chartmap_analytic")
+        print(f"(c) MH kicks: proposals analytic {p5:.0f}, chartmap {p6:.0f}; rejected "
+              f"fraction analytic {r5:.4f}, chartmap {r6:.4f}")
+        if abs(p6 / p5 - 1.0) > 0.1 or abs(r6 - r5) > 0.02:
+            failures.append("collision background differs between analytic and "
+                            "chartmap routes")
 
     if "d" in gates:
         meshes = {}
