@@ -18,10 +18,23 @@ jobs:
         with:
           path: GORILLA_APPLETS
 
+      - name: Select GORILLA branch
+        id: gorilla_ref
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          # Use the GORILLA branch of the same name when it exists, else main.
+          if git ls-remote --exit-code --heads https://github.com/itpplasma/GORILLA.git "$BRANCH" > /dev/null; then
+            echo "ref=$BRANCH" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout GORILLA (core dependency)
         uses: actions/checkout@v6
         with:
           repository: itpplasma/GORILLA
+          ref: ${{ steps.gorilla_ref.outputs.ref }}
           path: GORILLA
 
       - name: System dependencies
