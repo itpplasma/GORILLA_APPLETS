@@ -11,6 +11,7 @@ add_library(GORILLA_APPLETS STATIC
   fluxtv_pusher_mod.f90
   gorilla_applets_settings_mod.f90
   gorilla_applets_sub_mod.f90
+  transport_electric_field_mod.f90
   llsq.f90
   utils_polyfit_mod.f90
   marker_distribution_mod.f90

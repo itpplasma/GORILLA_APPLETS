@@ -61,6 +61,9 @@
             use fluxtv_mod, only: pos_fluxtv_mat,load_flux_tube_volume
             use splint_vmec_data_mod, only: splint_vmec_data
             use sub_alpha_lifetime_can_mod, only: integrate_mfl_can
+            use tetra_grid_settings_mod, only: netcdf_filename
+            use boozer_chartmap_mod, only: load_boozer_chartmap, chartmap_torflux
+            use transport_electric_field_mod, only: eps_phi_from_v_e, chartmap_bmod00
 !
             implicit none
 !
@@ -88,8 +91,21 @@
             x_start = pos_fluxtv_mat(1,1:3)
 !
             !----------- Compute electrostatic potential for normalized ExB drift velocity v_E -----------!
-            if(grid_kind.ne.3 .and. v_E.ne.0.d0) then
-                error stop 'v_E /= 0 is only supported for grid_kind=3'
+            if(grid_kind.ne.3 .and. grid_kind.ne.6 .and. v_E.ne.0.d0) then
+                error stop 'v_E /= 0 is only supported for grid_kind=3 (VMEC) and 6 (chartmap)'
+            endif
+!
+            !Boozer chartmap: A_theta = torflux*s and B_00 is the mean of |B| on the surface.
+            !With v_E = 0, eps_Phi from gorilla.inp is kept, as before.
+            if(grid_kind.eq.6 .and. v_E.ne.0.d0) then
+               call load_boozer_chartmap(netcdf_filename)
+               s = x_start(1)
+               bmod00 = chartmap_bmod00(s)
+               ds_dr = radial_metric_ds_dr(s,bmod00,chartmap_torflux)
+               eps_Phi = eps_phi_from_v_e(v_E,vmod,bmod00,chartmap_torflux,ds_dr)
+               call set_eps_Phi(eps_Phi)
+               print *, 'bmod00', bmod00
+               print *, 'eps_Phi', eps_Phi
             endif
 !
             if(grid_kind.eq.3) then
