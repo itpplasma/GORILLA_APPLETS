@@ -186,6 +186,36 @@ OMP_NUM_THREADS=4"
 endif()
 
 if(BUILD_TESTING)
+    # Boozer chartmap of the analytic circular field (two-route NTV tests).
+    add_executable(write_circular_boozer_chartmap.x
+        TESTS/write_circular_boozer_chartmap.f90)
+    target_link_libraries(write_circular_boozer_chartmap.x GORILLA netCDF::netcdff
+        netCDF::netcdf)
+    target_include_directories(write_circular_boozer_chartmap.x PUBLIC
+        ${CMAKE_BINARY_DIR}/SRC_CORE)
+    add_executable(test_canonical_ntv_chartmap.x TESTS/test_canonical_ntv_chartmap.f90)
+    target_link_libraries(test_canonical_ntv_chartmap.x GORILLA_APPLETS)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/canonical_ntv_chartmap_unit)
+    add_test(NAME canonical_ntv_chartmap_unit
+        COMMAND test_canonical_ntv_chartmap.x
+                $<TARGET_FILE:write_circular_boozer_chartmap.x>
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/canonical_ntv_chartmap_unit)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME canonical_ntv_chartmap
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/TESTS/test_canonical_ntv_chartmap.py)
+    set_tests_properties(canonical_ntv_chartmap PROPERTIES
+        ENVIRONMENT
+            "APPLETS_ROOT=${CMAKE_CURRENT_SOURCE_DIR};\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+CHARTMAP_WRITER_BIN=$<TARGET_FILE:write_circular_boozer_chartmap.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/canonical_ntv_chartmap_work;\
+OMP_NUM_THREADS=4"
+        PROCESSORS 4
+        TIMEOUT 1200)
+endif()
+
+if(BUILD_TESTING)
     add_executable(test_ou_collision_invariant.x
         SRC_CORE/constants_mod.f90
         SRC/collis_ions_mod.f90
