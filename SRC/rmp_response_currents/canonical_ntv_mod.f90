@@ -19,24 +19,35 @@
 !> The per-marker table (one row per marker, numeric columns, header line) is
 !> written for the external NTV / delta-B-loss / axisymmetric-loss
 !> decomposition of the paired +-sigma/0 runs.
+!>
+!> Charts: the analytic circular field in cylindrical coordinates (grid_kind 5,
+!> coord_system 1, harmonic in the straight-field-line angle) and the Boozer
+!> chartmap (grid_kind 6, coord_system 2, x = (s, theta_B, phi_B)). On the
+!> chartmap the harmonics can be taken from a chartmap file (ntv_chartmap_file:
+!> Fourier projection of its |B| for n = ntv_n_tor), and a perturbed chartmap
+!> as mesh gives the full-f route: the orbits see the perturbed |B| and
+!> dh_mesh = int -dH/dphi|mesh dt with dB/dphi of the mesh is accumulated.
 module canonical_ntv_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use deltaf_harmonic_kernel, only: evaluate_deltaf_harmonic
     use deltaf_weight_kernel, only: evaluate_deltaf_weight
+    use chartmap_ntv_mod, only: chartmap_raw_t, read_chartmap_raw, chartmap_harmonic
 
     implicit none
 
     private
     public :: boole_canonical_ntv, ntv_m_pol, ntv_n_tor, ntv_amplitude, ntv_bmn, &
         ntv_phimn, ntv_profile_file, ntv_theta_kind, ntv_output_file, &
+        ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
         ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, ntv_lorentz_mh, &
         ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn
     public :: canonical_ntv_nml_read, canonical_ntv_init, canonical_ntv_allocate, &
         canonical_ntv_birth, canonical_ntv_push, canonical_ntv_collision, &
         canonical_ntv_end, canonical_ntv_write, ntv_harmonic_dphi, &
-        ntv_theta_of_x, species_temperature_eV, ntv_point_t, ntv_eval_point, &
-        ntv_lorentz_proposal
+        ntv_theta_of_x, ntv_phi_index, ntv_h_phi, species_temperature_eV, &
+        ntv_point_t, ntv_eval_point, canonical_ntv_mark_loss, loss_grid_exit, &
+        loss_wall, loss_outer_cut, ntv_lorentz_proposal
     public :: n_ntv_cols, ntv_col_names
 
     logical  :: boole_canonical_ntv = .false.
@@ -53,6 +64,19 @@ module canonical_ntv_mod
     !> of B_phi = B0 R0/R (as GORILLA eval_helical_pert_circ), 0 geometric angle.
     integer  :: ntv_theta_kind = 1
     character(len=512) :: ntv_output_file = 'canonical_ntv_markers.dat'
+    !> Chartmap whose |B| harmonics (toroidal mode ntv_n_tor) define dB1; scaled
+    !> by ntv_amplitude. Empty: single harmonic from ntv_bmn / ntv_profile_file.
+    character(len=512) :: ntv_chartmap_file = ''
+    !> Poloidal modes taken from ntv_chartmap_file: m = -ntv_m_max..ntv_m_max;
+    !> a negative value takes the single mode m = ntv_m_pol.
+    integer  :: ntv_m_max = -1
+    !> Optional (R, Z) [cm] wall / limiter polygon used as loss boundary.
+    character(len=512) :: loss_wall_file = ''
+    !> Reseed the random stream of every marker from (seed.inp, marker index),
+    !> so that the +-sigma/0 runs share starts and collision streams marker by
+    !> marker, independent of the thread partition and of earlier losses.
+    logical  :: ntv_marker_rng = .true.
+
     !> .true.: b_mn (constant or table) is the relative amplitude dB/B, and the
     !> perturbation is dB1 = sigma b_mn B(x) cos(m theta - n phi) with the local
     !> |B| of the mesh field (NEO-RT analytic convention epsmn, B1 = epsmn B).
@@ -80,18 +104,23 @@ module canonical_ntv_mod
 
     namelist /canonical_ntv_nml/ boole_canonical_ntv, ntv_m_pol, ntv_n_tor, &
         ntv_amplitude, ntv_bmn, ntv_phimn, ntv_profile_file, ntv_theta_kind, &
-        ntv_output_file, ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, &
+        ntv_output_file, ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
+        ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, &
         ntv_lorentz_mh, ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn
 
-    integer, parameter :: n_ntv_cols = 17
+    !> Loss kinds (column loss_kind): grid exit (last mesh surface or inner
+    !> boundary), wall contour, s_outer_cut.
+    integer, parameter :: loss_grid_exit = 1, loss_wall = 2, loss_outer_cut = 3
+
+    integer, parameter :: n_ntv_cols = 21
     character(len=*), parameter :: ntv_col_names = &
         'n lost P pphi_birth s_birth sstar_birth w_end tq_deltaf dh_int ' // &
         'dpphi_orbit dpphi_coll pphi_end s_end sstar_end t_end n_push ' // &
-        'dlnf0_dpphi_birth'
+        'dlnf0_dpphi_birth dh_mesh psi_birth psi_end loss_kind'
     integer, parameter :: c_n = 1, c_lost = 2, c_p = 3, c_pphi0 = 4, c_s0 = 5, &
         c_sstar0 = 6, c_w = 7, c_tq = 8, c_dh = 9, c_dporb = 10, c_dpcoll = 11, &
         c_pphi1 = 12, c_s1 = 13, c_sstar1 = 14, c_t1 = 15, c_npush = 16, &
-        c_dlnf0 = 17
+        c_dlnf0 = 17, c_dhm = 18, c_psi0 = 19, c_psi1 = 20, c_kind = 21
 
     !> Per-marker records (n_ntv_cols, n_particles); one marker per thread.
     real(dp), allocatable :: rec(:,:)
@@ -106,10 +135,18 @@ module canonical_ntv_mod
     integer :: n_tab = 0
     real(dp), allocatable :: tab_s(:), tab_b(:), tab_b2(:), tab_p(:), tab_p2(:)
 
+    !> Harmonics from ntv_chartmap_file: modes (m_k, ntv_n_tor), cosine and sine
+    !> amplitudes on the s nodes with natural-spline second derivatives.
+    integer :: n_cm_modes = 0
+    integer, allocatable :: cm_m(:)
+    real(dp), allocatable :: cm_s(:), cm_bc(:,:), cm_bc2(:,:), cm_bs(:,:), cm_bs2(:,:)
+
     !> Local state of a marker at one point of the mesh field.
     type :: ntv_point_t
         real(dp) :: bmod, h_phi, aphi, pphi, s_star, mu
         real(dp) :: dlnf0_dpphi, dh1_dphi
+        !> dH/dphi of the mesh field itself (full-f route) and psi0 = A_phi of f0.
+        real(dp) :: dh_mesh_dphi, psi0
     end type ntv_point_t
 
 contains
@@ -133,12 +170,18 @@ end subroutine canonical_ntv_nml_read
 !> Checks the configuration and loads the optional amplitude table.
 subroutine canonical_ntv_init()
     use tetra_grid_settings_mod, only: grid_kind, n_field_periods
+    use tetra_physics_mod, only: coord_system
+    use wall_contour_mod, only: load_wall_contour
     integer :: u, ios, i
     real(dp) :: row(3)
     character(len=512) :: line
 
-    if (grid_kind /= 5) error stop &
-        'canonical NTV: only the analytic circular chart (grid_kind 5) is wired'
+    if (.not. ((grid_kind == 5 .and. coord_system == 1) .or. &
+               (grid_kind == 6 .and. coord_system == 2))) error stop &
+        'canonical NTV: wired for grid_kind 5 (coord_system 1) and 6 (coord_system 2)'
+    if (ntv_theta_kind /= 0 .and. ntv_theta_kind /= 1) &
+        error stop 'canonical NTV: ntv_theta_kind must be 0 or 1'
+    if (len_trim(loss_wall_file) > 0) call load_wall_contour(trim(loss_wall_file))
     ! The mesh covers one field period 2 pi/n_field_periods and markers are
     ! relocated into it, so the harmonic must be periodic on that interval.
     if (n_field_periods < 1) error stop 'canonical NTV: n_field_periods must be >= 1'
@@ -156,7 +199,15 @@ subroutine canonical_ntv_init()
     if (ntv_lorentz_nu < 0.0_dp) error stop 'canonical NTV: ntv_lorentz_nu must be >= 0'
     if (ntv_lorentz_nu > 0.0_dp .and. ntv_lorentz_dt <= 0.0_dp) &
         ntv_lorentz_dt = 1.0e-4_dp / ntv_lorentz_nu
+    if (ntv_bmn_relative .and. len_trim(ntv_chartmap_file) > 0) error stop &
+        'canonical NTV: ntv_bmn_relative does not apply to chartmap harmonics'
     n_tab = 0
+    if (len_trim(ntv_chartmap_file) > 0) then
+        if (len_trim(ntv_profile_file) > 0) error stop &
+            'canonical NTV: ntv_chartmap_file and ntv_profile_file are exclusive'
+        call load_chartmap_harmonics(trim(ntv_chartmap_file))
+        return
+    end if
     if (len_trim(ntv_profile_file) == 0) return
     open(newunit=u, file=trim(ntv_profile_file), status='old', action='read', &
          iostat=ios)
@@ -190,6 +241,38 @@ subroutine canonical_ntv_init()
     call spline_second_derivatives(tab_s, tab_b, tab_b2)
     call spline_second_derivatives(tab_s, tab_p, tab_p2)
 end subroutine canonical_ntv_init
+
+!> Fourier projection of the |B| of a chartmap onto the modes (m, ntv_n_tor).
+subroutine load_chartmap_harmonics(filename)
+    character(len=*), intent(in) :: filename
+    type(chartmap_raw_t) :: cm
+    integer :: k, m_lo, m_hi
+
+    if (ntv_n_tor == 0) error stop 'canonical NTV: chartmap harmonics need ntv_n_tor /= 0'
+    call read_chartmap_raw(filename, cm, with_geometry=.false.)
+    if (ntv_m_max < 0) then
+        m_lo = ntv_m_pol
+        m_hi = ntv_m_pol
+    else
+        m_lo = -ntv_m_max
+        m_hi = ntv_m_max
+    end if
+    n_cm_modes = m_hi - m_lo + 1
+    if (allocated(cm_m)) deallocate(cm_m, cm_s, cm_bc, cm_bc2, cm_bs, cm_bs2)
+    allocate(cm_m(n_cm_modes), cm_s(cm%nrho), cm_bc(cm%nrho, n_cm_modes), &
+             cm_bc2(cm%nrho, n_cm_modes), cm_bs(cm%nrho, n_cm_modes), &
+             cm_bs2(cm%nrho, n_cm_modes))
+    cm_s = cm%rho**2
+    do k = 1, n_cm_modes
+        cm_m(k) = m_lo + k - 1
+        call chartmap_harmonic(cm, cm_m(k), ntv_n_tor, cm_bc(:, k), cm_bs(:, k))
+        call spline_second_derivatives(cm_s, cm_bc(:, k), cm_bc2(:, k))
+        call spline_second_derivatives(cm_s, cm_bs(:, k), cm_bs2(:, k))
+        print '(a, 2i5, a, 2es12.4)', ' Canonical NTV: chartmap harmonic (m,n) =', &
+            cm_m(k), ntv_n_tor, ', max |bc|, |bs| [G] =', maxval(abs(cm_bc(:, k))), &
+            maxval(abs(cm_bs(:, k)))
+    end do
+end subroutine load_chartmap_harmonics
 
 subroutine canonical_ntv_allocate(n_particles)
     integer, intent(in) :: n_particles
@@ -230,12 +313,38 @@ pure function species_temperature_eV(Te, Ti, charge) result(T)
     end if
 end function species_temperature_eV
 
-!> Poloidal angle of the harmonic at the cylindrical position x = (R, phi, Z).
+!> Index of the toroidal angle in x: 2 for (R, phi, Z), 3 for (s, theta, phi).
+pure integer function ntv_phi_index() result(i)
+    use tetra_physics_mod, only: coord_system
+    i = merge(3, 2, coord_system == 2)
+end function ntv_phi_index
+
+!> Covariant h_phi of the mesh field at z = x - x1 in cell ind_tetr.
+pure function ntv_h_phi(ind_tetr, z) result(h_phi)
+    use tetra_physics_mod, only: tetra_physics, coord_system
+    integer, intent(in) :: ind_tetr
+    real(dp), intent(in) :: z(3)
+    real(dp) :: h_phi
+    if (coord_system == 2) then
+        h_phi = tetra_physics(ind_tetr)%h3_1 + sum(tetra_physics(ind_tetr)%gh3 * z)
+    else
+        h_phi = tetra_physics(ind_tetr)%h2_1 + sum(tetra_physics(ind_tetr)%gh2 * z)
+    end if
+end function ntv_h_phi
+
+!> Poloidal angle of the harmonic at x: the Boozer angle x(2) in flux
+!> coordinates; at the cylindrical position x = (R, phi, Z) of grid_kind 5 the
+!> geometric or straight-field-line angle (ntv_theta_kind).
 pure function ntv_theta_of_x(x) result(theta)
     use tetra_grid_settings_mod, only: R0_analytic_circ
+    use tetra_physics_mod, only: coord_system
     real(dp), intent(in) :: x(3)
     real(dp) :: theta, rho, th, eps
 
+    if (coord_system == 2) then
+        theta = x(2)
+        return
+    end if
     rho = sqrt((x(1) - R0_analytic_circ)**2 + x(3)**2)
     th = atan2(x(3), x(1) - R0_analytic_circ)
     if (ntv_theta_kind == 0) then
@@ -255,6 +364,11 @@ subroutine ntv_harmonic_dphi(s, theta, phi, db1_dphi, dphi1_dphi, bmod)
     real(dp), intent(in), optional :: bmod
     real(dp) :: bmn, phimn, db1, db1_ds, db1_dth, dp1, dp1_ds, dp1_dth
 
+    if (n_cm_modes > 0) then
+        call chartmap_harmonics_dphi(s, theta, phi, db1_dphi)
+        dphi1_dphi = 0.0_dp
+        return
+    end if
     if (n_tab > 0) then
         bmn = spline_value(tab_s, tab_b, tab_b2, s)
         phimn = spline_value(tab_s, tab_p, tab_p2, s)
@@ -274,6 +388,32 @@ subroutine ntv_harmonic_dphi(s, theta, phi, db1_dphi, dphi1_dphi, bmod)
         dp1_ds, dp1_dth, dphi1_dphi)
 end subroutine ntv_harmonic_dphi
 
+!> dB1/dphi of the chartmap harmonics, sigma sum_m [bc cos + bs sin](m theta -
+!> n phi); the sine part is the generated cosine kernel at a phase shifted by
+!> pi/2 (phi -> phi + pi/(2n)).
+subroutine chartmap_harmonics_dphi(s, theta, phi, db1_dphi)
+    real(dp), intent(in)  :: s, theta, phi
+    real(dp), intent(out) :: db1_dphi
+    real(dp) :: bc, bs, d, db1, db1_ds, db1_dth, dp1, dp1_ds, dp1_dth, dp1_dphi
+    real(dp) :: dn, shift
+    integer :: k
+
+    db1_dphi = 0.0_dp
+    dn = real(ntv_n_tor, dp)
+    shift = 0.5_dp * acos(-1.0_dp) / dn
+    do k = 1, n_cm_modes
+        bc = ntv_amplitude * spline_value(cm_s, cm_bc(:, k), cm_bc2(:, k), s)
+        bs = ntv_amplitude * spline_value(cm_s, cm_bs(:, k), cm_bs2(:, k), s)
+        call evaluate_deltaf_harmonic(real(cm_m(k), dp), dn, bc, 0.0_dp, 0.0_dp, &
+            0.0_dp, theta, phi, db1, db1_ds, db1_dth, d, dp1, dp1_ds, dp1_dth, dp1_dphi)
+        db1_dphi = db1_dphi + d
+        call evaluate_deltaf_harmonic(real(cm_m(k), dp), dn, bs, 0.0_dp, 0.0_dp, &
+            0.0_dp, theta, phi + shift, db1, db1_ds, db1_dth, d, dp1, dp1_ds, &
+            dp1_dth, dp1_dphi)
+        db1_dphi = db1_dphi + d
+    end do
+end subroutine chartmap_harmonics_dphi
+
 !> Local canonical quantities of a marker (vpar, perpinv) at x in cell ind_tetr.
 !> psi0: unperturbed poloidal flux (the A_phi of f0), s0 = s(psi0), Phi0 the
 !> profile potential at s0; s_mesh: flux label for the amplitude profile.
@@ -290,14 +430,17 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
 
     real(dp) :: z(3), mass, charge, K, s0, ds0, dsdpsi, psi_star, T_eV, dT_ds
     real(dp) :: db1_dphi, dphi1_dphi, ln_f0, dw_dt, torque, h0, dens, ddens, temp
-    real(dp) :: dtemp, phi0, dphi0
+    real(dp) :: dtemp, phi0, dphi0, dummy(4)
+    integer :: ip
     type(profile_values_t) :: pv0, pvs
 
     mass = start%particle_mass(species)
     charge = start%particle_charge(species)
+    ip = ntv_phi_index()
     z = x - tetra_physics(ind_tetr)%x1
+    pt%psi0 = psi0
     pt%bmod = tetra_physics(ind_tetr)%bmod1 + sum(tetra_physics(ind_tetr)%gB * z)
-    pt%h_phi = tetra_physics(ind_tetr)%h2_1 + sum(tetra_physics(ind_tetr)%gh2 * z)
+    pt%h_phi = ntv_h_phi(ind_tetr, z)
     pt%aphi = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi * z)
     pt%pphi = charge * pt%aphi / clight + mass * vpar * pt%h_phi
     pt%mu = -mass * perpinv
@@ -320,11 +463,17 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     phi0 = pvs%Phi0
     dphi0 = pvs%dPhi0_ds * dsdpsi
 
-    call ntv_harmonic_dphi(s_mesh, ntv_theta_of_x(x), x(2), db1_dphi, dphi1_dphi, &
+    call ntv_harmonic_dphi(s_mesh, ntv_theta_of_x(x), x(ip), db1_dphi, dphi1_dphi, &
                            pt%bmod)
     call evaluate_deltaf_weight(mass, charge, clight, pt%mu, vpar, pt%bmod, h0, &
         dens, ddens, temp, dtemp, phi0, dphi0, db1_dphi, dphi1_dphi, ln_f0, &
         pt%dlnf0_dpphi, pt%dh1_dphi, dw_dt, torque)
+    ! Same canonical dH/dphi with the toroidal derivatives of the mesh |B| and
+    ! Phi (full-f: the orbits move in the perturbed mesh field).
+    call evaluate_deltaf_weight(mass, charge, clight, pt%mu, vpar, pt%bmod, h0, &
+        dens, ddens, temp, dtemp, phi0, dphi0, tetra_physics(ind_tetr)%gB(ip), &
+        tetra_physics(ind_tetr)%gPhi(ip), dummy(1), dummy(2), pt%dh_mesh_dphi, &
+        dummy(3), dummy(4))
 end subroutine ntv_eval_point
 
 !> Records the birth state of marker n (P: birth factor f0/g0).
@@ -341,6 +490,8 @@ subroutine canonical_ntv_birth(n, P, pt, s0)
     rec(c_pphi1, n) = pt%pphi
     rec(c_s1, n) = s0
     rec(c_sstar1, n) = pt%s_star
+    rec(c_psi0, n) = pt%psi0
+    rec(c_psi1, n) = pt%psi0
 end subroutine canonical_ntv_birth
 
 !> One push: pa, pb at the start and end point (same cell), pm at the
@@ -369,6 +520,8 @@ subroutine canonical_ntv_push(n, pa, pm, pb, s_end, dt, w)
     dtq = -0.5_dp * (w_old + w) * pm%dh1_dphi * dt
     rec(c_tq, n) = rec(c_tq, n) + dtq
     rec(c_dh, n) = rec(c_dh, n) - pm%dh1_dphi * dt
+    rec(c_dhm, n) = rec(c_dhm, n) - pm%dh_mesh_dphi * dt
+    rec(c_psi1, n) = pb%psi0
     if (ntv_w_reset_dt > 0.0_dp .and. dt > 0.0_dp) then
         ! Part of the push after the burn-in of the current cycle.
         t_on = rst_t0(n) + ntv_w_reset_burn
@@ -415,6 +568,11 @@ subroutine canonical_ntv_end(n, lost, t_end)
 
     rec(c_lost, n) = merge(1.0_dp, 0.0_dp, lost)
     rec(c_t1, n) = t_end
+    if (.not. lost) then
+        rec(c_kind, n) = 0.0_dp
+    else if (rec(c_kind, n) == 0.0_dp) then
+        rec(c_kind, n) = real(loss_grid_exit, dp)
+    end if
     ! Checkpoints after the loss (or at the trace end) keep the final values:
     ! a lost marker contributes nothing after its loss.
     do while (chk_next(n) <= ntv_n_check)
@@ -424,6 +582,13 @@ subroutine canonical_ntv_end(n, lost, t_end)
         chk_next(n) = chk_next(n) + 1
     end do
 end subroutine canonical_ntv_end
+
+!> Records why marker n is lost (loss_wall, loss_outer_cut); a loss without a
+!> recorded kind is a grid exit.
+subroutine canonical_ntv_mark_loss(n, kind)
+    integer, intent(in) :: n, kind
+    if (allocated(rec)) rec(c_kind, n) = real(kind, dp)
+end subroutine canonical_ntv_mark_loss
 
 !> Gaussian Euler-Maruyama proposal of the Lorentz operator in the pitch
 !> lambda = v_par/v, d lambda = -nu lambda dt + sqrt(nu (1 - lambda^2) dt) xi,
@@ -462,8 +627,9 @@ subroutine canonical_ntv_write(volume, trace_time)
         'trace_time (dyn cm / cm^3 per marker population)'
     write(u, '(2a)') '# ', ntv_col_names
     do n = 1, np
-        write(u, '(i10, 1x, i2, 15(1x, es24.16))') nint(rec(c_n, n)), &
-            nint(rec(c_lost, n)), rec(c_p:c_t1, n), rec(c_npush:c_dlnf0, n)
+        write(u, '(i10, 1x, i2, 18(1x, es24.16), 1x, i2)') nint(rec(c_n, n)), &
+            nint(rec(c_lost, n)), rec(c_p:c_t1, n), rec(c_npush:c_psi1, n), &
+            nint(rec(c_kind, n))
     end do
     close(u)
     sum_tq = sum(rec(c_p, :) * rec(c_tq, :))
@@ -476,6 +642,8 @@ subroutine canonical_ntv_write(volume, trace_time)
     max_dp = maxval(abs(rec(c_dporb, :)))
     print '(a, es24.16)', ' Canonical NTV: sum P tq_deltaf = ', sum_tq
     print '(a, es24.16)', ' Canonical NTV: sum P dh_int = ', sum_dh
+    print '(a, es24.16)', ' Canonical NTV: sum P dh_mesh = ', &
+        sum(rec(c_p, :) * rec(c_dhm, :))
     print '(a, es24.16)', ' Canonical NTV: sum P dpphi_orbit = ', sum_dp
     print '(a, es24.16)', ' Canonical NTV: sum P dpphi_coll = ', sum_dc
     print '(a, es24.16)', ' Canonical NTV: max |w| = ', max_w
