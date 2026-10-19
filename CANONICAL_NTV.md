@@ -140,6 +140,16 @@ on `(rho, theta_B, zeta_B)` nodes (`SRC/rmp_response_currents/chartmap_ntv_mod.f
   terms exclude direct flux grids. A radial `Phi0(s)` enters f0 through the
   profiles (`Er.dat`) already; a mesh potential `Phi(s)` on the chartmap
   vertices (`phi_elec`) is the missing hook.
+- **Mesh drift.** Sigma = 0, no collisions, 1 keV-scale electrons, 2e-4 s,
+  16384 markers: rms `|Delta s*|` 6.1e-5, 1.9e-5, 5.9e-6 for `n2` = 24, 48,
+  96 (about `n2^-1.7`), as on `grid_kind = 5` (5.7e-5, 1.3e-5, 4.2e-6). On
+  the chartmap mesh `A_phi` depends on `s` only, so it has no spurious phi
+  gradient; the drift comes from `h_phi` and `|B|` in the skewed cells.
+- **Full-f statistics.** The full-f quadratic part is a small mean of a
+  phase-mixed second-order orbit response. At 65536 markers and 2e-5 s its
+  standard error is 44 times that of the delta-f torque (-0.19 +- 4.0 against
+  2.02 +- 0.09 in the units of the test): consistent, but not a measurement.
+  The linear order agrees per marker (corr 0.993 for `dh_mesh`).
 - **Not supported on chartmaps.** The refined sqrt(g) prism volumes
   (`boole_refined_sqrt_g`, cylindrical only; moments only).
 
@@ -152,10 +162,10 @@ analytic table, the `J0` window volume and the wall polygon.
 at sigma = 0; (b) chartmap-file harmonic equals the analytic harmonic (same
 markers, rel. 4e-14); (c) analytic route and chartmap route agree
 statistically; (d) full-f on the perturbed meshes against delta-f: per marker
-the odd part of the full-f response equals the linear delta-f response (corr
-0.9997 for `dh_mesh` with collisions, slope 0.95: the mesh resolves the m = 3
-harmonic with 24 poloidal points); the quadratic part agrees within its
-(large) statistical error; (e) the wall loss boundary.
+the odd part of `dh_mesh` equals the linear delta-f response (corr 0.9997 at
+2e-6 s, 0.993 at 2e-5 s with collisions; slope 0.94-0.95, because the mesh
+resolves the m = 3 harmonic with 24 poloidal points); the quadratic part
+agrees within its large statistical error; (e) the wall loss boundary.
 
 ## Loss boundary
 
