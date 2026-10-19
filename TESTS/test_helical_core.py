@@ -76,7 +76,7 @@ gorilla_applets["gorilla_applets_nml"]["i_option"] = 14
 
 # Helical core: few antithetic particle pairs, short trace, delta-f weights
 helical_core["helical_core_nml"]["time_step"] = 1.0e-4
-helical_core["helical_core_nml"]["energy_ev"] = 1.0e3
+helical_core["helical_core_nml"]["energy_ev"] = 1.0e5  # wide orbits reach the outer boundary
 helical_core["helical_core_nml"]["n_species"] = 1
 helical_core["helical_core_nml"]["n_particles"] = 4
 helical_core["helical_core_nml"]["boole_squared_moments"] = False
@@ -123,6 +123,7 @@ result = subprocess.run(
     capture_output=True,
     text=True,
     check=False,
+    timeout=120,
 )
 print(result.stdout)
 if result.stderr:
@@ -134,5 +135,8 @@ if result.returncode != 0:
 expected_marker = "Number of lost ions"
 if expected_marker not in result.stdout:
     sys.exit(f"FAIL: expected '{expected_marker}' in stdout but it was missing")
+n_lost = int(result.stdout.split(expected_marker)[1].split()[0])
+if n_lost == 0:
+    sys.exit("FAIL: no ions lost; outer-boundary crossings must be absorbed")
 
 print("PASS: helical core tracing completed and summary marker found")
