@@ -91,6 +91,9 @@ subroutine write_vertex_coordinates
 
     ! Also dump per-vertex (s, theta_SFL, phi) so post-processing can
     ! compute coherent (m,n) Fourier projections of cell moments.
+    ! Rectangular grids have no flux coordinates.
+    if (.not. allocated(verts_sthetaphi)) return
+    if (size(verts_sthetaphi, 2) < nvert) return
     open(newunit = st_unit, file = 'vertex_sthetaphi.dat')
     do i = 1, nvert
         write(st_unit,101) verts_sthetaphi(1, i), verts_sthetaphi(2, i), verts_sthetaphi(3, i)
