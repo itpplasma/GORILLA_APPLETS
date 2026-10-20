@@ -10,6 +10,7 @@ table = Path(sys.argv[1]).resolve()
 for name in ('off','energy'):
     case = root/name
     base.prepare(case,8)
+    base.set_nml(case/"rmp_response_currents.inp", {"ntv_m_pol": 0})
     if name == 'energy':
         inp = case/'rmp_response_currents.inp'
         s = inp.read_text()
