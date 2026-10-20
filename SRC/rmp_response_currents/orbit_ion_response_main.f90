@@ -60,7 +60,7 @@ module orbit_ion_response_driver_mod
     logical :: radial_reentry=.false.
     real(dp) :: reentry_vertex(2)=0,reentry_flux(2)=0
     real(dp) :: reentry_max_flux_error=0,reentry_max_angle_error=0,reentry_max_phase_error=0
-    integer :: radial_reentries=0,reentry_histories=0
+    integer :: radial_reentries=0,reentry_histories=0,reentry_unit=0
     namelist /ion_orbit_response/ radial_samples,markers,batches,n_mu,seed,lag_nu,nu_dt,phase_step, &
         mu_reference_scale,cylinder_only,prefix_lag_nu,radial_sample_shift_cm, &
         anomalous_diffusion_coefficient,diffusion_step_cm,diffusion_reference_check,paired_diffusion, &
@@ -179,6 +179,9 @@ contains
             end do
             if(reentry_flux(2)-reentry_flux(1)<=L) &
                 error stop 'radial re-entry needs a mesh annulus wider than the window period'
+            open(newunit=reentry_unit,file='ion_reentry_histories.dat',status='new')
+            write(reentry_unit,'(a)') '# mu_node radial_sample marker r0_cm unwrapped_net_displacement_cm '// &
+                'lambda u0_over_vT reentries'
         end if
     end if
     d=2*M+1
@@ -390,6 +393,7 @@ contains
     if(sample_streams) write(diagnostics,'(a,i12)') 'sample_streams ',1
     ! Written only with re-entry, so legacy outputs are unchanged.
     if(radial_reentry) then
+        close(reentry_unit)
         write(diagnostics,'(a,i12)') 'radial_reentries ',radial_reentries
         write(diagnostics,'(a,i12)') 'reentry_histories ',reentry_histories
         write(diagnostics,'(a,es24.16)') 'reentry_inner_flux_cm ',reentry_flux(1)
@@ -493,9 +497,10 @@ contains
         logical :: debugging
         real(dp) :: reentry_offset
         logical :: wrapped
+        integer :: wraps
         debugging=all([imu,radial_index,marker_index]==debug_marker)
         if(debugging.and.debug_unit==0) open(newunit=debug_unit,file='ion_debug_marker.dat',status='new')
-        reentry_offset=0;wrapped=.false.
+        reentry_offset=0;wrapped=.false.;wraps=0
         call random_number(rand2)
         v0=bg0(7)*sqrt(-2*log(max(rand2(1),tiny(1.0_dp))))*cos(2*pi*rand2(2))
         vpar=v0;vc=v0;t=0;phase_c=0;mu=lambda*mu_ref
@@ -587,6 +592,9 @@ contains
         call ion_mu_deposit(bg0,wave,lambda,mu_ref,bg0(13),v0,clight,ref_integral,ref_deposit)
         result=real_deposit-ref_deposit
         if(wrapped) reentry_histories=reentry_histories+1
+        ! Per-history wrap diagnostic: net unwrapped radial displacement over the lag.
+        if(radial_reentry) write(reentry_unit,'(3i8,4es24.16,i8)') imu,radial_index,marker_index,r0, &
+            rnow+reentry_offset-r0,lambda,v0/bg0(7),wraps
     contains
         subroutine diffuse(lag_step)
             ! Diffusion acts over positive lag; backward characteristics reverse
@@ -669,7 +677,7 @@ contains
                 count=count+1
                 if(count>16) error stop 'ion re-entry repeated more than 16 times within one step'
                 call periodic_reentry(x,vpar,vperp,mu,initialized,cell,face,side,shift)
-                reentry_offset=reentry_offset-shift;wrapped=.true.
+                reentry_offset=reentry_offset-shift;wrapped=.true.;wraps=wraps+1
                 if(debugging) call debug_state('reentry',t,x,vpar,cell,face)
                 if(remaining==0) return
                 rest=remaining;remaining=0
