@@ -129,6 +129,7 @@ if abs(reconstructed_nu_star - nu_star) > 1.0e-12 * nu_star:
 if int(meta[10]) != FIXTURE_NFP:
     sys.exit(f"FAIL: metadata field periods {meta[10]} differ from chartmap {FIXTURE_NFP}")
 
+# The resolved cos(64*theta) ripple has zero mean; fixed 64-point sampling aliases it.
 # Nonzero E_r: eps_Phi = v_E*v*B_00/(c*torflux*ds/dr) with r = sqrt(s*torflux/(pi*B_00))
 mono["transpcoefnml"]["v_e"] = 1.0e-2
 mono.write(str(WORK_DIR / "mono_energetic_transp_coef.inp"), force=True)

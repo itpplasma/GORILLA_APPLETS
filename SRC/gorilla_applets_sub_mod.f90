@@ -55,14 +55,13 @@
             use gorilla_settings_mod, only: set_eps_Phi
             use constants, only: clight,ev2erg,pi
             use tetra_physics_mod, only: particle_mass
-            use tetra_grid_settings_mod, only: grid_kind
+            use tetra_grid_settings_mod, only: grid_kind,netcdf_filename
             use vector_potential_mod, only: torflux
             use mono_energetic_transp_coef_settings_mod, only: energy_eV,v_E
             use fluxtv_mod, only: pos_fluxtv_mat,load_flux_tube_volume
             use splint_vmec_data_mod, only: splint_vmec_data
             use sub_alpha_lifetime_can_mod, only: integrate_mfl_can
-            use tetra_grid_settings_mod, only: netcdf_filename
-            use boozer_chartmap_mod, only: load_boozer_chartmap, evaluate_boozer_chartmap, &
+            use boozer_chartmap_mod, only: evaluate_boozer_chartmap, &
                                            chartmap_torflux, chartmap_nfp
 !
             implicit none
@@ -75,7 +74,7 @@
             double precision                            :: xi,mag_axis_bmod
             double precision                            :: eps_Phi
             integer                                     :: i,j,ierr
-            integer,parameter :: nang = 64
+            integer :: ntheta,nzeta
             double precision, dimension(6) :: a_h
             integer,parameter :: npoi = 100000
             double precision :: dphi,phibeg,rbeg,zbeg,bmod00
@@ -99,16 +98,16 @@
 !
             !Boozer chartmap: A_theta = torflux*s, B_00 = mean of |B| over the start surface
             if(grid_kind.eq.6 .and. v_E.ne.0.d0) then
-               call load_boozer_chartmap(netcdf_filename)
                s = x_start(1)
+               call chartmap_angular_cells(netcdf_filename,ntheta,nzeta)
                bmod00 = 0.d0
-               do j = 0, nang-1
-                  do i = 0, nang-1
-                     theta = 2.d0*pi*i/nang
-                     varphi = 2.d0*pi*j/(nang*chartmap_nfp)
+               do j = 0, nzeta-1
+                  do i = 0, ntheta-1
+                     theta = 2.d0*pi*i/ntheta
+                     varphi = 2.d0*pi*j/(nzeta*chartmap_nfp)
                      call evaluate_boozer_chartmap(s,theta,varphi,a_h(1),a_h(2),a_h(3), &
                                                    a_h(4),a_h(5),a_h(6),bmod,sqg)
-                     bmod00 = bmod00 + bmod/nang**2
+                     bmod00 = bmod00 + bmod/(dble(ntheta)*nzeta)
                   enddo
                enddo
                ds_dr = radial_metric_ds_dr(s,bmod00,chartmap_torflux)
@@ -152,6 +151,43 @@
            call initialize_gorilla(2)
 !
         end subroutine initialize_mono_energetic_transp_coef
+!
+        subroutine chartmap_angular_cells(filename,ntheta,nzeta)
+            use netcdf, only: nf90_open,nf90_nowrite,nf90_inq_dimid, &
+                              nf90_inquire_dimension,nf90_inq_varid,nf90_get_var, &
+                              nf90_close,nf90_noerr,nf90_strerror
+            use constants, only: pi
+            use boozer_chartmap_mod, only: chartmap_nfp
+            implicit none
+            character(*), intent(in) :: filename
+            integer, intent(out) :: ntheta,nzeta
+            character(5), parameter :: axes(2) = ['theta','zeta ']
+            integer :: ncid,dimid,varid,n,k,cells(2)
+            double precision :: angles(2),periods(2)
+
+            !The loader validates uniform axes. Average each periodic interpolation
+            !cell once, excluding any duplicated endpoint, to avoid angular aliasing.
+            periods = [2.d0*pi,2.d0*pi/chartmap_nfp]
+            call check(nf90_open(trim(filename),nf90_nowrite,ncid))
+            do k = 1,2
+                call check(nf90_inq_dimid(ncid,trim(axes(k)),dimid))
+                call check(nf90_inquire_dimension(ncid,dimid,len=n))
+                cells(k) = 1
+                if(n > 1) then
+                    call check(nf90_inq_varid(ncid,trim(axes(k)),varid))
+                    call check(nf90_get_var(ncid,varid,angles,start=[1],count=[2]))
+                    cells(k) = nint(periods(k)/(angles(2)-angles(1)))
+                endif
+            enddo
+            call check(nf90_close(ncid))
+            ntheta = cells(1)
+            nzeta = cells(2)
+        contains
+            subroutine check(status)
+                integer, intent(in) :: status
+                if(status /= nf90_noerr) error stop nf90_strerror(status)
+            end subroutine check
+        end subroutine chartmap_angular_cells
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
