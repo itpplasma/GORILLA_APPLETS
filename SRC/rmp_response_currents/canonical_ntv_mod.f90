@@ -39,6 +39,7 @@ module canonical_ntv_mod
     use chartmap_ntv_mod, only: chartmap_raw_t, read_chartmap_raw, chartmap_harmonic
     use deltaf_fax_coordinates_kernel, only: evaluate_deltaf_fax_coordinates
     use deltaf_fax_weight_kernel, only: evaluate_deltaf_fax_weight
+    use deltaf_fax_chartmap_kernel, only: evaluate_deltaf_fax_chartmap
 
     implicit none
 
@@ -55,7 +56,7 @@ module canonical_ntv_mod
         ntv_theta_of_x, ntv_phi_index, ntv_h_phi, species_temperature_eV, &
         ntv_point_t, ntv_eval_point, canonical_ntv_mark_loss, loss_grid_exit, &
         loss_wall, loss_outer_cut, ntv_lorentz_proposal, ntv_fax_load_table, &
-        ntv_fax_dchi_dlambda
+        ntv_fax_dchi_dlambda, fax_surface_field, fax_surface_b
     public :: n_ntv_cols, ntv_col_names
 
     logical  :: boole_canonical_ntv = .false.
@@ -162,11 +163,11 @@ module canonical_ntv_mod
     integer, allocatable :: cm_m(:)
     real(dp), allocatable :: cm_s(:), cm_bc(:,:), cm_bc2(:,:), cm_bs(:,:), cm_bs2(:,:)
     !> Collisional background drive: on/off, table d chi/d lambda
-    !> (lambda, vartheta), and Bmin, Bmax of the circular surface of radius rho.
+    !> (lambda, vartheta), and Bmin, Bmax indexed by radius (grid 5) or s (grid 6).
     logical :: fax_on = .false.
     real(dp), allocatable :: fax_vt(:), fax_lam(:), fax_tab(:,:)
     integer, parameter :: n_fax_rho = 2001
-    real(dp) :: fax_drho = 0.0_dp, fax_spol = 1.0_dp
+    real(dp) :: fax_drho = 0.0_dp, fax_spol = 1.0_dp, fax_rho_min = 0.0_dp
     real(dp) :: fax_bmin(n_fax_rho), fax_bmax(n_fax_rho)
 
     !> Local state of a marker at one point of the mesh field.
@@ -245,7 +246,7 @@ subroutine canonical_ntv_init()
         'canonical NTV: ntv_bmn_relative does not apply to chartmap harmonics'
     fax_on = len_trim(ntv_fax_file) > 0
     if (fax_on) then
-        if (ntv_m_pol /= 0) error stop &
+        if (grid_kind == 5 .and. ntv_m_pol /= 0) error stop &
             'canonical NTV: ntv_fax_file needs ntv_m_pol = 0 (b.grad = b^phi d/dphi)'
         call ntv_fax_load_table(trim(ntv_fax_file))
         call fax_surface_field()
@@ -406,15 +407,19 @@ pure function ntv_theta_of_x(x) result(theta)
 end function ntv_theta_of_x
 
 !> dB1/dphi and dPhi1/dphi of the scaled harmonic at (s, theta, phi).
-subroutine ntv_harmonic_dphi(s, theta, phi, db1_dphi, dphi1_dphi, bmod)
+subroutine ntv_harmonic_dphi(s, theta, phi, db1_dphi, dphi1_dphi, &
+        bmod, db1_dtheta, relative_db1)
     real(dp), intent(in)  :: s, theta, phi
     real(dp), intent(out) :: db1_dphi, dphi1_dphi
     !> Local |B| (required with ntv_bmn_relative).
     real(dp), intent(in), optional :: bmod
+    !> Relative-amplitude contribution whose local B factor is differentiated.
+    real(dp), intent(out), optional :: db1_dtheta, relative_db1
     real(dp) :: bmn, phimn, db1, db1_ds, db1_dth, dp1, dp1_ds, dp1_dth
 
+    if (present(relative_db1)) relative_db1 = 0.0_dp
     if (n_cm_modes > 0) then
-        call chartmap_harmonics_dphi(s, theta, phi, db1_dphi)
+        call chartmap_harmonics_dphi(s, theta, phi, db1_dphi, db1_dtheta)
         dphi1_dphi = 0.0_dp
         return
     end if
@@ -435,19 +440,25 @@ subroutine ntv_harmonic_dphi(s, theta, phi, db1_dphi, dphi1_dphi, bmod)
     call evaluate_deltaf_harmonic(real(ntv_m_pol, dp), real(ntv_n_tor, dp), bmn, &
         0.0_dp, phimn, 0.0_dp, theta, phi, db1, db1_ds, db1_dth, db1_dphi, dp1, &
         dp1_ds, dp1_dth, dphi1_dphi)
+    if (present(db1_dtheta)) db1_dtheta = db1_dth
+    if (ntv_bmn_relative) then
+        if (present(relative_db1)) relative_db1 = db1
+    end if
 end subroutine ntv_harmonic_dphi
 
 !> dB1/dphi of the chartmap harmonics, sigma sum_m [bc cos + bs sin](m theta -
 !> n phi); the sine part is the generated cosine kernel at a phase shifted by
 !> pi/2 (phi -> phi + pi/(2n)).
-subroutine chartmap_harmonics_dphi(s, theta, phi, db1_dphi)
+subroutine chartmap_harmonics_dphi(s, theta, phi, db1_dphi, db1_dtheta)
     real(dp), intent(in)  :: s, theta, phi
     real(dp), intent(out) :: db1_dphi
+    real(dp), intent(out), optional :: db1_dtheta
     real(dp) :: bc, bs, d, db1, db1_ds, db1_dth, dp1, dp1_ds, dp1_dth, dp1_dphi
     real(dp) :: dn, shift
     integer :: k
 
     db1_dphi = 0.0_dp
+    if (present(db1_dtheta)) db1_dtheta = 0.0_dp
     dn = real(ntv_n_tor, dp)
     shift = 0.5_dp * acos(-1.0_dp) / dn
     do k = 1, n_cm_modes
@@ -456,10 +467,12 @@ subroutine chartmap_harmonics_dphi(s, theta, phi, db1_dphi)
         call evaluate_deltaf_harmonic(real(cm_m(k), dp), dn, bc, 0.0_dp, 0.0_dp, &
             0.0_dp, theta, phi, db1, db1_ds, db1_dth, d, dp1, dp1_ds, dp1_dth, dp1_dphi)
         db1_dphi = db1_dphi + d
+        if (present(db1_dtheta)) db1_dtheta = db1_dtheta + db1_dth
         call evaluate_deltaf_harmonic(real(cm_m(k), dp), dn, bs, 0.0_dp, 0.0_dp, &
             0.0_dp, theta, phi + shift, db1, db1_ds, db1_dth, d, dp1, dp1_ds, &
             dp1_dth, dp1_dphi)
         db1_dphi = db1_dphi + d
+        if (present(db1_dtheta)) db1_dtheta = db1_dtheta + db1_dth
     end do
 end subroutine chartmap_harmonics_dphi
 
@@ -468,6 +481,7 @@ end subroutine chartmap_harmonics_dphi
 !> profile potential at s0; s_mesh: flux label for the amplitude profile.
 subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     use tetra_physics_mod, only: tetra_physics
+    use tetra_grid_settings_mod, only: grid_kind
     use gorilla_applets_types_mod, only: start
     use profile_data_mod, only: eval_profiles, profile_values_t, &
         eval_s_and_ds_dpsi_from_psi_pol
@@ -483,6 +497,7 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     integer :: ip
     type(profile_values_t) :: pv0, pvs
     real(dp) :: bmin, bmax, branch, lam, vtheta, bclamp
+    real(dp) :: db1_dtheta, relative_db1, h_theta, gradpar, unused
 
     mass = start%particle_mass(species)
     charge = start%particle_charge(species)
@@ -526,13 +541,36 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
         dummy(3), dummy(4))
     pt%dw_fax = 0.0_dp
     if (.not. fax_on) return
-    call fax_surface_b(x, bmin, bmax, branch)
+    if (grid_kind == 6) then
+        h_theta = tetra_physics(ind_tetr)%h2_1 &
+            + sum(tetra_physics(ind_tetr)%gh2 * z)
+        ! The orbit field: h^i = curl(A)^i / (h_j curl(A)^j).
+        call evaluate_deltaf_fax_chartmap(pt%mu, h_theta, pt%h_phi, &
+            tetra_physics(ind_tetr)%curlA(2), tetra_physics(ind_tetr)%curlA(3), &
+            tetra_physics(ind_tetr)%gB(2), tetra_physics(ind_tetr)%gB(3), &
+            pt%dlnf0_dpphi, 0.0_dp, 0.0_dp, 0.0_dp, pt%bmod, 0.0_dp, unused, gradpar)
+        branch = sign(1.0_dp, gradpar)
+        call fax_surface_b(x, bmin, bmax)
+    else
+        call fax_surface_b(x, bmin, bmax, branch)
+    end if
     if (bmax <= bmin) return
     bclamp = min(max(pt%bmod, bmin), bmax)
     call evaluate_deltaf_fax_coordinates(mass, pt%mu, vpar, bclamp, bmin, bmax, &
         branch, lam, vtheta)
-    call evaluate_deltaf_fax_weight(pt%mu, pt%h_phi, x(1), pt%dlnf0_dpphi, &
-        db1_dphi, ntv_fax_dchi_dlambda(vtheta, lam), pt%dw_fax)
+    if (grid_kind == 6) then
+        call ntv_harmonic_dphi(s_mesh, x(2), x(3), db1_dphi, dphi1_dphi, &
+            pt%bmod, db1_dtheta, relative_db1)
+        call evaluate_deltaf_fax_chartmap(pt%mu, h_theta, pt%h_phi, &
+            tetra_physics(ind_tetr)%curlA(2), tetra_physics(ind_tetr)%curlA(3), &
+            tetra_physics(ind_tetr)%gB(2), tetra_physics(ind_tetr)%gB(3), &
+            pt%dlnf0_dpphi, db1_dtheta, db1_dphi, &
+            ntv_fax_dchi_dlambda(vtheta, lam), pt%bmod, relative_db1, &
+            pt%dw_fax, gradpar)
+    else
+        call evaluate_deltaf_fax_weight(pt%mu, pt%h_phi, x(1), pt%dlnf0_dpphi, &
+            db1_dphi, ntv_fax_dchi_dlambda(vtheta, lam), pt%dw_fax)
+    end if
 end subroutine ntv_eval_point
 
 !> Records the birth state of marker n (P: birth factor f0/g0).
@@ -811,11 +849,40 @@ end subroutine bracket
 !> |B| at the outboard (Bmin) and inboard (Bmax) midplane of the circular
 !> surfaces rho = |x - (R0, ., 0)| of the analytic field (grid_kind 5), and the
 !> sign of the poloidal circulation (B_Z at the outboard midplane).
+!> Grid 6: extrema of the core chartmap on surfaces s = rho^2.
 subroutine fax_surface_field()
-    use tetra_grid_settings_mod, only: R0_analytic_circ, a_analytic_circ
-    integer :: k
+    use tetra_grid_settings_mod, only: grid_kind, netcdf_filename, &
+        R0_analytic_circ, a_analytic_circ
+    use boozer_chartmap_mod, only: evaluate_boozer_chartmap
+    type(chartmap_raw_t) :: cm
+    integer :: k, it, iz
+    real(dp) :: s, b, dummy(7)
     real(dp) :: rho, bz_out
 
+    if (grid_kind == 6) then
+        call read_chartmap_raw(trim(netcdf_filename), cm, with_geometry=.false.)
+        fax_rho_min = cm%rho(1)
+        fax_drho = (cm%rho(cm%nrho) - fax_rho_min) / real(n_fax_rho - 1, dp)
+        ! Angular interpolation is multilinear: extrema occur on angle nodes.
+        ! Tabulate in s = rho^2; retain the core's linear-rho interpolation.
+        !$omp parallel do private(s, b, dummy, it, iz) schedule(static)
+        do k = 1, n_fax_rho
+            s = (fax_rho_min + real(k - 1, dp) * fax_drho)**2
+            fax_bmin(k) = huge(1.0_dp)
+            fax_bmax(k) = -huge(1.0_dp)
+            do iz = 1, cm%nze
+                do it = 1, cm%nth
+                    call evaluate_boozer_chartmap(s, cm%theta(it), cm%zeta(iz), &
+                        dummy(1), dummy(2), dummy(3), dummy(4), dummy(5), &
+                        dummy(6), b, dummy(7))
+                    fax_bmin(k) = min(fax_bmin(k), b)
+                    fax_bmax(k) = max(fax_bmax(k), b)
+                end do
+            end do
+        end do
+        !$omp end parallel do
+        return
+    end if
     fax_drho = 1.1_dp * a_analytic_circ / real(n_fax_rho - 1, dp)
     do k = 1, n_fax_rho
         rho = real(k - 1, dp) * fax_drho
@@ -851,20 +918,27 @@ end subroutine field_bz
 !> Bmin, Bmax of the surface through x = (R, phi, Z) and the branch
 !> sign(b.grad B): B grows from the outboard (theta = 0) to the inboard
 !> midplane, so b.grad B has the sign of fax_spol * Z.
+!> Grid 6: x(1) is s; the caller obtains branch from the orbit mesh gradient.
 subroutine fax_surface_b(x, bmin, bmax, branch)
-    use tetra_grid_settings_mod, only: R0_analytic_circ
+    use tetra_grid_settings_mod, only: grid_kind, R0_analytic_circ
     real(dp), intent(in) :: x(3)
-    real(dp), intent(out) :: bmin, bmax, branch
+    real(dp), intent(out) :: bmin, bmax
+    real(dp), intent(out), optional :: branch
     real(dp) :: rho, f
     integer :: k
 
-    rho = sqrt((x(1) - R0_analytic_circ)**2 + x(3)**2)
+    if (grid_kind == 6) then
+        rho = sqrt(max(x(1), 0.0_dp)) - fax_rho_min
+        if (present(branch)) error stop 'fax_surface_b: use the mesh parallel gradient'
+    else
+        rho = sqrt((x(1) - R0_analytic_circ)**2 + x(3)**2)
+    end if
     f = rho / fax_drho
     k = min(max(int(f) + 1, 1), n_fax_rho - 1)
     f = min(max(f - real(k - 1, dp), 0.0_dp), 1.0_dp)
     bmin = (1.0_dp - f) * fax_bmin(k) + f * fax_bmin(k + 1)
     bmax = (1.0_dp - f) * fax_bmax(k) + f * fax_bmax(k + 1)
-    branch = fax_spol * sign(1.0_dp, x(3))
+    if (present(branch)) branch = fax_spol * sign(1.0_dp, x(3))
 end subroutine fax_surface_b
 
 subroutine spline_second_derivatives(x, y, y2)

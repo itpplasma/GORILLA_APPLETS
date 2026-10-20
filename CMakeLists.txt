@@ -189,7 +189,28 @@ if(BUILD_TESTING)
         COMMAND test_canonical_ntv_chartmap.x
                 $<TARGET_FILE:write_circular_boozer_chartmap.x>
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/canonical_ntv_chartmap_unit)
+    add_executable(test_canonical_ntv_fax_chartmap.x
+        TESTS/test_canonical_ntv_fax_chartmap.f90)
+    target_link_libraries(test_canonical_ntv_fax_chartmap.x GORILLA_APPLETS)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/canonical_ntv_fax_chartmap_unit)
+    add_test(NAME canonical_ntv_fax_chartmap_unit
+        COMMAND test_canonical_ntv_fax_chartmap.x
+                $<TARGET_FILE:write_circular_boozer_chartmap.x>
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/canonical_ntv_fax_chartmap_unit)
+    set_tests_properties(canonical_ntv_fax_chartmap_unit PROPERTIES
+        ENVIRONMENT "OMP_NUM_THREADS=4" PROCESSORS 4 TIMEOUT 120)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME canonical_ntv_fax_chartmap
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/TESTS/test_canonical_ntv_fax_chartmap.py)
+    set_tests_properties(canonical_ntv_fax_chartmap PROPERTIES
+        ENVIRONMENT
+            "APPLETS_ROOT=${CMAKE_CURRENT_SOURCE_DIR};\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+CHARTMAP_WRITER_BIN=$<TARGET_FILE:write_circular_boozer_chartmap.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/canonical_ntv_fax_chartmap_work;\
+OMP_NUM_THREADS=1"
+        TIMEOUT 600)
     add_test(NAME canonical_ntv_chartmap
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/TESTS/test_canonical_ntv_chartmap.py)

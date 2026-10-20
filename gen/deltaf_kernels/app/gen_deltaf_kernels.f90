@@ -202,6 +202,7 @@ program gen_deltaf_kernels
     r_maj = sym(arena, "r_major")
     kappa_f = sym(arena, "dlnf0_dpphi")
     call emit_fax()
+    call emit_fax_chartmap()
 
     call suite_end(suite)
 
@@ -305,6 +306,34 @@ contains
             "db1_dphi", "dchi_dlambda"], &
             [simplified(src)], [character(len=16) :: "dw_dt_fax"])
     end subroutine emit_fax
+
+    !> Fixed covariant Boozer B_k: h^i scales with |B|, so variation of
+    !> h^i d_i ln B is h^i d_i(delta B)/B (the denominator terms cancel).
+    !> Thus -delta(lambda_dot) d(h/f0)/dlambda = kappa mu h_phi h^i d_i B1 chi'.
+    subroutine emit_fax_chartmap()
+        type(expr_t) :: ht, ct, cp, gt, gp, dbt, rb1, denom, src, gradpar
+
+        ht = sym(arena, "h_theta")
+        ct = sym(arena, "curl_theta")
+        cp = sym(arena, "curl_phi")
+        gt = sym(arena, "gb_theta")
+        gp = sym(arena, "gb_phi")
+        dbt = sym(arena, "db1_dtheta")
+        rb1 = sym(arena, "relative_db1")
+        denom = ht*ct + h_phi*cp
+        ! rb1=0 for absolute amplitudes; otherwise include derivatives of
+        ! the local B multiplying the relative harmonic amplitude.
+        src = kappa_f*mu*h_phi*(ct*(dbt + rb1*gt/bmod) &
+            + cp*(db1_dphi + rb1*gp/bmod))/denom*dchi
+        gradpar = (ct*gt + cp*gp)/denom
+        call emit_kernel_file("deltaf_fax_chartmap_kernel", &
+            "evaluate_deltaf_fax_chartmap", &
+            [character(len=16) :: "mu", "h_theta", "h_phi", "curl_theta", &
+            "curl_phi", "gb_theta", "gb_phi", "dlnf0_dpphi", &
+            "db1_dtheta", "db1_dphi", "dchi_dlambda", "bmod", "relative_db1"], &
+            simplified_all([src, gradpar]), &
+            [character(len=16) :: "dw_dt_fax", "gradpar_b"])
+    end subroutine emit_fax_chartmap
 
     !> Circular-chart identities.
     subroutine prove_circular()

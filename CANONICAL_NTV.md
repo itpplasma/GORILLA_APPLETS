@@ -144,7 +144,7 @@ and `h` is axisymmetric, so only the perturbed mirror force acts on it:
 
 with `h/f0 = (d ln f0/dp_phi) m v h_phi chi`, so `chi = lambda h/G` and
 `chi = lambda` for `h = G`. For an m = 0 harmonic `b.grad = b^phi d/dphi` and
-`b^phi = h_phi/R^2`; other `m` are rejected. The perturbed radial drift
+`b^phi = h_phi/R^2` on grid_kind 5; other `m` remain rejected there. The perturbed radial drift
 acting on `h` is `O(rho*)` smaller and is dropped, as in NEO-2. The kernels
 `deltaf_fax_coordinates_kernel` and `deltaf_fax_weight_kernel` are generated
 (`gen/deltaf_kernels`, identities F1-F3). F3 checks the normalisation and sign
@@ -162,12 +162,48 @@ At fixed position `chi` is one function of the signed `lambda`, continuous
 through the turning point `lambda = 0`, so `d chi/d lambda` stays finite there
 (`d chi/d eta` grows as `1/lambda`). These labels do not depend on the
 poloidal angle or orientation convention of the code that solved for `h`.
-`Bmin` and `Bmax` are those of the circular surface through the marker
-(outboard and inboard midplane of the analytic field). This is local
-thin-orbit use of a single-surface table. Format: `#` header lines,
+On grid_kind 5, `Bmin` and `Bmax` are those of the circular surface through
+the marker (outboard and inboard midplane of the analytic field). On
+`grid_kind=6, coord_system=2`, extrema are sampled from the mesh chartmap
+through GORILLA's field evaluator at all unique angular nodes on 2001
+surfaces spanning its rho range, indexed by `s=rho^2` and interpolated in
+rho as in the core. Angular extrema of its multilinear interpolant occur
+at nodes; changes of the extremizing node between tabulated surfaces leave
+a radial tabulation error. `branch` uses the local orbit mesh's `b.grad B`,
+including both angular derivatives, rather than a cylindrical height.
+
+The chartmap source supports every retained poloidal mode (cosine and sine):
+
+    dw/dt += (d ln f0/dp_phi) mu h_phi (d chi/d lambda)
+             * (b^theta dB1/dtheta + b^phi dB1/dphi),
+    b^i = curl(A)^i / (h_j curl(A)^j).
+
+Here the components and gradients are those of the orbit tetrahedron.
+For fixed covariant Boozer `B_k` and `A_k`, `b^i` scales with `B`, so the
+variation of `b.grad ln B` is `b^i d_i B1/B`: the variation of `b^i` cancels
+the denominator derivative. A single helical mode contains `m*iota-n`;
+retaining just `d/dphi` loses the `m*iota` term. The generated
+`deltaf_fax_chartmap_kernel` evaluates the contraction and parallel gradient.
+With relative amplitudes, the derivative includes the local `B` factor.
+The cylindrical m=0 path and its generated kernel are unchanged.
+
+This remains local thin-orbit use of a single-surface table. The labels
+cannot distinguish different magnetic wells with the same B and branch;
+a multiwell background needs a richer table. Device/species tables and
+transport agreement with NEO-2 require separate qualification.
+Format: `#` header lines,
 `n_theta n_lambda`, the `vartheta` grid (increasing, spanning `[-pi, pi]`),
 the `lambda` grid (increasing, spanning `[-1, 1]`), then `n_theta` rows of
 `n_lambda` values. Lookup is bilinear and clamped to the table.
+
+CTest `canonical_ntv_fax_chartmap_unit` compares the circular chartmap's
+extrema, position labels and m=0 source with cylindrical analytic values
+(source tolerance 0.5%), and m=3 with the analytic helical mirror derivative
+(tolerance 1%). The fine radial fixture resolves A_phi' near m*iota=n;
+resonant cancellation, field reversal and relative amplitudes are also checked.
+`canonical_ntv_fax_chartmap` checks a zero table, unchanged orbits and the
+m=3 spectral versus explicit source with eight markers. Its nonzero table
+is artificial and supplies no transport reference.
 
 The table is built outside the code from the axisymmetric NEO-2-QL solution
 `g_k0` (drive k = 1) as `h = g_k0 - G`. In NEO-2 the `sigma = +1` solution
