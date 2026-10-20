@@ -131,3 +131,14 @@ DRIVER_BIN=$<TARGET_FILE:test_flux_mesh_potential_driver.x>;\
 CHARTMAP_WRITER_BIN=$<TARGET_FILE:write_circular_boozer_chartmap.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/flux_mesh_potential_work"
 )
+
+add_executable(test_local_collision_background.x test_local_collision_background.f90)
+target_link_libraries(test_local_collision_background.x GORILLA_APPLETS)
+add_test(NAME local_collision_background
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_local_collision_background.py
+        $<TARGET_FILE:test_local_collision_background.x>
+        $<TARGET_FILE:write_circular_boozer_chartmap.x>
+        ${CMAKE_CURRENT_BINARY_DIR}/local_collision_background_work)
+set_tests_properties(local_collision_background PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1"
+    PROCESSORS 2 TIMEOUT 120)

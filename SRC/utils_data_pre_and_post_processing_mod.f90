@@ -482,8 +482,8 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     endif
 
     do i = 1,grid_size(2)-1 !copy data from first phi slice to all other phi slices
-        c%temp_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%temp_mat(:,1:ntetr/grid_size(2):3)
-        c%dens_mat(:,i*ntetr/grid_size(2)+1:(i+1)*ntetr/grid_size(2):3) = c%dens_mat(:,1:ntetr/grid_size(2):3)
+        c%temp_mat(:,i*(ntetr/grid_size(2))+1:(i+1)*(ntetr/grid_size(2)):3) = c%temp_mat(:,1:ntetr/grid_size(2):3)
+        c%dens_mat(:,i*(ntetr/grid_size(2))+1:(i+1)*(ntetr/grid_size(2)):3) = c%dens_mat(:,1:ntetr/grid_size(2):3)
     enddo
     do i = 1,2 !copy data from first tetrahedron of each triangular prism to the two other ones
         c%temp_mat(:,1+i:ntetr:3) = c%temp_mat(:,1:ntetr:3)

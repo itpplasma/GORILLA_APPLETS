@@ -25,7 +25,7 @@ module profile_data_mod
     public :: load_profiles, eval_profiles, cleanup_profiles
     public :: eval_q, get_psi_tor_edge
     public :: eval_s_from_psi_pol, eval_ds_dreff, eval_s_and_ds_dpsi_from_psi_pol
-    public :: profile_values_t
+    public :: profile_values_t, get_collision_species, eval_collision_densities
     public :: load_kim_nu, eval_kim_nu, kim_nu_loaded
     public :: load_da_profile, eval_da_profile, da_profile_loaded
     public :: boole_kim_reff_coords, kim_b_ref
@@ -44,6 +44,11 @@ module profile_data_mod
         real(dp) :: dlnTe_ds   ! d(ln Te)/ds
         real(dp) :: dlnTi_ds   ! d(ln Ti)/ds
     end type profile_values_t
+
+    ! Optional explicit collision backgrounds, ions first and electrons last.
+    real(dp), allocatable :: collision_mass(:), collision_charge(:)
+    real(dp), allocatable :: collision_density(:,:), collision_density_dd(:,:)
+    real(dp), parameter :: neutrality_rtol = 1.0e-10_dp
 
     ! Number of grid points after mapping to s
     integer :: ns
@@ -237,6 +242,8 @@ subroutine load_profiles(profile_dir, equil_mapping_file)
     call spline_natural(ns, s_grid, Ti_spl, Ti_dd)
     call spline_natural(ns, s_grid, Phi_spl, Phi_dd)
 
+    call load_collision_profiles(profile_dir, r_equil)
+
     profiles_loaded = .true.
 
     print *, '  Profiles loaded and splined on ', ns, ' s-grid points'
@@ -289,6 +296,105 @@ subroutine eval_profiles(s_val, pv)
 
 end subroutine eval_profiles
 
+! Optional profile_dir/collision_species.dat: count, then one row per species
+! containing mass [g], charge [e], density filename relative to profile_dir.
+! Electron last; no rescaling or inferred mixture fractions are permitted.
+subroutine load_collision_profiles(profile_dir, r_equil)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    character(len=*), intent(in) :: profile_dir
+    real(dp), intent(in) :: r_equil(:)
+    character(len=512) :: filename
+    integer :: iu, ios, n, j, i
+    logical :: exists
+
+    filename = trim(profile_dir)//'/collision_species.dat'
+    inquire(file=trim(filename), exist=exists)
+    if (.not. exists) return
+    open(newunit=iu, file=trim(filename), status='old', action='read', iostat=ios)
+    if (ios /= 0) error stop 'Cannot open collision_species.dat'
+    read(iu, *, iostat=ios) n
+    if (ios /= 0) error stop 'Invalid collision species count'
+    if (n < 2) error stop 'Collision profiles need ions and electrons'
+    allocate(collision_mass(n), collision_charge(n))
+    allocate(collision_density(n, ns), collision_density_dd(n, ns))
+    do j = 1, n
+        read(iu, *, iostat=ios) collision_mass(j), collision_charge(j), filename
+        if (ios /= 0) error stop 'Invalid collision species row'
+        if (.not. ieee_is_finite(collision_mass(j)) .or. &
+            .not. ieee_is_finite(collision_charge(j))) &
+            error stop 'Nonfinite collision species identity'
+        if (collision_mass(j) <= 0.0_dp) error stop 'Nonpositive collision mass'
+        call read_and_map_profile(trim(profile_dir)//'/'//trim(filename), &
+            r_equil, ns, collision_density(j,:), required=.true.)
+        call spline_natural(ns, s_grid, collision_density(j,:), &
+            collision_density_dd(j,:))
+    end do
+    close(iu)
+    if (any(collision_charge(:n-1) <= 0.0_dp) .or. &
+        abs(collision_charge(n) + 1.0_dp) > epsilon(1.0_dp)) &
+        error stop 'Collision profiles require ions first, electron last'
+    do i = 1, ns
+        call check_collision_densities(collision_density(:,i), ne_spl(i))
+    end do
+end subroutine load_collision_profiles
+
+! Keep the legacy pure D/e identities if no explicit species source is given.
+subroutine get_collision_species(masses, charges)
+    real(dp), intent(inout) :: masses(:), charges(:)
+
+    if (allocated(collision_mass)) then
+        if (size(masses) /= size(collision_mass) .or. &
+            size(charges) /= size(collision_mass)) &
+            error stop 'Collision profile count differs from n_background_species'
+        masses = collision_mass
+        charges = collision_charge
+    else
+        if (size(masses) /= 2 .or. size(charges) /= 2) &
+            error stop 'Mixture requires collision_species.dat'
+        if (abs(charges(1) - 1.0_dp) > epsilon(1.0_dp) .or. &
+            abs(charges(2) + 1.0_dp) > epsilon(1.0_dp)) &
+            error stop 'Non-unit ion charge requires collision_species.dat'
+    end if
+end subroutine get_collision_species
+
+subroutine eval_collision_densities(s_val, pv, densities)
+    real(dp), intent(in) :: s_val
+    type(profile_values_t), intent(in) :: pv
+    real(dp), intent(out) :: densities(:)
+    real(dp) :: s_clamped, derivative
+    integer :: j
+
+    if (allocated(collision_density)) then
+        if (size(densities) /= size(collision_mass)) &
+            error stop 'Collision density count differs from profile source'
+        s_clamped = max(0.0_dp, min(1.0_dp, s_val))
+        do j = 1, size(densities)
+            call splint_with_deriv(ns, s_grid, collision_density(j,:), &
+                collision_density_dd(j,:), s_clamped, densities(j), derivative)
+        end do
+        call check_collision_densities(densities, pv%n_e)
+    else
+        if (size(densities) /= 2) error stop 'Mixture requires collision_species.dat'
+        densities = pv%n_e
+    end if
+end subroutine eval_collision_densities
+
+subroutine check_collision_densities(densities, ne)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    real(dp), intent(in) :: densities(:), ne
+    real(dp) :: norm
+
+    if (.not. all(ieee_is_finite(densities)) .or. &
+        .not. ieee_is_finite(ne)) error stop 'Nonfinite collision density'
+    if (any(densities < 0.0_dp) .or. ne <= 0.0_dp) &
+        error stop 'Invalid collision density'
+    norm = sum(abs(collision_charge*densities))
+    if (abs(sum(collision_charge*densities)) > neutrality_rtol*norm) &
+        error stop 'Collision profiles violate quasineutrality'
+    if (abs(densities(size(densities)) - ne) > neutrality_rtol*ne) &
+        error stop 'Collision electron density differs from n.dat'
+end subroutine check_collision_densities
+
 ! ============================================================
 ! Read the reference toroidal field |B_tor| [Gauss] from btor_rbig.dat
 ! (two numbers on one line: B_tor [Gauss], R_big [cm]).  Used to build the
@@ -322,6 +428,9 @@ end subroutine read_btor_rbig_bref
 ! ============================================================
 subroutine cleanup_profiles()
 
+    if (allocated(collision_mass)) deallocate(collision_mass, collision_charge)
+    if (allocated(collision_density)) &
+        deallocate(collision_density, collision_density_dd)
     if (allocated(s_grid))  deallocate(s_grid)
     if (allocated(ne_spl))  deallocate(ne_spl)
     if (allocated(ne_dd))   deallocate(ne_dd)
@@ -671,9 +780,11 @@ end subroutine read_equil_mapping
 ! PRIVATE: Read a two-column profile file and interpolate onto
 !          the r_eff grid from the equil mapping
 ! ============================================================
-subroutine read_and_map_profile(filename, r_target, n_target, val_mapped)
+subroutine read_and_map_profile(filename, r_target, n_target, val_mapped, required)
 
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     character(len=*), intent(in) :: filename
+    logical, intent(in), optional :: required
     real(dp), intent(in) :: r_target(:)
     integer, intent(in) :: n_target
     real(dp), intent(out) :: val_mapped(:)
@@ -687,6 +798,9 @@ subroutine read_and_map_profile(filename, r_target, n_target, val_mapped)
     iunit = 43
     open(unit=iunit, file=filename, status='old', action='read', iostat=ios)
     if (ios /= 0) then
+        if (present(required)) then
+            if (required) error stop 'Cannot open required collision density profile'
+        end if
         print *, '  WARNING: Cannot open ', trim(filename), ' -- using zeros'
         val_mapped = 0.0_dp
         return
@@ -701,6 +815,9 @@ subroutine read_and_map_profile(filename, r_target, n_target, val_mapped)
     end do
     close(iunit)
 
+    if (present(required)) then
+        if (required .and. n_raw < 2) error stop 'Collision density needs two nodes'
+    end if
     allocate(r_raw(n_raw), v_raw(n_raw))
 
     ! Second pass: read data
@@ -711,9 +828,21 @@ subroutine read_and_map_profile(filename, r_target, n_target, val_mapped)
         if (ios /= 0) exit
         if (line(1:1) == '#' .or. len_trim(line) == 0) cycle
         i = i + 1
-        read(line, *) r_raw(i), v_raw(i)
+        read(line, *, iostat=ios) r_raw(i), v_raw(i)
+        if (ios /= 0) error stop 'Invalid profile data row'
     end do
     close(iunit)
+
+    if (present(required)) then
+        if (required) then
+            if (.not. all(ieee_is_finite(r_raw)) .or. &
+                .not. all(ieee_is_finite(v_raw))) &
+                error stop 'Nonfinite collision density profile'
+            if (any(v_raw < 0.0_dp)) error stop 'Negative collision density profile'
+            if (any(r_raw(2:) <= r_raw(:n_raw-1))) &
+                error stop 'Collision density radius must increase'
+        end if
+    end if
 
     ! Linear interpolation onto r_target grid
     do i = 1, n_target

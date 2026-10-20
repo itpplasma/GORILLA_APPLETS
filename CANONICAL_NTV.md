@@ -441,3 +441,33 @@ moments without running marker orbits or a physical pilot.
 
 `GORILLA_REF` records the compatible core commit used by CI and the native
 checks. The energy/species feature uses the same frozen core as #80.
+
+### Local collision mixture profiles
+
+With `boole_local_background`, the legacy input without a species file describes
+one singly charged ion and electrons, both at `n.dat`. For a mixture, provide
+`profile_dir/collision_species.dat`: the species count on the first line, then
+mass [g], charge number, and a density-profile filename relative to `profile_dir`
+for each background, ions first and electrons last. For example:
+
+```
+3
+3.345228e-24  1  nD.dat
+5.017842e-24  1  nT.dat
+9.109100e-28 -1  n.dat
+```
+
+Each density file has the same two-column radius [cm], density [cm^-3] format
+and coordinate mapping as `n.dat`. Set `n_background_species=3` for this example.
+The source supplies each density independently: D/T fractions are never inferred
+from electron density. All ions use `Ti.dat`, electrons use `Te.dat`. The loader
+and every centroid evaluation check `sum(Z*n)=0` to relative tolerance `1e-10`
+(normalized by `sum(abs(Z*n))`), nonnegative finite densities, and agreement of
+the supplied electron profile with `n.dat` to relative tolerance `1e-10`. Invalid
+inputs stop the run rather than being renormalized. The file is optional for the
+legacy pure plasma, whose collision coefficients retain their previous bits.
+
+This changes the backgrounds passed to `collis_init`, retaining its native CGS
+constants and pair Coulomb logarithms. The canonical Metropolis-Hastings path
+still requires mode-5 OU collisions; these profile checks do not establish
+full-Fokker-Planck transport parity.
