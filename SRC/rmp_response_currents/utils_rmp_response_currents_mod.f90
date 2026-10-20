@@ -1858,6 +1858,20 @@ real(dp) function loading_temperature_eV(pv, species) result(T)
     T = species_temperature_eV(pv%Te, pv%Ti, start%particle_charge(species))
 end function loading_temperature_eV
 
+! Density of the canonical marker background, rather than the electron density.
+real(dp) function loading_density(s, pv, species) result(density)
+    use profile_data_mod, only: profile_values_t, eval_species_density
+    use gorilla_applets_types_mod, only: start
+    use constants, only: echarge
+    real(dp), intent(in) :: s
+    type(profile_values_t), intent(in) :: pv
+    integer, intent(in) :: species
+    real(dp) :: derivative
+
+    call eval_species_density(s, start%particle_mass(species), &
+        start%particle_charge(species)/echarge, pv, density, derivative)
+end function loading_density
+
 ! Unperturbed poloidal flux psi0 (the A_phi of f0) at x in cell ind_tetr: the
 ! linear interpolant of psi0_vert. On the chartmap (coord_system 2) psi0_vert
 ! is the mesh A_phi itself (A axisymmetric in every run of a set), so the
@@ -2030,7 +2044,8 @@ real(dp) function ln_f0_point(psi0, h_phi, vpar, mub, species) result(lnf0)
     K0 = 0.5_dp * start%particle_mass(species) * vpar**2 + mub &
         + start%particle_charge(species) * (pv0%Phi0 - pvs%Phi0)
     T_erg = loading_temperature_eV(pvs, species) * ev2erg
-    lnf0 = log(pvs%n_e) - 1.5_dp * log(T_erg) - K0 / T_erg
+    lnf0 = log(loading_density(s_star, pvs, species)) &
+        - 1.5_dp * log(T_erg) - K0 / T_erg
 end function ln_f0_point
 
 ! Uniform physical-volume loading in the s window on a chartmap grid
@@ -2149,7 +2164,8 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_ml
     K0 = K + energy_drift &
         + start%particle_charge(species)*(pv0%Phi0 - pvs%Phi0)
     Te_erg = loading_temperature_eV(pvs, species) * ev2erg
-    lnf0 = log(pvs%n_e) - 1.5_dp * log(Te_erg) - K0 / Te_erg
+    lnf0 = log(loading_density(s_star, pvs, species)) &
+        - 1.5_dp * log(Te_erg) - K0 / Te_erg
     if (present(ln_mload)) ln_mload = &
         -1.5_dp * log(loading_temperature_eV(pv0, species) * ev2erg) &
         - K_random / (loading_temperature_eV(pv0, species) * ev2erg)

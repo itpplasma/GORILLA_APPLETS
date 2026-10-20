@@ -142,3 +142,14 @@ add_test(NAME local_collision_background
 set_tests_properties(local_collision_background PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1"
     PROCESSORS 2 TIMEOUT 120)
+
+add_test(NAME canonical_species_density
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_canonical_species_density.py)
+set_tests_properties(canonical_species_density PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/canonical_species_density_work;\
+OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
+    TIMEOUT 120)
