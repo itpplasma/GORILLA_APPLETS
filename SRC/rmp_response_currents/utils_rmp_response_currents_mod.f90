@@ -281,6 +281,7 @@ subroutine read_rmp_response_currents_inp_into_type
     !   5 = Euler-Maruyama Ornstein-Uhlenbeck step on v_par (stost iswmode=5)
     ! Default 1 keeps legacy runs byte-identical.
     integer :: i_collision_mode = 1
+    integer :: n_background_species = 2
 
     integer :: s_inp_unit
 
@@ -309,7 +310,7 @@ subroutine read_rmp_response_currents_inp_into_type
     & boole_stratify_theta, boole_stratify_phi, &
     & boole_dump_orbit_n1, orbit_dump_stride, trapping_filter_mode, &
     & point_source_x, boole_force_marker1_pitch, marker1_pitch_value, &
-    & boole_dump_collisions_n1, coll_dump_stride, i_collision_mode, &
+    & boole_dump_collisions_n1, coll_dump_stride, i_collision_mode, n_background_species, &
     & anomalous_diffusion_coefficient, &
     & boole_local_background, boole_vperp_averaged_source, &
     & n_prof_bins, n_prof_batches, ou_nu_dtau, boole_eperp_native_grid, &
@@ -333,6 +334,9 @@ subroutine read_rmp_response_currents_inp_into_type
     in%boole_collisions = boole_collisions
     in%boole_precalc_collisions = boole_precalc_collisions
     in%i_collision_mode = i_collision_mode
+    if (n_background_species < 2) &
+        error stop "n_background_species must include ions and electrons"
+    in%n_background_species = n_background_species
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
     ! Sanity-fix e_cutoff_factor if user passed a non-positive value.
     if (e_cutoff_factor <= 0.0_dp) e_cutoff_factor = 5.0_dp
