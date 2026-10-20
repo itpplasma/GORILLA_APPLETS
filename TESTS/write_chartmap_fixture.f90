@@ -1,7 +1,8 @@
 !Write a manufactured Boozer chartmap with constant rotational transform.
-!Circular cross-section, R0 = 200 cm, minor radius 10 cm, Bmod = 1000 G,
-!two field periods. A_phi is linear in s, so iota = -dA_phi/ds/torflux is
-!exactly fixture_iota on every surface. Usage: write_chartmap_fixture.x <file>
+!Circular cross-section, R0 = 200 cm, minor radius 10 cm, B_00 = 1000 G
+!with a resolved zero-mean ripple and two field periods. A_phi is linear in s,
+!so iota = -dA_phi/ds/torflux is exactly fixture_iota on every surface.
+!Usage: write_chartmap_fixture.x <file>
 program write_chartmap_fixture
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
@@ -13,7 +14,7 @@ program write_chartmap_fixture
     real(dp), parameter :: fixture_iota = 0.4_dp
     real(dp), parameter :: torflux = 2.0e8_dp
     real(dp), parameter :: major_radius = 200.0_dp, minor_radius = 10.0_dp
-    integer, parameter :: nrho = 9, ntheta = 16, nzeta = 4, nfp = 2
+    integer, parameter :: nrho = 9, ntheta = 128, nzeta = 4, nfp = 2
 
     character(len=1024) :: filename
     integer :: ncid, dims(4), vars(12), ir, it, iz
@@ -35,13 +36,13 @@ program write_chartmap_fixture
         zeta(iz) = 2.0_dp*pi/real(nfp, dp)*real(iz - 1, dp)/real(nzeta, dp)
     end do
 
-    bmod = 1000.0_dp
     aphi = -fixture_iota*torflux*s
     btheta = 100.0_dp + 10.0_dp*rho
     bphi = 500.0_dp - 20.0_dp*rho
     do iz = 1, nzeta
         do it = 1, ntheta
             do ir = 1, nrho
+                bmod(ir, it, iz) = 1000.0_dp + 100.0_dp*cos(64.0_dp*theta(it))
                 radius = major_radius + minor_radius*rho(ir)*cos(theta(it))
                 x(ir, it, iz) = radius*cos(zeta(iz))
                 y(ir, it, iz) = radius*sin(zeta(iz))
