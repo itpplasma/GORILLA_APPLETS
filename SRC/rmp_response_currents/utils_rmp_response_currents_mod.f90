@@ -10,7 +10,7 @@ module utils_rmp_response_currents_mod
     use rmp_volume_loading_mod, only: volume_candidate, analytic_window_volume
     use rmp_maxwellian_loading_mod, only: maxwellian_from_uniforms
     use canonical_ntv_mod, only: boole_canonical_ntv, species_temperature_eV, ntv_h_phi, &
-        ntv_marker_rng, canonical_ntv_mark_loss, loss_wall, loss_outer_cut
+        ntv_marker_rng, ntv_3d_background, canonical_ntv_mark_loss, loss_wall, loss_outer_cut
 
     implicit none
 
@@ -633,6 +633,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
         add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
         initialise_seed_for_random_numbers_for_each_thread
+    use omp_lib, only: omp_get_wtime
     use find_tetra_mod, only: find_tetra
     ! Anomalous-transport kick: re-use the existing applet's perpendicular
     ! random-walk displacement. Enabled when in%anomalous_diffusion_coefficient > 0
@@ -673,6 +674,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     integer                                           :: ibatch
     logical                                           :: thread_flag = .true.
     logical                                           :: respawn_success
+    real(dp)                                          :: orbit_wall_start, orbit_wall_elapsed
     real(dp)                                          :: vpar_coll
 
     if (present(n_particles_in)) then
@@ -731,6 +733,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
         prof_count = 0
     end if
 
+    orbit_wall_start = omp_get_wtime()
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, moment_specs, ntetr, n_respawn_max, &
     !$OMP&        boole_dump_orbit_n1, traj_dump_unit, orbit_dump_stride, traj_step_count, &
@@ -999,6 +1002,9 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     n_mh_rej = n_mh_rej + n_mh_rej_loc
     !$omp end critical (dH_merge)
     !$OMP END PARALLEL
+    orbit_wall_elapsed = omp_get_wtime()-orbit_wall_start
+    if (boole_canonical_ntv) print '(a,es24.16)', &
+        ' NTV orbit wall seconds per marker: ', orbit_wall_elapsed/real(n_particles,dp)
 
     if (boole_nonlinear_weight) then
         print '(a, es12.4)', ' Nonlinear weights: max |dH|/|H| over one push = ', &
@@ -1994,6 +2000,7 @@ end function inside_loss_wall
 ! at fixed vpar and mu = m vperp^2/(2B). Zero for an axisymmetric mesh.
 ! ====================================================================
 real(dp) function chartmap_birth_log_factor(x, vpar, vperp, species) result(dlnp)
+    use deltaf_dke_birth_kernel, only: evaluate_dke_birth
     use chartmap_ntv_mod, only: chartmap_point
     use gorilla_applets_types_mod, only: start
     real(dp), intent(in) :: x(3), vpar, vperp
@@ -2002,6 +2009,10 @@ real(dp) function chartmap_birth_log_factor(x, vpar, vperp, species) result(dlnp
 
     call chartmap_point(x(1), x(2), x(3), b, b0, j0, bphi, aphi)
     dlnp = 0.0_dp
+    if (ntv_3d_background) then
+        call evaluate_dke_birth(b,b0,dlnp)
+        return
+    end if
     if (b == b0) return
     eperp = 0.5_dp * start%particle_mass(species) * vperp**2
     dlnp = ln_f0_point(aphi, bphi / b0, vpar, eperp * b0 / b, species) &
@@ -2137,9 +2148,13 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_ml
     psi0 = psi0_at(ind_tetr, x)
     h_phi = ntv_h_phi(ind_tetr, z)
     s0 = max(0.0_dp, min(1.0_dp, eval_s_from_psi_pol(psi0)))
-    s_star = max(0.0_dp, min(1.0_dp, &
-        eval_s_from_psi_pol(psi0 + start%cm_over_e(species) &
-            * (vpar*h_phi + drift_phi))))
+    if (ntv_3d_background) then
+        s_star = s0
+    else
+        s_star = max(0.0_dp, min(1.0_dp, &
+            eval_s_from_psi_pol(psi0 + start%cm_over_e(species) &
+                * (vpar*h_phi + drift_phi))))
+    end if
     call eval_profiles(s0, pv0)
     call eval_profiles(s_star, pvs)
     K0 = K + energy_drift &

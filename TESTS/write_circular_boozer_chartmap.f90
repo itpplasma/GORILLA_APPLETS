@@ -15,7 +15,7 @@
 !> leaves A and B_k axisymmetric (chartmap model).
 !>
 !> Usage: write_circular_boozer_chartmap.x file sigma b m n
-!>            [nrho ntheta nzeta [m2 n2 b2]]
+!>            [nrho ntheta nzeta [m2 n2 b2 [nfp relative R0]]]]
 !> Geometry: R0 = 165 cm, a = 69.991288 cm, B0 = -17991.7336 G, q0 = 1, q1 = 2
 !> (the rmp_fm_stationarity template).
 program write_circular_boozer_chartmap
@@ -27,13 +27,15 @@ program write_circular_boozer_chartmap
 
     implicit none
 
-    real(dp), parameter :: r0 = 165.0_dp, a = 69.991288_dp, b0 = -17991.7336_dp
+    real(dp), parameter :: a = 69.991288_dp, b0 = -17991.7336_dp
+    real(dp) :: r0 = 165.0_dp
     real(dp), parameter :: q0 = 1.0_dp, q1 = 2.0_dp
     real(dp), parameter :: pi = acos(-1.0_dp)
     character(len=512) :: filename, arg
     real(dp) :: sigma, bmn, b2
     integer :: m, n, m2, n2, nr, nt, nz
-    integer :: ir, it, iz, ncid, dims(4), vars(12)
+    integer :: ir, it, iz, ncid, dims(4), vars(12), nfp
+    logical :: relative
     real(dp) :: s_edge, torflux, r, eps, th, q
     real(dp), allocatable :: rho(:), s(:), theta(:), zeta(:), aphi(:), btheta(:), &
         bphi(:), x(:, :, :), y(:, :, :), z(:, :, :), bmod(:, :, :)
@@ -62,6 +64,14 @@ program write_circular_boozer_chartmap
         b2 = real_arg(11)
     end if
 
+    nfp = 1
+    relative = .false.
+    if (command_argument_count() >= 12) nfp = int_arg(12)
+    if (command_argument_count() >= 13) relative = int_arg(13) /= 0
+    if (command_argument_count() >= 14) r0 = real_arg(14)
+    if (nfp < 1 .or. r0 <= a) error stop 'invalid analytic chart geometry'
+    if (mod(n,nfp) /= 0 .or. mod(n2,nfp) /= 0) &
+        error stop 'harmonic is not periodic on the requested chart wedge'
     call set_field_analytic_circ(r0, a, b0, q0, q1, 2)
     s_edge = r0 - sqrt(r0**2 - a**2)
     torflux = -b0*r0*s_edge
@@ -76,7 +86,7 @@ program write_circular_boozer_chartmap
         theta(it) = 2.0_dp*pi*real(it - 1, dp)/real(nt, dp)
     end do
     do iz = 1, nz
-        zeta(iz) = 2.0_dp*pi*real(iz - 1, dp)/real(nz, dp)
+        zeta(iz) = 2.0_dp*pi*real(iz - 1, dp)/real(nz*nfp, dp)
     end do
     do ir = 1, nr
         r = sqrt(max(0.0_dp, r0**2 - (r0 - s(ir)*s_edge)**2))
@@ -92,9 +102,16 @@ program write_circular_boozer_chartmap
                 x(ir, it, iz) = (r0 + r*cos(th))*cos(zeta(iz))
                 y(ir, it, iz) = (r0 + r*cos(th))*sin(zeta(iz))
                 z(ir, it, iz) = r*sin(th)
-                bmod(ir, it, iz) = abs(b0)/(r0 + r*cos(th))*sqrt(r0**2 + (r/q)**2) &
-                    + sigma*(bmn*cos(m*theta(it) - n*zeta(iz)) &
-                             + b2*sin(m2*theta(it) - n2*zeta(iz)))
+                bmod(ir, it, iz) = abs(b0)/(r0 + r*cos(th))*sqrt(r0**2 + (r/q)**2)
+                if (relative) then
+                    bmod(ir,it,iz) = bmod(ir,it,iz) &
+                        * (1.0_dp+sigma*bmn*cos(real(m,dp)*theta(it)-real(n,dp)*zeta(iz))) &
+                        + sigma*b2*sin(real(m2,dp)*theta(it)-real(n2,dp)*zeta(iz))
+                else
+                    bmod(ir,it,iz) = bmod(ir,it,iz) &
+                        + sigma*(bmn*cos(real(m,dp)*theta(it)-real(n,dp)*zeta(iz)) &
+                        + b2*sin(real(m2,dp)*theta(it)-real(n2,dp)*zeta(iz)))
+                end if
             end do
         end do
     end do
@@ -130,7 +147,7 @@ program write_circular_boozer_chartmap
     call nc(nf90_put_var(ncid, vars(9), y))
     call nc(nf90_put_var(ncid, vars(10), z))
     call nc(nf90_put_var(ncid, vars(11), bmod))
-    call nc(nf90_put_var(ncid, vars(12), 1))
+    call nc(nf90_put_var(ncid, vars(12), nfp))
     call nc(nf90_close(ncid))
 
 contains

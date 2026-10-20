@@ -203,6 +203,10 @@ program gen_deltaf_kernels
     kappa_f = sym(arena, "dlnf0_dpphi")
     call emit_fax()
     call emit_fax_chartmap()
+    call emit_dke_3d()
+    call emit_dke_local()
+    call emit_dke_reference()
+    call emit_dke_birth()
 
     call emit_energy_kernels()
     call suite_end(suite)
@@ -449,8 +453,140 @@ contains
             n_f, t_f, phi0_f], [ddens, dtemp, dphi0, dens, temp, phi0])
     end function profile_values
 
+    subroutine emit_dke_birth()
+        type(expr_t) :: bb, bzero
+        bb = sym(arena, "b")
+        bzero = sym(arena, "bzero")
+        call emit_kernel_file("deltaf_dke_birth_kernel", "evaluate_dke_birth", &
+                              [character(len=16) :: "b", "bzero"], [2*log(bzero/bb)], &
+                              [character(len=16) :: "log_jratio"])
+    end subroutine emit_dke_birth
+    subroutine emit_dke_reference()
+        type(expr_t) :: aa, ap, vv, bg, bb, bt, ll, gg
+        aa = sym(arena, "a_s")
+        ap = sym(arena, "daps")
+        vv = sym(arena, "speed")
+        bg = sym(arena, "bphi")
+        bb = sym(arena, "bzero")
+        bt = sym(arena, "dbzero_dt")
+        ll = sym(arena, "lambda")
+        ! Legacy no-table AX reference: f0=f_M+G to drift-kinetic order.
+        ! This is a reference function, never a conserved 3D momentum label.
+        gg = c_light*mass*vv*aa*bg*ll/(charge*ap*bb)
+        call emit_kernel_file("deltaf_dke_reference_kernel", "evaluate_dke_reference", &
+                             [character(len=16) :: "mass", "charge", "c_light", "a_s", &
+                             "daps", "speed", "bphi", "bzero", "dbzero_dt", "lambda"], &
+                              [diff(gg, ll), diff(gg, bb)*bt], &
+                              [character(len=16) :: "dg_dlambda", "dg_dtheta"])
+    end subroutine emit_dke_reference
+    subroutine emit_dke_local()
+        type(expr_t) :: ee, mm, nn, dn, tt, dtt, dp, qq, bb, dbz
+        type(expr_t) :: vpar_l, speed_l, scale
+        ee = sym(arena, "energy")
+        mm = sym(arena, "mass")
+        nn = sym(arena, "density")
+        dn = sym(arena, "dn_ds")
+        tt = sym(arena, "temperature")
+        dtt = sym(arena, "dt_ds")
+        dp = sym(arena, "dphi_ds")
+        qq = sym(arena, "charge")
+        vpar_l = sym(arena, "vpar")
+        bb = sym(arena, "b")
+        dbz = sym(arena, "db_dz")
+        scale = sym(arena, "ds_dpsi")*sym(arena, "mesh_daps")
+        speed_l = sqrt(2*ee/mm)
+        call emit_kernel_file("deltaf_dke_local_kernel", "evaluate_dke_local", &
+                           [character(len=16) :: "energy", "mass", "density", "dn_ds", &
+                             "temperature", "dt_ds", "charge", "dphi_ds", "vpar", "b", &
+                               "db_dz", "mu", "ds_dpsi", "mesh_daps"], &
+                              [log(nn) - num(arena, 3)/2*log(tt) - ee/tt, &
+                 (dn/nn + (ee/tt - num(arena, 3)/2)*dtt/tt)*scale + qq*dp/tt, speed_l, &
+                               vpar_l/speed_l, (mu + mm*vpar_l**2/bb)*dbz], &
+                              [character(len=16) :: "lnfm", "a_s", "speed", "lambda", &
+                               "dh_dphi"])
+    end subroutine emit_dke_local
     ! Horner step and physical f_AX/f_M -> remainder h/f_M. I/O and loops
     ! remain handwritten; these are the new pointwise mathematical leaves.
+    ! Leading-order Boozer guiding-centre drift-kinetic characteristics.
+    ! D = J B^2 = I*torflux - G*Aphi'; iota = -Aphi'/torflux.
+    ! The axisymmetric control variate satisfies L_AX F_AX = C_AX F_AX.
+    ! Hence the perturbation drive is -(L_3D-L_AX)(f_M+f_AX)/f_M.
+    subroutine emit_dke_3d()
+        type(expr_t) :: bb, bs, bt, bz, ii, gg, tf, ap, vv, ll, pp
+        type(expr_t) :: den, cov, radial, poloidal, mirror, aa, ds, dt, dl
+        type(expr_t) :: gt, gl, src, la, lb, pa, wa, dtstep
+        block
+            type(expr_t) :: a, b, f, dx
+            a = sym(arena, "left")
+            b = sym(arena, "right")
+            f = sym(arena, "fraction")
+            dx = sym(arena, "spacing")
+            call emit_kernel_file("deltaf_lerp_kernel", "evaluate_deltaf_lerp", &
+                        [character(len=16) :: "left", "right", "fraction", "spacing"], &
+                                  [a + f*(b - a), (b - a)/dx], &
+                                  [character(len=16) :: "value", "derivative"])
+        end block
+        bb = sym(arena, "b")
+        bs = sym(arena, "db_ds")
+        bt = sym(arena, "db_dt")
+        bz = sym(arena, "db_dz")
+        ii = sym(arena, "btheta")
+        gg = sym(arena, "bphi")
+        tf = sym(arena, "torflux")
+        ap = sym(arena, "daps")
+        vv = sym(arena, "speed")
+        ll = sym(arena, "lambda")
+        pp = sym(arena, "dphi_ds")
+        den = gg*tf - ii*ap
+        cov = gg - ii*ap/tf
+        radial = c_light/charge*mass*vv**2*(1 + ll**2)/(2*bb) &
+                 *(ii*bz - gg*bt)/den
+        poloidal = -vv*ll*bb*ap/(tf*cov) &
+                   + c_light/charge*gg/den &
+                   *(mass*vv**2*(1 + ll**2)/(2*bb)*bs + charge*pp)
+        mirror = -vv*(1 - ll**2)/(2*cov)*(-ap/tf*bt + bz)
+        block
+            type(expr_t) :: mu_local, streaming_t, streaming_z
+            mu_local = mass*vv**2*(1 - ll**2)/(2*bb)
+            streaming_t = -vv*ll*bb*ap/(tf*cov)
+            streaming_z = vv*ll*bb/cov
+            call check_identity(suite, symeng, "DKE parallel mu conservation", &
+                                diff(mu_local, bb)*(bt*streaming_t + bz*streaming_z) &
+                                + diff(mu_local, ll)*mirror)
+        end block
+        call emit_kernel_file("deltaf_dke_characteristics_kernel", &
+                              "evaluate_dke_characteristics", &
+                           [character(len=16) :: "mass", "charge", "c_light", "speed", &
+                               "lambda", "b", "db_ds", "db_dt", "db_dz", "btheta", &
+                               "bphi", "torflux", "daps", "dphi_ds"], &
+                       [simplified(radial), simplified(poloidal), simplified(mirror)], &
+                              [character(len=16) :: "sdot", "tdot", "ldot"])
+        aa = sym(arena, "a_s")
+        ds = sym(arena, "delta_sdot")
+        dt = sym(arena, "delta_tdot")
+        dl = sym(arena, "delta_ldot")
+        gt = sym(arena, "dg_dtheta")
+        gl = sym(arena, "dg_dlambda")
+        src = -aa*ds - gt*dt - gl*dl
+        call emit_kernel_file("deltaf_dke_source_kernel", "evaluate_dke_source", &
+                              [character(len=16) :: "a_s", "delta_sdot", "delta_tdot", &
+                               "delta_ldot", "dg_dtheta", "dg_dlambda"], &
+                              [src], [character(len=16) :: "source"])
+        call check_identity(suite, native, "3D DKE zero perturbation", &
+            subs_many(src, [ds, dt, dl], [num(arena, 0), num(arena, 0), num(arena, 0)]))
+        la = sym(arena, "lnf_a")
+        lb = sym(arena, "lnf_b")
+        pa = sym(arena, "p_a")
+        wa = sym(arena, "w_a")
+        dtstep = sym(arena, "dt")
+        ! p=f_M/g follows the collisionless characteristic exactly. A local
+        ! Maxwellian-preserving collision kernel leaves this second weight alone.
+        call emit_kernel_file("deltaf_dke_step_kernel", "evaluate_dke_step", &
+                [character(len=16) :: "lnf_a", "lnf_b", "p_a", "w_a", "source", "dt"], &
+                              [pa*func("exp", [(lb - la)/2]), &
+    pa*func("exp",[lb-la]), wa+pa*func("exp",[(lb-la)/2])*sym(arena,"source")*dtstep], &
+                              [character(len=16) :: "p_mid", "p_b", "w_b"])
+    end subroutine emit_dke_3d
     subroutine emit_energy_kernels()
         type(expr_t) :: xx, aa, cc, gg, vv, hh, kk, mm, bb, ee, tt
         xx = sym(arena, "x")

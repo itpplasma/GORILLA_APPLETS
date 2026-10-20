@@ -471,3 +471,119 @@ This changes the backgrounds passed to `collis_init`, retaining its native CGS
 constants and pair Coulomb logarithms. The canonical Metropolis-Hastings path
 still requires mode-5 OU collisions; these profile checks do not establish
 full-Fokker-Planck transport parity.
+
+### Total 3D background orbits (`ntv_3d_background`)
+
+Set `ntv_3d_background = .true.` in `canonical_ntv_nml` to trace the
+**total** field on a Boozer chartmap (`grid_kind=6`, `coord_system=2`). The
+chartmap's `Bmod` must contain the axisymmetric equilibrium plus TF ripple
+and any retained RMP strength spectrum. The existing GORILLA pusher sees all
+these components together. There is no separate linear harmonic drive in
+this mode: `ntv_amplitude` must be zero and the harmonic profile/chartmap
+options must be empty. The single-harmonic labels `ntv_m_pol` and `ntv_n_tor`
+are diagnostic only. The default `.false.` preserves the #82 estimator.
+
+Use `boole_n_field_periods=.true.` in `tetra_grid.inp`. The mesh and chartmap
+field-period counts must agree. A pure N-periodic ripple chart can use one
+period, `num_field_periods=N`; a symmetry-breaking RMP requires a full-torus
+chart, `num_field_periods=1`. A file restricted to a wedge cannot represent a
+mode that breaks that wedge's symmetry. Resolve **every** retained mode on
+both the input chart and orbit mesh; switching to a full torus requires more
+toroidal mesh points to retain the same resolution per ripple period.
+
+The axisymmetric reference `B_AX(s,theta)` is the toroidal mean of the total
+chart's field strength. Its profiles, A_phi, covariant B components and angle
+chart are shared with the total field. The reference must be the equilibrium
+used to produce the imported f_AX table. The f_AX lookup uses **only this
+reference's** field extrema and sign of its parallel gradient; ripple wells
+never supply its position label. The source uses the raw chart's multilinear
+field derivatives; the orbit pusher and torque use the tetrahedral field.
+Their interpolation errors must be checked by mesh refinement.
+
+`ntv_mesh_phi0=.true.` is required: orbit and reference potential are the same
+profile Phi0(s). Marker births use local Maxwellians, with n(s) and T(s),
+and the physical-volume correction J_3D/J_AX=(B_AX/B_3D)^2. No 3D invariant
+P_phi or canonical loading surface is assumed. P_phi remains a diagnostic.
+
+Write the AX distribution as F_AX=f_M(1+g). A native energy/species table
+supplies g=f_AX/f_M and its pitch derivative, including the canonical shift
+G; the new source therefore does **not** subtract G from that table. Legacy
+pitch-derivative-only tables lack the angular value data and are rejected.
+Without a table, the reference retains the previous canonical shift to first
+drift-kinetic order, g=G/f_M=(c m v/q) h_phi lambda A_s/A_phi'. A native zero
+table instead specifies g=0. Both choices give exactly zero perturbation
+source on an axisymmetric field; they describe different AX references.
+
+The thin-orbit control-variate equation is
+
+```
+(d/dt)_3D delta_f - C delta_f = -(L_3D-L_AX) F_AX,
+A_s = n_s/n + (E/T-3/2) T_s/T + q Phi0_s/T,
+S/f_M = -A_s (sdot_3D-sdot_AX)
+        -g_theta (thetadot_3D-thetadot_AX)
+        -g_lambda (lambdadot_3D-lambdadot_AX).
+```
+
+Here E is local kinetic energy and lambda=v_parallel/v. This subtracts the
+AX kinetic balance already supplied by f_AX. It retains the Maxwellian radial
+drive and the angular/mirror action on g. Radial and energy derivatives
+multiplied by g are omitted at the same thin-orbit order as the imported
+background; the code is not a global finite-orbit-width f_AX solver.
+The canonical-shift fallback is likewise a first-order reference.
+
+For I=B_theta, G_B=B_phi, iota=-A_phi'/torflux and
+D=G_B torflux-I A_phi'=J B^2, the generated characteristics are
+
+```
+sdot      = (c/q) [m v^2(1+lambda^2)/(2 B)] (I B_zeta-G_B B_theta)/D,
+thetadot  = v lambda B iota/(G_B+iota I)
+            + (c/q) G_B/D [m v^2(1+lambda^2) B_s/(2 B)+q Phi0_s],
+lambdadot = -v(1-lambda^2)(iota B_theta+B_zeta)/(2(G_B+iota I)).
+```
+
+B derivatives have coordinate subscripts here, whereas I and G_B are
+covariant field components. All characteristics and local weight algebra are
+emitted by `gen/deltaf_kernels`; normal builds need no symbolic library.
+The angular derivative of g differentiates the interpolated AX table by a
+centered 1e-5-rad difference at fixed energy and pitch. The table must be
+periodic in its position chart and resolve trapped-passing transitions.
+
+Two weights are carried. The recorded w divides delta_f by the advected
+birth Maxwellian. The internal p divides the current f_M by that same
+advected distribution: p_b=p_a exp(ln f_M,b-ln f_M,a). The source update uses
+its midpoint value. Constant P corrects the original sampler to the birth
+Maxwellian, including the volume Jacobian; torque and loss samples use P w.
+Local Maxwellian-preserving collisions leave p unchanged. This removes the
+assumption that the birth Maxwellian is invariant along a 3D trajectory.
+The existing weight-reset/burn-in controls apply to w, retaining p. Existing
+loss kinds, signed final weights and fixed initial-marker normalization are
+retained, with no respawn and no contribution after loss. Checkpoint values
+freeze after loss. A new run-log timer reports orbit-loop wall seconds per
+initial marker, excluding mesh preparation and marker loading.
+
+The supported field contract is GORILLA's extended Boozer chartmap: nested
+surfaces, axisymmetric A and covariant field components, arbitrary positive
+3D strength. It permits ripple trapping and nonlinear drift-orbit coupling
+between retained strength modes. It does not represent magnetic islands or
+field-line stochasticity from an arbitrary perturbed vector potential.
+Those require a general vector-field orbit provider plus an independent AX
+coordinate map; do not use this mode to claim their inclusion. The imported
+single-well AX position chart must also be valid. Device fields, species,
+profiles, radial f_AX coverage and transport convergence need qualification.
+
+Native CTests `deltaf_3d_kernel`, `deltaf_3d_orbits`,
+`deltaf_3d_ripple_wells` and `deltaf_3d_linear_limit` cover the generated
+characteristics, source contraction, two-weight evolution, AX reduction,
+table isolation, thread independence, boundary losses, periodicity admission,
+a native ripple-trapped orbit and the small-RMP comparison to #82. The linear
+comparison uses a 5% interpolation/ordering tolerance and checks quadratic
+amplitude scaling. These tests do not qualify an asymptotic transport regime.
+The configurable native `deltaf_3d_orbit_probe.x` supports independent Lorentz
+orbit ensembles for that separate convergence check.
+
+The circular ripple-well criterion alpha*=epsilon|sin(theta)|/(N q delta)<1
+is summarized in [Scott et al., Fast-ion physics in SPARC (2020)](https://doi.org/10.1017/S0022377820001087).
+The collisional ripple-transport comparison follows the regime considered by
+[Connor and Hastie (1973)](https://doi.org/10.1088/0029-5515/13/2/011).
+Establish the bounce, collision and drift orderings and convergence before
+interpreting a measured amplitude exponent as its asymptotic scaling.
