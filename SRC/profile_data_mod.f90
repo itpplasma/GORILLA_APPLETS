@@ -26,6 +26,7 @@ module profile_data_mod
     public :: eval_q, get_psi_tor_edge
     public :: eval_s_from_psi_pol, eval_ds_dreff, eval_s_and_ds_dpsi_from_psi_pol
     public :: profile_values_t, get_collision_species, eval_collision_densities
+    public :: eval_species_density
     public :: load_kim_nu, eval_kim_nu, kim_nu_loaded
     public :: load_da_profile, eval_da_profile, da_profile_loaded
     public :: boole_kim_reff_coords, kim_b_ref
@@ -378,6 +379,36 @@ subroutine eval_collision_densities(s_val, pv, densities)
         densities = pv%n_e
     end if
 end subroutine eval_collision_densities
+
+! Canonical F0 uses the density of the marker species, including its gradient.
+! Explicit mixture identities and profiles are shared with the collisions.
+! Without a mixture file retain the legacy pure singly charged plasma.
+subroutine eval_species_density(s_val, mass_g, charge_e, pv, density, derivative)
+    real(dp), intent(in) :: s_val, mass_g, charge_e
+    type(profile_values_t), intent(in) :: pv
+    real(dp), intent(out) :: density, derivative
+    real(dp) :: s_clamped
+    integer :: j, match_count, selected
+
+    density = pv%n_e
+    derivative = pv%dn_ds
+    if (.not. allocated(collision_mass)) return
+    match_count = 0
+    selected = 0
+    do j = 1, size(collision_mass)
+        if (abs(mass_g/collision_mass(j) - 1.0_dp) < 1.0e-4_dp .and. &
+            abs(charge_e - collision_charge(j)) < 1.0e-4_dp) then
+            match_count = match_count + 1
+            selected = j
+        end if
+    end do
+    if (match_count /= 1) &
+        error stop 'Canonical marker needs one matching species density profile'
+    s_clamped = max(0.0_dp, min(1.0_dp, s_val))
+    call splint_with_deriv(ns, s_grid, collision_density(selected,:), &
+        collision_density_dd(selected,:), s_clamped, density, derivative)
+    if (density <= 0.0_dp) error stop 'Nonpositive canonical species density'
+end subroutine eval_species_density
 
 subroutine check_collision_densities(densities, ne)
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite

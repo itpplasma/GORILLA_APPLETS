@@ -10,14 +10,16 @@ program test_local_collision_background
     use utils_data_pre_and_post_processing_mod, only: set_c
     use utils_rmp_response_currents_mod, only: set_local_collision_background, &
         read_rmp_response_currents_inp_into_type
-    use profile_data_mod, only: load_profiles, eval_profiles, profile_values_t
+    use profile_data_mod, only: load_profiles, eval_profiles, profile_values_t, &
+        eval_species_density
     use collis_ions, only: collis_init, coleff
     use constants, only: echarge
     implicit none
     character(len=64) :: arg
-    integer :: i, j, a, u
+    integer :: i, j, a, u, ud
     real(dp) :: s, v0, ef(2), vr(2), er(2), dens(2), temp(2)
     real(dp), allocatable :: dpp(:), dhh(:), drag(:)
+    real(dp) :: marker_density, marker_gradient
     type(profile_values_t) :: pv
 
     call get_command_argument(1, arg)
@@ -32,6 +34,7 @@ program test_local_collision_background
     call set_c()
     allocate(dpp(c%n), dhh(c%n), drag(c%n))
     open(newunit=u, file='rates.dat', status='replace')
+    open(newunit=ud, file='species_density.dat', status='replace')
     do a = 1, c%n
         ! First obtain the source identities, then select each as the test particle.
         call set_local_collision_background()
@@ -42,6 +45,9 @@ program test_local_collision_background
         do i = 1, ntetr
             s = sum(verts_sthetaphi(1, tetra_grid(i)%ind_knot))/4.0_dp
             call eval_profiles(s, pv)
+            call eval_species_density(s, particle_mass, c%charge_num(a), pv, &
+                marker_density, marker_gradient)
+            write(ud, '(i8,3es25.16)') a, s, marker_density, marker_gradient
             if (c%n == 2) then
                 ! Frozen pre-fix algorithm, including its evaluation order.
                 dens = pv%n_e
@@ -70,5 +76,6 @@ program test_local_collision_background
         end do
     end do
     close(u)
+    close(ud)
     print *, 'PASS: production local collision background'
 end program test_local_collision_background
