@@ -525,8 +525,8 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     use tetra_grid_settings_mod, only: grid_kind
     use gorilla_applets_types_mod, only: start
     use profile_data_mod, only: eval_profiles, profile_values_t, &
-        eval_s_and_ds_dpsi_from_psi_pol
-    use constants, only: ev2erg, clight
+        eval_s_and_ds_dpsi_from_psi_pol, eval_species_density
+    use constants, only: ev2erg, clight, echarge
 
     integer,  intent(in)  :: ind_tetr, species
     real(dp), intent(in)  :: x(3), vpar, perpinv, psi0, s_mesh
@@ -571,8 +571,8 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     h0 = K + charge * pv0%Phi0
     T_eV = species_temperature_eV(pvs%Te, pvs%Ti, charge)
     dT_ds = species_temperature_eV(pvs%dTe_ds, pvs%dTi_ds, charge)
-    dens = pvs%n_e
-    ddens = pvs%dn_ds * dsdpsi
+    call eval_species_density(pt%s_star, mass, charge/echarge, pvs, dens, ddens)
+    ddens = ddens * dsdpsi
     temp = T_eV * ev2erg
     dtemp = dT_ds * ev2erg * dsdpsi
     phi0 = pvs%Phi0

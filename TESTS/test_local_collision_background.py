@@ -113,6 +113,13 @@ def main():
     print('PASS: pure D/e collision coefficients and velocity/energy ratios bitwise unchanged')
     root = prepare('ITER_DT')
     rows = run(root, 3)
+    for line in (root / 'species_density.dat').read_text().splitlines():
+        species, s, density, gradient = map(float, line.split())
+        offset = [.5, .5, 1.][int(species)-1]
+        slope = [.15, .05, .2][int(species)-1]
+        assert abs(density / ((offset+slope*s)*NE) - 1) < 2e-14
+        assert abs(gradient / (slope*NE) - 1) < 2e-13
+    print('PASS: canonical D/T/e densities and distinct radial gradients')
     err, coefficient_err, exact_shape_err = 0., 0., 0.
     for a, b, cell, s, mt, mb, za, zb, nb, tb, nu, coefficient in rows:
         expected_n = [(0.5+.15*s)*NE, (0.5+.05*s)*NE, (1+.2*s)*NE][int(b)-1]

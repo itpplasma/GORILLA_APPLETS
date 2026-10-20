@@ -467,6 +467,12 @@ the supplied electron profile with `n.dat` to relative tolerance `1e-10`. Invali
 inputs stop the run rather than being renormalized. The file is optional for the
 legacy pure plasma, whose collision coefficients retain their previous bits.
 
+Canonical marker loading, MH acceptance and the delta-f derivative also select
+the marker's density and radial derivative from this file, matched by mass
+(relative tolerance `1e-4`) and charge number (absolute tolerance `1e-4`).
+Exactly one identity must match. Thus an equal D/T mixture uses `n_D=n_T=n_e/2`
+for its marker normalization, while `n.dat` remains the electron profile.
+
 This changes the backgrounds passed to `collis_init`, retaining its native CGS
 constants and pair Coulomb logarithms. The canonical Metropolis-Hastings path
 still requires mode-5 OU collisions; these profile checks do not establish
