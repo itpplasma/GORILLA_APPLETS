@@ -20,8 +20,10 @@
 !> background f_AX = G + h beyond the canonical f0 (generated kernels
 !> deltaf_fax_coordinates_kernel and deltaf_fax_weight_kernel, see
 !> CANONICAL_NTV.md "Collisional background drive").
-!> The per-marker table (one row per marker, numeric columns, header line) is
-!> written for the external NTV / delta-B-loss / axisymmetric-loss
+!> ntv_3d_background selects local two-weight DKE on the total Boozer mesh;
+!> see CANONICAL_NTV.md for its AX control variate and thin-orbit scope.
+!> The per-marker table is written for the external NTV / delta-B-loss /
+!> axisymmetric-loss
 !> decomposition of the paired +-sigma/0 runs.
 !>
 !> Charts: the analytic circular field in cylindrical coordinates (grid_kind 5,
@@ -34,6 +36,12 @@
 module canonical_ntv_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
+    use deltaf_dke_characteristics_kernel, only: evaluate_dke_characteristics
+    use deltaf_lerp_kernel, only: evaluate_deltaf_lerp
+    use deltaf_dke_source_kernel, only: evaluate_dke_source
+    use deltaf_dke_reference_kernel, only: evaluate_dke_reference
+    use deltaf_dke_local_kernel, only: evaluate_dke_local
+    use deltaf_dke_step_kernel, only: evaluate_dke_step
     use deltaf_harmonic_kernel, only: evaluate_deltaf_harmonic
     use deltaf_weight_kernel, only: evaluate_deltaf_weight
     use chartmap_ntv_mod, only: chartmap_raw_t, read_chartmap_raw, chartmap_harmonic
@@ -52,7 +60,7 @@ module canonical_ntv_mod
         ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
         ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, ntv_lorentz_mh, &
         ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn, ntv_mesh_phi0, &
-        ntv_profile_phi0, ntv_fax_file
+        ntv_profile_phi0, ntv_fax_file, ntv_3d_background
     public :: canonical_ntv_nml_read, canonical_ntv_init, canonical_ntv_allocate, &
         canonical_ntv_birth, canonical_ntv_push, canonical_ntv_collision, &
         canonical_ntv_end, canonical_ntv_write, ntv_harmonic_dphi, &
@@ -63,6 +71,8 @@ module canonical_ntv_mod
     public :: n_ntv_cols, ntv_col_names
 
     logical  :: boole_canonical_ntv = .false.
+    ! Total 3D Boozer mesh; local drift-kinetic drive around its n=0 f_AX.
+    logical :: ntv_3d_background = .false.
     integer  :: ntv_m_pol = 0
     integer  :: ntv_n_tor = 0
     !> Amplitude sigma multiplying b_mn and Phi_mn (CRN pairs: +sigma, -sigma, 0).
@@ -131,7 +141,7 @@ module canonical_ntv_mod
         ntv_output_file, ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
         ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, &
         ntv_lorentz_mh, ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn, &
-        ntv_mesh_phi0, ntv_fax_file
+        ntv_mesh_phi0, ntv_fax_file, ntv_3d_background
 
     !> Loss kinds (column loss_kind): grid exit (last mesh surface or inner
     !> boundary), wall contour, s_outer_cut.
@@ -151,6 +161,7 @@ module canonical_ntv_mod
     real(dp), allocatable :: rec(:,:)
     !> Physical trace time of each marker (sum of the push times).
     real(dp), allocatable :: tphys(:)
+    real(dp), allocatable :: dke_p(:)
     !> Checkpoints (ntv_n_check, n_particles): int -dH1/dphi dt, torque, w.
     real(dp), allocatable :: chk_dh(:,:), chk_tq(:,:), chk_w(:,:)
     integer,  allocatable :: chk_next(:)
@@ -188,6 +199,7 @@ module canonical_ntv_mod
         real(dp) :: dh_mesh_dphi, psi0
         !> Collisional background weight source (0 without ntv_fax_file).
         real(dp) :: dw_fax = 0.0_dp
+        real(dp) :: dke_source = 0.0_dp, lnfm = 0.0_dp
     end type ntv_point_t
 
 contains
@@ -224,6 +236,7 @@ end subroutine canonical_ntv_nml_read
 subroutine canonical_ntv_init()
     use tetra_grid_settings_mod, only: grid_kind, n_field_periods
     use tetra_physics_mod, only: coord_system
+    use boozer_chartmap_mod, only: chartmap_nfp
     use wall_contour_mod, only: load_wall_contour
     integer :: u, ios, i
     real(dp) :: row(3)
@@ -232,14 +245,27 @@ subroutine canonical_ntv_init()
     if (.not. ((grid_kind == 5 .and. coord_system == 1) .or. &
                (grid_kind == 6 .and. coord_system == 2))) error stop &
         'canonical NTV: wired for grid_kind 5 (coord_system 1) and 6 (coord_system 2)'
+    if (ntv_3d_background) then
+        if (grid_kind /= 6 .or. coord_system /= 2) &
+            error stop '3D NTV: requires a total-field Boozer chartmap mesh'
+        if (abs(ntv_amplitude) > 0.0_dp .or. len_trim(ntv_chartmap_file) > 0 &
+            .or. len_trim(ntv_profile_file) > 0) &
+            error stop '3D NTV: perturbations belong in the mesh, not the linear drive'
+        if (n_field_periods /= chartmap_nfp) &
+            error stop '3D NTV: mesh field periods must match chartmap_nfp'
+        if (.not. ntv_mesh_phi0) &
+            error stop '3D NTV: requires ntv_mesh_phi0 for consistent profile potential'
+    end if
     if (ntv_theta_kind /= 0 .and. ntv_theta_kind /= 1) &
         error stop 'canonical NTV: ntv_theta_kind must be 0 or 1'
     if (len_trim(loss_wall_file) > 0) call load_wall_contour(trim(loss_wall_file))
     ! The mesh covers one field period 2 pi/n_field_periods and markers are
     ! relocated into it, so the harmonic must be periodic on that interval.
     if (n_field_periods < 1) error stop 'canonical NTV: n_field_periods must be >= 1'
-    if (mod(ntv_n_tor, n_field_periods) /= 0) &
-        error stop 'canonical NTV: ntv_n_tor must be a multiple of n_field_periods'
+    if (.not. ntv_3d_background) then
+        if (mod(ntv_n_tor, n_field_periods) /= 0) &
+            error stop 'canonical NTV: ntv_n_tor must be a multiple of n_field_periods'
+    end if
     if (ntv_theta_kind /= 0 .and. ntv_theta_kind /= 1) &
         error stop 'canonical NTV: ntv_theta_kind must be 0 or 1'
     if (ntv_n_check < 0) error stop 'canonical NTV: ntv_n_check must be >= 0'
@@ -259,6 +285,8 @@ subroutine canonical_ntv_init()
         if (grid_kind == 5 .and. ntv_m_pol /= 0) error stop &
             'canonical NTV: ntv_fax_file needs ntv_m_pol = 0 (b.grad = b^phi d/dphi)'
         call ntv_fax_load_table(trim(ntv_fax_file))
+        if (ntv_3d_background .and. fax_nb == 0) &
+            error stop '3D NTV: f_AX requires a v2 energy/value table'
         call fax_surface_field()
     end if
     n_tab = 0
@@ -352,6 +380,9 @@ subroutine canonical_ntv_allocate(n_particles)
     chk_tq = 0.0_dp
     chk_w = 0.0_dp
     chk_next = 1
+    if (allocated(dke_p)) deallocate(dke_p)
+    allocate(dke_p(n_particles))
+    dke_p = 1.0_dp
     if (allocated(rst_tq)) deallocate(rst_tq, rst_t, rst_t0)
     allocate(rst_tq(n_particles), rst_t(n_particles), rst_t0(n_particles))
     rst_tq = 0.0_dp
@@ -494,8 +525,8 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     use tetra_grid_settings_mod, only: grid_kind
     use gorilla_applets_types_mod, only: start
     use profile_data_mod, only: eval_profiles, profile_values_t, &
-        eval_s_and_ds_dpsi_from_psi_pol
-    use constants, only: ev2erg, clight
+        eval_s_and_ds_dpsi_from_psi_pol, eval_species_density
+    use constants, only: ev2erg, clight, echarge
 
     integer,  intent(in)  :: ind_tetr, species
     real(dp), intent(in)  :: x(3), vpar, perpinv, psi0, s_mesh
@@ -523,6 +554,13 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     pt%mu = -mass * perpinv
     K = mass * (0.5_dp * vpar**2 - perpinv * pt%bmod)
 
+    if (ntv_3d_background) then
+        pt%dw_fax = 0.0_dp
+        call ntv_dke_point(x, vpar, K, species, pt, tetra_physics(ind_tetr)%gB(ip), &
+            tetra_physics(ind_tetr)%gAphi(1), tetra_physics(ind_tetr)%gPhi(1))
+        return
+    end if
+
     ! f0 on the canonical label of the unperturbed field (as ln_f0_and_H):
     ! psi* = psi0 + (c m/e) vpar h_phi, H0 = K + e Phi0(s0).
     psi_star = psi0 + start%cm_over_e(species) * vpar * pt%h_phi
@@ -533,8 +571,8 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     h0 = K + charge * pv0%Phi0
     T_eV = species_temperature_eV(pvs%Te, pvs%Ti, charge)
     dT_ds = species_temperature_eV(pvs%dTe_ds, pvs%dTi_ds, charge)
-    dens = pvs%n_e
-    ddens = pvs%dn_ds * dsdpsi
+    call eval_species_density(pt%s_star, mass, charge/echarge, pvs, dens, ddens)
+    ddens = ddens * dsdpsi
     temp = T_eV * ev2erg
     dtemp = dT_ds * ev2erg * dsdpsi
     phi0 = pvs%Phi0
@@ -595,6 +633,90 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     end if
 end subroutine ntv_eval_point
 
+!> Thin-orbit control-variate DKE in local (s,theta,E,lambda) coordinates.
+!> g=f_AX/f_M is the TOTAL native AX correction (G+h); do not subtract G.
+!> Keep radial gradients of f_M and angular/pitch derivatives of g. Radial
+!> and energy derivatives multiplied by g are higher order in rho* and omitted.
+subroutine ntv_dke_point(x, vpar, energy, species, pt, mesh_dbphi, mesh_daps, mesh_dphi)
+    use chartmap_ntv_mod, only: chartmap_dke_point
+    use profile_data_mod, only: eval_profiles, profile_values_t, &
+        eval_s_and_ds_dpsi_from_psi_pol
+    use gorilla_applets_types_mod, only: start
+    use constants, only: ev2erg, clight
+    real(dp), intent(in) :: x(3), vpar, energy, mesh_dbphi, mesh_daps, mesh_dphi
+    integer, intent(in) :: species
+    type(ntv_point_t), intent(inout) :: pt
+    type(profile_values_t) :: pv
+    real(dp) :: b, b0, db(3), db0(3), bi, bg, tf, ap, speed, lam, temp, dtemp
+    real(dp) :: a_s, u(3), u0(3), dg_l, dg_t, xp(3), xm(3), step, mass, charge, unused
+    real(dp) :: s_profile, ds_dpsi, phi_s
+    real(dp) :: gplus, gminus
+    integer :: fs
+
+    mass = start%particle_mass(species)
+    charge = start%particle_charge(species)
+    call eval_s_and_ds_dpsi_from_psi_pol(pt%psi0, s_profile, ds_dpsi)
+    call eval_profiles(s_profile, pv)
+    phi_s = mesh_dphi
+    temp = species_temperature_eV(pv%Te, pv%Ti, charge)*ev2erg
+    dtemp = species_temperature_eV(pv%dTe_ds, pv%dTi_ds, charge)*ev2erg
+    call chartmap_dke_point(x, b, b0, db, db0, bi, bg, tf, ap)
+    if (energy <= 0.0_dp) error stop '3D NTV: nonpositive marker energy'
+    call evaluate_dke_local(energy, mass, pv%n_e, pv%dn_ds, temp, dtemp, &
+        charge, phi_s, vpar, pt%bmod, mesh_dbphi, pt%mu, ds_dpsi, mesh_daps, &
+        pt%lnfm, a_s, speed, lam, pt%dh1_dphi)
+    lam = max(-1.0_dp, min(1.0_dp, lam))
+    call evaluate_dke_characteristics(mass, charge, clight, speed, lam, b, &
+        db(1), db(2), db(3), bi, bg, tf, ap, phi_s, u(1), u(2), u(3))
+    call evaluate_dke_characteristics(mass, charge, clight, speed, lam, b0, &
+        db0(1), db0(2), db0(3), bi, bg, tf, ap, phi_s, u0(1), u0(2), u0(3))
+    call evaluate_dke_reference(mass, charge, clight, a_s, ap, speed, bg, b0, db0(2), &
+        lam, dg_l, dg_t)
+    if (fax_on) then
+        fs = fax_species_index(mass, charge)
+        dg_l = dke_fax_at(x, lam, energy, fs, .true.)
+        ! Differentiate the native, bilinearly interpolated AX value at fixed
+        ! local pitch/energy. Periodic differences include the chart's branch.
+        step = 1.0e-5_dp
+        xp = x
+        xm = x
+        xp(2) = xp(2) + step
+        xm(2) = xm(2) - step
+        gplus = dke_fax_at(xp, lam, energy, fs, .false.)
+        gminus = dke_fax_at(xm, lam, energy, fs, .false.)
+        call evaluate_deltaf_lerp(gminus, gplus, 0.5_dp, 2.0_dp*step, unused, dg_t)
+    end if
+    call evaluate_dke_source(a_s, u(1) - u0(1), u(2) - u0(2), u(3) - u0(3), &
+        dg_t, dg_l, pt%dke_source)
+    ! Torque of ALL mesh harmonics, using the orbit cell derivative.
+    pt%dh_mesh_dphi = pt%dh1_dphi
+    pt%s_star = x(1)
+    pt%dlnf0_dpphi = 0.0_dp
+end subroutine ntv_dke_point
+
+function dke_fax_at(x, lam, energy, species, derivative) result(g)
+    use chartmap_ntv_mod, only: chartmap_dke_point
+    real(dp), intent(in) :: x(3), lam, energy
+    integer, intent(in) :: species
+    logical, intent(in) :: derivative
+    real(dp) :: g, b, b0, db(3), db0(3), bi, bg, tf, ap, bmin, bmax, vt, branch
+    real(dp) :: dummy(3)
+
+    call chartmap_dke_point(x, b, b0, db, db0, bi, bg, tf, ap)
+    call fax_surface_b(x, bmin, bmax)
+    if (bmax <= bmin) then
+        g = 0.0_dp
+        return
+    end if
+    call evaluate_dke_characteristics(1.0_dp, 1.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, &
+        b0, db0(1), db0(2), db0(3), bi, bg, tf, ap, 0.0_dp, &
+        dummy(1), dummy(2), dummy(3))
+    branch = sign(1.0_dp, -dummy(3))
+    call evaluate_deltaf_fax_coordinates(1.0_dp, 0.0_dp, 1.0_dp, &
+        min(max(b0, bmin), bmax), bmin, bmax, branch, dummy(1), vt)
+    g = ntv_fax_response(vt, lam, energy, species, derivative)
+end function dke_fax_at
+
 !> Records the birth state of marker n (P: birth factor f0/g0).
 subroutine canonical_ntv_birth(n, P, pt, s0)
     integer,  intent(in) :: n
@@ -620,7 +742,7 @@ subroutine canonical_ntv_push(n, pa, pm, pb, s_end, dt, w)
     type(ntv_point_t), intent(in) :: pa, pm, pb
     real(dp), intent(in) :: s_end, dt
     real(dp), intent(inout) :: w
-    real(dp) :: w_old, dtq, t0, t1, frac, tk, t_on, dh_old, tq_old
+    real(dp) :: w_old, dtq, t0, t1, frac, tk, t_on, dh_old, tq_old, p_mid, p_new, w_new
 
     t0 = tphys(n)
     t1 = t0 + dt
@@ -635,8 +757,15 @@ subroutine canonical_ntv_push(n, pa, pm, pb, s_end, dt, w)
     w_old = w
     dh_old = rec(c_dh, n)
     tq_old = rec(c_tq, n)
-    w = w + pm%dlnf0_dpphi * pm%dh1_dphi * dt
-    if (fax_on) w = w + pm%dw_fax * dt
+    if (ntv_3d_background) then
+        call evaluate_dke_step(pa%lnfm, pb%lnfm, dke_p(n), w, pm%dke_source, &
+            dt, p_mid, p_new, w_new)
+        dke_p(n) = p_new
+        w = w_new
+    else
+        w = w + pm%dlnf0_dpphi * pm%dh1_dphi * dt
+        if (fax_on) w = w + pm%dw_fax * dt
+    end if
     dtq = -0.5_dp * (w_old + w) * pm%dh1_dphi * dt
     rec(c_tq, n) = rec(c_tq, n) + dtq
     rec(c_dh, n) = rec(c_dh, n) - pm%dh1_dphi * dt
@@ -745,6 +874,8 @@ subroutine canonical_ntv_write(volume, trace_time)
         ' trace_time_s ', trace_time
     write(u, '(a)') '# torque density estimate = volume/N sum P tq_deltaf / ' // &
         'trace_time (dyn cm / cm^3 per marker population)'
+    if (ntv_3d_background) write(u,'(a)') &
+        '# 3D DKE: AX = toroidal mean; w = delta_f/advected_birth_f_M; P = f_M/g_birth'
     write(u, '(2a)') '# ', ntv_col_names
     do n = 1, np
         write(u, '(i10, 1x, i2, 18(1x, es24.16), 1x, i2)') nint(rec(c_n, n)), &
@@ -1008,10 +1139,11 @@ subroutine fax_surface_field()
     use tetra_grid_settings_mod, only: grid_kind, netcdf_filename, &
         R0_analytic_circ, a_analytic_circ
     use boozer_chartmap_mod, only: evaluate_boozer_chartmap
+    use chartmap_ntv_mod, only: chartmap_dke_point
     type(chartmap_raw_t) :: cm
     integer :: k, it, iz
     real(dp) :: s, b, dummy(7)
-    real(dp) :: rho, bz_out
+    real(dp) :: rho, bz_out, b0, db(3), db0(3), bi, bg, tf, ap
 
     if (grid_kind == 6) then
         call read_chartmap_raw(trim(netcdf_filename), cm, with_geometry=.false.)
@@ -1019,16 +1151,22 @@ subroutine fax_surface_field()
         fax_drho = (cm%rho(cm%nrho) - fax_rho_min) / real(n_fax_rho - 1, dp)
         ! Angular interpolation is multilinear: extrema occur on angle nodes.
         ! Tabulate in s = rho^2; retain the core's linear-rho interpolation.
-        !$omp parallel do private(s, b, dummy, it, iz) schedule(static)
+        !$omp parallel do private(s, b, dummy, it, iz, b0, db, db0, bi, bg, tf, ap) schedule(static)
         do k = 1, n_fax_rho
             s = (fax_rho_min + real(k - 1, dp) * fax_drho)**2
             fax_bmin(k) = huge(1.0_dp)
             fax_bmax(k) = -huge(1.0_dp)
-            do iz = 1, cm%nze
+            do iz = 1, merge(1,cm%nze,ntv_3d_background)
                 do it = 1, cm%nth
+                    if (ntv_3d_background) then
+                        call chartmap_dke_point([s,cm%theta(it),0.0_dp], b, b0, &
+                            db, db0, bi, bg, tf, ap)
+                        b = b0
+                    else
                     call evaluate_boozer_chartmap(s, cm%theta(it), cm%zeta(iz), &
                         dummy(1), dummy(2), dummy(3), dummy(4), dummy(5), &
                         dummy(6), b, dummy(7))
+                    end if
                     fax_bmin(k) = min(fax_bmin(k), b)
                     fax_bmax(k) = max(fax_bmax(k), b)
                 end do

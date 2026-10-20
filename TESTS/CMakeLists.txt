@@ -142,3 +142,37 @@ add_test(NAME local_collision_background
 set_tests_properties(local_collision_background PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1"
     PROCESSORS 2 TIMEOUT 120)
+
+add_test(NAME deltaf_3d_orbits
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_deltaf_3d.py)
+set_tests_properties(deltaf_3d_orbits PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;CHARTMAP_WRITER_BIN=$<TARGET_FILE:write_circular_boozer_chartmap.x>;WORK_DIR=${CMAKE_BINARY_DIR}/deltaf_3d_work;OMP_NUM_THREADS=1"
+    PROCESSORS 4 TIMEOUT 600)
+
+add_executable(deltaf_3d_orbit_probe.x deltaf_3d_orbit_probe.f90)
+target_link_libraries(deltaf_3d_orbit_probe.x GORILLA_APPLETS)
+
+add_test(NAME deltaf_3d_ripple_wells
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_deltaf_3d_wells.py)
+set_tests_properties(deltaf_3d_ripple_wells PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;CHARTMAP_WRITER_BIN=$<TARGET_FILE:write_circular_boozer_chartmap.x>;ORBIT_PROBE_BIN=$<TARGET_FILE:deltaf_3d_orbit_probe.x>;WORK_DIR=${CMAKE_BINARY_DIR}/deltaf_3d_wells;OMP_NUM_THREADS=1"
+    TIMEOUT 300)
+
+add_test(NAME deltaf_3d_linear_limit
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_deltaf_3d_linear.py)
+set_tests_properties(deltaf_3d_linear_limit PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;CHARTMAP_WRITER_BIN=$<TARGET_FILE:write_circular_boozer_chartmap.x>;WORK_DIR=${CMAKE_BINARY_DIR}/deltaf_3d_linear;OMP_NUM_THREADS=1"
+    TIMEOUT 300)
+add_test(NAME canonical_species_density
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_canonical_species_density.py)
+set_tests_properties(canonical_species_density PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/canonical_species_density_work;\
+OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
+    TIMEOUT 120)

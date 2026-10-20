@@ -18,6 +18,7 @@
 module chartmap_ntv_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
+    use deltaf_lerp_kernel, only: evaluate_deltaf_lerp
     use netcdf
 
     implicit none
@@ -26,7 +27,7 @@ module chartmap_ntv_mod
     public :: chartmap_raw_t, read_chartmap_raw, chartmap_harmonic, &
         write_chartmap_flux_functions, chartmap_q_on_s_nodes, chartmap_r_eff, &
         chartmap_mesh_setup, chartmap_point, chartmap_window_volume, &
-        chartmap_mesh_loaded
+        chartmap_mesh_loaded, chartmap_dke_point
 
     real(dp), parameter :: twopi = 8.0_dp*atan(1.0_dp)
 
@@ -41,6 +42,7 @@ module chartmap_ntv_mod
 
     !> Raw data of the mesh chartmap (zeta nodes for B0, geometry for r_eff).
     type(chartmap_raw_t), save :: mesh_cm
+    real(dp), allocatable :: mesh_b0(:,:)
     logical, save :: mesh_loaded = .false.
 
 contains
@@ -51,6 +53,17 @@ subroutine chartmap_mesh_setup(mesh_file, flux_file)
     character(len=*), intent(in) :: mesh_file, flux_file
 
     call read_chartmap_raw(mesh_file, mesh_cm, with_geometry=.true.)
+    if (allocated(mesh_b0)) deallocate(mesh_b0)
+    allocate(mesh_b0(mesh_cm%nrho, mesh_cm%nth))
+    ! Difference averaging preserves an exactly axisymmetric input bitwise.
+    mesh_b0 = mesh_cm%bmod(:,:,1)
+    block
+        integer :: k
+        do k = 2, mesh_cm%nze
+            mesh_b0 = mesh_b0 + (mesh_cm%bmod(:,:,k)-mesh_cm%bmod(:,:,1)) &
+                /real(mesh_cm%nze, dp)
+        end do
+    end block
     mesh_loaded = .true.
     call write_chartmap_flux_functions(mesh_cm, flux_file)
     print *, 'Chartmap flux table written to ', trim(flux_file)
@@ -82,6 +95,85 @@ subroutine chartmap_point(s, theta, zeta, b, b0, j0, bphi_cov, aphi)
     bphi_cov = h_p*b
     j0 = sqrtg*(b/b0)**2
 end subroutine chartmap_point
+
+!> Total and toroidally averaged AX field with derivatives on the SAME raw
+!> chart. No f_AX position, extremum or branch is inferred from ripple wells.
+!> The core constructs the orbit mesh from this input; this evaluator retains
+!> its multilinear interpolation for the thin-orbit drift-kinetic source.
+subroutine chartmap_dke_point(x, b, b0, db, db0, bi, bg, torflux, daps)
+    real(dp), intent(in) :: x(3)
+    real(dp), intent(out) :: b, b0, db(3), db0(3), bi, bg, torflux, daps
+    integer :: ir, it, iz, jt, jz, k, j, n
+    real(dp) :: fr, ft, fz, dr, dt, dz, rho, unused, ax(2), dax(2)
+    real(dp) :: v(2, 2), vr(2, 2), t(2), tr(2), tt(2)
+
+    if (.not. mesh_loaded) error stop 'chartmap_dke_point: missing mesh'
+    rho = sqrt(max(x(1), tiny(1.0_dp)))
+    call linear_interval(mesh_cm%rho, rho, ir, fr, dr)
+    dt = twopi/real(mesh_cm%nth, dp)
+    dz = twopi/real(mesh_cm%nfp*mesh_cm%nze, dp)
+    ft = modulo(x(2), twopi)/dt
+    it = min(int(ft) + 1, mesh_cm%nth)
+    ft = ft - real(it - 1, dp)
+    jt = modulo(it, mesh_cm%nth) + 1
+    fz = modulo(x(3), twopi/real(mesh_cm%nfp, dp))/dz
+    iz = min(int(fz) + 1, mesh_cm%nze)
+    fz = fz - real(iz - 1, dp)
+    jz = modulo(iz, mesh_cm%nze) + 1
+    do k = 1, 2
+        j = merge(it, jt, k == 1)
+        call evaluate_deltaf_lerp(mesh_b0(ir, j), mesh_b0(ir + 1, j), &
+            fr, dr, ax(k), dax(k))
+        do n = 1, 2
+            block
+                integer :: z
+                z = merge(iz, jz, n == 1)
+                call evaluate_deltaf_lerp(mesh_cm%bmod(ir, j, z), &
+                    mesh_cm%bmod(ir + 1, j, z), fr, dr, v(k, n), vr(k, n))
+            end block
+        end do
+    end do
+    do n = 1, 2
+        call evaluate_deltaf_lerp(v(1, n), v(2, n), ft, dt, t(n), tt(n))
+        call evaluate_deltaf_lerp(vr(1, n), vr(2, n), ft, dt, tr(n), unused)
+    end do
+    call evaluate_deltaf_lerp(t(1), t(2), fz, dz, b, db(3))
+    call evaluate_deltaf_lerp(tr(1), tr(2), fz, dz, db(1), unused)
+    call evaluate_deltaf_lerp(tt(1), tt(2), fz, dz, db(2), unused)
+    call evaluate_deltaf_lerp(ax(1), ax(2), ft, dt, b0, db0(2))
+    call evaluate_deltaf_lerp(dax(1), dax(2), ft, dt, db0(1), unused)
+    db(1) = db(1)/(2.0_dp*rho)
+    db0(1) = db0(1)/(2.0_dp*rho)
+    db0(3) = 0.0_dp
+    call evaluate_deltaf_lerp(mesh_cm%btheta(ir), mesh_cm%btheta(ir+1), &
+        fr, dr, bi, unused)
+    call evaluate_deltaf_lerp(mesh_cm%bphi(ir), mesh_cm%bphi(ir+1), &
+        fr, dr, bg, unused)
+    call linear_interval(mesh_cm%s, x(1), ir, fr, dr)
+    call evaluate_deltaf_lerp(mesh_cm%aphi(ir), mesh_cm%aphi(ir+1), &
+        fr, dr, unused, daps)
+    torflux = mesh_cm%torflux
+end subroutine chartmap_dke_point
+
+subroutine linear_interval(axis, coordinate, i, fraction, spacing)
+    real(dp), intent(in) :: axis(:), coordinate
+    integer, intent(out) :: i
+    real(dp), intent(out) :: fraction, spacing
+    integer :: lo, hi, mid
+    lo = 1
+    hi = size(axis)
+    do while (hi - lo > 1)
+        mid = (hi + lo)/2
+        if (axis(mid) > coordinate) then
+            hi = mid
+        else
+            lo = mid
+        end if
+    end do
+    i = lo
+    spacing = axis(i + 1) - axis(i)
+    fraction = max(0.0_dp, min(1.0_dp, (coordinate - axis(i))/spacing))
+end subroutine linear_interval
 
 !> Physical volume of the window s1 <= s <= s2 over one of nper toroidal
 !> periods with the axisymmetric Jacobian |J0| (midpoint rule, ns_int x nth
