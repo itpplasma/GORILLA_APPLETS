@@ -63,7 +63,7 @@ program test_canonical_ntv_fax_energy
                 do m = 1, 2
                     do j = 1, 3
                         do i = 1, 3
-                            values(i,j,m,k,b,a) = a+2*b+3*k+4*m &
+                            values(i,j,m,k,b,a) = real(a+2*b+3*k+4*m,dp) &
                                 + vt(j)*lam(i)
                             derivatives(i,j,m,k,b,a) = vt(j)
                         end do
@@ -82,16 +82,16 @@ program test_canonical_ntv_fax_energy
     err = 0.0_dp
     do a = 1, 2
         do t = 0, 16
-            x = 0.3_dp*t
+            x = 0.3_dp*real(t,dp)
             energy = temperature(a)*x*x
-            theta = 0.1_dp*t
-            pitch = -0.8_dp+0.1_dp*t
+            theta = 0.1_dp*real(t,dp)
+            pitch = -0.8_dp+0.1_dp*real(t,dp)
             expected = 0.0_dp
             do b = 1, 2
                 do k = 1, 3
                     expected = expected+amplitude(k,b) * &
-                        ((a+2*b+3*k+4+theta*pitch) &
-                        +(2.5_dp-x*x)*(a+2*b+3*k+8+theta*pitch))
+                        ((real(a+2*b+3*k+4,dp)+theta*pitch) &
+                        +(2.5_dp-x*x)*(real(a+2*b+3*k+8,dp)+theta*pitch))
                 end do
             end do
             got = ntv_fax_response(theta,pitch,energy,a,.false.)
