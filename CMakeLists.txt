@@ -251,3 +251,57 @@ OMP_NUM_THREADS=4"
         PROCESSORS 4
         TIMEOUT 900)
 endif()
+
+if(BUILD_TESTING)
+    add_executable(test_canonical_ntv_fax_energy.x
+        TESTS/test_canonical_ntv_fax_energy.f90)
+    target_link_libraries(test_canonical_ntv_fax_energy.x GORILLA_APPLETS)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fax_energy_unit)
+    add_test(NAME canonical_ntv_fax_energy
+        COMMAND test_canonical_ntv_fax_energy.x
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fax_energy_unit)
+endif()
+
+set(FAX_NEO2_READER "" CACHE FILEPATH "NEO-2 fax.py for native cross-code oracle")
+set(FAX_NEO2_EXPORTS "" CACHE STRING "Native NEO-2 f_AX export files")
+if(BUILD_TESTING AND FAX_NEO2_READER AND FAX_NEO2_EXPORTS)
+    add_test(NAME canonical_ntv_fax_native_distribution
+        COMMAND ${Python3_EXECUTABLE} ${FAX_NEO2_READER} ${FAX_NEO2_EXPORTS}
+            --table ${CMAKE_CURRENT_BINARY_DIR}/fax_native_table.dat
+            --out ${CMAKE_CURRENT_BINARY_DIR}/fax_native_oracle.json
+            --er-cgs 0 --consumer $<TARGET_FILE:test_canonical_ntv_fax_energy.x>)
+    set_tests_properties(canonical_ntv_fax_native_distribution PROPERTIES TIMEOUT 300)
+endif()
+
+set(FAX_BLOCK0_REFERENCE "" CACHE PATH "Frozen #80 canonical_ntv_fax_work directory")
+if(BUILD_TESTING AND FAX_BLOCK0_REFERENCE)
+    add_test(NAME canonical_ntv_fax_block0_compatibility
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/TESTS/test_canonical_ntv_fax_block0.py
+            ${FAX_BLOCK0_REFERENCE} ${CMAKE_BINARY_DIR}/canonical_ntv_fax_work)
+    set_tests_properties(canonical_ntv_fax_block0_compatibility PROPERTIES
+        DEPENDS canonical_ntv_fax TIMEOUT 30)
+endif()
+
+if(BUILD_TESTING AND FAX_NEO2_READER AND FAX_NEO2_EXPORTS)
+    add_test(NAME canonical_ntv_fax_energy_markers
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/TESTS/test_canonical_ntv_fax_energy_markers.py
+            ${CMAKE_BINARY_DIR}/fax_native_table.dat)
+    set_tests_properties(canonical_ntv_fax_energy_markers PROPERTIES
+        DEPENDS canonical_ntv_fax_native_distribution TIMEOUT 120
+        ENVIRONMENT
+            "APPLETS_ROOT=${CMAKE_SOURCE_DIR};GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;WORK_DIR=${CMAKE_BINARY_DIR}/fax_energy_markers;OMP_NUM_THREADS=1")
+endif()
+
+set(FAX_NATIVE_TABLE "" CACHE FILEPATH "Existing physical f_AX table for native admission")
+set(FAX_NATIVE_TABLE_EXPORTS "" CACHE STRING "Raw native exports underlying FAX_NATIVE_TABLE")
+if(BUILD_TESTING AND FAX_NEO2_READER AND FAX_NATIVE_TABLE AND FAX_NATIVE_TABLE_EXPORTS)
+    add_test(NAME canonical_ntv_fax_existing_native_table
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/TESTS/test_canonical_ntv_fax_native_table.py
+            ${FAX_NEO2_READER} ${FAX_NATIVE_TABLE}
+            $<TARGET_FILE:test_canonical_ntv_fax_energy.x>
+            ${CMAKE_BINARY_DIR}/fax_existing_native_table.json ${FAX_NATIVE_TABLE_EXPORTS})
+    set_tests_properties(canonical_ntv_fax_existing_native_table PROPERTIES TIMEOUT 300)
+endif()
