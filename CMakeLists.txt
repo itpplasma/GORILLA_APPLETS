@@ -90,6 +90,7 @@ add_executable(gorilla_orbit_ion_response.x
     SRC/rmp_response_currents/cylindrical_electron_response_mod.f90
     SRC/rmp_response_currents/cylindrical_ion_response_mod.f90
     SRC/rmp_response_currents/cylindrical_ion_mu_response_mod.f90
+    SRC/rmp_response_currents/ion_reentry_rules_mod.f90
     SRC/rmp_response_currents/orbit_ion_response_main.f90)
 set_target_properties(gorilla_orbit_ion_response.x PROPERTIES
     Fortran_MODULE_DIRECTORY "${CMAKE_BINARY_DIR}/ion_orbit_modules")

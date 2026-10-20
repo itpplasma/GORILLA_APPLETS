@@ -15,6 +15,8 @@ module orbit_ion_response_driver_mod
     use tetra_grid_settings_mod, only: load_tetra_grid_inp,R0_analytic_circ,n_field_periods_manual,grid_kind, &
         a_analytic_circ,sfc_s_min,sfc_s_max,n3
     use tetra_physics_mod, only: tetra_physics,particle_mass,particle_charge
+    use tetra_grid_mod, only: tetra_grid
+    use ion_reentry_rules_mod, only: reentry_exit_accepted
     use supporting_functions_mod, only: bmod_func,energy_tot_func
     use field_analytic_circ_mod, only: psi_pol_analytic_circ
     use collis_ions, only: exact_ou_velocity,getran
@@ -640,13 +642,13 @@ contains
         subroutine advance(step)
             real(dp),intent(in) :: step
             real(dp) :: saved_x(3),saved_vpar,saved_vperp,remaining
-            integer :: saved_cell,saved_face,failure_unit
+            integer :: saved_cell,saved_face,failure_unit,last_cell
             if(cylinder_only) return
             saved_x=x;saved_vpar=vpar;saved_vperp=vperp;saved_cell=cell;saved_face=face
             if(debugging) call debug_state('step_in',t,x,vpar,cell,face)
-            call orbit_timestep_gorilla(x,vpar,vperp,step,initialized,cell,face,remaining)
+            call orbit_timestep_gorilla(x,vpar,vperp,step,initialized,cell,face,remaining,last_cell)
             if(debugging) call debug_state('step_out',t,x,vpar,cell,face)
-            if(radial_reentry) call continue_after_reentry(remaining)
+            if(radial_reentry) call continue_after_reentry(remaining,step,last_cell)
             if(cell==-1) then
                 open(newunit=failure_unit,file='ion_orbit_failure.dat',status='new')
                 write(failure_unit,'(a)') 'GK_ION_ORBIT_FAILURE_V1'
@@ -664,15 +666,17 @@ contains
             ! Unwrapped radial excursion; the offset is zero without re-entry.
             max_excursion=max(max_excursion,abs(rnow+reentry_offset-r0))
         end subroutine
-        subroutine continue_after_reentry(remaining)
+        subroutine continue_after_reentry(remaining,step,last_cell)
             ! A loss through a radial boundary continues from the periodic image for the
             ! remaining step time; any other loss is left to the caller's abort.
             real(dp),intent(inout) :: remaining
-            real(dp) :: shift,rest
+            real(dp),intent(in) :: step
+            integer,intent(inout) :: last_cell
+            real(dp) :: shift,rest,current_step
             integer :: side,count
-            count=0
+            count=0;current_step=step
             do while(cell==-1)
-                side=radial_exit_side(x)
+                side=radial_exit_side(x,last_cell,remaining,current_step)
                 if(side==0) return
                 count=count+1
                 if(count>16) error stop 'ion re-entry repeated more than 16 times within one step'
@@ -680,8 +684,8 @@ contains
                 reentry_offset=reentry_offset-shift;wrapped=.true.;wraps=wraps+1
                 if(debugging) call debug_state('reentry',t,x,vpar,cell,face)
                 if(remaining==0) return
-                rest=remaining;remaining=0
-                call orbit_timestep_gorilla(x,vpar,vperp,rest,initialized,cell,face,remaining)
+                rest=remaining;remaining=0;current_step=rest
+                call orbit_timestep_gorilla(x,vpar,vperp,rest,initialized,cell,face,remaining,last_cell)
             end do
         end subroutine
         subroutine sources()
@@ -907,16 +911,34 @@ contains
         flush(debug_unit)
     end subroutine
 
-    integer function radial_exit_side(x) result(side)
-        ! 1/2 if x lies on the inner/outer radial boundary: between its vertex circle and the
-        ! polygon chord (1e-8 cm, the injection convergence bound), else 0.
-        real(dp),intent(in) :: x(3)
-        real(dp) :: g
-        g=sqrt((x(1)-R0_analytic_circ)**2+x(3)**2);side=0
-        do side=1,2
-            if(g>=reentry_vertex(side)*cos(pi/n3)-1e-8_dp.and.g<=reentry_vertex(side)+1e-8_dp) return
+    integer function radial_exit_side(x,last_cell,remaining,step) result(side)
+        ! 1/2 for a real exit through the inner/outer radial boundary, else 0. The exit point
+        ! must lie on a neighbourless face of the last pushed cell within that face's roundoff
+        ! bound (same construction as the pusher's face_distance_roundoff, with x1 standing in
+        ! for the start position), and the remaining time must not reverse or exceed the step.
+        ! Internal pusher aborts (troubleshooting, no root, stagnant or time-reversal guards)
+        ! fail this test and fall through to the caller's abort with the saved state.
+        real(dp),intent(in) :: x(3),remaining,step
+        integer,intent(in) :: last_cell
+        real(dp) :: g,distance,bound,d,b,z(3)
+        integer :: f
+        side=0;distance=0;bound=-1
+        if(last_cell<1) return
+        z=x-tetra_physics(last_cell)%x1
+        do f=1,4
+            if(tetra_grid(last_cell)%neighbour_tetr(f)/=-1) cycle
+            d=sum(tetra_physics(last_cell)%anorm(:,f)*z)
+            if(f==1) d=d+tetra_physics(last_cell)%dist_ref
+            b=sum(abs(tetra_physics(last_cell)%anorm(:,f))*(2*abs(tetra_physics(last_cell)%x1)+abs(z)))
+            if(f==1) b=b+abs(tetra_physics(last_cell)%dist_ref)
+            b=8*epsilon(1.0_dp)*(b+abs(tetra_physics(last_cell)%dist_ref_vec(f)))
+            if(bound<0.or.abs(d)<abs(distance)) then
+                distance=d;bound=b
+            end if
         end do
-        side=0
+        if(.not.reentry_exit_accepted(distance,bound,remaining,step)) return
+        g=sqrt((x(1)-R0_analytic_circ)**2+x(3)**2)
+        side=merge(1,2,g<(reentry_vertex(1)+reentry_vertex(2))/2)
     end function
     subroutine periodic_reentry(x,vpar,vperp,mu,initialized,cell,face,side,shift)
         ! KIM's window repeats with period L, as do the exported source coefficients
