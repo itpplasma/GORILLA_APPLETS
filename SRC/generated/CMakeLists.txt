@@ -5,6 +5,7 @@ add_library(GORILLA_APPLETS_DELTAF_KERNELS STATIC
   deltaf_circular_chart_kernel.f90
   deltaf_weight_kernel.f90
   deltaf_fax_coordinates_kernel.f90
+  deltaf_fax_chartmap_kernel.f90
   deltaf_fax_weight_kernel.f90
   )
 set_target_properties(GORILLA_APPLETS_DELTAF_KERNELS PROPERTIES
