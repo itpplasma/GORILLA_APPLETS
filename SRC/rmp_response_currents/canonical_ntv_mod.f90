@@ -40,6 +40,9 @@ module canonical_ntv_mod
     use deltaf_fax_coordinates_kernel, only: evaluate_deltaf_fax_coordinates
     use deltaf_fax_weight_kernel, only: evaluate_deltaf_fax_weight
     use deltaf_fax_chartmap_kernel, only: evaluate_deltaf_fax_chartmap
+    use deltaf_fax_horner_kernel, only: evaluate_fax_horner
+    use deltaf_fax_energy_kernel, only: evaluate_fax_energy
+    use deltaf_fax_speed_kernel, only: evaluate_fax_speed
 
     implicit none
 
@@ -56,7 +59,7 @@ module canonical_ntv_mod
         ntv_theta_of_x, ntv_phi_index, ntv_h_phi, species_temperature_eV, &
         ntv_point_t, ntv_eval_point, canonical_ntv_mark_loss, loss_grid_exit, &
         loss_wall, loss_outer_cut, ntv_lorentz_proposal, ntv_fax_load_table, &
-        ntv_fax_dchi_dlambda, fax_surface_field, fax_surface_b
+        ntv_fax_dchi_dlambda, ntv_fax_dg_dlambda, ntv_fax_response, fax_surface_field, fax_surface_b
     public :: n_ntv_cols, ntv_col_names
 
     logical  :: boole_canonical_ntv = .false.
@@ -166,6 +169,13 @@ module canonical_ntv_mod
     !> (lambda, vartheta), and Bmin, Bmax indexed by radius (grid 5) or s (grid 6).
     logical :: fax_on = .false.
     real(dp), allocatable :: fax_vt(:), fax_lam(:), fax_tab(:,:)
+    ! v2 axes: lambda, vartheta, basis, drive, driving species, field species.
+    real(dp), allocatable :: fax_g(:, :, :, :, :, :), fax_basis(:, :, :)
+    real(dp), allocatable :: fax_value(:, :, :, :, :, :)
+    real(dp), allocatable :: fax_edges(:), fax_centers(:), fax_amplitude(:, :)
+    real(dp), allocatable :: fax_mass(:), fax_charge(:), fax_temperature(:)
+    integer :: fax_nb = 0, fax_ns = 0
+    logical :: fax_extend = .false.
     integer, parameter :: n_fax_rho = 2001
     real(dp) :: fax_drho = 0.0_dp, fax_spol = 1.0_dp, fax_rho_min = 0.0_dp
     real(dp) :: fax_bmin(n_fax_rho), fax_bmax(n_fax_rho)
@@ -498,6 +508,8 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     type(profile_values_t) :: pv0, pvs
     real(dp) :: bmin, bmax, branch, lam, vtheta, bclamp
     real(dp) :: db1_dtheta, relative_db1, h_theta, gradpar, unused
+    real(dp) :: fax_kappa, fax_dchi, dg, speed, energy_x
+    integer :: fax_species
 
     mass = start%particle_mass(species)
     charge = start%particle_charge(species)
@@ -558,18 +570,28 @@ subroutine ntv_eval_point(ind_tetr, x, vpar, perpinv, species, psi0, s_mesh, pt)
     bclamp = min(max(pt%bmod, bmin), bmax)
     call evaluate_deltaf_fax_coordinates(mass, pt%mu, vpar, bclamp, bmin, bmax, &
         branch, lam, vtheta)
+    if (fax_nb > 0) then
+        if (K <= 0.0_dp) return
+        fax_species = fax_species_index(mass, charge)
+        dg = ntv_fax_dg_dlambda(vtheta, lam, K, fax_species)
+        call evaluate_fax_speed(K, mass, fax_temperature(fax_species), speed, energy_x)
+        call evaluate_fax_energy(dg, mass, speed, pt%h_phi, pt%dlnf0_dpphi, fax_kappa)
+        fax_dchi = 1.0_dp
+    else
+        fax_kappa = pt%dlnf0_dpphi
+        fax_dchi = ntv_fax_dchi_dlambda(vtheta, lam)
+    end if
     if (grid_kind == 6) then
         call ntv_harmonic_dphi(s_mesh, x(2), x(3), db1_dphi, dphi1_dphi, &
             pt%bmod, db1_dtheta, relative_db1)
         call evaluate_deltaf_fax_chartmap(pt%mu, h_theta, pt%h_phi, &
             tetra_physics(ind_tetr)%curlA(2), tetra_physics(ind_tetr)%curlA(3), &
             tetra_physics(ind_tetr)%gB(2), tetra_physics(ind_tetr)%gB(3), &
-            pt%dlnf0_dpphi, db1_dtheta, db1_dphi, &
-            ntv_fax_dchi_dlambda(vtheta, lam), pt%bmod, relative_db1, &
+            fax_kappa, db1_dtheta, db1_dphi, fax_dchi, pt%bmod, relative_db1, &
             pt%dw_fax, gradpar)
     else
-        call evaluate_deltaf_fax_weight(pt%mu, pt%h_phi, x(1), pt%dlnf0_dpphi, &
-            db1_dphi, ntv_fax_dchi_dlambda(vtheta, lam), pt%dw_fax)
+        call evaluate_deltaf_fax_weight(pt%mu, pt%h_phi, x(1), fax_kappa, &
+            db1_dphi, fax_dchi, pt%dw_fax)
     end if
 end subroutine ntv_eval_point
 
@@ -791,16 +813,24 @@ end subroutine write_reset
 subroutine ntv_fax_load_table(fname)
     character(len=*), intent(in) :: fname
     integer :: u, ios, nt, nl
-    character(len=1) :: c
+    character(len=32) :: c
 
     open(newunit=u, file=fname, status='old', action='read', iostat=ios)
     if (ios /= 0) error stop 'canonical NTV: cannot open ntv_fax_file'
     do
         read(u, '(a)', iostat=ios) c
         if (ios /= 0) error stop 'canonical NTV: ntv_fax_file has no data'
-        if (c /= '#') exit
+        if (c(1:1) /= '#') exit
     end do
     backspace(u)
+    if (trim(c) == 'FAX_ENERGY_V1') then
+        call fax_load_energy(u)
+        close(u)
+        return
+    end if
+    fax_nb = 0
+    if (allocated(fax_g)) deallocate(fax_g, fax_value, fax_basis, fax_edges, fax_centers, &
+        fax_amplitude, fax_mass, fax_charge, fax_temperature)
     read(u, *, iostat=ios) nt, nl
     if (ios /= 0 .or. nt < 2 .or. nl < 2) error stop 'canonical NTV: bad ntv_fax_file size'
     if (allocated(fax_vt)) deallocate(fax_vt, fax_lam, fax_tab)
@@ -825,6 +855,130 @@ function ntv_fax_dchi_dlambda(vtheta, lam) result(d)
     d = (1.0_dp - ft) * ((1.0_dp - fl) * fax_tab(il, it) + fl * fax_tab(il + 1, it)) &
         + ft * ((1.0_dp - fl) * fax_tab(il, it + 1) + fl * fax_tab(il + 1, it + 1))
 end function ntv_fax_dchi_dlambda
+
+!> Versioned physical response table. The source amplitudes are beta_b A_k^b,
+!> and g is normalized to f_M of the FIELD species. Species order is explicit.
+subroutine fax_load_energy(u)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    integer, intent(in) :: u
+    integer :: nt, nl, degree, segments, ios
+    character(len=32) :: magic
+
+    read(u, *, iostat=ios) magic
+    if (ios /= 0) error stop 'canonical NTV: missing f_AX version'
+    read(u, *, iostat=ios) nt, nl, fax_nb, fax_ns, degree, segments, fax_extend
+    if (ios /= 0) error stop 'canonical NTV: invalid f_AX header'
+    if (nt < 2 .or. nl < 2 .or. fax_nb < 1 .or. fax_ns < 1 .or. &
+        degree < 0 .or. segments < 1) error stop 'canonical NTV: invalid f_AX size'
+    if (allocated(fax_vt)) deallocate(fax_vt, fax_lam, fax_tab)
+    if (allocated(fax_g)) deallocate(fax_g, fax_value, fax_basis, fax_edges, fax_centers, &
+        fax_amplitude, fax_mass, fax_charge, fax_temperature)
+    allocate(fax_vt(nt), fax_lam(nl), fax_tab(nl, nt))
+    allocate(fax_mass(fax_ns), fax_charge(fax_ns), fax_temperature(fax_ns))
+    allocate(fax_edges(segments+1), fax_centers(segments))
+    allocate(fax_basis(0:degree, fax_nb, segments), fax_amplitude(3, fax_ns))
+    allocate(fax_g(nl, nt, fax_nb, 3, fax_ns, fax_ns))
+    allocate(fax_value(nl, nt, fax_nb, 3, fax_ns, fax_ns))
+    read(u, *, iostat=ios) fax_mass, fax_charge, fax_temperature, &
+        fax_amplitude, fax_edges, fax_centers, fax_basis, fax_vt, fax_lam, fax_value, fax_g
+    if (ios /= 0) error stop 'canonical NTV: truncated f_AX energy table'
+    if (any(fax_vt(2:) <= fax_vt(:nt-1)) .or. &
+        any(fax_lam(2:) <= fax_lam(:nl-1)) .or. &
+        any(fax_edges(2:) <= fax_edges(:segments))) &
+        error stop 'canonical NTV: f_AX grids must increase'
+    if (abs(fax_vt(1)+acos(-1.0_dp)) > 1.0e-10_dp .or. &
+        abs(fax_vt(nt)-acos(-1.0_dp)) > 1.0e-10_dp .or. &
+        abs(fax_lam(1)+1.0_dp) > 1.0e-10_dp .or. &
+        abs(fax_lam(nl)-1.0_dp) > 1.0e-10_dp) &
+        error stop 'canonical NTV: f_AX grids must span the position/pitch chart'
+    if (any(fax_mass <= 0.0_dp) .or. any(fax_temperature <= 0.0_dp)) &
+        error stop 'canonical NTV: invalid f_AX normalization'
+    if (.not. all(ieee_is_finite(fax_vt)) .or. &
+        .not. all(ieee_is_finite(fax_lam)) .or. &
+        .not. all(ieee_is_finite(fax_edges)) .or. &
+        .not. all(ieee_is_finite(fax_centers)) .or. &
+        .not. all(ieee_is_finite(fax_mass)) .or. &
+        .not. all(ieee_is_finite(fax_charge)) .or. &
+        .not. all(ieee_is_finite(fax_temperature)) .or. &
+        .not. all(ieee_is_finite(fax_value)) .or. &
+        .not. all(ieee_is_finite(fax_g)) .or. &
+        .not. all(ieee_is_finite(fax_basis)) .or. &
+        .not. all(ieee_is_finite(fax_amplitude))) &
+        error stop 'canonical NTV: nonfinite f_AX data'
+    print '(a, 4i8)', ' Canonical NTV collisional background energy table: ', &
+        nt, nl, fax_nb, fax_ns
+end subroutine fax_load_energy
+
+function fax_species_index(mass, charge) result(species)
+    use constants, only: echarge
+    real(dp), intent(in) :: mass, charge
+    integer :: species, j
+
+    species = 0
+    do j = 1, fax_ns
+        if (abs(mass/fax_mass(j)-1.0_dp) < 1.0e-4_dp .and. &
+            abs(charge/echarge-fax_charge(j)) < 1.0e-4_dp) then
+            if (species /= 0) error stop 'canonical NTV: ambiguous f_AX species'
+            species = j
+        end if
+    end do
+    if (species == 0) error stop 'canonical NTV: marker species absent from f_AX'
+end function fax_species_index
+
+!> d(f_AX/f_M)/d lambda, at fixed energy and field position, summed over ALL
+!> driving species and sources. No division by the local profile gradient.
+function ntv_fax_dg_dlambda(vtheta, lam, energy, species) result(d)
+    real(dp), intent(in) :: vtheta, lam, energy
+    integer, intent(in) :: species
+    real(dp) :: d
+
+    d = ntv_fax_response(vtheta, lam, energy, species, .true.)
+end function ntv_fax_dg_dlambda
+
+!> f_AX/f_M (or its pitch derivative) at the marker energy and field species.
+function ntv_fax_response(vtheta, lam, energy, species, derivative) result(d)
+    real(dp), intent(in) :: vtheta, lam, energy
+    integer, intent(in) :: species
+    logical, intent(in) :: derivative
+    real(dp) :: corners(2,2)
+    real(dp) :: d, ft, fl, fx, x, speed, basis_value, next_value, value
+    integer :: it, il, seg, m, k, b, power
+
+    if (species < 1 .or. species > fax_ns .or. energy < 0.0_dp) &
+        error stop 'canonical NTV: invalid f_AX species/energy'
+    call evaluate_fax_speed(energy, fax_mass(species), fax_temperature(species), speed, x)
+    if (.not. fax_extend) then
+        if (x > fax_edges(size(fax_edges))) then
+            d = 0.0_dp
+            return
+        end if
+    end if
+    call bracket(fax_edges, x, seg, fx)
+    call bracket(fax_vt, vtheta, it, ft)
+    call bracket(fax_lam, lam, il, fl)
+    d = 0.0_dp
+    do m = 1, fax_nb
+        basis_value = fax_basis(ubound(fax_basis, 1), m, seg)
+        do power = ubound(fax_basis, 1)-1, 0, -1
+            call evaluate_fax_horner(x-fax_centers(seg), basis_value, &
+                fax_basis(power, m, seg), next_value)
+            basis_value = next_value
+        end do
+        do b = 1, fax_ns
+            do k = 1, 3
+                if (derivative) then
+                    corners = fax_g(il:il+1,it:it+1,m,k,b,species)
+                else
+                    corners = fax_value(il:il+1,it:it+1,m,k,b,species)
+                end if
+                value = (1.0_dp-ft) * ((1.0_dp-fl)*corners(1,1) &
+                    + fl*corners(2,1)) + ft * ((1.0_dp-fl)*corners(1,2) &
+                    + fl*corners(2,2))
+                d = d + fax_amplitude(k,b)*basis_value*value
+            end do
+        end do
+    end do
+end function ntv_fax_response
 
 !> Interval lo (x(lo) <= xv <= x(lo+1)) and fraction, clamped to the grid.
 pure subroutine bracket(x, xv, lo, frac)
