@@ -420,8 +420,8 @@ subtraction come from the FortSym generator.
 
 Generate these tables with NEO-2's `lsw_export_fax` feature and
 `python/src/neo2_ql/fax.py`. Its raw HDF5 set retains the distribution band
-integrals and source-force normalization. The converter requires every field
-species and an explicit electric field (or the completed native output).
+integrals and source-force normalization. The converter preserves native `avbhat` factors in the source amplitudes and
+requires every field species and an explicit electric field (or the completed native output).
 A single table covers one radial surface and one single-well position chart;
 using it across different profiles/surfaces requires separate qualification.
 The table does not assert physical transport convergence.
@@ -433,3 +433,8 @@ analytic values. For the native NEO-2 distribution oracle, configure
 semicolon-separated export files. CTest then builds a real table and compares
 the APPLETS reader with native NEO-2 band moments (2% matrix-scale tolerance,
 including position/pitch interpolation).
+
+For admission of an existing device table, set `FAX_NATIVE_TABLE` and
+`FAX_NATIVE_TABLE_EXPORTS` in addition to `FAX_NEO2_READER`. Native CTest
+checks its checksum and evaluates every field species against the native band
+moments without running marker orbits or a physical pilot.

@@ -293,3 +293,15 @@ if(BUILD_TESTING AND FAX_NEO2_READER AND FAX_NEO2_EXPORTS)
         ENVIRONMENT
             "APPLETS_ROOT=${CMAKE_SOURCE_DIR};GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;WORK_DIR=${CMAKE_BINARY_DIR}/fax_energy_markers;OMP_NUM_THREADS=1")
 endif()
+
+set(FAX_NATIVE_TABLE "" CACHE FILEPATH "Existing physical f_AX table for native admission")
+set(FAX_NATIVE_TABLE_EXPORTS "" CACHE STRING "Raw native exports underlying FAX_NATIVE_TABLE")
+if(BUILD_TESTING AND FAX_NEO2_READER AND FAX_NATIVE_TABLE AND FAX_NATIVE_TABLE_EXPORTS)
+    add_test(NAME canonical_ntv_fax_existing_native_table
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/TESTS/test_canonical_ntv_fax_native_table.py
+            ${FAX_NEO2_READER} ${FAX_NATIVE_TABLE}
+            $<TARGET_FILE:test_canonical_ntv_fax_energy.x>
+            ${CMAKE_BINARY_DIR}/fax_existing_native_table.json ${FAX_NATIVE_TABLE_EXPORTS})
+    set_tests_properties(canonical_ntv_fax_existing_native_table PROPERTIES TIMEOUT 300)
+endif()
