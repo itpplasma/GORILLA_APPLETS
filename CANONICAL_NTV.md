@@ -438,3 +438,6 @@ For admission of an existing device table, set `FAX_NATIVE_TABLE` and
 `FAX_NATIVE_TABLE_EXPORTS` in addition to `FAX_NEO2_READER`. Native CTest
 checks its checksum and evaluates every field species against the native band
 moments without running marker orbits or a physical pilot.
+
+`GORILLA_REF` records the compatible core commit used by CI and the native
+checks. The energy/species feature uses the same frozen core as #80.
