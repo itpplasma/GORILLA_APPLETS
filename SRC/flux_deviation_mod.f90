@@ -514,7 +514,7 @@
                 enddo !k = 1,n_time_steps
 !
 !------------------------------------------------------------------------------------------------------------!
-!----------------------------- Treatment in case of of NOT storing psi mat ----------------------------------!
+!----------------------------- Treatment in case of NOT storing psi mat ----------------------------------!
 !
                 !Calculation of momenta of Delta Psi (t)
                 if(.not.boole_psi_mat) then
