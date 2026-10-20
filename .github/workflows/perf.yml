@@ -2,10 +2,14 @@ name: Performance comparison
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  merge_group:
   workflow_dispatch:
 
 jobs:
   perf:
+    # Full tier: runs in the merge queue; PRs skip it unless labeled full-ci.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
     runs-on: ubuntu-24.04
 
     env:
