@@ -56,10 +56,15 @@ module orbit_ion_response_driver_mod
     ! Diagnostic trace of one marker (mu node, radial sample, marker): every
     ! kick and pusher step with signed face distances; 0 disables. Output only.
     integer :: debug_marker(3)=0,debug_unit=0
+    ! Opt-in periodic radial re-entry (period L) at the radial mesh boundary.
+    logical :: radial_reentry=.false.
+    real(dp) :: reentry_vertex(2)=0,reentry_flux(2)=0
+    real(dp) :: reentry_max_flux_error=0,reentry_max_angle_error=0,reentry_max_phase_error=0
+    integer :: radial_reentries=0,reentry_histories=0
     namelist /ion_orbit_response/ radial_samples,markers,batches,n_mu,seed,lag_nu,nu_dt,phase_step, &
         mu_reference_scale,cylinder_only,prefix_lag_nu,radial_sample_shift_cm, &
         anomalous_diffusion_coefficient,diffusion_step_cm,diffusion_reference_check,paired_diffusion, &
-        radial_sample_first,radial_sample_last,sample_streams,raw_binary,debug_marker
+        radial_sample_first,radial_sample_last,sample_streams,raw_binary,debug_marker,radial_reentry
     complex(dp),allocatable :: exact0(:,:,:),bare0(:,:,:),cylinder_closed0(:,:,:)
     complex(dp),allocatable :: corrections0(:,:,:,:),mean0(:,:,:),batches0(:,:,:,:),integrated_exact0(:,:,:)
     complex(dp),allocatable :: prefix_corrections0(:,:,:,:),prefix_mean0(:,:,:),prefix_batches0(:,:,:,:)
@@ -117,6 +122,8 @@ contains
         error stop 'diffusion reference check requires cylinder_only and a prefix window'
     if(paired_diffusion.and.(anomalous_diffusion_coefficient<=0.or.diffusion_reference_check.or.prefix_lag_nu<=0)) &
         error stop 'paired diffusion requires D>0, a prefix window and no reference check'
+    if(radial_reentry.and.(cylinder_only.or.anomalous_diffusion_coefficient>0.or.paired_diffusion)) &
+        error stop 'radial re-entry requires actual orbits without anomalous diffusion'
     if(radial_sample_last==0) radial_sample_last=radial_samples
     if(radial_sample_first<1.or.radial_sample_last>radial_samples.or.radial_sample_first>radial_sample_last) &
         error stop 'invalid radial sample subset'
@@ -161,6 +168,17 @@ contains
                 -sqrt(R0_analytic_circ**2-a_analytic_circ**2))))
             diffusion_bounds(2)=diffusion_bounds(2)*cos(pi/n3)
             if(diffusion_bounds(1)>=diffusion_bounds(2)) error stop 'mesh-contained reflecting annulus is empty'
+        end if
+        if(radial_reentry) then
+            ! Radial boundary vertex circles; their flux labels use the same table as flux_radius.
+            reentry_vertex=sqrt([sfc_s_min,sfc_s_max]*(R0_analytic_circ-sqrt(R0_analytic_circ**2 &
+                -a_analytic_circ**2))*(2*R0_analytic_circ-[sfc_s_min,sfc_s_max]*(R0_analytic_circ &
+                -sqrt(R0_analytic_circ**2-a_analytic_circ**2))))
+            do j=1,2
+                reentry_flux(j)=flux_label(abs(psi_pol_analytic_circ(reentry_vertex(j))))
+            end do
+            if(reentry_flux(2)-reentry_flux(1)<=L) &
+                error stop 'radial re-entry needs a mesh annulus wider than the window period'
         end if
     end if
     d=2*M+1
@@ -370,6 +388,16 @@ contains
     if(diffusion_reference_check) write(diagnostics,'(a,i12)') 'diffusion_reference_check ',1
     if(paired_diffusion) write(diagnostics,'(a,i12)') 'paired_diffusion ',1
     if(sample_streams) write(diagnostics,'(a,i12)') 'sample_streams ',1
+    ! Written only with re-entry, so legacy outputs are unchanged.
+    if(radial_reentry) then
+        write(diagnostics,'(a,i12)') 'radial_reentries ',radial_reentries
+        write(diagnostics,'(a,i12)') 'reentry_histories ',reentry_histories
+        write(diagnostics,'(a,es24.16)') 'reentry_inner_flux_cm ',reentry_flux(1)
+        write(diagnostics,'(a,es24.16)') 'reentry_outer_flux_cm ',reentry_flux(2)
+        write(diagnostics,'(a,es24.16)') 'reentry_max_flux_shift_error_cm ',reentry_max_flux_error
+        write(diagnostics,'(a,es24.16)') 'reentry_max_angle_error_rad ',reentry_max_angle_error
+        write(diagnostics,'(a,es24.16)') 'reentry_max_source_phase_error_rad ',reentry_max_phase_error
+    end if
     if(anomalous_diffusion_coefficient>0) write(diagnostics,'(a,i12)') 'diffusion_relocations ',diffusion_relocations
     if(radial_sample_first/=1.or.radial_sample_last/=radial_samples) then
         write(diagnostics,'(a,i12)') 'radial_sample_first ',radial_sample_first
@@ -463,8 +491,11 @@ contains
         integer :: cell,face,iteration,probe_cell,probe_face
         real(dp) :: ref_dr,ref_dphase,ref_radial(3),ref_helical(3)
         logical :: debugging
+        real(dp) :: reentry_offset
+        logical :: wrapped
         debugging=all([imu,radial_index,marker_index]==debug_marker)
         if(debugging.and.debug_unit==0) open(newunit=debug_unit,file='ion_debug_marker.dat',status='new')
+        reentry_offset=0;wrapped=.false.
         call random_number(rand2)
         v0=bg0(7)*sqrt(-2*log(max(rand2(1),tiny(1.0_dp))))*cos(2*pi*rand2(2))
         vpar=v0;vc=v0;t=0;phase_c=0;mu=lambda*mu_ref
@@ -555,6 +586,7 @@ contains
         call ion_mu_deposit(bg0,wave,lambda,mu_ref,field0,v0,clight,real_integral,real_deposit)
         call ion_mu_deposit(bg0,wave,lambda,mu_ref,bg0(13),v0,clight,ref_integral,ref_deposit)
         result=real_deposit-ref_deposit
+        if(wrapped) reentry_histories=reentry_histories+1
     contains
         subroutine diffuse(lag_step)
             ! Diffusion acts over positive lag; backward characteristics reverse
@@ -606,6 +638,7 @@ contains
             if(debugging) call debug_state('step_in',t,x,vpar,cell,face)
             call orbit_timestep_gorilla(x,vpar,vperp,step,initialized,cell,face,remaining)
             if(debugging) call debug_state('step_out',t,x,vpar,cell,face)
+            if(radial_reentry) call continue_after_reentry(remaining)
             if(cell==-1) then
                 open(newunit=failure_unit,file='ion_orbit_failure.dat',status='new')
                 write(failure_unit,'(a)') 'GK_ION_ORBIT_FAILURE_V1'
@@ -620,7 +653,28 @@ contains
             rnow=flux_radius(x,cell);call sample_background(rnow,current_bg)
             field=bmod_func(x-tetra_physics(cell)%x1,cell)
             max_mu_error=max(max_mu_error,abs(vperp*vperp/(2*field*mu)-1))
-            max_excursion=max(max_excursion,abs(rnow-r0))
+            ! Unwrapped radial excursion; the offset is zero without re-entry.
+            max_excursion=max(max_excursion,abs(rnow+reentry_offset-r0))
+        end subroutine
+        subroutine continue_after_reentry(remaining)
+            ! A loss through a radial boundary continues from the periodic image for the
+            ! remaining step time; any other loss is left to the caller's abort.
+            real(dp),intent(inout) :: remaining
+            real(dp) :: shift,rest
+            integer :: side,count
+            count=0
+            do while(cell==-1)
+                side=radial_exit_side(x)
+                if(side==0) return
+                count=count+1
+                if(count>16) error stop 'ion re-entry repeated more than 16 times within one step'
+                call periodic_reentry(x,vpar,vperp,mu,initialized,cell,face,side,shift)
+                reentry_offset=reentry_offset-shift;wrapped=.true.
+                if(debugging) call debug_state('reentry',t,x,vpar,cell,face)
+                if(remaining==0) return
+                rest=remaining;remaining=0
+                call orbit_timestep_gorilla(x,vpar,vperp,rest,initialized,cell,face,remaining)
+            end do
         end subroutine
         subroutine sources()
             complex(dp) :: phase(d)
@@ -845,6 +899,62 @@ contains
         flush(debug_unit)
     end subroutine
 
+    integer function radial_exit_side(x) result(side)
+        ! 1/2 if x lies on the inner/outer radial boundary: between its vertex circle and the
+        ! polygon chord (1e-8 cm, the injection convergence bound), else 0.
+        real(dp),intent(in) :: x(3)
+        real(dp) :: g
+        g=sqrt((x(1)-R0_analytic_circ)**2+x(3)**2);side=0
+        do side=1,2
+            if(g>=reentry_vertex(side)*cos(pi/n3)-1e-8_dp.and.g<=reentry_vertex(side)+1e-8_dp) return
+        end do
+        side=0
+    end function
+    subroutine periodic_reentry(x,vpar,vperp,mu,initialized,cell,face,side,shift)
+        ! KIM's window repeats with period L, as do the exported source coefficients
+        ! (sample_background). A marker leaving through a radial boundary continues from its
+        ! image: flux label shifted by exactly +/-L; theta*, phi, v_par and mu unchanged, so the
+        ! source phase k_p r + m theta* + n F phi is continuous. Only the equilibrium jumps.
+        real(dp),intent(inout) :: x(3),vpar,vperp
+        real(dp),intent(in) :: mu
+        logical,intent(inout) :: initialized
+        integer,intent(inout) :: cell,face
+        integer,intent(in) :: side
+        real(dp),intent(out) :: shift
+        real(dp) :: target,thetas,alpha_old,alpha_new,geometric,eps,angle,xt(3),vp,err,rnew,dphase(d)
+        integer :: iteration,c,f
+        logical :: init
+        shift=merge(L,-L,side==1);target=reentry_flux(side)+shift
+        thetas=theta_sfl(x);alpha_old=mmode*thetas+nmode*n_field_periods_manual*x(2)
+        geometric=sqrt((x(1)-R0_analytic_circ)**2+x(3)**2)+shift
+        err=huge(1.0_dp)
+        do iteration=1,20
+            eps=geometric/R0_analytic_circ
+            ! Inverse of theta_sfl at this geometric radius.
+            angle=2*atan2(sqrt(1+eps)*sin(thetas/2),sqrt(1-eps)*cos(thetas/2))
+            xt=[R0_analytic_circ+geometric*cos(angle),x(2),geometric*sin(angle)]
+            init=.false.;c=0;f=0;vp=vpar
+            call orbit_timestep_gorilla(xt,vp,vperp,0.0_dp,init,c,f)
+            if(c==-1) error stop 'ion re-entry image outside mesh'
+            err=flux_radius(xt,c)-target
+            if(abs(err)<=1e-11_dp) exit
+            geometric=geometric-err
+        end do
+        if(abs(err)>1e-11_dp) error stop 'ion re-entry flux label did not converge'
+        x=xt;cell=c;face=f
+        vperp=sqrt(2*mu*bmod_func(x-tetra_physics(cell)%x1,cell))
+        initialized=.false.;vp=vpar
+        call orbit_timestep_gorilla(x,vp,vperp,0.0_dp,initialized,cell,face)
+        if(cell==-1.or.vp/=vpar) error stop 'ion re-entry initialization changed the marker'
+        rnew=flux_radius(x,cell)
+        alpha_new=mmode*theta_sfl(x)+nmode*n_field_periods_manual*x(2)
+        dphase=wave*(rnew-reentry_flux(side))+alpha_new-alpha_old
+        reentry_max_flux_error=max(reentry_max_flux_error,abs(rnew-target))
+        reentry_max_angle_error=max(reentry_max_angle_error, &
+            abs(atan2(sin(theta_sfl(x)-thetas),cos(theta_sfl(x)-thetas))))
+        reentry_max_phase_error=max(reentry_max_phase_error,maxval(abs(atan2(sin(dphase),cos(dphase)))))
+        radial_reentries=radial_reentries+1
+    end subroutine
     subroutine relocate_after_kick(x,vpar,vperp,mu,initialized,cell,face)
         ! The straight-line diffusion displacement can end a numerical hair
         ! outside the face it reports as the entry face. The pusher never exits
@@ -915,9 +1025,12 @@ contains
     real(dp) function flux_radius(position,cell) result(radius)
         real(dp),intent(in) :: position(3)
         integer,intent(in) :: cell
-        real(dp) :: psi,f
+        radius=flux_label(abs(tetra_physics(cell)%Aphi1+sum(tetra_physics(cell)%gAphi*(position-tetra_physics(cell)%x1))))
+    end function
+    real(dp) function flux_label(psi) result(radius)
+        real(dp),intent(in) :: psi
+        real(dp) :: f
         integer :: lo,hi,mid
-        psi=abs(tetra_physics(cell)%Aphi1+sum(tetra_physics(cell)%gAphi*(position-tetra_physics(cell)%x1)))
         if(psi<flux_psi(1).or.psi>flux_psi(flux_points)) error stop 'ion flux radius outside mapping'
         lo=1;hi=flux_points
         do while(hi-lo>1)
