@@ -52,6 +52,9 @@ def prepare(name, explicit=True, fractions=(.5, .5), electron=1.):
         text = re.sub(rf'({key}\s*=)\s*\d+', rf'\g<1> {value}', text)
     text = text.replace('&TETRA_GRID_NML', "&TETRA_GRID_NML\n netcdf_filename='chartmap.nc',")
     (root / 'tetra_grid.inp').write_text(text)
+    inp = root / 'rmp_response_currents.inp'
+    inp.write_text(inp.read_text().replace('boole_nonlinear_weight = .true.',
+                                          'boole_nonlinear_weight = .false.'))
     with (root / 'writer.log').open('w') as log:
         subprocess.run([str(WRITER), 'chartmap.nc', '0', '10', '3', '2',
                         '513', '32', '2'], cwd=root, stdout=log,
@@ -60,6 +63,12 @@ def prepare(name, explicit=True, fractions=(.5, .5), electron=1.):
 
 
 def run(root, n, expected_error=None):
+    # The pure fixture omits the key to exercise the legacy default.
+    if n != 2:
+        p = root / 'rmp_response_currents.inp'
+        text = p.read_text().replace('&rmp_response_currents_nml',
+            f'&rmp_response_currents_nml\n n_background_species={n},')
+        p.write_text(text)
     with (root / 'run.log').open('w') as log:
         p = subprocess.run([str(DRIVER), str(n)], cwd=root, stdout=log,
                            stderr=subprocess.STDOUT)
@@ -124,6 +133,7 @@ def main():
         print(f'TEST_SPECIES {a} cell1 s={first[0][3]:.17e} pair_rates_s^-1=' +
               ','.join(f'{r[-2]:.17e}' for r in first))
     # Rejection checks exercise the production loader, not just a separate validator.
+    run(prepare('invalid_count', explicit=False), 1, 'must include ions and electrons')
     run(prepare('missing_mixture', explicit=False), 3, 'Mixture requires collision_species.dat')
     run(prepare('nonneutral', fractions=(.6, .5)), 3, 'violate quasineutrality')
     run(prepare('wrong_electron', fractions=(.6, .6), electron=1.2), 3, 'differs from n.dat')

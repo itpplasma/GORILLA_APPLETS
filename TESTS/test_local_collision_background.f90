@@ -8,7 +8,8 @@ program test_local_collision_background
     use tetra_physics_mod, only: particle_mass, particle_charge
     use gorilla_applets_types_mod, only: in, c
     use utils_data_pre_and_post_processing_mod, only: set_c
-    use utils_rmp_response_currents_mod, only: set_local_collision_background
+    use utils_rmp_response_currents_mod, only: set_local_collision_background, &
+        read_rmp_response_currents_inp_into_type
     use profile_data_mod, only: load_profiles, eval_profiles, profile_values_t
     use collis_ions, only: collis_init, coleff
     use constants, only: echarge
@@ -20,7 +21,9 @@ program test_local_collision_background
     type(profile_values_t) :: pv
 
     call get_command_argument(1, arg)
-    read(arg, *) in%n_background_species
+    read(arg, *) a
+    call read_rmp_response_currents_inp_into_type()
+    if (in%n_background_species /= a) error stop "Background count not read from namelist"
     in%energy_eV = 3500.0_dp
     call load_tetra_grid_inp()
     call load_gorilla_inp()
