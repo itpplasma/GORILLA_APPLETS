@@ -41,7 +41,7 @@ make clean
 make reconfigure
 ```
 
-The resulting executable is `BUILD/gorilla_applets_main.x` (symlinked to the project root). Requires a Fortran compiler with OpenMP, BLAS/LAPACK, NetCDF (Fortran bindings), CMake >= 3.12, and Ninja.
+The resulting executable is `BUILD/gorilla_applets_main.x`; every folder in [EXAMPLES/](EXAMPLES/) has a symlink to it. Requires a Fortran compiler with OpenMP, BLAS/LAPACK, NetCDF (Fortran bindings), CMake >= 3.12, and Ninja.
 
 ## Running
 
@@ -57,7 +57,7 @@ The working directory needs the following inputs (blueprints under [INPUT/](INPU
 - One mode-specific input file (e.g. `alpha_lifetime.inp`, `mono_energetic_transp_coef.inp`, `boltzmann.inp`, `reversibility_test.inp`, `divertor_heat_loads.inp`, `field_line_tracing.inp`, `self_consistent_ef.inp`)
 - MHD equilibrium files (VMEC NetCDF or g-file), and a `seed.inp` where the application uses random numbers
 
-The runnable scenarios in [EXAMPLES/](EXAMPLES/) show the full setup per application; each folder contains its input files, MHD equilibrium symlinks, and a MATLAB or Python plotting script for the output.
+The runnable scenarios in [EXAMPLES/](EXAMPLES/) show the full setup per application; each folder contains its input files, symlinks to the executable and the MHD equilibria, and a MATLAB or Python plotting script for the output.
 
 ## Testing
 
