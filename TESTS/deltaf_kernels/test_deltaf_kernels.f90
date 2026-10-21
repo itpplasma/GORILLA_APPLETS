@@ -4,6 +4,7 @@ program test_deltaf_kernels
     ! derivatives, and the circular chart agrees with GORILLA's analytic circular
     ! field (field_analytic_circ_mod, grid_kind = 5).
     use, intrinsic :: iso_fortran_env, only: dp => real64
+    use deltaf_complex_harmonic_kernel, only: evaluate_deltaf_complex_harmonic
     use deltaf_harmonic_kernel, only: evaluate_deltaf_harmonic
     use deltaf_circular_chart_kernel, only: evaluate_deltaf_circular_chart
     use deltaf_weight_kernel, only: evaluate_deltaf_weight
@@ -22,6 +23,7 @@ program test_deltaf_kernels
 
     failures = 0
     call check_harmonic()
+    call check_complex_harmonic()
     call check_circular_against_gorilla()
     call check_weight()
     if (failures /= 0) then
@@ -31,6 +33,26 @@ program test_deltaf_kernels
     write (*, "(a)") "test_deltaf_kernels: all checks passed"
 
 contains
+
+    subroutine check_complex_harmonic()
+        real(dp) :: m, n, bc, bs, th, ph, alpha, dph, dth
+        integer :: i
+
+        do i = -320, 320
+            m = real(i, dp)
+            n = 3.0_dp
+            bc = 1.3_dp
+            bs = -0.7_dp
+            th = 0.37_dp
+            ph = 1.41_dp
+            alpha = m*th - n*ph
+            call evaluate_deltaf_complex_harmonic(m, n, bc, bs, th, ph, dph, dth)
+            call check_close("complex dphi", dph, &
+                n*(bc*sin(alpha) - bs*cos(alpha)), 1.0e-12_dp)
+            call check_close("complex dtheta", dth, &
+                m*(-bc*sin(alpha) + bs*cos(alpha)), 1.0e-12_dp)
+        end do
+    end subroutine check_complex_harmonic
 
     subroutine check_harmonic()
         real(dp), parameter :: m_pol = 2.0_dp, n_tor = 3.0_dp, h = 1.0e-6_dp

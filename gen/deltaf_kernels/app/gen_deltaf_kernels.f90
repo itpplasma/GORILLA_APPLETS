@@ -56,7 +56,7 @@ program gen_deltaf_kernels
     use fortsym_string, only: str_t, str, chars
     use fortsym_arena, only: arena_t
     use fortsym_expr, only: expr_t, sym, num, func, pi_expr, operator(+), &
-        operator(-), operator(*), operator(/), operator(**), cos, log, &
+        operator(-), operator(*), operator(/), operator(**), sin, cos, log, &
         sqrt, acos
     use fortsym_diff, only: diff, partial_derivative
     use fortsym_subs, only: subs_many
@@ -134,6 +134,7 @@ program gen_deltaf_kernels
     db1 = b_of_s*cos(alpha)
     dphi1 = phi_of_s*cos(alpha)
     call emit_harmonic()
+    call emit_complex_harmonic()
 
     ! ---------------------------------------------------------------- circular
     r0 = sym(arena, "R0")
@@ -229,6 +230,27 @@ contains
             [character(len=16) :: "db1", "db1_ds", "db1_dtheta", "db1_dphi", &
             "dphi1", "dphi1_ds", "dphi1_dtheta", "dphi1_dphi"])
     end subroutine emit_harmonic
+
+    !> Both real Fourier coefficients, with only the requested derivatives.
+    subroutine emit_complex_harmonic()
+        type(expr_t) :: bc, bs, field, roots(2), dc, dt
+
+        bc = sym(arena, "bc")
+        bs = sym(arena, "bs")
+        field = bc*cos(alpha) + bs*sin(alpha)
+        dc = n_tor*(bc*sin(alpha) - bs*cos(alpha))
+        dt = m_pol*(-bc*sin(alpha) + bs*cos(alpha))
+        call check_identity(suite, native, "complex harmonic phi derivative", &
+            diff(field, phi) - dc)
+        call check_identity(suite, native, "complex harmonic theta derivative", &
+            diff(field, theta) - dt)
+        roots = [dc, dt]
+        call emit_kernel_file("deltaf_complex_harmonic_kernel", &
+            "evaluate_deltaf_complex_harmonic", &
+            [character(len=16) :: "m_pol", "n_tor", "bc", "bs", "theta", "phi"], &
+            simplified_all(roots), &
+            [character(len=16) :: "db_dphi", "db_dtheta"])
+    end subroutine emit_complex_harmonic
 
     !> Circular-chart equilibrium.
     subroutine emit_circular()
