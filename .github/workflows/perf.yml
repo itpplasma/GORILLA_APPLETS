@@ -2,10 +2,19 @@ name: Performance comparison
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  merge_group:
   workflow_dispatch:
+
+# Only PR runs share a group; pending push and merge-group runs stay independent.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.ref, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   perf:
+    # Full tier: runs in the merge queue; PRs skip it unless labeled full-ci.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
     runs-on: ubuntu-24.04
 
     env:
@@ -25,10 +34,27 @@ jobs:
           path: baseline
           ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
 
+      - name: Select GORILLA branch
+        id: gorilla_ref
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          # A declared core commit takes precedence over branch-name fallback.
+          if [[ -s candidate/GORILLA_REF ]]; then
+            read -r core_ref < candidate/GORILLA_REF
+            [[ "$core_ref" =~ ^[0-9a-f]{40}$ ]]
+            echo "ref=$core_ref" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --heads https://github.com/itpplasma/GORILLA.git "$BRANCH" > /dev/null; then
+            echo "ref=$BRANCH" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout GORILLA (core dependency)
         uses: actions/checkout@v6
         with:
           repository: itpplasma/GORILLA
+          ref: ${{ steps.gorilla_ref.outputs.ref }}
           path: GORILLA
 
       - name: System dependencies
@@ -59,9 +85,14 @@ jobs:
         working-directory: candidate
         run: make
 
+      # Only the Python drivers record timings, and they only need the main
+      # executable. Fortran unit tests from the candidate TESTS/ tree may use
+      # routines the baseline SRC does not have, so do not build them here.
       - name: Build baseline
         working-directory: baseline
-        run: make
+        run: |
+          make configure
+          cmake --build BUILD --target gorilla_applets_main.x
 
       - name: Benchmark candidate (best of $RUNS)
         working-directory: candidate
