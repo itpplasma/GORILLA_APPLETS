@@ -23,13 +23,13 @@ while read -r slug; do
     cp -a "$mirror" "$stage/mirrors/$slug.git"
     exec {lock}>&-
 done < "$src/ci/dependencies.txt"
-git clone -q --no-hardlinks "$src" "$stage/src"
+git clone -q --no-hardlinks --dissociate "$src" "$stage/src"
 git -C "$stage/src" remote set-url origin "https://github.com/${GITHUB_REPOSITORY:?GITHUB_REPOSITORY missing}.git"
 git -C "$src" rev-parse HEAD > "$stage/revision.txt"
 printf '%s\n' "${SCI_TIER:?SCI_TIER missing}" > "$stage/tier.txt"
 : > "$stage/task.env"
 while IFS= read -r key; do
     printf 'export %s=%q\n' "$key" "${!key}" >> "$stage/task.env"
-done < <(compgen -A variable SCI_MATRIX_)
+done < <(compgen -A variable SCI_MATRIX_; printf '%s\n' SCI_BASE_SHA SCI_HEAD_REF)
 tar -C "$stage" -cf - src mirrors revision.txt tier.txt task.env | zstd -q -T2 -o "$out"
 sha256sum "$out"

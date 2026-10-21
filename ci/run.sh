@@ -45,6 +45,9 @@ load_job_environment() {
     while IFS= read -r item; do [ -z "$item" ] || export PATH="$item:$PATH"; done < "$GITHUB_PATH"
 }
 case "$tier" in
+  perf)
+    . "$src/ci/perf.sh"
+    ;;
   CI-test)
     python3 -m venv "$root/venv"
     . "$root/venv/bin/activate"
