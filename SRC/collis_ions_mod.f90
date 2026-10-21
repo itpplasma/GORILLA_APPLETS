@@ -252,10 +252,16 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override
   ! Using onseff's dh(y) = NRL_bracket(y²)/y with y = xbeta = p·velrat, and
   ! efcolf(i) = (1/2)·ν_0,i(v0)·velrat(i)/v0 from collis_init, the per-species
   ! contribution simplifies to 4·v0·dh·efcolf/p² = 4·v0·dhh_vec(i), so in
-  ! code units (rate / v0) the total is exactly 4·dhh — independent of
-  ! marker speed and species mix.  This is 2× the Lorentz deflection rate
-  ! ν_D = 2·dhh because ν_⊥ = 2·ν_D when measured as d⟨v_⊥²⟩/dt / v² (the
-  ! ℓ=2 Legendre mode of cos²θ decays at 3ν_D, contributing 2ν_D to sin²θ).
+  ! code units (rate / v0) the total is 4·dhh.  This is 2× the Lorentz
+  ! deflection rate ν_D = 2·dhh because ν_⊥ = 2·ν_D when measured as
+  ! d⟨v_⊥²⟩/dt / v² (the ℓ=2 Legendre mode of cos²θ decays at 3ν_D,
+  ! contributing 2ν_D to sin²θ).
+  ! dhh depends on the marker speed, hence on v_par.  A v_par-dependent rate
+  ! or step length breaks the Gaussian invariant law of the OU process: with
+  ! dtau = ou_nu_dtau/nu(v) the time spent per collision step grows with
+  ! speed and a Maxwellian heats up.  The rate and the step are therefore
+  ! evaluated at the background thermal speed p_th = sqrt(2 sigma_eq2), so
+  ! they depend on position (density, temperature) only.
   if (iswmode.eq.5) then
     block
       real(dp) :: vpar_norm, vperp_norm, nu_step, sigma_eq2, xi_ou
@@ -264,19 +270,24 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override
       i_bg = n
       vpar_norm  = z(4) * z(5)
       vperp_norm = z(4) * sqrt(max(0.0_dp, 1.0_dp - z(5)*z(5)))
-      if (present(nu_override)) then
-        ! Caller provides nu in code units (1/length); apply the same
-        ! nu_scale_factor that dhh-derived rates get above.
-        nu_step  = nu_override * nu_scale_factor
-      else
-        nu_step  = 4.0_dp * dhh
-      end if
-      if (nu_step .le. 0.0_dp) return
       if (enrat(i_bg) .gt. 0.0_dp) then
         sigma_eq2 = 0.5_dp / enrat(i_bg)
       else
         sigma_eq2 = 0.5_dp
       end if
+      if (present(nu_override)) then
+        ! Caller provides nu in code units (1/length); apply the same
+        ! nu_scale_factor that dhh-derived rates get above.
+        nu_step  = nu_override * nu_scale_factor
+      else
+        call coleff(efcolf,velrat,enrat,sqrt(2.0_dp*sigma_eq2), &
+                    dpp_vec,dhh_vec,fpeff_vec)
+        nu_step  = 4.0_dp * sum(dhh_vec) * nu_scale_factor
+      end if
+      if (nu_step .le. 0.0_dp) return
+      ! Euler-Maruyama step length from the same speed-independent rate
+      ! (nu dtau = 2 epsilon^2, as epsilon^2/(2 dhh) for the Coulomb modes).
+      if (present(tau)) dtau = min(2.0_dp*epsilon**2/nu_step, tau, upper_limit)
       if (ou_nu_dtau .gt. 0.0_dp) then
         ! Exact OU transition over dtau = ou_nu_dtau/nu (Box-Muller normal).
         ! Not capped by upper_limit (30 code units = 23 ns for thermal AUG
@@ -300,10 +311,12 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override
                   - vpar_norm * nu_step * dtau
       end if
       z(4) = sqrt(vpar_norm*vpar_norm + vperp_norm*vperp_norm)
-      z(5) = vpar_norm / z(4)
-      if (z(4).lt.pmin) then
-        ierr = ierr + 10
-        z(4) = pmin + abs(pmin - z(4))
+      ! OU evolves v_parallel alone. A speed floor would also change v_perp
+      ! and destroy the Gaussian invariant distribution of this transition.
+      if (z(4) > 0.0_dp) then
+        z(5) = vpar_norm / z(4)
+      else
+        z(5) = 0.0_dp
       end if
     end block
     return
