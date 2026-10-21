@@ -32,6 +32,7 @@ add_library(GORILLA_APPLETS STATIC
   helical_core/helical_core_mod.f90
   profile_data_mod.f90
   perturbation_field_mod.f90
+  rmp_response_currents/rmp_profile_moments_mod.f90
   rmp_response_currents/utils_rmp_response_currents_mod.f90
   rmp_response_currents/rmp_response_currents_mod.f90
   volume_integrals_and_sqrt_g_mod.f90
