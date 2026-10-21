@@ -34,7 +34,8 @@
 module canonical_ntv_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use deltaf_complex_harmonic_kernel, only: evaluate_deltaf_complex_harmonic
+    use deltaf_phase_step_kernel, only: evaluate_deltaf_phase_step
+    use deltaf_phase_derivative_kernel, only: evaluate_deltaf_phase_derivative
     use deltaf_harmonic_kernel, only: evaluate_deltaf_harmonic
     use deltaf_weight_kernel, only: evaluate_deltaf_weight
     use chartmap_ntv_mod, only: chartmap_raw_t, read_chartmap_raw, chartmap_harmonic
@@ -471,16 +472,29 @@ subroutine chartmap_harmonics_dphi(s, theta, phi, db1_dphi, db1_dtheta)
     real(dp), intent(out) :: db1_dphi
     real(dp), intent(out), optional :: db1_dtheta
     real(dp) :: bc, bs, d, dth, weights(4), theta_sum
+    real(dp) :: sn, cs, next_sn, next_cs, sn_step, cs_step, phase
     integer :: k, lo, hi
 
     db1_dphi = 0.0_dp
     theta_sum = 0.0_dp
     call spline_weights(cm_s, s, lo, hi, weights)
+    sn_step = sin(theta)
+    cs_step = cos(theta)
     do k = 1, n_cm_modes
+        ! The loaded m values are consecutive. Re-anchor every 32 modes to
+        ! bound recurrence drift, including near-cancelling harmonic sums.
+        if (mod(k - 1, 32) == 0) then
+            phase = real(cm_m(k), dp)*theta - real(ntv_n_tor, dp)*phi
+            sn = sin(phase)
+            cs = cos(phase)
+        end if
         bc = ntv_amplitude * spline_at(cm_bc(:, k), cm_bc2(:, k), lo, hi, weights)
         bs = ntv_amplitude * spline_at(cm_bs(:, k), cm_bs2(:, k), lo, hi, weights)
-        call evaluate_deltaf_complex_harmonic(real(cm_m(k), dp), &
-            real(ntv_n_tor, dp), bc, bs, theta, phi, d, dth)
+        call evaluate_deltaf_phase_derivative(real(cm_m(k), dp), &
+            real(ntv_n_tor, dp), bc, bs, sn, cs, d, dth)
+        call evaluate_deltaf_phase_step(sn, cs, sn_step, cs_step, next_sn, next_cs)
+        sn = next_sn
+        cs = next_cs
         db1_dphi = db1_dphi + d
         theta_sum = theta_sum + dth
     end do
