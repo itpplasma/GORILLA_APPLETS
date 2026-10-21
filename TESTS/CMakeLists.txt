@@ -176,3 +176,13 @@ GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/canonical_species_density_work;\
 OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1"
     TIMEOUT 120)
+
+# Link the reader probe to the same core library as the production executable.
+add_executable(test_marker_species.x ../SRC_CORE/TESTS/test_marker_species.f90)
+target_link_libraries(test_marker_species.x GORILLA_APPLETS)
+target_include_directories(test_marker_species.x PRIVATE ${CMAKE_BINARY_DIR}/SRC_CORE)
+add_test(NAME marker_species
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../SRC_CORE/TESTS/test_marker_species.py
+        $<TARGET_FILE:test_marker_species.x>
+        ${CMAKE_CURRENT_SOURCE_DIR}/../SRC_CORE/../INPUT/gorilla.inp)
