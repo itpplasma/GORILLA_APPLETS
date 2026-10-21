@@ -192,7 +192,11 @@ subroutine allocate_weights
     use gorilla_applets_types_mod, only: in, weights
 
     allocate(weights%w(in%num_particles,in%n_species))
-    if (in%boole_delta_f) allocate(weights%original(in%num_particles,in%n_species))
+    weights%w = (0.0_dp, 0.0_dp)
+    if (in%boole_delta_f) then
+        allocate(weights%original(in%num_particles,in%n_species))
+        weights%original = (0.0_dp, 0.0_dp)
+    end if
 
 end subroutine allocate_weights
 
@@ -381,6 +385,8 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
     integer, intent(in), optional :: species_in
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
+    real(dp), dimension(:), allocatable :: efcolf_l, velrat_l, enrat_l, dens_l, temp_l
+    real(dp) :: v0_l
     integer :: i, j
     integer :: species = 1
     real(dp) :: m0, z0, n0, s_value, v0
@@ -447,17 +453,23 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     c%dens_mat(c%n, :) = matmul(c%charge_num(1:c%n-1), c%dens_mat(1:c%n-1, :))
 
     if (.not.in%boole_preserve_energy_and_momentum_during_collisions) then
+        !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(i,j,efcolf_l,velrat_l,enrat_l,dens_l,temp_l,v0_l)
+        allocate(efcolf_l(c%n), velrat_l(c%n), enrat_l(c%n), dens_l(c%n), temp_l(c%n))
+        !$OMP DO
         do i = 1, ntetr
             do j = 1,c%n
-                c%dens(j) = c%dens_mat(j,i)
-                c%temp(j) = c%temp_mat(j,i)
+                dens_l(j) = c%dens_mat(j,i)
+                temp_l(j) = c%temp_mat(j,i)
             enddo
-            call collis_init(m0,z0,c%mass,c%charge_num,c%dens,c%temp,in%energy_eV,v0, &
-                             efcolf,velrat,enrat)
-            c%efcolf_mat(:,i) = efcolf
-            c%velrat_mat(:,i) = velrat
-            c%enrat_mat(:,i) = enrat
+            call collis_init(m0,z0,c%mass,c%charge_num,dens_l,temp_l,in%energy_eV,v0_l, &
+                             efcolf_l,velrat_l,enrat_l)
+            c%efcolf_mat(:,i) = efcolf_l
+            c%velrat_mat(:,i) = velrat_l
+            c%enrat_mat(:,i) = enrat_l
         enddo
+        !$OMP END DO
+        deallocate(efcolf_l, velrat_l, enrat_l, dens_l, temp_l)
+        !$OMP END PARALLEL
     endif
     
     if (in%boole_precalc_collisions) then
@@ -737,14 +749,14 @@ subroutine analyse_particle_weight_distribution
     integer  :: i
     real(dp) :: maximum_weight, minimum_weight, average_weight
 
-    maximum_weight = weights%w(1,1)
-    minimum_weight = weights%w(1,1)
+    maximum_weight = abs(weights%w(1,1))
+    minimum_weight = abs(weights%w(1,1))
     average_weight = 0
 
     do i = 1,int(in%n_particles)
-        average_weight = average_weight + weights%w(i,1)
-        maximum_weight = max(maximum_weight,weights%w(i,1))
-        minimum_weight = min(minimum_weight,weights%w(i,1))
+        average_weight = average_weight + abs(weights%w(i,1))
+        maximum_weight = max(maximum_weight, abs(weights%w(i,1)))
+        minimum_weight = min(minimum_weight, abs(weights%w(i,1)))
     enddo
 
     average_weight = average_weight/in%n_particles

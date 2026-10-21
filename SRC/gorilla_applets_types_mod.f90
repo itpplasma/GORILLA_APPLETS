@@ -131,6 +131,7 @@ module gorilla_applets_types_mod
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
     integer  :: n_mappings_ignored !Used in divertor_heat_loads
     real(dp) :: lambda !Used in divertor_heat_loads
+    integer  :: i_collision_mode = 1 !rmp_response_currents: stost iswmode (1=Coulomb, 5=Euler-Maruyama OU on v_par)
     integer  :: n_background_species = 2
     end type input_t
 
@@ -250,8 +251,8 @@ module gorilla_applets_types_mod
     end type time_t
 
     type weights_t
-    real(dp), dimension(:,:), allocatable :: w         ! current weight (particles x species)
-    real(dp), dimension(:,:), allocatable :: original  ! original weight, used in helical_core for delta-f damping
+    complex(dp), dimension(:,:), allocatable :: w         ! current weight (complex for delta-f, Im=0 in other applets)
+    complex(dp), dimension(:,:), allocatable :: original  ! original weight, used in helical_core for delta-f damping
     end type weights_t
 
     type(weights_t) :: weights

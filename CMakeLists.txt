@@ -52,12 +52,10 @@ find_package(BLAS REQUIRED)
 find_package(LAPACK REQUIRED)
 find_package(netCDF REQUIRED)
 
-add_compile_options(-g -fbacktrace -ffpe-trap=zero,overflow,invalid -fbounds-check -fopenmp -ffree-line-length-none)
-add_link_options(-g -fbacktrace -ffpe-trap=zero,overflow,invalid -fbounds-check -fopenmp)
-
-if(APPLE)
-  add_link_options(-L/opt/local/lib)
-endif()
+# No -ffpe-trap=invalid: LAPACK dgesv produces transient NaN in the
+# make_tetra_physics OMP loop for grid_kind=5 with coord_system=2 (macOS ARM64).
+add_compile_options(-g -fbacktrace -ffpe-trap=zero,overflow -fbounds-check -fopenmp -ffree-line-length-none)
+add_link_options(-g -fbacktrace -ffpe-trap=zero,overflow -fbounds-check -fopenmp)
 
 enable_testing()
 

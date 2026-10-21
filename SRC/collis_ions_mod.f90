@@ -4,6 +4,11 @@ module collis_ions
 
 implicit none
 
+! Global multiplicative scaling on the collisional rates (dpp, dhh, fpeff) used
+! in stost. Default 1.0 (no change). Set at runtime from the namelist to
+! benchmark against external collision-frequency conventions (e.g. KIM nu_e).
+real(dp), public :: nu_scale_factor = 1.0_dp
+
 contains
 !
 !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -175,7 +180,7 @@ end subroutine lambda_alpha_beta
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
+subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override)
 !
 !  z(1:5)   - phase space coordinates: z(1:3) - spatial position,
 !                                      z(4)   - normalized velocity module
@@ -186,13 +191,14 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
 !               2 - energy scattering and drag only
 !               3 - drag only
 !               4 - pitch-angle scattering only
+!               5 - Euler-Maruyama OU step on v_par (v_perp unchanged)
 !  ierr     - error code:
 !               0 - good,
 !               1 - bad argument (pitch |z(5)| > 1 ),
 !               2 - step over pitch exceeds 1 (pitch was
 !                   replaced by randomly distributed on [-1,1]),
 !               3 - new pitch module exceeds 1, reflection from
-!                   the boudary was performed,
+!                   the boundary was performed,
 !               10 or >10 - new momentum module is less then
 !                   prescribed minimum, reflection was performed.
 !
@@ -205,6 +211,11 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
   real(dp), dimension(:), allocatable :: dpp_vec,dhh_vec,fpeff_vec
   real(dp), optional :: tau
   real(dp), dimension(3), intent(in), optional :: randnum
+  ! Optional caller-supplied override for the OU step rate, in code units
+  ! (1/length). When present, iswmode=5 uses nu_step = nu_override * nu_scale_factor
+  ! instead of nu_step = 4*dhh. Used to drive the OU operator with an external
+  ! collision frequency table (e.g. KIM's nue.dat splined as nu_e(s)).
+  real(dp), optional, intent(in) :: nu_override
   real(dp) :: z4_save
 
   epsilon = 0.1
@@ -218,19 +229,70 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
   p=z(4)
   call coleff(efcolf,velrat,enrat,p,dpp_vec,dhh_vec,fpeff_vec)
 
-  dpp = sum(dpp_vec)
-  dhh = sum(dhh_vec)
-  fpeff = sum(fpeff_vec)
+  dpp   = sum(dpp_vec)   * nu_scale_factor
+  dhh   = sum(dhh_vec)   * nu_scale_factor
+  fpeff = sum(fpeff_vec) * nu_scale_factor
 
   ierr=0
 
   if (present(tau)) then
     dtau = min(epsilon**2/(2*dhh),tau,upper_limit)
     if (z(4).lt.q) then
-      !dtau = min(dtau*(q/z(4))**2,tau),upper_limit)
-      dtau = min(1.0d-2/(2*dhh),tau,upper_limit)
+      dtau = min(dtau*(q/z(4))**2,tau,upper_limit)
     endif
   endif
+
+  ! iswmode = 5: Euler-Maruyama Ornstein-Uhlenbeck step on the parallel
+  ! velocity only.  v_perp_norm = z(4)*sqrt(1-z(5)^2) stays untouched.
+  ! See docs/plans/2026-05-15-ou-collision-operator-euler-design.md.
+  !
+  ! Collision frequency: NRL perpendicular velocity-velocity diffusion rate
+  !   ν_⊥(v) = 2 ν_0(v) [ (1 − 1/(2x))·ψ(x) + ψ'(x) ],  x = v²/v_T,β²
+  ! Using onseff's dh(y) = NRL_bracket(y²)/y with y = xbeta = p·velrat, and
+  ! efcolf(i) = (1/2)·ν_0,i(v0)·velrat(i)/v0 from collis_init, the per-species
+  ! contribution simplifies to 4·v0·dh·efcolf/p² = 4·v0·dhh_vec(i), so in
+  ! code units (rate / v0) the total is exactly 4·dhh — independent of
+  ! marker speed and species mix.  This is 2× the Lorentz deflection rate
+  ! ν_D = 2·dhh because ν_⊥ = 2·ν_D when measured as d⟨v_⊥²⟩/dt / v² (the
+  ! ℓ=2 Legendre mode of cos²θ decays at 3ν_D, contributing 2ν_D to sin²θ).
+  if (iswmode.eq.5) then
+    block
+      real(dp) :: vpar_norm, vperp_norm, nu_step, sigma_eq2, xi_ou
+      integer  :: i_bg
+      i_bg = n
+      vpar_norm  = z(4) * z(5)
+      vperp_norm = z(4) * sqrt(max(0.0_dp, 1.0_dp - z(5)*z(5)))
+      if (present(nu_override)) then
+        ! Caller provides nu in code units (1/length); apply the same
+        ! nu_scale_factor that dhh-derived rates get above.
+        nu_step  = nu_override * nu_scale_factor
+      else
+        nu_step  = 4.0_dp * dhh
+      end if
+      if (nu_step .le. 0.0_dp) return
+      if (enrat(i_bg) .gt. 0.0_dp) then
+        sigma_eq2 = 0.5_dp / enrat(i_bg)
+      else
+        sigma_eq2 = 0.5_dp
+      end if
+      if (present(randnum)) then
+        ur = randnum(3)
+      else
+        call getran(0, ur)
+      end if
+      xi_ou     = dble(ur)
+      vpar_norm = vpar_norm &
+                + sqrt(2.0_dp * nu_step * sigma_eq2 * dtau) * xi_ou &
+                - vpar_norm * nu_step * dtau
+      z(4) = sqrt(vpar_norm*vpar_norm + vperp_norm*vperp_norm)
+      z(5) = vpar_norm / z(4)
+      if (z(4).lt.pmin) then
+        ierr = ierr + 10
+        z(4) = pmin + abs(pmin - z(4))
+      end if
+    end block
+    return
+  end if
 
   if(iswmode.eq.1.or.iswmode.eq.4) then
     alam=z(5)

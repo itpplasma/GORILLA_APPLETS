@@ -18,10 +18,27 @@ jobs:
         with:
           path: GORILLA_APPLETS
 
+      - name: Select GORILLA branch
+        id: gorilla_ref
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          # A declared core commit takes precedence over branch-name fallback.
+          if [[ -s GORILLA_APPLETS/GORILLA_REF ]]; then
+            read -r core_ref < GORILLA_APPLETS/GORILLA_REF
+            [[ "$core_ref" =~ ^[0-9a-f]{40}$ ]]
+            echo "ref=$core_ref" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --heads https://github.com/itpplasma/GORILLA.git "$BRANCH" > /dev/null; then
+            echo "ref=$BRANCH" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout GORILLA (core dependency)
         uses: actions/checkout@v6
         with:
           repository: itpplasma/GORILLA
+          ref: ${{ steps.gorilla_ref.outputs.ref }}
           path: GORILLA
 
       - name: System dependencies

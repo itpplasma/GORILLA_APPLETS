@@ -257,6 +257,8 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     use gorilla_applets_types_mod, only: in, c, time_t, start
     use collis_ions, only: stost
     use gorilla_applets_settings_mod, only: i_option
+    use profile_data_mod, only: kim_nu_loaded, eval_kim_nu, eval_s_from_psi_pol
+    use tetra_physics_mod, only: tetra_physics
 
     integer, intent(in) :: i, n, species, iswmode
     real(dp), dimension(3), intent(inout) :: x
@@ -269,6 +271,9 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
     integer :: err
     real(dp) :: t_max
+
+    real(dp) :: z_cell(3), psi_pol_loc, s_loc, nu_kim_phys, nu_kim_code
+    logical  :: use_kim_nu_now
 
     allocate(efcolf(c%n))
     allocate(velrat(c%n))
@@ -285,17 +290,38 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     !since vpar_background actually has num_background_particles entries, consider giving it as an extra
     !optional input variable to stost, before randnum
     zet(1:3) = x !spatial position
-    zet(4) = sqrt(vpar**2+vperp**2)/start%v0(species) !normalized velocity module 
+    zet(4) = sqrt(vpar**2+vperp**2)/start%v0(species) !normalized velocity module
     zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
 
     t_max = (start%t(species)-t%confined)*start%v0(species)
     if (i_option.eq.13) t_max = min(t_max, t%step_anomalous_transport*start%v0(species))
 
+    ! KIM-nu override: only meaningful for the OU operator (iswmode=5).
+    ! Convert the splined nu_e(s) [1/s] to stost code units [1/length]
+    ! by dividing by the marker's normalisation speed v0.
+    use_kim_nu_now = kim_nu_loaded .and. (iswmode == 5)
+    if (use_kim_nu_now) then
+        z_cell      = x - tetra_physics(ind_tetr)%x1
+        psi_pol_loc = tetra_physics(ind_tetr)%Aphi1 &
+                    + sum(tetra_physics(ind_tetr)%gAphi * z_cell)
+        s_loc       = eval_s_from_psi_pol(psi_pol_loc)
+        nu_kim_phys = eval_kim_nu(s_loc)
+        nu_kim_code = nu_kim_phys / start%v0(species)
+    end if
+
     if (in%boole_precalc_collisions) then
-        randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species) 
-        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum)
+        randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species)
+        if (use_kim_nu_now) then
+            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum,nu_override=nu_kim_code)
+        else
+            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum)
+        end if
     else
-        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max)
+        if (use_kim_nu_now) then
+            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,nu_override=nu_kim_code)
+        else
+            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max)
+        end if
     endif
 
     vpar = zet(5)*zet(4)*start%v0(species)+vpar_background(1)
