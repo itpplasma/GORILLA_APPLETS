@@ -305,3 +305,12 @@ if(BUILD_TESTING AND FAX_NEO2_READER AND FAX_NATIVE_TABLE AND FAX_NATIVE_TABLE_E
             ${CMAKE_BINARY_DIR}/fax_existing_native_table.json ${FAX_NATIVE_TABLE_EXPORTS})
     set_tests_properties(canonical_ntv_fax_existing_native_table PROPERTIES TIMEOUT 300)
 endif()
+
+if(BUILD_TESTING)
+    add_executable(test_canonical_ntv_progress.x TESTS/test_canonical_ntv_progress.f90)
+    target_link_libraries(test_canonical_ntv_progress.x GORILLA_APPLETS)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/canonical_ntv_progress_work)
+    add_test(NAME canonical_ntv_progress COMMAND test_canonical_ntv_progress.x)
+    set_tests_properties(canonical_ntv_progress PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/canonical_ntv_progress_work)
+endif()

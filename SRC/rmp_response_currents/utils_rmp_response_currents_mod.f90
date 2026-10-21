@@ -647,7 +647,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                                        a_analytic_circ
     use constants, only: pi
     use canonical_ntv_mod, only: canonical_ntv_allocate, canonical_ntv_end, &
-        canonical_ntv_write, ntv_lorentz_nu
+        canonical_ntv_write, canonical_ntv_progress_open, ntv_lorentz_nu
 
     integer, intent(in)                               :: species
     integer, intent(in), optional                     :: n_particles_in
@@ -686,7 +686,10 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     endif
 
     if (in%boole_delta_f) call allocate_delta_f_per_particle(n_particles, in%n_species)
-    if (boole_canonical_ntv) call canonical_ntv_allocate(n_particles)
+    if (boole_canonical_ntv) then
+        call canonical_ntv_allocate(n_particles)
+        call canonical_ntv_progress_open(compute_spawn_volume(), start%t(species))
+    end if
 
     ! With the radial profile deposit (n_prof_bins > 0) the per-tetrahedron
     ! moments are not accumulated; allocate a dummy column only (the two

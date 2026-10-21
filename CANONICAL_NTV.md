@@ -477,3 +477,15 @@ This changes the backgrounds passed to `collis_init`, retaining its native CGS
 constants and pair Coulomb logarithms. The canonical Metropolis-Hastings path
 still requires mode-5 OU collisions; these profile checks do not establish
 full-Fokker-Planck transport parity.
+
+### Incremental records
+
+`ntv_incremental = .true.` flushes each completed marker to
+`canonical_ntv_markers.dat.partial` (or `ntv_output_file` plus `.partial`) and
+`canonical_ntv_checkpoints.dat.partial`. The columns and checkpoint times match
+the ordinary final tables. Include lost markers with their frozen final tallies.
+On interruption, use only complete numeric lines and intersect marker IDs between
+both files; a kill may fall between the two writes. The completion order is
+arbitrary. Early partial estimates can be biased toward fast or lost markers,
+so statistical admission uses complete chunks. Restart at a completed chunk
+boundary in the campaign driver; these files do not contain an orbit restart.
