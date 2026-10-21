@@ -34,7 +34,8 @@ if [ -n "${SCI_BASE_SHA:-}" ]; then
     export SCI_BASE_SHA
 fi
 while IFS= read -r key; do
+    [[ -v $key ]] || continue
     printf 'export %s=%q\n' "$key" "${!key}" >> "$stage/task.env"
-done < <(compgen -A variable SCI_MATRIX_; printf '%s\n' SCI_BASE_SHA SCI_HEAD_REF)
+done < <(compgen -A variable SCI_MATRIX_ || true; printf '%s\n' SCI_BASE_SHA SCI_HEAD_REF)
 tar -C "$stage" -cf - src mirrors revision.txt tier.txt task.env | zstd -q -T2 -o "$out"
 sha256sum "$out"
