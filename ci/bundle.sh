@@ -28,6 +28,11 @@ git -C "$stage/src" remote set-url origin "https://github.com/${GITHUB_REPOSITOR
 git -C "$src" rev-parse HEAD > "$stage/revision.txt"
 printf '%s\n' "${SCI_TIER:?SCI_TIER missing}" > "$stage/tier.txt"
 : > "$stage/task.env"
+# Resolve remote ref names before local clones collapse remote-tracking refs.
+if [ -n "${SCI_BASE_SHA:-}" ]; then
+    SCI_BASE_SHA=$(git -C "$src" rev-parse "${SCI_BASE_SHA}^{commit}")
+    export SCI_BASE_SHA
+fi
 while IFS= read -r key; do
     printf 'export %s=%q\n' "$key" "${!key}" >> "$stage/task.env"
 done < <(compgen -A variable SCI_MATRIX_; printf '%s\n' SCI_BASE_SHA SCI_HEAD_REF)
