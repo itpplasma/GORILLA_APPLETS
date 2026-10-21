@@ -432,9 +432,11 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     integer :: species = 1
     real(dp) :: m0, z0, n0, s_value, v0
     logical :: boole_T_and_n_from_files = .false.
-    logical :: boole_analytic_temperature_profile = .true.
+    logical :: boole_analytic_temperature_profile
 
     if (present(species_in)) species = species_in
+    ! The analytic SCEF temperature model must not replace other applet profiles.
+    boole_analytic_temperature_profile = (i_option == 12)
 
     call set_c
 
