@@ -133,6 +133,12 @@ module gorilla_applets_types_mod
     real(dp) :: lambda !Used in divertor_heat_loads
     integer  :: i_collision_mode = 1 !rmp_response_currents: stost iswmode (1=Coulomb, 5=Euler-Maruyama OU on v_par)
     integer  :: n_background_species = 2
+    logical  :: boole_honest_tracing(2) !used in self consistent electric field: honest push (T) vs. random walk (F) per species
+    logical  :: boole_recompute_D(2)    !used in self consistent electric field: recompute D per species (T) or reuse cached A_and_B_<species>.dat (F)
+    integer  :: n_source_updates = 1                !used in self consistent electric field: outer source-tuning iterations
+    logical  :: reduced_output = .false.            !used in self consistent electric field: write files only on the last EP update per source iteration
+    real(dp) :: source_relaxation_factor = 1.0_dp   !used in self consistent electric field: alpha in S := S - alpha*(n - n_target)*factor_from_tracing_time
+    real(dp) :: quasineutrality_tol = 0.0_dp        !used in self consistent electric field: early-exit tolerance on sum|n_e-n_i|V / sum(n_e+n_i)V (0 = off)
     end type input_t
 
     type(input_t) :: in
@@ -153,6 +159,9 @@ module gorilla_applets_types_mod
     character(len=100) :: tetr_moments
     character(len=100) :: exit_data
     character(len=100) :: grid_data
+    character(len=100) :: electric_field
+    character(len=100) :: density(2)   ! (species) — per-species RW density output
+    character(len=100) :: pushing_problems
     end type filenames_t
 
     type(filenames_t) :: filenames
@@ -184,6 +193,8 @@ module gorilla_applets_types_mod
     integer  :: ind_c
     integer, dimension(:,:), allocatable :: vertices_per_flux_surface !used in self_consistent_electric_field_mod
     integer, dimension(:,:), allocatable :: prisms_per_flux_tube !used in self_consistent_electric_field_mod
+    real(dp), dimension(:), allocatable :: s_vertices     ! (grid_size(1)+1) s-coordinate of each flux surface
+    real(dp), dimension(:), allocatable :: s_shell_volumes ! (grid_size(1))   volume of each flux shell
     end type grid_t
 
     type(grid_t) :: g
@@ -195,8 +206,9 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: phi_elec_from_rho
     real(dp), dimension(:), allocatable :: average_abs_phi_elec_from_rho
     real(dp), dimension(:), allocatable :: total_tracing_time
-    real(dp), dimension(:), allocatable :: s_shell_volumes
+    real(dp) :: exit_time_correction = 1.0_dp
     real(dp) :: mean_abs_rho_at_first_update
+    real(dp) :: mean_exit_time(2) = 0.0_dp  ! per species, set by RW routine and driver after honest push
     end type electric_potential_t
 
     type(electric_potential_t) :: ep
@@ -217,18 +229,32 @@ module gorilla_applets_types_mod
 
     type(delta_s_delta_s_squared_t) :: s
 
-    type diffusion_coefficients 
-    real(dp), dimension(:), allocatable :: A
-    real(dp), dimension(:), allocatable :: A_from_first_run
-    real(dp), dimension(:), allocatable :: B
-    real(dp), dimension(:), allocatable :: grad_A
-    real(dp), dimension(:), allocatable :: grad_B
-    real(dp), dimension(:), allocatable :: s_vertices
-    real(dp), dimension(4)              :: polynomial_coefficients_for_B
-    real(dp), dimension(3)              :: polynomial_coefficients_for_A
+    type diffusion_coefficients
+    real(dp), dimension(:,:), allocatable :: A                ! (grid_size+1, species)
+    real(dp), dimension(:,:), allocatable :: A_from_first_run ! (grid_size+1, species)
+    real(dp), dimension(:,:), allocatable :: B                ! (grid_size+1, species)
+    real(dp), dimension(:,:), allocatable :: grad_A           ! (grid_size,   species)
+    real(dp), dimension(:,:), allocatable :: grad_B           ! (grid_size,   species)
+    real(dp), dimension(4,2)              :: polynomial_coefficients_for_B
+    real(dp), dimension(3,2)              :: polynomial_coefficients_for_A
+    logical,  dimension(2)                :: boole_cached_data_loaded = .false. ! (species) A_and_B_species<k>.dat read in
     end type diffusion_coefficients
 
     type(diffusion_coefficients) dc
+
+    type desired_density_t
+    real(dp), dimension(:), allocatable :: value ! (grid_size(1)+1) target electron/ion density at each s-vertex
+    real(dp), dimension(:), allocatable :: grad  ! (grid_size(1))   piecewise-constant d(value)/ds per flux shell
+    end type desired_density_t
+
+    type(desired_density_t) :: desired_density
+
+    type particle_source_t
+    real(dp), dimension(:), allocatable :: value ! (grid_size(1)+1) particle source amplitude per s-vertex
+    real(dp), dimension(:), allocatable :: grad  ! (grid_size(1))   piecewise-constant d(value)/ds per flux shell
+    end type particle_source_t
+
+    type(particle_source_t) :: particle_source
 
     type one_d_t
     real(dp), dimension(:,:), allocatable :: densities
