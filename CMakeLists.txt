@@ -46,6 +46,25 @@ elseif(APPLE)
       link_directories(/usr/local/lib)
     endif()
   endif()
+
+  # Prefer Homebrew's OpenBLAS over Accelerate. On Intel Macs, Accelerate's
+  # AVX-512 kernels (e.g. dtrsm inside dgesv) divide unused vector lanes,
+  # which raises spurious SIGFPE under -ffpe-trap. OpenBLAS is keg-only, so
+  # pass its prefix explicitly. Override with -DBLA_VENDOR=... if needed.
+  if(NOT DEFINED BLA_VENDOR)
+    execute_process(COMMAND brew --prefix openblas
+                    OUTPUT_VARIABLE OPENBLAS_PREFIX
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_QUIET)
+    if(OPENBLAS_PREFIX AND EXISTS "${OPENBLAS_PREFIX}/lib")
+      list(APPEND CMAKE_PREFIX_PATH "${OPENBLAS_PREFIX}")
+      set(BLA_VENDOR OpenBLAS)
+    else()
+      message(WARNING "OpenBLAS not found, falling back to Accelerate. "
+                      "Accelerate may raise spurious SIGFPE under -ffpe-trap "
+                      "(fix: brew install openblas).")
+    endif()
+  endif()
 endif()
 
 find_package(BLAS REQUIRED)

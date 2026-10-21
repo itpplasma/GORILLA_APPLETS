@@ -350,6 +350,10 @@ subroutine give_file_names
     filenames%tetr_moments = 'tetr_moments.dat'
     filenames%exit_data = 'exit_data.dat'
     filenames%grid_data = 'grid_data.nc'
+    filenames%electric_field = 'electric_field.dat'
+    filenames%density(1) = 'ion_density.dat'
+    filenames%density(2) = 'electron_density.dat'
+    filenames%pushing_problems = 'pushing_problems.dat'
 
 end subroutine give_file_names
 
@@ -392,6 +396,10 @@ subroutine unlink_files
     call unlink(filenames%electric_potential)
     call unlink(filenames%boltzmann_density)
     call unlink(filenames%divertor_intersections)
+    call unlink(filenames%electric_field)
+    call unlink(filenames%density(1))
+    call unlink(filenames%density(2))
+    call unlink(filenames%pushing_problems)
 
 
 end subroutine unlink_files
