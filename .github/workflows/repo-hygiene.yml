@@ -4,6 +4,11 @@ on:
   merge_group:
 permissions:
   contents: read
+# Only PR runs share a group; pending push and merge-group runs stay independent.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.ref, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   repo-hygiene:
     uses: itpplasma/.github/.github/workflows/repo-hygiene.yml@0663fcdd3b414a741bc3df08959a6f83aedf2d40
