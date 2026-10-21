@@ -126,3 +126,15 @@ if(BUILD_TESTING)
     target_link_libraries(test_rmp_equilibrium_potential.x GORILLA_APPLETS)
     add_test(NAME rmp_equilibrium_potential COMMAND test_rmp_equilibrium_potential.x)
 endif()
+
+if(BUILD_TESTING)
+    add_executable(test_rmp_gc_measure.x
+        SRC/rmp_response_currents/rmp_gc_measure_mod.f90
+        TESTS/test_rmp_gc_measure.f90)
+    set_target_properties(test_rmp_gc_measure.x PROPERTIES
+        Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/measure_test_modules)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/measure_test_modules)
+    target_include_directories(test_rmp_gc_measure.x PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/measure_test_modules)
+    add_test(NAME rmp_gc_measure COMMAND test_rmp_gc_measure.x)
+endif()
