@@ -35,7 +35,10 @@ subroutine calc_rmp_response_currents
         boole_dump_collisions_n1, coll_dump_unit, coll_event_count, &
         coll_dt_sum, coll_dist_sum, &
         boole_use_kim_nu, kim_nu_file, &
-        compute_spawn_volume, filter_markers_by_trapping, trapping_filter_mode
+        compute_spawn_volume, filter_markers_by_trapping, trapping_filter_mode, &
+        boole_local_background, set_local_collision_background, &
+        boole_nonlinear_weight, init_nonlinear_weight, &
+        boole_local_energy_sampling, rescale_energies_to_local_temperature
     use profile_data_mod, only: load_profiles, load_kim_nu
     use perturbation_field_mod, only: init_constant_perturbation, load_perturbation_field, &
                                       init_step_perturbation, load_eperp_field, boole_skip_phase
@@ -84,6 +87,13 @@ subroutine calc_rmp_response_currents
             call load_eperp_field(trim(e_perp_file), trim(equil_mapping_file))
     end if
 
+    ! Unperturbed flux label for the nonlinear weights (needs the grid).
+    if (in%boole_delta_f .and. boole_nonlinear_weight) call init_nonlinear_weight()
+
+    ! Collision background from the loaded profiles (needs load_profiles).
+    if (in%boole_delta_f .and. in%boole_collisions .and. boole_local_background) &
+        call set_local_collision_background()
+
     call calc_starting_conditions_rmp_response_currents
     call eliminate_particles_outside_flux_threshold
     if (in%boole_delta_f) then
@@ -96,6 +106,10 @@ subroutine calc_rmp_response_currents
             call bias_starting_positions_to_s_window
         end if
     end if
+
+    ! Maxwellian at the local temperature of each spawn point.
+    if (in%boole_delta_f .and. boole_local_energy_sampling) &
+        call rescale_energies_to_local_temperature(species=1)
 
     ! Optional trapped/passing population filter (post-spawn).
     if (trim(trapping_filter_mode) /= 'none') then
