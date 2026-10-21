@@ -43,6 +43,50 @@ make reconfigure
 
 The resulting executable is `BUILD/gorilla_applets_main.x` (symlinked to the project root). Requires a Fortran compiler with OpenMP, BLAS/LAPACK, NetCDF (Fortran bindings), CMake >= 3.12, and Ninja.
 
+
+### CINECA Leonardo
+
+Built and tested on the Leonardo CPU login nodes and in a budget-free serial
+batch job (GCC 12.2.0, CMake 3.27.9, OpenBLAS 0.3.26, NetCDF-C 4.9.2,
+NetCDF-Fortran 4.6.1, Python 3.11.7) at GORILLA_APPLETS `cb6f347` with GORILLA
+`1a6cdc1`, 2026-10-19. Pitagora access was not available, so nothing is
+verified there. GitHub is reachable from the login nodes. The shims below are
+needed because the Spack NetCDF modules ship no `netCDFConfig.cmake` and the
+CMake files link `-lblas` and `-llapack`, which OpenBLAS does not provide as
+separate libraries. The Python tests need `f90nml`, installed into a virtual
+environment.
+
+```bash
+module purge
+module load profile/base gcc/12.2.0 cmake/3.27.9 ninja/1.11.1 \
+    openblas/0.3.26--gcc--12.2.0 python/3.11.7 \
+    netcdf-c/4.9.2--gcc--12.2.0-spack0.22 \
+    netcdf-fortran/4.6.1--gcc--12.2.0-spack0.22
+export B=$CINECA_SCRATCH/builds TMPDIR=$CINECA_SCRATCH/builds/tmp
+mkdir -p $TMPDIR $B/shim/netCDF $B/shim/lib
+export CMAKE_BUILD_PARALLEL_LEVEL=4 OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=1
+echo 'set(netCDF_FOUND TRUE)' > $B/shim/netCDF/netCDFConfig.cmake
+for l in lapack blas; do ln -sf $OPENBLAS_LIB/libopenblas.so $B/shim/lib/lib$l.so; done
+LINK="-L$B/shim/lib -Wl,-rpath,$OPENBLAS_LIB -L$NETCDF_FORTRAN_LIB -L$NETCDF_C_LIB -Wl,-rpath,$NETCDF_FORTRAN_LIB -Wl,-rpath,$NETCDF_C_LIB"
+INC="-I$NETCDF_FORTRAN_INC -I$NETCDF_C_INC"
+cd $B
+git clone https://github.com/itpplasma/GORILLA.git
+git clone https://github.com/itpplasma/GORILLA_APPLETS.git && cd GORILLA_APPLETS
+python3 -m venv $B/venv && $B/venv/bin/pip install f90nml
+nice cmake -S . -B build-lrd -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DPython3_EXECUTABLE=$B/venv/bin/python \
+    -DnetCDF_DIR=$B/shim/netCDF "-DCMAKE_Fortran_FLAGS=$INC" \
+    "-DCMAKE_EXE_LINKER_FLAGS=$LINK" "-DCMAKE_SHARED_LINKER_FLAGS=$LINK"
+nice cmake --build build-lrd -j 4
+(cd build-lrd && ctest --output-on-failure)
+```
+
+The sibling `GORILLA` checkout is required. Release build: 36 s with `-j 4`
+under `nice`. All 9 registered tests passed (32 s in total, four threads;
+the three Fortran unit tests take under a second, the Python application
+tests up to 16 s each). Run `ctest` in a batch job on `--partition=lrd_all_serial`
+(budget-free, no account, `--cpus-per-task=4`) rather than on the login node.
+
 ## Running
 
 ```bash
@@ -68,6 +112,18 @@ make test
 ```
 
 Each smoke test is a short scenario (small grid, few particles) wired through CMake; the alpha-particle lifetime test, for example, drives the binary twice (flux-tube precomputation, then a 10-particle trace) and checks the output file. The GitHub Actions workflow in [.github/workflows/CI.yml](.github/workflows/CI.yml) builds against a fresh checkout of GORILLA and runs the suite on every PR.
+
+## Merging
+
+- Pull requests, including every layer of a stacked PR, run the fast CI tier.
+  Label a PR `full-ci` to run the full tier on it before queueing.
+- Review a stack layer by layer. When it is ready, collapse it into one PR into
+  `main` (retarget the top layer to `main`); the lower PRs then show as merged.
+- Click "Merge when ready" (or `gh pr merge --merge --auto`). The PR enters the
+  merge queue, the full CI tier runs on the exact merge result, and on success
+  it lands on `main` as a merge commit. `main` itself is not re-tested on push.
+- A branch need not be up to date with `main`. Merge `main` into a PR only
+  when it conflicts.
 
 ## License
 
