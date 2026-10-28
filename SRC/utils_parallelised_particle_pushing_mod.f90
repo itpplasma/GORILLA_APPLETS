@@ -1,23 +1,24 @@
 module utils_parallelised_particle_pushing_mod
 
-    use, intrinsic :: iso_fortran_env, only: dp => real64
+    use, intrinsic :: iso_fortran_env, only: dp => real64, int64
 
     implicit none
-   
+
 contains
 
 subroutine print_progress(num_particles,kpart,n)
 
+    integer, parameter :: n_critical = 100
     integer :: num_particles, kpart, n
     logical :: print_progress_for_every_particle = .false.
 
-    if ((.not.print_progress_for_every_particle).and.(num_particles.gt.10)) then
-        if (modulo(kpart,int(num_particles/100)).eq.0) then
+    if ((.not.print_progress_for_every_particle).and.(num_particles.gt.n_critical)) then
+        if (modulo(kpart,int(num_particles/n_critical)).eq.0) then
             print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
         endif
     else
         print *, kpart, ' / ', num_particles, 'particle: ', n, 'thread: ' !, omp_get_thread_num()
-    endif    
+    endif
 
 end subroutine print_progress
 
@@ -257,6 +258,8 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     use gorilla_applets_types_mod, only: in, c, time_t, start
     use collis_ions, only: stost
     use gorilla_applets_settings_mod, only: i_option
+    use profile_data_mod, only: kim_nu_loaded, eval_kim_nu, eval_s_from_psi_pol
+    use tetra_physics_mod, only: tetra_physics
 
     integer, intent(in) :: i, n, species, iswmode
     real(dp), dimension(3), intent(inout) :: x
@@ -266,14 +269,12 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
 
     real(dp), dimension(5) :: zet
     real(dp), dimension(3) :: randnum
-    real(dp), dimension(:), allocatable :: efcolf,velrat,enrat,vpar_background
+    real(dp), dimension(c%n) :: efcolf,velrat,enrat,vpar_background
     integer :: err
     real(dp) :: t_max
 
-    allocate(efcolf(c%n))
-    allocate(velrat(c%n))
-    allocate(enrat(c%n))
-    allocate(vpar_background(c%n))
+    real(dp) :: z_cell(3), psi_pol_loc, s_loc, nu_kim_phys, nu_kim_code
+    logical  :: use_kim_nu_now
 
     efcolf = c%efcolf_mat(:,ind_tetr)
     velrat = c%velrat_mat(:,ind_tetr)
@@ -285,17 +286,38 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     !since vpar_background actually has num_background_particles entries, consider giving it as an extra
     !optional input variable to stost, before randnum
     zet(1:3) = x !spatial position
-    zet(4) = sqrt(vpar**2+vperp**2)/start%v0(species) !normalized velocity module 
+    zet(4) = sqrt(vpar**2+vperp**2)/start%v0(species) !normalized velocity module
     zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
 
     t_max = (start%t(species)-t%confined)*start%v0(species)
     if (i_option.eq.13) t_max = min(t_max, t%step_anomalous_transport*start%v0(species))
 
+    ! KIM-nu override: only meaningful for the OU operator (iswmode=5).
+    ! Convert the splined nu_e(s) [1/s] to stost code units [1/length]
+    ! by dividing by the marker's normalisation speed v0.
+    use_kim_nu_now = kim_nu_loaded .and. (iswmode == 5)
+    if (use_kim_nu_now) then
+        z_cell      = x - tetra_physics(ind_tetr)%x1
+        psi_pol_loc = tetra_physics(ind_tetr)%Aphi1 &
+                    + sum(tetra_physics(ind_tetr)%gAphi * z_cell)
+        s_loc       = eval_s_from_psi_pol(psi_pol_loc)
+        nu_kim_phys = eval_kim_nu(s_loc)
+        nu_kim_code = nu_kim_phys / start%v0(species)
+    end if
+
     if (in%boole_precalc_collisions) then
-        randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species) 
-        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum)
+        randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species)
+        if (use_kim_nu_now) then
+            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum,nu_override=nu_kim_code)
+        else
+            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum)
+        end if
     else
-        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max)
+        if (use_kim_nu_now) then
+            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,nu_override=nu_kim_code)
+        else
+            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max)
+        end if
     endif
 
     vpar = zet(5)*zet(4)*start%v0(species)+vpar_background(1)
@@ -401,34 +423,47 @@ function linspace(start, stop, n) result(x)
 end function linspace
 
 subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num, second_factor)
-    !This routine sets an individual seed for random number generation in each thread. It does so by adding the thread number
-    !to a given array of integers and using the sum as a put argument of random_seed. Since the seed has rather low entropy (values
-    !of the array are multiples of each other), the first random numbers produced are likely to be non-random. Thus, n random
-    !numbers are generated to get rid of these potentially corrupted numnbers (compare with 
-    !https://stackoverflow.com/questions/51893720/correctly-setting-random-seeds-for-repeatability, also check
-    !https://stats.stackexchange.com/questions/354373/what-exactly-is-a-seed-in-a-random-number-generator)
+    !Sets an individual, reproducible RNG state for each OpenMP thread. The state
+    !is derived from the master seed loaded from seed.inp (via
+    !set_seed_for_random_numbers) by combining it with thread_num and an optional
+    !second_factor through the SplitMix64 bit mixer, which produces
+    !well-decorrelated 64-bit words for neighbouring inputs. Same seed.inp +
+    !same thread partition => bit-identical per-thread streams. If no master
+    !seed was loaded, we fall back to a hardcoded constant so callers that
+    !skipped set_seed_for_random_numbers keep working.
+
+    use utils_data_pre_and_post_processing_mod, only: master_seed_u64, master_seed_loaded, splitmix64_next
 
     integer, intent(in) :: thread_num
     integer, intent(in), optional :: second_factor
-    real(dp) :: randnum
-    integer :: i,n, state(33)
+    integer(int64), parameter :: gamma        = -7046029254386353131_int64  ! 0x9E3779B97F4A7C15
+    integer(int64), parameter :: second_salt  = -6534898150910275811_int64  ! arbitrary large odd
+    integer(int64), parameter :: mask31       = 2147483647_int64            ! 0x7FFFFFFF
+    integer(int64) :: sm_state, key, w
+    integer, allocatable :: state(:)
+    integer :: n, i, sf
 
-    n = 1000
-    state = 20180815
+    sf = 0
+    if (present(second_factor)) sf = second_factor
 
-    do i = 1, size(state)
-        if (present(second_factor)) then 
-            state(i) = (state(i)+thread_num+second_factor)*i
-        else
-            state(i) = (state(i)+thread_num)*i
-        endif
+    if (master_seed_loaded) then
+        key = ieor(master_seed_u64, int(thread_num, int64) * gamma)
+        key = ieor(key,             int(sf,         int64) * second_salt)
+    else
+        key = int(20180815, int64) + int(thread_num, int64) + int(sf, int64) * gamma
+    endif
+
+    sm_state = key
+    call splitmix64_next(sm_state, w)   ! initial diffusion of the key
+
+    call random_seed(size=n)
+    allocate(state(n))
+    do i = 1, n
+        call splitmix64_next(sm_state, w)
+        state(i) = int(iand(w, mask31), kind(state(i)))
     enddo
-
-    call random_seed(put=state+thread_num)
-
-    do i = 1,n
-        call random_number(randnum)
-    enddo
+    call random_seed(put=state)
+    deallocate(state)
 
 end subroutine initialise_seed_for_random_numbers_for_each_thread
 

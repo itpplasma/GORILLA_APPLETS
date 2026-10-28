@@ -1,0 +1,127 @@
+! INPUT FILE FOR GORILLA - RMP RESPONSE CURRENTS EXAMPLE
+!
+! GORILLA CONFIGURATION NAMELIST
+&GORILLANML
+!
+ !Electrostatic potential
+ eps_Phi =  0.0d0 ,
+!
+ !Coordinate system
+ !1 ... (R,phi,Z) cylindrical coordinate system
+ !2 ... (s,theta,phi) symmetry flux coordinate system
+ coord_system = 1 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !particle species
+ !1 ... electron, 2 ... deuterium ion, 3 ... alpha particle, 4 ... ionised tungsten
+ ispecies = 2 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Switch for initial periodic coordinate particle re-location (modulo operation)
+ boole_periodic_relocation = .true. ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Gorilla pusher options
+ !1 ... numerical RK pusher, 2 ... polynomial pusher
+ ipusher = 2 ,
+!
+ !Numerical pusher options
+!
+ !accuracy for integration step:
+ boole_pusher_ode45 = .false. ,
+!
+ !ODE45 relative accuracy (pusher_orbit)
+ rel_err_ode45 = 1.E-10 ,
+!
+ !Physical time - orbit parameter relation
+ boole_dt_dtau = .true. ,
+!
+ !Precomputation for Newton iterations
+ boole_newton_precalc = .false. ,
+!
+ !Polynomial pusher options
+!
+ !Polynomial order for orbit pusher
+ poly_order = 2 ,
+!
+ !Settings for precomputation of coefficients
+ !0 ... No precomputation
+ !1 ... Precomputation of coefficients and factorization of powers of perpinv
+ !2 ... Same as 1 but with further precomputation of operatorb in b
+ i_precomp = 0 ,
+!
+ !Face prediction with 2nd order polynomial
+ boole_guess = .true. ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Time tracing options
+ ! 1 ... Time tracing in 0th order approximation
+ ! 2 ... (Correct) Hamiltonian time tracing in adequate polynomial order
+ i_time_tracing_option = 1 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Processing of particle handover to tetrahedron neighbour
+ ! 1 ... Processing with special treatment of periodic boundaries
+ ! 2 ... Position exchange via Cartesian variables
+ handover_processing_kind = 1 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Noise switches (ALL DISABLED)
+ boole_axi_noise_vector_pot = .false. ,
+ axi_noise_eps_A = 0.0d0 ,
+ boole_axi_noise_elec_pot = .false. ,
+ axi_noise_eps_Phi = 0.0d0 ,
+ boole_non_axi_noise_vector_pot = .false. ,
+ non_axi_noise_eps_A = 0.0d0 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !RMP perturbation via Mephit
+ boole_pert_from_mephit = .false.
+!
+ !Helical harmonic perturbation (DISABLED by default, enable for RMP)
+ boole_helical_pert = .false. ,
+ helical_pert_eps_Aphi = 0.0d0 ,
+ helical_pert_m_fourier = 2 ,
+ helical_pert_n_fourier = 2 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Switches to calculate optional quantities
+ boole_time_hamiltonian = .true. ,
+ boole_gyrophase = .true. ,
+ boole_vpar_int = .true. ,
+ boole_vpar2_int = .true. ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Adaptive time step scheme
+ boole_adaptive_time_steps = .false. ,
+ desired_delta_energy = 1.E-10 ,
+ max_n_intermediate_steps = 10000 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+  !boolean for precalculation of rectangular grid to improve find_tetra
+  boole_grid_for_find_tetra = .true. ,
+  a_factor = 1 ,
+  b_factor = 0 ,
+  c_factor = 0 ,
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+ !Strong electric field terms
+ boole_strong_electric_field = .false. ,
+ boole_save_electric = .false. ,
+ filename_electric_field = 'electric_field.dat',
+ filename_electric_drift = 'electric_drift.dat',
+!
+!------------------------------------------------------------------------------------------------------------!
+!
+/
