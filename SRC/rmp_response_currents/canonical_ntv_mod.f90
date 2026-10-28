@@ -34,6 +34,8 @@
 module canonical_ntv_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
+    use deltaf_phase_step_kernel, only: evaluate_deltaf_phase_step
+    use deltaf_phase_derivative_kernel, only: evaluate_deltaf_phase_derivative
     use deltaf_harmonic_kernel, only: evaluate_deltaf_harmonic
     use deltaf_weight_kernel, only: evaluate_deltaf_weight
     use chartmap_ntv_mod, only: chartmap_raw_t, read_chartmap_raw, chartmap_harmonic
@@ -52,7 +54,8 @@ module canonical_ntv_mod
         ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
         ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, ntv_lorentz_mh, &
         ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn, ntv_mesh_phi0, &
-        ntv_profile_phi0, ntv_fax_file
+        ntv_profile_phi0, ntv_fax_file, ntv_incremental
+    public :: canonical_ntv_progress_open
     public :: canonical_ntv_nml_read, canonical_ntv_init, canonical_ntv_allocate, &
         canonical_ntv_birth, canonical_ntv_push, canonical_ntv_collision, &
         canonical_ntv_end, canonical_ntv_write, ntv_harmonic_dphi, &
@@ -126,12 +129,17 @@ module canonical_ntv_mod
     !> .false.: the mesh keeps eps_Phi*A_theta (zero for eps_Phi = 0).
     logical  :: ntv_mesh_phi0 = .false.
 
+    ! Opt-in loss-inclusive records after each finished marker. The ordinary
+    ! final tables remain the authority when all markers have finished.
+    logical :: ntv_incremental = .false.
+    integer :: progress_markers_unit = 0, progress_checks_unit = 0
+
     namelist /canonical_ntv_nml/ boole_canonical_ntv, ntv_m_pol, ntv_n_tor, &
         ntv_amplitude, ntv_bmn, ntv_phimn, ntv_profile_file, ntv_theta_kind, &
         ntv_output_file, ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
         ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, &
         ntv_lorentz_mh, ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn, &
-        ntv_mesh_phi0, ntv_fax_file
+        ntv_mesh_phi0, ntv_fax_file, ntv_incremental
 
     !> Loss kinds (column loss_kind): grid exit (last mesh surface or inner
     !> boundary), wall contour, s_outer_cut.
@@ -463,27 +471,34 @@ subroutine chartmap_harmonics_dphi(s, theta, phi, db1_dphi, db1_dtheta)
     real(dp), intent(in)  :: s, theta, phi
     real(dp), intent(out) :: db1_dphi
     real(dp), intent(out), optional :: db1_dtheta
-    real(dp) :: bc, bs, d, db1, db1_ds, db1_dth, dp1, dp1_ds, dp1_dth, dp1_dphi
-    real(dp) :: dn, shift
-    integer :: k
+    real(dp) :: bc, bs, d, dth, weights(4), theta_sum
+    real(dp) :: sn, cs, next_sn, next_cs, sn_step, cs_step, phase
+    integer :: k, lo, hi
 
     db1_dphi = 0.0_dp
-    if (present(db1_dtheta)) db1_dtheta = 0.0_dp
-    dn = real(ntv_n_tor, dp)
-    shift = 0.5_dp * acos(-1.0_dp) / dn
+    theta_sum = 0.0_dp
+    call spline_weights(cm_s, s, lo, hi, weights)
+    sn_step = sin(theta)
+    cs_step = cos(theta)
     do k = 1, n_cm_modes
-        bc = ntv_amplitude * spline_value(cm_s, cm_bc(:, k), cm_bc2(:, k), s)
-        bs = ntv_amplitude * spline_value(cm_s, cm_bs(:, k), cm_bs2(:, k), s)
-        call evaluate_deltaf_harmonic(real(cm_m(k), dp), dn, bc, 0.0_dp, 0.0_dp, &
-            0.0_dp, theta, phi, db1, db1_ds, db1_dth, d, dp1, dp1_ds, dp1_dth, dp1_dphi)
+        ! The loaded m values are consecutive. Re-anchor every 32 modes to
+        ! bound recurrence drift, including near-cancelling harmonic sums.
+        if (mod(k - 1, 32) == 0) then
+            phase = real(cm_m(k), dp)*theta - real(ntv_n_tor, dp)*phi
+            sn = sin(phase)
+            cs = cos(phase)
+        end if
+        bc = ntv_amplitude * spline_at(cm_bc(:, k), cm_bc2(:, k), lo, hi, weights)
+        bs = ntv_amplitude * spline_at(cm_bs(:, k), cm_bs2(:, k), lo, hi, weights)
+        call evaluate_deltaf_phase_derivative(real(cm_m(k), dp), &
+            real(ntv_n_tor, dp), bc, bs, sn, cs, d, dth)
+        call evaluate_deltaf_phase_step(sn, cs, sn_step, cs_step, next_sn, next_cs)
+        sn = next_sn
+        cs = next_cs
         db1_dphi = db1_dphi + d
-        if (present(db1_dtheta)) db1_dtheta = db1_dtheta + db1_dth
-        call evaluate_deltaf_harmonic(real(cm_m(k), dp), dn, bs, 0.0_dp, 0.0_dp, &
-            0.0_dp, theta, phi + shift, db1, db1_ds, db1_dth, d, dp1, dp1_ds, &
-            dp1_dth, dp1_dphi)
-        db1_dphi = db1_dphi + d
-        if (present(db1_dtheta)) db1_dtheta = db1_dtheta + db1_dth
+        theta_sum = theta_sum + dth
     end do
+    if (present(db1_dtheta)) db1_dtheta = theta_sum
 end subroutine chartmap_harmonics_dphi
 
 !> Local canonical quantities of a marker (vpar, perpinv) at x in cell ind_tetr.
@@ -681,6 +696,42 @@ subroutine canonical_ntv_collision(n, species, h_phi, vpar_old, vpar_new)
         + start%particle_mass(species) * h_phi * (vpar_new - vpar_old)
 end subroutine canonical_ntv_collision
 
+!> Progress files retain completed markers even if the enclosing job stops.
+!> Readers must intersect marker IDs between the two files: a kill can occur
+!> between their writes. Completed chunks are the restart boundary.
+subroutine canonical_ntv_progress_open(volume, trace_time)
+    real(dp), intent(in) :: volume, trace_time
+    integer :: k
+
+    if (.not. ntv_incremental) return
+    open(newunit=progress_markers_unit, file=trim(ntv_output_file)//'.partial', &
+        status='replace', action='write')
+    write(progress_markers_unit, '(a, es24.16, a, es24.16)') &
+        '# spawn_volume_cm3 ', volume, ' trace_time_s ', trace_time
+    write(progress_markers_unit, '(2a)') '# ', ntv_col_names
+    open(newunit=progress_checks_unit, file='canonical_ntv_checkpoints.dat.partial', &
+        status='replace', action='write')
+    write(progress_checks_unit, '(a, *(1x, es24.16))') '# times_s', &
+        (real(k, dp)*ntv_check_dt, k = 1, ntv_n_check)
+    flush(progress_markers_unit)
+    flush(progress_checks_unit)
+end subroutine canonical_ntv_progress_open
+
+subroutine write_progress_marker(n)
+    integer, intent(in) :: n
+
+    if (.not. ntv_incremental) return
+    !$omp critical (canonical_ntv_progress_io)
+    write(progress_markers_unit, '(i10, 1x, i2, 18(1x, es24.16), 1x, i2)') &
+        nint(rec(c_n, n)), nint(rec(c_lost, n)), rec(c_p:c_t1, n), &
+        rec(c_npush:c_psi1, n), nint(rec(c_kind, n))
+    write(progress_checks_unit, '(i10, *(1x, es24.16))') n, tphys(n), &
+        chk_dh(1:ntv_n_check, n), chk_tq(1:ntv_n_check, n), chk_w(1:ntv_n_check, n)
+    flush(progress_markers_unit)
+    flush(progress_checks_unit)
+    !$omp end critical (canonical_ntv_progress_io)
+end subroutine write_progress_marker
+
 subroutine canonical_ntv_end(n, lost, t_end)
     integer,  intent(in) :: n
     logical,  intent(in) :: lost
@@ -701,6 +752,7 @@ subroutine canonical_ntv_end(n, lost, t_end)
         chk_w(chk_next(n), n) = rec(c_w, n)
         chk_next(n) = chk_next(n) + 1
     end do
+    call write_progress_marker(n)
 end subroutine canonical_ntv_end
 
 !> Records why marker n is lost (loss_wall, loss_outer_cut); a loss without a
@@ -738,6 +790,10 @@ subroutine canonical_ntv_write(volume, trace_time)
     real(dp) :: sum_tq, sum_dh, sum_dp, sum_dc, max_w, max_dp
 
     np = size(rec, 2)
+    if (progress_markers_unit /= 0) close(progress_markers_unit)
+    if (progress_checks_unit /= 0) close(progress_checks_unit)
+    progress_markers_unit = 0
+    progress_checks_unit = 0
     open(newunit=u, file=trim(ntv_output_file), status='replace', action='write')
     write(u, '(a, i0, a, i0, a, es24.16)') '# canonical NTV markers: m = ', &
         ntv_m_pol, ', n = ', ntv_n_tor, ', sigma = ', ntv_amplitude
@@ -1120,12 +1176,25 @@ end subroutine spline_second_derivatives
 !> Natural cubic spline value; zero outside the tabulated range.
 pure function spline_value(x, y, y2, xv) result(val)
     real(dp), intent(in) :: x(:), y(:), y2(:), xv
-    real(dp) :: val, h, a, b
-    integer :: lo, hi, k
+    real(dp) :: val, weights(4)
+    integer :: lo, hi
 
-    val = 0.0_dp
-    if (xv < x(1) .or. xv > x(size(x))) return
+    call spline_weights(x, xv, lo, hi, weights)
+    val = spline_at(y, y2, lo, hi, weights)
+end function spline_value
+
+!> Share the search and cubic weights between all fields on the same grid.
+pure subroutine spline_weights(x, xv, lo, hi, weights)
+    real(dp), intent(in) :: x(:), xv
+    integer, intent(out) :: lo, hi
+    real(dp), intent(out) :: weights(4)
+    real(dp) :: h, a, b
+    integer :: k
+
     lo = 1
+    hi = 1
+    weights = 0.0_dp
+    if (xv < x(1) .or. xv > x(size(x))) return
     hi = size(x)
     do while (hi - lo > 1)
         k = (hi + lo) / 2
@@ -1138,8 +1207,16 @@ pure function spline_value(x, y, y2, xv) result(val)
     h = x(hi) - x(lo)
     a = (x(hi) - xv) / h
     b = (xv - x(lo)) / h
-    val = a * y(lo) + b * y(hi) + ((a**3 - a) * y2(lo) + (b**3 - b) * y2(hi)) &
-          * h**2 / 6.0_dp
-end function spline_value
+    weights = [a, b, (a**3 - a)*h**2/6.0_dp, (b**3 - b)*h**2/6.0_dp]
+end subroutine spline_weights
+
+pure function spline_at(y, y2, lo, hi, weights) result(val)
+    real(dp), intent(in) :: y(:), y2(:), weights(4)
+    integer, intent(in) :: lo, hi
+    real(dp) :: val
+
+    val = weights(1)*y(lo) + weights(2)*y(hi) &
+        + weights(3)*y2(lo) + weights(4)*y2(hi)
+end function spline_at
 
 end module canonical_ntv_mod

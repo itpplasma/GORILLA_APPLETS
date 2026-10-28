@@ -4,6 +4,9 @@ program test_deltaf_kernels
     ! derivatives, and the circular chart agrees with GORILLA's analytic circular
     ! field (field_analytic_circ_mod, grid_kind = 5).
     use, intrinsic :: iso_fortran_env, only: dp => real64
+    use deltaf_phase_step_kernel, only: evaluate_deltaf_phase_step
+    use deltaf_phase_derivative_kernel, only: evaluate_deltaf_phase_derivative
+    use deltaf_complex_harmonic_kernel, only: evaluate_deltaf_complex_harmonic
     use deltaf_harmonic_kernel, only: evaluate_deltaf_harmonic
     use deltaf_circular_chart_kernel, only: evaluate_deltaf_circular_chart
     use deltaf_weight_kernel, only: evaluate_deltaf_weight
@@ -22,6 +25,8 @@ program test_deltaf_kernels
 
     failures = 0
     call check_harmonic()
+    call check_complex_harmonic()
+    call check_phase_recurrence()
     call check_circular_against_gorilla()
     call check_weight()
     if (failures /= 0) then
@@ -31,6 +36,52 @@ program test_deltaf_kernels
     write (*, "(a)") "test_deltaf_kernels: all checks passed"
 
 contains
+
+    subroutine check_phase_recurrence()
+        real(dp) :: sn, cs, sn_next, cs_next, th, ph, angle, dph, dth, refph, refth
+        integer :: j, m
+
+        do j = 0, 16
+            th = j*2*pi/16
+            ph = 0.132_dp + j*0.7_dp
+            do m = -320, 320
+                if (mod(m + 320, 32) == 0) then
+                    angle = m*th - 3*ph
+                    sn = sin(angle)
+                    cs = cos(angle)
+                end if
+                call evaluate_deltaf_phase_derivative(real(m, dp), 3.0_dp, &
+                    1.3_dp, -0.7_dp, sn, cs, dph, dth)
+                call evaluate_deltaf_complex_harmonic(real(m, dp), 3.0_dp, &
+                    1.3_dp, -0.7_dp, th, ph, refph, refth)
+                call check_close("phase recurrence phi", dph, refph, 1.0e-10_dp)
+                call check_close("phase recurrence theta", dth, refth, 1.0e-10_dp)
+                call evaluate_deltaf_phase_step(sn, cs, sin(th), cos(th), sn_next, cs_next)
+                sn = sn_next
+                cs = cs_next
+            end do
+        end do
+    end subroutine check_phase_recurrence
+
+    subroutine check_complex_harmonic()
+        real(dp) :: m, n, bc, bs, th, ph, alpha, dph, dth
+        integer :: i
+
+        do i = -320, 320
+            m = real(i, dp)
+            n = 3.0_dp
+            bc = 1.3_dp
+            bs = -0.7_dp
+            th = 0.37_dp
+            ph = 1.41_dp
+            alpha = m*th - n*ph
+            call evaluate_deltaf_complex_harmonic(m, n, bc, bs, th, ph, dph, dth)
+            call check_close("complex dphi", dph, &
+                n*(bc*sin(alpha) - bs*cos(alpha)), 1.0e-12_dp)
+            call check_close("complex dtheta", dth, &
+                m*(-bc*sin(alpha) + bs*cos(alpha)), 1.0e-12_dp)
+        end do
+    end subroutine check_complex_harmonic
 
     subroutine check_harmonic()
         real(dp), parameter :: m_pol = 2.0_dp, n_tor = 3.0_dp, h = 1.0e-6_dp

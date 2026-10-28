@@ -56,7 +56,7 @@ program gen_deltaf_kernels
     use fortsym_string, only: str_t, str, chars
     use fortsym_arena, only: arena_t
     use fortsym_expr, only: expr_t, sym, num, func, pi_expr, operator(+), &
-        operator(-), operator(*), operator(/), operator(**), cos, log, &
+        operator(-), operator(*), operator(/), operator(**), sin, cos, log, &
         sqrt, acos
     use fortsym_diff, only: diff, partial_derivative
     use fortsym_subs, only: subs_many
@@ -65,6 +65,7 @@ program gen_deltaf_kernels
     use fortsym_engine, only: engine_result_t
     use fortsym_engine_native, only: native_engine_t, make_native_engine
     use fortsym_engine_symengine, only: symengine_engine_t, make_symengine_engine
+    use fortsym_trigrewrite, only: trig_expand
     use fortsym_check, only: suite_t, suite_begin, suite_end, check_identity
     implicit none
 
@@ -134,6 +135,8 @@ program gen_deltaf_kernels
     db1 = b_of_s*cos(alpha)
     dphi1 = phi_of_s*cos(alpha)
     call emit_harmonic()
+    call emit_complex_harmonic()
+    call emit_phase_kernels()
 
     ! ---------------------------------------------------------------- circular
     r0 = sym(arena, "R0")
@@ -229,6 +232,61 @@ contains
             [character(len=16) :: "db1", "db1_ds", "db1_dtheta", "db1_dphi", &
             "dphi1", "dphi1_ds", "dphi1_dtheta", "dphi1_dphi"])
     end subroutine emit_harmonic
+
+    !> Both real Fourier coefficients, with only the requested derivatives.
+    subroutine emit_complex_harmonic()
+        type(expr_t) :: bc, bs, field, roots(2), dc, dt
+
+        bc = sym(arena, "bc")
+        bs = sym(arena, "bs")
+        field = bc*cos(alpha) + bs*sin(alpha)
+        dc = n_tor*(bc*sin(alpha) - bs*cos(alpha))
+        dt = m_pol*(-bc*sin(alpha) + bs*cos(alpha))
+        call check_identity(suite, native, "complex harmonic phi derivative", &
+            diff(field, phi) - dc)
+        call check_identity(suite, native, "complex harmonic theta derivative", &
+            diff(field, theta) - dt)
+        roots = [dc, dt]
+        call emit_kernel_file("deltaf_complex_harmonic_kernel", &
+            "evaluate_deltaf_complex_harmonic", &
+            [character(len=16) :: "m_pol", "n_tor", "bc", "bs", "theta", "phi"], &
+            simplified_all(roots), &
+            [character(len=16) :: "db_dphi", "db_dtheta"])
+    end subroutine emit_complex_harmonic
+
+    !> Advance the phase for consecutive integer m without repeated trig calls.
+    subroutine emit_phase_kernels()
+        type(expr_t) :: angle, step, expanded, expected, sa, ca, sb, cb, bc, bs
+        type(expr_t) :: roots(2)
+        logical :: ok
+        character(len=:), allocatable :: why
+
+        angle = sym(arena, "angle")
+        step = sym(arena, "step")
+        call trig_expand(sin(angle + step), expanded, ok, why)
+        if (.not. ok) error stop "phase sine expansion refused"
+        expected = sin(angle)*cos(step) + cos(angle)*sin(step)
+        call check_identity(suite, native, "phase sine addition", expanded - expected)
+        call trig_expand(cos(angle + step), expanded, ok, why)
+        if (.not. ok) error stop "phase cosine expansion refused"
+        expected = cos(angle)*cos(step) - sin(angle)*sin(step)
+        call check_identity(suite, native, "phase cosine addition", expanded - expected)
+        sa = sym(arena, "sin_phase")
+        ca = sym(arena, "cos_phase")
+        sb = sym(arena, "sin_step")
+        cb = sym(arena, "cos_step")
+        roots = [sa*cb + ca*sb, ca*cb - sa*sb]
+        call emit_kernel_file("deltaf_phase_step_kernel", "evaluate_deltaf_phase_step", &
+            [character(len=16) :: "sin_phase", "cos_phase", "sin_step", "cos_step"], &
+            simplified_all(roots), [character(len=16) :: "sin_next", "cos_next"])
+        bc = sym(arena, "bc")
+        bs = sym(arena, "bs")
+        roots = [n_tor*(bc*sa - bs*ca), m_pol*(-bc*sa + bs*ca)]
+        call emit_kernel_file("deltaf_phase_derivative_kernel", &
+            "evaluate_deltaf_phase_derivative", &
+            [character(len=16) :: "m_pol", "n_tor", "bc", "bs", "sin_phase", "cos_phase"], &
+            simplified_all(roots), [character(len=16) :: "db_dphi", "db_dtheta"])
+    end subroutine emit_phase_kernels
 
     !> Circular-chart equilibrium.
     subroutine emit_circular()
