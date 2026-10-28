@@ -70,7 +70,7 @@ subroutine init_marker_distributions(temperature_eV)
     use gorilla_applets_types_mod, only: in, start
     use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods
     use constants, only: pi
-    use marker_distribution_mod, only: pdf_flat, pdf_maxwell, maxwell_temperature_eV, &
+    use marker_distribution_mod, only: pdf_flat, pdf_maxwell, pdf_maxwell_integral, maxwell_temperature_eV, &
                                        init_distribution_3d, init_distribution_1d, cleanup_distribution_1d
 
     real(dp), intent(in) :: temperature_eV
@@ -96,7 +96,8 @@ subroutine init_marker_distributions(temperature_eV)
         endif
         if (.not. start%dist_energy%initialized) then
             maxwell_temperature_eV = temperature_eV
-            call init_distribution_1d(start%dist_energy, pdf_maxwell, 0.0_dp, start%epsilon_max*temperature_eV)
+            call init_distribution_1d(start%dist_energy, pdf_maxwell, 0.0_dp, start%epsilon_max*temperature_eV, &
+                                      normalization = pdf_maxwell_integral(start%epsilon_max*temperature_eV))
         endif
     endif
 

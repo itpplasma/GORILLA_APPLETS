@@ -203,12 +203,18 @@ end subroutine sample_array_3d
 !-------------------------------------------------------------------------------
 ! Initialize 1D distribution by building the CDF table
 !-------------------------------------------------------------------------------
-subroutine init_distribution_1d(dist, pdf, xmin, xmax, table_size)
+subroutine init_distribution_1d(dist, pdf, xmin, xmax, table_size, normalization)
+
+    !normalization (optional): exact integral of pdf over [xmin, xmax], used for evaluating the pdf
+    !instead of the midpoint sum of the CDF table (which converges slowly for pdfs with a singular
+    !derivative at the boundary, e.g. sqrt(E) at E = 0). The CDF table used for sampling is always
+    !normalised by its own sum, so that it ends at 1.
 
     type(distribution_1d_t), intent(inout) :: dist
     procedure(pdf_interface) :: pdf
     real(dp), intent(in) :: xmin, xmax
     integer, intent(in), optional :: table_size
+    real(dp), intent(in), optional :: normalization
 
     integer :: i, n
     real(dp) :: x, hx
@@ -255,6 +261,7 @@ subroutine init_distribution_1d(dist, pdf, xmin, xmax, table_size)
     if (dist%normalization > 0.0_dp) then
         dist%cdf = dist%cdf / dist%normalization
     endif
+    if (present(normalization)) dist%normalization = normalization
 
     dist%initialized = .true.
 
@@ -401,7 +408,8 @@ end function pdf_flat
 function pdf_maxwell(x) result(val)
 
     !Unnormalised Maxwell energy pdf f(E) ~ sqrt(E) * exp(-E/T), E and T in eV. The caller sets
-    !maxwell_temperature_eV before init_distribution_1d; the CDF table normalises it over [xmin, xmax].
+    !maxwell_temperature_eV before init_distribution_1d and passes pdf_maxwell_integral as its
+    !normalization.
 
     real(dp), intent(in) :: x(:)
     real(dp) :: val
@@ -409,6 +417,21 @@ function pdf_maxwell(x) result(val)
     val = sqrt(x(1))*exp(-x(1)/maxwell_temperature_eV)
 
 end function pdf_maxwell
+
+function pdf_maxwell_integral(energy_max) result(val)
+
+    !Exact integral of pdf_maxwell over [0, energy_max]:
+    !T^(3/2) * (sqrt(pi)/2 * erf(sqrt(u)) - sqrt(u) * exp(-u)), u = energy_max/T
+
+    use constants, only: pi
+
+    real(dp), intent(in) :: energy_max
+    real(dp) :: val, u
+
+    u = energy_max/maxwell_temperature_eV
+    val = maxwell_temperature_eV**1.5_dp * (sqrt(pi)/2.0_dp*erf(sqrt(u)) - sqrt(u)*exp(-u))
+
+end function pdf_maxwell_integral
 
 function pdf_boltzmann(n,T,m,energy,q,Phi) result(val)
 

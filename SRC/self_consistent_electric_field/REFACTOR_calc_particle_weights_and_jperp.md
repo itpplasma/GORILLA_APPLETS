@@ -38,7 +38,10 @@ the sampling densities of the markers, evaluated from `start%dist_position`, `st
   `marker_distribution_mod` next to `pdf_boltzmann`.
 - **Maxwell energy pdf** `pdf_maxwell(E) ∝ √E · e^(−E/T)` with module-level
   `maxwell_temperature_eV` in `marker_distribution_mod`. SCEF samples energies through
-  `start%dist_energy` initialised from it.
+  `start%dist_energy` initialised from it. Its evaluation uses the exact normalisation
+  `pdf_maxwell_integral` (passed as `normalization` to `init_distribution_1d`): the midpoint sum
+  of the 1000-point CDF table is off by 1.38e-4 because of the √E slope at E = 0, which scaled
+  every Maxwellian SCEF weight by 1 + 1.38e-4.
 - **Base normalisation**: `set_weights` deleted. `c%weight_factor` (only consumed by the
   experimental energy/momentum-conserving collisions) now computed directly from the inputs
   inside `calc_collision_coefficients_for_all_tetrahedra`, gated on
