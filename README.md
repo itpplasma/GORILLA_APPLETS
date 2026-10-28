@@ -50,12 +50,10 @@ notes for the CINECA Leonardo cluster.
 
 ## Running
 
-Run the executable in a directory that holds the input files. The example
-folders link to `gorilla_applets_main.x` in the repository root, which the
-build does not create:
+Run the executable in a directory that holds the input files. Every folder in
+[EXAMPLES/](EXAMPLES/) links to `BUILD/gorilla_applets_main.x`:
 
 ```bash
-ln -s BUILD/gorilla_applets_main.x .
 cd EXAMPLES/ALPHA_LIFETIME
 export OMP_NUM_THREADS=<physical cores>
 ./gorilla_applets_main.x
