@@ -4,6 +4,15 @@ module collis_ions
 
 implicit none
 
+! Global multiplicative scaling on the collisional rates (dpp, dhh, fpeff) used
+! in stost. Default 1.0 (no change). Set at runtime from the namelist to
+! benchmark against external collision-frequency conventions (e.g. KIM nu_e).
+real(dp), public :: nu_scale_factor = 1.0_dp
+! OU operator (iswmode = 5): if > 0, the step is dtau = ou_nu_dtau / nu (capped
+! by tau) and v_par is advanced with the exact OU transition (Gaussian
+! increment) instead of the Euler-Maruyama step with a uniform increment.
+real(dp), public :: ou_nu_dtau = 0.0_dp
+
 contains
 !
 !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -175,7 +184,7 @@ end subroutine lambda_alpha_beta
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
-subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
+subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override)
 !
 !  z(1:5)   - phase space coordinates: z(1:3) - spatial position,
 !                                      z(4)   - normalized velocity module
@@ -186,13 +195,14 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
 !               2 - energy scattering and drag only
 !               3 - drag only
 !               4 - pitch-angle scattering only
+!               5 - Euler-Maruyama OU step on v_par (v_perp unchanged)
 !  ierr     - error code:
 !               0 - good,
 !               1 - bad argument (pitch |z(5)| > 1 ),
 !               2 - step over pitch exceeds 1 (pitch was
 !                   replaced by randomly distributed on [-1,1]),
 !               3 - new pitch module exceeds 1, reflection from
-!                   the boudary was performed,
+!                   the boundary was performed,
 !               10 or >10 - new momentum module is less then
 !                   prescribed minimum, reflection was performed.
 !
@@ -202,35 +212,115 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum)
   real(dp), dimension(5) :: z
   real(dp) :: ur, epsilon, q
   real(dp), dimension(:), intent(in) :: efcolf,velrat,enrat
-  real(dp), dimension(:), allocatable :: dpp_vec,dhh_vec,fpeff_vec
+  real(dp), dimension(size(efcolf)) :: dpp_vec,dhh_vec,fpeff_vec
   real(dp), optional :: tau
   real(dp), dimension(3), intent(in), optional :: randnum
+  ! Optional caller-supplied override for the OU step rate, in code units
+  ! (1/length). When present, iswmode=5 uses nu_step = nu_override * nu_scale_factor
+  ! instead of nu_step = 4*dhh. Used to drive the OU operator with an external
+  ! collision frequency table (e.g. KIM's nue.dat splined as nu_e(s)).
+  real(dp), optional, intent(in) :: nu_override
   real(dp) :: z4_save
 
   epsilon = 0.1
   q = 0.3
   upper_limit = 30
   n = size(efcolf)
-  allocate(dpp_vec(n))
-  allocate(dhh_vec(n))
-  allocate(fpeff_vec(n))
 
   p=z(4)
   call coleff(efcolf,velrat,enrat,p,dpp_vec,dhh_vec,fpeff_vec)
 
-  dpp = sum(dpp_vec)
-  dhh = sum(dhh_vec)
-  fpeff = sum(fpeff_vec)
+  dpp   = sum(dpp_vec)   * nu_scale_factor
+  dhh   = sum(dhh_vec)   * nu_scale_factor
+  fpeff = sum(fpeff_vec) * nu_scale_factor
 
   ierr=0
 
   if (present(tau)) then
     dtau = min(epsilon**2/(2*dhh),tau,upper_limit)
     if (z(4).lt.q) then
-      !dtau = min(dtau*(q/z(4))**2,tau),upper_limit)
-      dtau = min(1.0d-2/(2*dhh),tau,upper_limit)
+      dtau = min(dtau*(q/z(4))**2,tau,upper_limit)
     endif
   endif
+
+  ! iswmode = 5: Euler-Maruyama Ornstein-Uhlenbeck step on the parallel
+  ! velocity only.  v_perp_norm = z(4)*sqrt(1-z(5)^2) stays untouched.
+  ! See docs/plans/2026-05-15-ou-collision-operator-euler-design.md.
+  !
+  ! Collision frequency: NRL perpendicular velocity-velocity diffusion rate
+  !   ν_⊥(v) = 2 ν_0(v) [ (1 − 1/(2x))·ψ(x) + ψ'(x) ],  x = v²/v_T,β²
+  ! Using onseff's dh(y) = NRL_bracket(y²)/y with y = xbeta = p·velrat, and
+  ! efcolf(i) = (1/2)·ν_0,i(v0)·velrat(i)/v0 from collis_init, the per-species
+  ! contribution simplifies to 4·v0·dh·efcolf/p² = 4·v0·dhh_vec(i), so in
+  ! code units (rate / v0) the total is 4·dhh.  This is 2× the Lorentz
+  ! deflection rate ν_D = 2·dhh because ν_⊥ = 2·ν_D when measured as
+  ! d⟨v_⊥²⟩/dt / v² (the ℓ=2 Legendre mode of cos²θ decays at 3ν_D,
+  ! contributing 2ν_D to sin²θ).
+  ! dhh depends on the marker speed, hence on v_par.  A v_par-dependent rate
+  ! or step length breaks the Gaussian invariant law of the OU process: with
+  ! dtau = ou_nu_dtau/nu(v) the time spent per collision step grows with
+  ! speed and a Maxwellian heats up.  The rate and the step are therefore
+  ! evaluated at the background thermal speed p_th = sqrt(2 sigma_eq2), so
+  ! they depend on position (density, temperature) only.
+  if (iswmode.eq.5) then
+    block
+      real(dp) :: vpar_norm, vperp_norm, nu_step, sigma_eq2, xi_ou
+      real(dp) :: u_bm(2), decay_ou
+      integer  :: i_bg
+      i_bg = n
+      vpar_norm  = z(4) * z(5)
+      vperp_norm = z(4) * sqrt(max(0.0_dp, 1.0_dp - z(5)*z(5)))
+      if (enrat(i_bg) .gt. 0.0_dp) then
+        sigma_eq2 = 0.5_dp / enrat(i_bg)
+      else
+        sigma_eq2 = 0.5_dp
+      end if
+      if (present(nu_override)) then
+        ! Caller provides nu in code units (1/length); apply the same
+        ! nu_scale_factor that dhh-derived rates get above.
+        nu_step  = nu_override * nu_scale_factor
+      else
+        call coleff(efcolf,velrat,enrat,sqrt(2.0_dp*sigma_eq2), &
+                    dpp_vec,dhh_vec,fpeff_vec)
+        nu_step  = 4.0_dp * sum(dhh_vec) * nu_scale_factor
+      end if
+      if (nu_step .le. 0.0_dp) return
+      ! Euler-Maruyama step length from the same speed-independent rate
+      ! (nu dtau = 2 epsilon^2, as epsilon^2/(2 dhh) for the Coulomb modes).
+      if (present(tau)) dtau = min(2.0_dp*epsilon**2/nu_step, tau, upper_limit)
+      if (ou_nu_dtau .gt. 0.0_dp) then
+        ! Exact OU transition over dtau = ou_nu_dtau/nu (Box-Muller normal).
+        ! Not capped by upper_limit (30 code units = 23 ns for thermal AUG
+        ! electrons), which would force nu*dtau ~ 0.01 again.
+        if (present(tau)) dtau = min(ou_nu_dtau / nu_step, tau)
+        call random_number(u_bm)
+        u_bm(1) = max(u_bm(1), tiny(1.0_dp))
+        xi_ou = sqrt(-2.0_dp * log(u_bm(1))) * cos(2.0_dp * acos(-1.0_dp) * u_bm(2))
+        decay_ou = exp(-nu_step * dtau)
+        vpar_norm = vpar_norm * decay_ou &
+                  + sqrt(sigma_eq2 * (1.0_dp - decay_ou**2)) * xi_ou
+      else
+        if (present(randnum)) then
+          ur = randnum(3)
+        else
+          call getran(0, ur)
+        end if
+        xi_ou     = dble(ur)
+        vpar_norm = vpar_norm &
+                  + sqrt(2.0_dp * nu_step * sigma_eq2 * dtau) * xi_ou &
+                  - vpar_norm * nu_step * dtau
+      end if
+      z(4) = sqrt(vpar_norm*vpar_norm + vperp_norm*vperp_norm)
+      ! OU evolves v_parallel alone. A speed floor would also change v_perp
+      ! and destroy the Gaussian invariant distribution of this transition.
+      if (z(4) > 0.0_dp) then
+        z(5) = vpar_norm / z(4)
+      else
+        z(5) = 0.0_dp
+      end if
+    end block
+    return
+  end if
 
   if(iswmode.eq.1.or.iswmode.eq.4) then
     alam=z(5)

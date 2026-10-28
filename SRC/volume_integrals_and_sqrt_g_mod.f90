@@ -61,6 +61,9 @@ subroutine calc_volume_integrals
     use tetra_grid_settings_mod, only: grid_size, n_field_periods
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
     use gorilla_applets_types_mod, only: output, in
+    use, intrinsic :: ieee_arithmetic, only: ieee_set_halting_mode, ieee_set_flag, &
+                                           & ieee_invalid, ieee_overflow, ieee_divide_by_zero, &
+                                           & ieee_is_finite
 
     real(dp), dimension(:), allocatable              :: prism_volumes, refined_prism_volumes, elec_pot_vec, n_b
     integer                                          :: i,k
@@ -75,7 +78,7 @@ subroutine calc_volume_integrals
 
     print*, 'calc_volume_integrals started'
     n_prisms = ntetr/3
-    allocate(tetra_indices_per_prism(n_prisms,3))    
+    allocate(tetra_indices_per_prism(n_prisms,3))
     allocate(prism_volumes(n_prisms))
     allocate(refined_prism_volumes(n_prisms))
     allocate(r_integrand_constants(n_prisms,22)) !collects all constants used for integration in order to print them on a file
@@ -84,10 +87,32 @@ subroutine calc_volume_integrals
 
     refined_prism_volumes = 0
     r_integrand_constants = 0
+    elec_pot_vec = 0.0_dp
+    n_b = 0.0_dp
+    prism_volumes = 0.0_dp
 
     do i = 1,3
         tetra_indices_per_prism(:,i) = (/(i+3*k,k = 0,n_prisms-1)/)
     enddo
+
+    ! Clear any sticky FPE flags set by earlier LAPACK calls (transient NaN
+    ! during LU factorisation in dgesv can persist and re-trigger the trap
+    ! when the OMP runtime forks the next parallel region on macOS ARM64).
+    call ieee_set_flag(ieee_invalid,        .false.)
+    call ieee_set_flag(ieee_overflow,       .false.)
+    call ieee_set_flag(ieee_divide_by_zero, .false.)
+    ! Temporarily disable the halt-on-FPE traps for the parallel region. The
+    ! prism-volume / refined-volume formulae divide by vertex R-differences and
+    ! take logs of their ratios; for the straight-cylinder limit (grid_kind=5,
+    ! R0>>a) near-theta=90deg prisms have a near-zero R-spread, so a few of these
+    ! terms overflow / divide-by-zero. prism_volumes is computed robustly via the
+    ! exact Pappus form below (so the integrated moments stay clean); the trap
+    ! disable only stops those transient FPEs in the auxiliary refined integrals
+    ! from killing the run. N<=10 (R0<=1691) never trips this, so they are
+    ! bit-unchanged.
+    call ieee_set_halting_mode(ieee_invalid,        .false.)
+    call ieee_set_halting_mode(ieee_overflow,       .false.)
+    call ieee_set_halting_mode(ieee_divide_by_zero, .false.)
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(n_prisms,verts_rphiz,tetra_grid,grid_size,tetra_indices_per_prism,prism_volumes, particle_charge, in, &
@@ -108,9 +133,17 @@ subroutine calc_volume_integrals
         r_values_intermediate = r_values
         r_values_intermediate(triangle_indices(2)) = minval(r_values)
         if (sum(r_values_intermediate).eq.0) then
-            z_values_intermediate = z_values
-            z_values_intermediate(triangle_indices(2)) = minval(z_values)
-            triangle_indices(1) = maxloc(abs(z_values_intermediate),1)
+            ! Two vertices share the minimal R, so removing the max-R apex
+            ! leaves all-zero r_values_intermediate. triangle_indices(1) must
+            ! be the OTHER min-R vertex, i.e. the remaining index of {1,2,3}:
+            ! 6 - reference - apex. The previous maxloc(abs(z)) heuristic could
+            ! alias triangle_indices(1) onto triangle_indices(2), collapsing the
+            ! poloidal triangle to zero area. This happens on the analytic-circ
+            ! mesh (grid_kind=5) at the theta=90 deg plane, where every vertex
+            ! has R = R0 + rho*cos(theta) = R0, producing ~1e-17 prism volumes
+            ! and NaN/Inf moments downstream. Shaped (EFIT/VMEC) meshes never
+            ! place two prism vertices at exactly equal R, so they are unaffected.
+            triangle_indices(1) = 6 - minloc(r_values,1) - triangle_indices(2)
         else
             triangle_indices(1) = maxloc(r_values_intermediate,1)
         endif
@@ -144,6 +177,19 @@ subroutine calc_volume_integrals
 
         prism_volumes(i) =  2*pi/(grid_size(2)*n_field_periods)*(alpha/3*r(1)**3+alpha*rmin/2*r(1)**2+ &
                             abs(z_star*rmin*(r(2)-r(1))+(z_star+beta*rmin)/2*(r(2)**2-r(1)**2)+beta/3*(r(2)**3-r(1)**3)))
+
+        ! Robust fallback for thin-R (near-theta=90deg) poloidal triangles whose
+        ! z/r gradients overflow the R-integration above (straight-cylinder limit,
+        ! R0>>a). The exact volume of revolution of a triangle by Dphi is Pappus'
+        ! theorem V = Dphi * R_centroid * A_triangle, which equals integral(R dA)
+        ! and is identical to the formula above for well-conditioned triangles -- so
+        ! this only fires for the few degenerate prisms (N<=10 keep their exact value).
+        if (.not. ieee_is_finite(prism_volumes(i)) .or. prism_volumes(i) <= 0.0_dp) then
+            prism_volumes(i) = 2*pi/(grid_size(2)*n_field_periods) &
+                * (rmin + sum(r_values)/3.0_dp) &                                  ! R_centroid
+                * 0.5_dp*abs( (r_values(2)-r_values(1))*(z_values(3)-z_values(1)) &  ! A_triangle
+                            - (r_values(3)-r_values(1))*(z_values(2)-z_values(1)) )
+        endif
 
         !calculate other volme integrals (compare with appendix B of master thesis of Jonatan Schatzlmayr)
         delta_r = verts_rphiz(1,tetra_grid(tetra_indices_per_prism(i,1))%ind_knot(1)) - &
@@ -266,10 +312,25 @@ subroutine calc_volume_integrals
     enddo
     !$OMP END DO
     !$OMP END PARALLEL
+    ! Re-enable the halt-on-FPE traps after the OMP region
+    call ieee_set_halting_mode(ieee_invalid,        .true.)
+    call ieee_set_halting_mode(ieee_overflow,       .true.)
+    call ieee_set_halting_mode(ieee_divide_by_zero, .true.)
+    call ieee_set_flag(ieee_invalid,        .false.)
+    call ieee_set_flag(ieee_overflow,       .false.)
+    call ieee_set_flag(ieee_divide_by_zero, .false.)
 
     refined_prism_volumes = abs(refined_prism_volumes)*2*pi/(grid_size(2)*n_field_periods)
     elec_pot_vec = abs(elec_pot_vec)*2*pi/(grid_size(2)*n_field_periods*prism_volumes)
-    n_b = abs(n_b)*2*pi/(grid_size(2)**n_field_periods*prism_volumes)
+    n_b = abs(n_b)*2*pi/(grid_size(2)*n_field_periods*prism_volumes)
+
+    ! Sanitise the auxiliary integrals for the few degenerate thin-R prisms whose
+    ! z/r-gradient terms overflowed (straight-cylinder limit). prism_volumes is
+    ! already robust (Pappus fallback); fall the refinement back to it and zero the
+    ! negligible electric-potential / Boltzmann contributions of those cells.
+    where (.not. ieee_is_finite(refined_prism_volumes)) refined_prism_volumes = prism_volumes
+    where (.not. ieee_is_finite(elec_pot_vec))          elec_pot_vec = 0.0_dp
+    where (.not. ieee_is_finite(n_b))                   n_b = 0.0_dp
 
     output%prism_volumes = prism_volumes
     if(in%boole_refined_sqrt_g) output%refined_prism_volumes = refined_prism_volumes

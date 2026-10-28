@@ -71,7 +71,7 @@ subroutine write_vertex_coordinates
     use tetra_grid_mod, only: verts_rphiz, verts_sthetaphi, nvert
     use gorilla_applets_types_mod, only: filenames
 
-    integer :: vc_unit
+    integer :: vc_unit, st_unit
     integer :: i
 
     open(newunit = vc_unit, file = filenames%vertex_coordinates)
@@ -88,6 +88,17 @@ subroutine write_vertex_coordinates
         end do
     endif
     close(vc_unit)
+
+    ! Also dump per-vertex (s, theta_SFL, phi) so post-processing can
+    ! compute coherent (m,n) Fourier projections of cell moments.
+    ! Rectangular grids have no flux coordinates.
+    if (.not. allocated(verts_sthetaphi)) return
+    if (size(verts_sthetaphi, 2) < nvert) return
+    open(newunit = st_unit, file = 'vertex_sthetaphi.dat')
+    do i = 1, nvert
+        write(st_unit,101) verts_sthetaphi(1, i), verts_sthetaphi(2, i), verts_sthetaphi(3, i)
+    end do
+    close(st_unit)
 
 end subroutine write_vertex_coordinates
 
@@ -339,6 +350,10 @@ subroutine give_file_names
     filenames%tetr_moments = 'tetr_moments.dat'
     filenames%exit_data = 'exit_data.dat'
     filenames%grid_data = 'grid_data.nc'
+    filenames%electric_field = 'electric_field.dat'
+    filenames%density(1) = 'ion_density.dat'
+    filenames%density(2) = 'electron_density.dat'
+    filenames%pushing_problems = 'pushing_problems.dat'
 
 end subroutine give_file_names
 
@@ -381,6 +396,10 @@ subroutine unlink_files
     call unlink(filenames%electric_potential)
     call unlink(filenames%boltzmann_density)
     call unlink(filenames%divertor_intersections)
+    call unlink(filenames%electric_field)
+    call unlink(filenames%density(1))
+    call unlink(filenames%density(2))
+    call unlink(filenames%pushing_problems)
 
 
 end subroutine unlink_files
