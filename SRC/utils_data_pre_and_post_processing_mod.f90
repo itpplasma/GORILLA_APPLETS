@@ -401,21 +401,42 @@ subroutine calc_poloidal_flux(verts)
     use tetra_grid_mod, only: ntetr, tetra_grid
     
     real(dp), dimension(:,:), intent(in) :: verts
-    integer :: i
-    
-    flux%poloidal_max = 0
-    flux%poloidal_min = tetra_physics(1)%Aphi1
+    integer :: i, k
+    real(dp) :: psi_vertex
+
+    !Range of A_phi over all vertices of the grid
+    flux%poloidal_min = huge(1.0_dp)
+    flux%poloidal_max = -huge(1.0_dp)
     do i = 1, ntetr
-        flux%poloidal_max = max(flux%poloidal_max,tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi* &
-        & (verts([1,2,3],tetra_grid(i)%ind_knot(4))-verts([1,2,3],tetra_grid(i)%ind_knot(1)))))
-        flux%poloidal_min = min(flux%poloidal_min,tetra_physics(i)%Aphi1)
+        do k = 1, 4
+            psi_vertex = tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi* &
+            & (verts([1,2,3],tetra_grid(i)%ind_knot(k))-verts([1,2,3],tetra_grid(i)%ind_knot(1))))
+            flux%poloidal_min = min(flux%poloidal_min, psi_vertex)
+            flux%poloidal_max = max(flux%poloidal_max, psi_vertex)
+        enddo
     enddo
     
 end subroutine calc_poloidal_flux
 
+elemental function normalised_poloidal_flux(psi) result(s)
+
+    !Poloidal flux psi = A_phi normalised to [0, 1] by its range over the computational domain
+    !(flux%poloidal_min/max from calc_poloidal_flux); the radial coordinate in cylindrical coordinates
+    !for axisymmetric devices. A_phi has no fixed sign or offset, so dividing by poloidal_max alone
+    !can give s < 0.
+
+    use gorilla_applets_types_mod, only: flux
+
+    real(dp), intent(in) :: psi
+    real(dp) :: s
+
+    s = (psi - flux%poloidal_min)/(flux%poloidal_max - flux%poloidal_min)
+
+end function normalised_poloidal_flux
+
 subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
-    use gorilla_applets_types_mod, only: in, c, start, s, flux
+    use gorilla_applets_types_mod, only: in, c, start, s
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
     use constants, only: echarge,amp, ame, ev2erg
@@ -464,7 +485,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
                 s_value = tetra_physics(i)%x1(1)
             else if (grid_kind /= 3) then
                 ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
-                s_value = tetra_physics(i)%Aphi1 / flux%poloidal_max
+                s_value = normalised_poloidal_flux(tetra_physics(i)%Aphi1)
             else
                 ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
                 print*, 'Error in calc_collision_coefficients_for_all_tetrahedra: Linear profiles with &

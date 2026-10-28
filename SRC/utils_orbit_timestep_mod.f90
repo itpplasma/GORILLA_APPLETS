@@ -85,7 +85,8 @@ end subroutine initialize_constants_of_motion
 
 subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species_in)
 
-    use gorilla_applets_types_mod, only: in, flux, start, weights
+    use gorilla_applets_types_mod, only: in, start, weights
+    use utils_data_pre_and_post_processing_mod, only: normalised_poloidal_flux
     use tetra_physics_mod, only: tetra_physics
     use constants, only: ev2erg
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
@@ -127,7 +128,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
         else if (grid_kind /= 3) then
             ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
             local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
-            s_value = local_poloidal_flux / flux%poloidal_max
+            s_value = normalised_poloidal_flux(local_poloidal_flux)
         else
             ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
             print*, 'Error in calc_particle_weights_and_jperp: Computing radial coordinate from A_phi is only valid for &

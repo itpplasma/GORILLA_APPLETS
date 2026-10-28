@@ -334,7 +334,8 @@ subroutine eliminate_particles_outside_flux_threshold
 !   s = (local_flux - flux_min) / (flux_max - flux_min)
 ! where s=0 at the magnetic axis and s=1 at the boundary.
 !
-    use gorilla_applets_types_mod, only: in, start, flux
+    use gorilla_applets_types_mod, only: in, start
+    use utils_data_pre_and_post_processing_mod, only: normalised_poloidal_flux
     use tetra_physics_mod, only: tetra_physics
     use find_tetra_mod, only: find_tetra
 
@@ -369,7 +370,7 @@ subroutine eliminate_particles_outside_flux_threshold
             local_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi * z_local)
 
             ! Compute normalized flux (0 at axis, 1 at boundary)
-            normalized_flux = (local_flux - flux%poloidal_min) / (flux%poloidal_max - flux%poloidal_min)
+            normalized_flux = normalised_poloidal_flux(local_flux)
 
             ! Eliminate particle if flux exceeds threshold
             if (normalized_flux > in%flux_threshold_for_elimination) then
@@ -460,7 +461,7 @@ subroutine calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
     dt_dtau = tetra_physics(ind_tetr)%dt_dtau_const
 
     ! Compute gradient of r from gradient of A_phi normalized by poloidal flux at boundary
-    grad_r = tetra_physics(ind_tetr)%gAphi / flux%poloidal_max
+    grad_r = tetra_physics(ind_tetr)%gAphi / (flux%poloidal_max - flux%poloidal_min)
 
     ! Compute contravariant velocity component v^r = v_gc . grad_r
     v_r = sum(v_gc_tau * grad_r) / dt_dtau
@@ -526,7 +527,8 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
 ! Calculates particle weights and perpendicular invariant for helical core.
 ! Computes the base weight and all particle-specific factors in one place.
 !
-    use gorilla_applets_types_mod, only: in, flux, start, weights, g
+    use gorilla_applets_types_mod, only: in, start, weights, g
+    use utils_data_pre_and_post_processing_mod, only: normalised_poloidal_flux
     use tetra_physics_mod, only: tetra_physics
     use constants, only: ev2erg, pi
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
@@ -562,7 +564,7 @@ subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, 
         else if (grid_kind /= 3) then
             ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
             local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
-            s_value = local_poloidal_flux / flux%poloidal_max
+            s_value = normalised_poloidal_flux(local_poloidal_flux)
         else
             ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
             print*, 'Error in calc_particle_weights_and_jperp_helical_core: Computing radial coordinate from A_phi is only valid &

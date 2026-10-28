@@ -332,7 +332,8 @@ end subroutine collisions_without_background_updates
 
 subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_0_mappings,species_in,ind_tetr)
 
-    use gorilla_applets_types_mod, only: exit_data, in, flux
+    use gorilla_applets_types_mod, only: exit_data, in
+    use utils_data_pre_and_post_processing_mod, only: normalised_poloidal_flux
     use tetra_physics_mod, only: tetra_physics
     use gorilla_settings_mod, only: coord_system
     use tetra_grid_settings_mod, only: grid_kind
@@ -366,8 +367,7 @@ subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_
         else if (grid_kind /= 3) then
             ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
             local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi * z_local)
-            exit_data%flux_surface(n,species) = (local_poloidal_flux - flux%poloidal_min) / &
-                                                 (flux%poloidal_max - flux%poloidal_min)
+            exit_data%flux_surface(n,species) = normalised_poloidal_flux(local_poloidal_flux)
         else
             ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
             print*, 'Error in update_exit_data: Computing flux surface label from A_phi is only valid for &

@@ -1224,7 +1224,8 @@ end subroutine orbit_timestep_rmp_response_currents
 ! ====================================================================
 subroutine calc_particle_weights_and_jperp_rmp_response_currents(n, z_save, vpar, vperp, ind_tetr, species_in)
 
-    use gorilla_applets_types_mod, only: in, flux, start, weights, g
+    use gorilla_applets_types_mod, only: in, start, weights, g
+    use utils_data_pre_and_post_processing_mod, only: normalised_poloidal_flux
     use tetra_physics_mod, only: tetra_physics, metric_determinant
     use constants, only: ev2erg, pi
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
@@ -1257,7 +1258,7 @@ subroutine calc_particle_weights_and_jperp_rmp_response_currents(n, z_save, vpar
             s_value = tetra_physics(ind_tetr)%x1(1) + z_save(1)
         else if (grid_kind /= 3) then
             local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
-            s_value = local_poloidal_flux / flux%poloidal_max
+            s_value = normalised_poloidal_flux(local_poloidal_flux)
         else
             print*, 'Error in calc_particle_weights_and_jperp_rmp_response_currents: Computing radial coordinate from A_phi is &
                     &only valid for axisymmetric devices. For stellarators (grid_kind=3), use flux coordinates (coord_system=2).'
