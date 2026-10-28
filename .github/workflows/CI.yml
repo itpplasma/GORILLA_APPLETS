@@ -1,13 +1,24 @@
 name: CI
 
 on:
-  push:
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+  merge_group:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.ref, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.event.pull_request.head.repo.fork && fromJSON('["self-hosted","itp-ubuntu24"]') || fromJSON('["self-hosted","itp-build"]') }}
 
     env:
       FC: gfortran
@@ -16,33 +27,67 @@ jobs:
       - name: Checkout GORILLA_APPLETS
         uses: actions/checkout@v6
         with:
-          path: GORILLA_APPLETS
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run native checks in the build container
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        env:
+          SCI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          SCI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+          SCI_HEAD_REF: ${{ github.head_ref || github.ref_name }}
+        run: |-
+          ci/run.sh CI-test
+      - name: Select GORILLA branch
+        id: gorilla_ref
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          # A declared core commit takes precedence over branch-name fallback.
+          if [[ -s GORILLA_APPLETS/GORILLA_REF ]]; then
+            read -r core_ref < GORILLA_APPLETS/GORILLA_REF
+            [[ "$core_ref" =~ ^[0-9a-f]{40}$ ]]
+            echo "ref=$core_ref" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --heads https://github.com/itpplasma/GORILLA.git "$BRANCH" > /dev/null; then
+            echo "ref=$BRANCH" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
 
+        if: ${{ github.event.pull_request.head.repo.fork }}
       - name: Checkout GORILLA (core dependency)
         uses: actions/checkout@v6
         with:
           repository: itpplasma/GORILLA
+          ref: ${{ steps.gorilla_ref.outputs.ref }}
           path: GORILLA
 
+        if: ${{ github.event.pull_request.head.repo.fork }}
       - name: System dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y gfortran liblapack-dev libnetcdff-dev ninja-build cmake
 
+        if: ${{ github.event.pull_request.head.repo.fork }}
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
+        if: ${{ github.event.pull_request.head.repo.fork }}
       - name: Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install f90nml
 
+        if: ${{ github.event.pull_request.head.repo.fork }}
       - name: Build
         working-directory: GORILLA_APPLETS
         run: make
 
+        if: ${{ github.event.pull_request.head.repo.fork }}
       - name: Test
         working-directory: GORILLA_APPLETS
         run: make test
+        if: ${{ github.event.pull_request.head.repo.fork }}
+    if: >-
+      github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.actor != 'github-merge-queue[bot]')

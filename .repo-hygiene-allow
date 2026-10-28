@@ -1,0 +1,2 @@
+# Paths exempt from the repo-hygiene data/archive check (glob<TAB>reason).
+EXAMPLES/helical_core/memo_HC_and_RMP_ext.pdf	added in 6587d65 and removed again in f6da00e; not part of the merged tree

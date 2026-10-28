@@ -1,5 +1,6 @@
 module field_line_tracing_mod
 
+    use, intrinsic :: iso_fortran_env, only: int64
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
 
     implicit none
@@ -20,12 +21,12 @@ module field_line_tracing_mod
     integer :: pm_unit, di_unit !file units
     type counter_t
         integer :: lost_particles = 0
-        integer :: tetr_pushings = 0
+        integer(int64) :: tetr_pushings = 0
         integer :: phi_0_mappings = 0
         integer :: divertor_intersections = 0
         integer :: survived_particles = 0
         integer :: ignored_particles = 0
-        integer :: integration_steps = 0
+        integer(int64) :: integration_steps = 0
     end type counter_t
 
     !Namelist for field_line_tracing input

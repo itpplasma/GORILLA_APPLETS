@@ -1,77 +1,103 @@
 # GORILLA_APPLETS
 
-Applications built on top of [GORILLA](https://github.com/itpplasma/GORILLA) (**G**uiding-center **OR**bit **I**ntegration with **L**ocal **L**inearization **A**pproach).
+Plasma-physics applications built on the guiding-center orbit integrator
+[GORILLA](https://github.com/itpplasma/GORILLA) (**G**uiding-center **OR**bit
+**I**ntegration with **L**ocal **L**inearization **A**pproach).
 
-GORILLA itself traces guiding-center orbits in three-dimensional toroidal fields via a quasi-geometric integrator that conserves total energy, magnetic moment, and phase-space volume; see Refs. [1,2] and the [GORILLA repository](https://github.com/itpplasma/GORILLA) for the underlying method and core interfaces (`orbit_timestep_gorilla`, `gorilla_plot`).
-
-GORILLA_APPLETS wraps the GORILLA core with a set of higher-level plasma-physics applications: a single executable `gorilla_applets_main.x` dispatches to one of several computational modes (alpha-particle losses, mono-energetic transport, Poincaré-invariance and reversibility diagnostics, divertor heat loads, self-consistent electric field, and more) selected via the `i_option` key in `gorilla_applets.inp`.
+GORILLA traces guiding-center orbits in three-dimensional toroidal fields with
+a quasi-geometric integrator that conserves total energy, magnetic moment and
+phase-space volume (Refs. [1, 2]). GORILLA_APPLETS provides a single executable,
+`gorilla_applets_main.x`, that runs one of several applications on top of it.
 
 ## Applications
 
-Selected at runtime via `gorilla_applets_nml/i_option` in `gorilla_applets.inp`:
+The application is selected with `i_option` in the namelist
+`gorilla_applets_nml` of `gorilla_applets.inp`:
 
-| `i_option` | Application |
-|------------|-------------|
-| 1  | Pre-computation of fluxtube volume |
-| 2  | Mono-energetic transport coefficient |
-| 3  | Collisionality scan for transport coefficients |
-| 4  | Numerical diffusion coefficient |
-| 5  | Alpha-particle lifetime |
-| 6  | Direct VMEC integrator |
-| 7  | Poincaré-invariance test |
-| 8  | Reversibility test |
-| 9  | Boltzmann test |
-| 10 | Field-line tracing |
-| 11 | Divertor heat loads |
-| 12 | Self-consistent electric field |
-| 13 | Anomalous transport |
-| 14 | Helical core particle tracing |
+1. Pre-computation of flux-tube volume
+2. Mono-energetic transport coefficient for one collisionality
+3. Collisionality scan of mono-energetic transport coefficients
+4. Numerical diffusion coefficient (no collisions)
+5. Alpha-particle lifetime
+6. Direct VMEC integrator
+7. Poincaré invariance test
+8. Reversibility test
+9. Boltzmann test
+10. Field-line tracing
+11. Divertor heat loads
+12. Self-consistent electric field
+13. Anomalous transport
+14. Helical-core particle tracing
+15. RMP response currents
 
 ## Building
 
-GORILLA_APPLETS expects a sibling checkout of GORILLA next to this repository (the build symlinks `SRC_CORE` to `../GORILLA/SRC`):
+The build expects a checkout of GORILLA next to this repository; `SRC_CORE`
+is a symbolic link to `../GORILLA/SRC`.
 
 ```bash
-git clone git@github.com:itpplasma/GORILLA.git
-git clone git@github.com:itpplasma/GORILLA_APPLETS.git
+git clone https://github.com/itpplasma/GORILLA.git
+git clone https://github.com/itpplasma/GORILLA_APPLETS.git
 cd GORILLA_APPLETS
-make                  # Release build via CMake + Ninja
-make CONFIG=Debug     # Debug build with extra checks
-make clean
-make reconfigure
+make                  # Release build with CMake and Ninja
 ```
 
-The resulting executable is `BUILD/gorilla_applets_main.x` (symlinked to the project root). Requires a Fortran compiler with OpenMP, BLAS/LAPACK, NetCDF (Fortran bindings), CMake >= 3.12, and Ninja.
+Requirements: a Fortran compiler with OpenMP, BLAS/LAPACK, NetCDF with
+Fortran bindings, CMake 3.12 or newer and Ninja. The tests also need Python 3
+with `f90nml`. The executable is `BUILD/gorilla_applets_main.x`.
+See [docs/building.md](docs/building.md) for build configurations, tests and
+notes for the CINECA Leonardo cluster.
 
 ## Running
 
+Run the executable in a directory that holds the input files. Every folder in
+[EXAMPLES/](EXAMPLES/) links to `BUILD/gorilla_applets_main.x`:
+
 ```bash
-export OMP_NUM_THREADS=<physical_cores>   # avoid hyperthreading
+cd EXAMPLES/ALPHA_LIFETIME
+export OMP_NUM_THREADS=<physical cores>
 ./gorilla_applets_main.x
 ```
 
-The working directory needs the following inputs (blueprints under [INPUT/](INPUT/) and in the sibling GORILLA repo):
+The working directory needs:
 
-- `gorilla.inp`, `tetra_grid.inp` — core GORILLA settings (from GORILLA/INPUT/)
-- `gorilla_applets.inp` — selects `i_option` and global applet settings
-- One mode-specific input file (e.g. `alpha_lifetime.inp`, `mono_energetic_transp_coef.inp`, `boltzmann.inp`, `reversibility_test.inp`, `divertor_heat_loads.inp`, `field_line_tracing.inp`, `self_consistent_ef.inp`)
-- MHD equilibrium files (VMEC NetCDF or g-file), and a `seed.inp` where the application uses random numbers
+- `gorilla.inp` and `tetra_grid.inp`: GORILLA settings (templates in
+  `GORILLA/INPUT/`),
+- `gorilla_applets.inp`: selects `i_option`,
+- the input file of the selected application, for example
+  `alpha_lifetime.inp` or `mono_energetic_transp_coef.inp`,
+- the MHD equilibrium (VMEC NetCDF or g-file) and, for applications that use
+  random numbers, `seed.inp`.
 
-The runnable scenarios in [EXAMPLES/](EXAMPLES/) show the full setup per application; each folder contains its input files, MHD equilibrium symlinks, and a MATLAB or Python plotting script for the output.
+Templates are in [INPUT/](INPUT/). The folders in [EXAMPLES/](EXAMPLES/) contain
+complete setups for most applications, including input files, links to
+equilibria and MATLAB or Python plotting scripts.
 
 ## Testing
-
-Continuous integration runs out of [TESTS/](TESTS/) via CTest:
 
 ```bash
 make test
 ```
 
-Each smoke test is a short scenario (small grid, few particles) wired through CMake; the alpha-particle lifetime test, for example, drives the binary twice (flux-tube precomputation, then a 10-particle trace) and checks the output file. The GitHub Actions workflow in [.github/workflows/CI.yml](.github/workflows/CI.yml) builds against a fresh checkout of GORILLA and runs the suite on every PR.
+runs the CTest suite defined in [TESTS/](TESTS/) and `CMakeLists.txt`: Fortran
+unit tests and short application runs (small grids, few particles) driven by
+Python scripts. The [CI workflow](.github/workflows/CI.yml) builds against a
+fresh checkout of GORILLA and runs the suite on pull requests.
+
+## Documentation
+
+- [docs/building.md](docs/building.md): build configurations, tests, CINECA
+  Leonardo.
+- [docs/contributing.md](docs/contributing.md): CI tiers and merging.
+- [docs/plans/](docs/plans/): design notes for the Ornstein-Uhlenbeck
+  collision operator.
+- For the GORILLA core (method, input files, `orbit_timestep_gorilla`,
+  `gorilla_plot`), see the [GORILLA repository](https://github.com/itpplasma/GORILLA).
 
 ## License
 
-GORILLA_APPLETS is released under the MIT License — see [LICENSE](LICENSE). The build depends on the GORILLA core ([itpplasma/GORILLA](https://github.com/itpplasma/GORILLA)), which is also MIT-licensed and itself bundles a small number of third-party routines under their own licenses; see GORILLA's README for details.
+MIT License, see [LICENSE](LICENSE). GORILLA is also MIT-licensed and bundles a
+few third-party routines under their own licences; see its README.
 
 ## References
 
