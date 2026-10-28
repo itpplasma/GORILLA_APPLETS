@@ -1,7 +1,16 @@
 name: Repository hygiene
 on:
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
   merge_group:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 permissions:
   contents: read
 # Only PR runs share a group; pending push and merge-group runs stay independent.
@@ -11,6 +20,6 @@ concurrency:
 
 jobs:
   repo-hygiene:
-    uses: itpplasma/.github/.github/workflows/repo-hygiene.yml@0663fcdd3b414a741bc3df08959a6f83aedf2d40
+    uses: itpplasma/.github/.github/workflows/repo-hygiene.yml@104634c01aa669d542e8a26a34a50b6471fc19ce
     with:
-      hygiene-revision: 0663fcdd3b414a741bc3df08959a6f83aedf2d40
+      hygiene-revision: 104634c01aa669d542e8a26a34a50b6471fc19ce

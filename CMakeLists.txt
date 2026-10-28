@@ -125,3 +125,23 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_BINARY_DIR}/volume_test_modules)
     add_test(NAME rmp_volume_loading COMMAND test_rmp_volume_loading.x)
 endif()
+
+if(BUILD_TESTING)
+    add_executable(test_rmp_maxwellian_loading.x
+        SRC/rmp_response_currents/rmp_maxwellian_loading_mod.f90
+        TESTS/test_rmp_maxwellian_loading.f90)
+    set_target_properties(test_rmp_maxwellian_loading.x PROPERTIES
+        Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/maxwellian_test_modules)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/maxwellian_test_modules)
+    target_include_directories(test_rmp_maxwellian_loading.x PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/maxwellian_test_modules)
+    add_test(NAME rmp_maxwellian_loading COMMAND test_rmp_maxwellian_loading.x)
+endif()
+
+if(BUILD_TESTING)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/potential_fixture)
+    add_executable(test_rmp_equilibrium_potential.x
+        TESTS/test_rmp_equilibrium_potential.f90)
+    target_link_libraries(test_rmp_equilibrium_potential.x GORILLA_APPLETS)
+    add_test(NAME rmp_equilibrium_potential COMMAND test_rmp_equilibrium_potential.x)
+endif()
