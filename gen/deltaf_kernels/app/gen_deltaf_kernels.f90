@@ -204,6 +204,7 @@ program gen_deltaf_kernels
     call emit_fax()
     call emit_fax_chartmap()
 
+    call emit_energy_kernels()
     call suite_end(suite)
 
 contains
@@ -447,6 +448,35 @@ contains
             partial_derivative(t_f, 1), partial_derivative(phi0_f, 1), &
             n_f, t_f, phi0_f], [ddens, dtemp, dphi0, dens, temp, phi0])
     end function profile_values
+
+    ! Horner step and physical f_AX/f_M -> remainder h/f_M. I/O and loops
+    ! remain handwritten; these are the new pointwise mathematical leaves.
+    subroutine emit_energy_kernels()
+        type(expr_t) :: xx, aa, cc, gg, vv, hh, kk, mm, bb, ee, tt
+        xx = sym(arena, "x")
+        aa = sym(arena, "acc")
+        cc = sym(arena, "coefficient")
+        call emit_kernel_file("deltaf_fax_horner_kernel", "evaluate_fax_horner", &
+            [character(len=16) :: "x", "acc", "coefficient"], &
+            [xx*aa+cc], [character(len=16) :: "value"])
+        gg = sym(arena, "dg")
+        vv = sym(arena, "speed")
+        hh = sym(arena, "hphi")
+        kk = sym(arena, "kappa")
+        mm = sym(arena, "mass")
+        ee = sym(arena, "energy")
+        tt = sym(arena, "temperature")
+        bb = gg/(mm*vv*hh)-kk
+        call emit_kernel_file("deltaf_fax_energy_kernel", "evaluate_fax_energy", &
+            [character(len=16) :: "dg", "mass", "speed", "hphi", "kappa"], &
+            [bb], [character(len=16) :: "effective_kappa"])
+        call emit_kernel_file("deltaf_fax_speed_kernel", "evaluate_fax_speed", &
+            [character(len=16) :: "energy", "mass", "temperature"], &
+            [sqrt(2*ee/mm), sqrt(ee/tt)], &
+            [character(len=16) :: "speed", "x"])
+        call check_identity(suite, symeng, "f_AX=G removes remainder", &
+            simplified(bb*mm*vv*hh - (gg-kk*mm*vv*hh)))
+    end subroutine emit_energy_kernels
 
     function simplified(e) result(res)
         type(expr_t), intent(in) :: e

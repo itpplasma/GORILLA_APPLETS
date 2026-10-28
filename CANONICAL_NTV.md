@@ -374,3 +374,70 @@ loss, `loss_kind = 2`. Coordinates: `(x1, x3)` on cylindrical grids, the
 chartmap geometry on `grid_kind = 6`. The wall must lie inside the mesh to
 act; outside it the grid exit comes first. `pphi_end`, `psi_end`, `s_end`
 and `t_end` record the loss.
+
+### Energy and species resolved background tables
+
+The original numeric `n_theta n_lambda` format remains the monoenergetic block-0
+`d chi/d lambda` route. Its reader, interpolation and weight arithmetic are
+unchanged. For a physical multispecies NEO-2 background, use `FAX_ENERGY_V1`:
+
+```text
+# optional leading comments
+FAX_ENERGY_V1
+n_theta n_lambda n_basis n_species degree n_segments extend_tail
+mass_g(n_species)
+charge_number(n_species)
+temperature_erg(n_species)
+source_amplitude(3,n_species)
+basis_edges(n_segments+1)
+basis_centers(n_segments)
+basis_coeff(0:degree,n_basis,n_segments)
+vartheta(n_theta)
+lambda(n_lambda)
+g(n_lambda,n_theta,n_basis,3,n_species,n_species)
+dg_dlambda(same dimensions as g)
+```
+
+All arrays use list-directed input and Fortran order (leftmost index fastest).
+`extend_tail` is a Fortran logical. Position spans `[-pi,pi]` and pitch
+`[-1,1]`. The last two axes are **driving species, field species**. Species are
+matched to markers by mass and charge; absent or ambiguous species fail.
+Energies are kinetic energies in erg; each marker uses
+`x=sqrt(E/T_field_species)`, not the driving species' temperature. Polynomial
+basis segments are supplied by NEO-2, retaining its normalized Laguerre basis
+or actual B-spline knots, normalization and extrapolation. A zero-tail basis
+returns zero outside its final edge; continuation uses the final polynomial.
+
+The values are NEO-2 response functions normalized to the field-species
+Maxwellian. `source_amplitude` holds `beta_b A_k^b`, in internal NEO-2 order
+(density, parallel electric field, temperature). Each source and driving
+species is summed independently. `ntv_fax_response` returns `f_AX/f_M` or its
+pitch derivative at fixed energy and position. The marker weight uses
+`d(h/f_M)/d lambda = d(f_AX/f_M)/d lambda - kappa m v h_phi`, with
+`kappa=d ln f0/dp_phi`, so a vanishing profile gradient never divides the
+multispecies response. Horner evaluation, speed conversion and canonical-shift
+subtraction come from the FortSym generator.
+
+Generate these tables with NEO-2's `lsw_export_fax` feature and
+`python/src/neo2_ql/fax.py`. Its raw HDF5 set retains the distribution band
+integrals and source-force normalization. The converter preserves native `avbhat` factors in the source amplitudes and
+requires every field species and an explicit electric field (or the completed native output).
+A single table covers one radial surface and one single-well position chart;
+using it across different profiles/surfaces requires separate qualification.
+The table does not assert physical transport convergence.
+
+`canonical_ntv_fax_energy` tests two field species, both driving species,
+all sources, energy dependence and the polynomial tail against independent
+analytic values. For the native NEO-2 distribution oracle, configure
+`FAX_NEO2_READER` with NEO-2's `fax.py` path and `FAX_NEO2_EXPORTS` with its
+semicolon-separated export files. CTest then builds a real table and compares
+the APPLETS reader with native NEO-2 band moments (2% matrix-scale tolerance,
+including position/pitch interpolation).
+
+For admission of an existing device table, set `FAX_NATIVE_TABLE` and
+`FAX_NATIVE_TABLE_EXPORTS` in addition to `FAX_NEO2_READER`. Native CTest
+checks its checksum and evaluates every field species against the native band
+moments without running marker orbits or a physical pilot.
+
+`GORILLA_REF` records the compatible core commit used by CI and the native
+checks. The energy/species feature uses the same frozen core as #80.
