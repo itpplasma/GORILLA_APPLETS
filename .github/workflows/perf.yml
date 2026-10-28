@@ -34,8 +34,12 @@ jobs:
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          # Use the GORILLA branch of the same name when it exists, else main.
-          if git ls-remote --exit-code --heads https://github.com/itpplasma/GORILLA.git "$BRANCH" > /dev/null; then
+          # A declared core commit takes precedence over branch-name fallback.
+          if [[ -s candidate/GORILLA_REF ]]; then
+            read -r core_ref < candidate/GORILLA_REF
+            [[ "$core_ref" =~ ^[0-9a-f]{40}$ ]]
+            echo "ref=$core_ref" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --heads https://github.com/itpplasma/GORILLA.git "$BRANCH" > /dev/null; then
             echo "ref=$BRANCH" >> "$GITHUB_OUTPUT"
           else
             echo "ref=main" >> "$GITHUB_OUTPUT"
