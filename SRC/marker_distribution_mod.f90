@@ -14,6 +14,9 @@ module marker_distribution_mod
     !fall linearly from 1 on the axis (x = 0) to 0.1 at the boundary (x = 1), x = normalised radial coordinate
     real(dp), parameter :: linear_profile_slope = -0.9_dp   !d(linear_profile_factor)/dx
 
+    !Temperature in eV used by pdf_maxwell. Set before init_distribution_1d(dist_energy, pdf_maxwell, ...).
+    real(dp) :: maxwell_temperature_eV = 1.0_dp
+
     !---------------------------------------------------------------------------
     ! Unified abstract interface for PDF functions
     ! Accepts a vector of any length: 3 elements for 3D, 1 for 1D
@@ -394,6 +397,18 @@ function pdf_flat(x) result(val)
     real(dp) :: val
     val = 1.0_dp
 end function pdf_flat
+
+function pdf_maxwell(x) result(val)
+
+    !Unnormalised Maxwell energy pdf f(E) ~ sqrt(E) * exp(-E/T), E and T in eV. The caller sets
+    !maxwell_temperature_eV before init_distribution_1d; the CDF table normalises it over [xmin, xmax].
+
+    real(dp), intent(in) :: x(:)
+    real(dp) :: val
+
+    val = sqrt(x(1))*exp(-x(1)/maxwell_temperature_eV)
+
+end function pdf_maxwell
 
 function pdf_boltzmann(n,T,m,energy,q,Phi) result(val)
 

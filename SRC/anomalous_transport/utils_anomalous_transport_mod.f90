@@ -361,7 +361,7 @@ subroutine calc_diffusion_coefficient(filename_in, D_out)
 !
     use gorilla_applets_types_mod, only: in, s, start, weights
     use llsq_mod, only: llsq
-    use utils_data_pre_and_post_processing_mod, only: initialize_exit_data, set_weights
+    use utils_data_pre_and_post_processing_mod, only: initialize_exit_data
 
     character(len=*), intent(in), optional :: filename_in
     real(dp), intent(out), optional :: D_out
@@ -403,7 +403,6 @@ subroutine calc_diffusion_coefficient(filename_in, D_out)
     call allocate_start_type(n_particles)  ! Use local allocate_start_type with explicit particle count
     call allocate_weights(n_particles)
     call set_starting_positions_point_source(rand_matrix, (/1/))  ! This also sets s%s0
-    call set_weights
     call set_rest_of_start_type(rand_matrix)  ! This also sets start%t(1)
 
     ! Initialize time array based on actual tracing time
@@ -915,12 +914,15 @@ subroutine allocate_start_type(n_particles_in)
     allocate(start%pitch(n_particles, in%n_species))
     allocate(start%energy(n_particles, in%n_species))
     allocate(start%jperp(n_particles, in%n_species))
+    allocate(start%density(n_particles, in%n_species))
     allocate(start%lost(n_particles, in%n_species))
     allocate(start%particle_charge(in%n_species))
     allocate(start%particle_mass(in%n_species))
     allocate(start%cm_over_e(in%n_species))
     allocate(start%t(in%n_species))
     allocate(start%v0(in%n_species))
+
+    start%density = in%density
 
 end subroutine allocate_start_type
 
@@ -957,6 +959,7 @@ subroutine deallocate_start_type
     if (allocated(start%pitch))           deallocate(start%pitch)
     if (allocated(start%energy))          deallocate(start%energy)
     if (allocated(start%jperp))           deallocate(start%jperp)
+    if (allocated(start%density))         deallocate(start%density)
     if (allocated(start%lost))            deallocate(start%lost)
     if (allocated(start%particle_charge)) deallocate(start%particle_charge)
     if (allocated(start%particle_mass))   deallocate(start%particle_mass)

@@ -179,7 +179,8 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     use gorilla_applets_types_mod, only: counter_t, particle_status_t, g, start, s, in, time_t, maximum_s, weights
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
     use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
-                                        initialize_constants_of_motion, compute_radial_fluxes
+                                        initialize_constants_of_motion, compute_radial_fluxes, calc_particle_jperp, &
+                                        calc_particle_weights_and_jperp
     use constants, only: echarge
     use russian_roulette_mod, only: play_russian_roulette, rr, local_rr_t
 
@@ -213,7 +214,16 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         endif
         z_save = x-tetra_physics(ind_tetr)%x1
         if ((j.eq.1).or.(.not.in%boole_static_ne)) then
-            call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species,boole_diffusion_coefficient)
+            if (boole_diffusion_coefficient) then
+                !Calibration: uniform weight 1/n_particles so delta_s statistics are unweighted.
+                weights%w(n,species) = 1.0_dp/s%n_particles
+                call calc_particle_jperp(n, z_save, vperp, ind_tetr, species)
+            else
+                !Phi fixed to 0 in the Boltzmann f so the source normalisation is not shifted by the
+                !self-consistent electric potential (SCEF-specific).
+                call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr,species, &
+                                                     boole_include_potential_in = .false.)
+            endif
         endif
         !electrons start at the ion positions with the ion weights (quasineutral start); not in the
         !diffusion-coefficient calibration, which initialises the calibrated species on its own
@@ -436,76 +446,5 @@ subroutine treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_
     z_save = z_save_at_x_save
 
 end subroutine treat_particles_that_are_lost_but_should_not_be
-
-subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species, boole_diffusion_coefficient)
-
-    use gorilla_applets_types_mod, only: in, start, s, weights
-    use tetra_physics_mod, only: tetra_physics
-    use constants, only: ev2erg, pi
-    use volume_integrals_and_sqrt_g_mod, only: sqrt_g
-    use supporting_functions_mod, only: bmod_func
-    use marker_distribution_mod, only: linear_profile_factor
-
-    logical, intent(in) :: boole_diffusion_coefficient
-    real(dp), intent(in) :: vpar, vperp
-    real(dp), dimension(3), intent(in) :: z_save
-    real(dp), dimension(3) :: x
-    integer, intent(in) :: n,ind_tetr
-    integer, intent(in) :: species
-    real(dp) :: phi_elec_func, temperature
-
-    x = tetra_physics(ind_tetr)%x1 + z_save
-    weights%w(n,species) = weights%w(n,species)*abs((tetra_physics(ind_tetr)%sqg1 + sum(tetra_physics(ind_tetr)%gsqg*z_save)))
-    !print*, 'weight before = ', weights%w(n,species), n
-
-    if (in%boole_linear_density_simulation) then
-        weights%w(n,species) = weights%w(n,species)*linear_profile_factor(x(1))
-    endif
-
-    if (boole_diffusion_coefficient) then
-        weights%w(n,species) = 1.0_dp/s%n_particles
-    elseif (.not. in%boole_monoenergetic) then
-
-        temperature = in%energy_eV
-        if (boole_diffusion_coefficient) temperature = s%temperature
-        weights%w(n,species) = weights%w(n,species)/  &
-        (sqrt(start%energy(n,species)/temperature)*exp(-start%energy(n,species)/temperature)/(temperature*ev2erg*sqrt(pi)/2))
-        !the last term is the integral of the function from zero to inf over energy in correct units
-        !weights%w(n,species) = weights%w(n,species)/((1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))*  &
-        !sqrt(start%energy(n,species)/s%temperature)*exp(-start%energy(n,species)/s%temperature)/(s%temperature*ev2erg*14035.0_dp))
-        !the last term is the integral of the function from zero to inf over energy in correct units
-
-        phi_elec_func = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
-        phi_elec_func = 0.0_dp !when working with fixed sources, electric potentials are not useful since they change the weights
-        !and thus the magnitude o the sources
-
-        weights%w(n,species) = weights%w(n,species)*2/sqrt(pi)*sqrt(start%energy(n,species)*ev2erg)
-        ! if (.not.boole_diffusion_coefficient) then
-        !     weights%w(n,species) = weights%w(n,species)*start%epsilon_max*in%energy_eV*ev2erg
-        ! endif
-        if (.not. in%boole_linear_temperature_simulation) then
-            temperature = in%energy_eV*ev2erg
-            if (boole_diffusion_coefficient) temperature = s%temperature*ev2erg
-            weights%w(n,species) =weights%w(n,species)/temperature**1.5_dp* &
-                        & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
-        else
-            temperature = in%energy_eV*ev2erg*linear_profile_factor(x(1))
-            if (boole_diffusion_coefficient) temperature = s%temperature*ev2erg*linear_profile_factor(x(1))
-            weights%w(n,species) = weights%w(n,species)/temperature**1.5_dp* &
-                        & exp(-(start%energy(n,species)*ev2erg+start%particle_charge(species)*phi_elec_func)/temperature)
-        endif
-    endif
-
-    start%jperp(n,species) = start%particle_mass(species)*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
-
-
-    !-1 because of negative gyrophase
-
-!print*, 'weight after = ', weights%w(n,species)*(1.0_dp+(start%energy(n,species)/s%temperature)**(3.5_dp))/14035.0_dp/2*sqrt(pi)
-!print*, 'weight after for real = ', weights%w(n,species)
-
-
-
-end subroutine calc_particle_weights_and_jperp
 
 end module utils_scef_particle_pushing_mod

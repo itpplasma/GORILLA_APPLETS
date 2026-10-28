@@ -53,11 +53,54 @@ subroutine calc_starting_conditions
     call allocate_start_type
     call allocate_weights
     call set_particle_type_specifications
+    call init_marker_distributions(in%energy_eV)
     call set_starting_positions(rand_matrix)!,s0=sfc_s_min*1.1_dp)
     call set_rest_of_individual_particle_specifications(rand_matrix)
     if (allocated(particle_source%value)) call apply_particle_source_weights
 
 end subroutine calc_starting_conditions
+
+subroutine init_marker_distributions(temperature_eV)
+
+    !Initialise the marker position/pitch/energy distributions so the central weight routine (and
+    !the shared sampling helpers) can evaluate pdf_position/pdf_lambda/pdf_energy. Position: uniform
+    !in flux coordinates on [sfc_s_min, 1] x [0, 2*pi] x [0, 2*pi/n_field_periods]; pitch: uniform
+    !on [-1, 1]; energy: Maxwell sqrt(E)*exp(-E/T) on [0, epsilon_max*T] (eV).
+
+    use gorilla_applets_types_mod, only: in, start
+    use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods
+    use constants, only: pi
+    use marker_distribution_mod, only: pdf_flat, pdf_maxwell, maxwell_temperature_eV, &
+                                       init_distribution_3d, init_distribution_1d, cleanup_distribution_1d
+
+    real(dp), intent(in) :: temperature_eV
+
+    if (.not. start%dist_position%initialized) then
+        call init_distribution_3d(start%dist_position, pdf_flat, &
+                                  [sfc_s_min, 0.0_dp, 0.0_dp], &
+                                  [1.0_dp, 2.0_dp*pi, 2.0_dp*pi/n_field_periods])
+    endif
+
+    if (.not. start%dist_lambda%initialized) then
+        call init_distribution_1d(start%dist_lambda, pdf_flat, -1.0_dp, 1.0_dp)
+    endif
+
+    if (in%boole_monoenergetic) then
+        if (.not. start%dist_energy%initialized) then
+            call init_distribution_1d(start%dist_energy, pdf_flat, in%energy_eV, in%energy_eV)
+        endif
+    else
+        !Re-initialise if temperature changed (e.g. between the main run and the diffusion calibration)
+        if (start%dist_energy%initialized .and. maxwell_temperature_eV /= temperature_eV) then
+            call cleanup_distribution_1d(start%dist_energy)
+        endif
+        if (.not. start%dist_energy%initialized) then
+            maxwell_temperature_eV = temperature_eV
+            call init_distribution_1d(start%dist_energy, pdf_maxwell, 0.0_dp, start%epsilon_max*temperature_eV)
+        endif
+    endif
+
+end subroutine init_marker_distributions
 
 subroutine initialize_particle_source
 
@@ -94,18 +137,16 @@ end subroutine initialize_particle_source
 
 subroutine apply_particle_source_weights
 
-    !Overwrite the uniform base weight set by set_weight with a per-marker weight
-    !proportional to the particle-source profile evaluated at each marker's s value.
+    !Set the physical density represented by each marker to the particle-source profile evaluated at
+    !the marker's s value. The central weight routine picks this up as `start%density(n, species)` and
+    !multiplies by V_box * sqrt(g) (plus the velocity-space factors) to produce the marker weight.
 
-    use gorilla_applets_types_mod, only: in, start, weights, g, particle_source
-    use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods, grid_size
-    use constants, only: pi
+    use gorilla_applets_types_mod, only: in, start, g, particle_source
+    use tetra_grid_settings_mod, only: grid_size
     use binsrc_mod, only: binsrc
 
     integer :: n, species, k
-    real(dp) :: base, s_marker, source_val
-
-    base = (1.0_dp - sfc_s_min) * 4.0_dp * pi**2 / n_field_periods
+    real(dp) :: s_marker
 
     do species = 1, in%n_species
         do n = 1, in%num_particles
@@ -113,8 +154,7 @@ subroutine apply_particle_source_weights
             call binsrc(g%s_vertices, 1, grid_size(1)+1, s_marker, k)
             k = k - 1
             k = max(1, min(k, grid_size(1)))
-            source_val = particle_source%value(k) + particle_source%grad(k)*(s_marker - g%s_vertices(k))
-            weights%w(n, species) = source_val * base
+            start%density(n, species) = particle_source%value(k) + particle_source%grad(k)*(s_marker - g%s_vertices(k))
         enddo
     enddo
 
@@ -215,12 +255,15 @@ subroutine allocate_start_type(n_particles_in)
     allocate(start%pitch(n_particles,in%n_species))
     allocate(start%energy(n_particles,in%n_species))
     allocate(start%jperp(n_particles,in%n_species))
+    allocate(start%density(n_particles,in%n_species))
     allocate(start%lost(n_particles,in%n_species))
     allocate(start%particle_charge(in%n_species))
     allocate(start%particle_mass(in%n_species))
     allocate(start%cm_over_e(in%n_species))
     allocate(start%t(in%n_species))
     allocate(start%v0(in%n_species))
+
+    start%density = in%density   !overwritten per marker in apply_particle_source_weights
 
 end subroutine allocate_start_type
 
@@ -250,6 +293,7 @@ subroutine deallocate_start_type
     if (allocated(start%pitch))           deallocate(start%pitch)
     if (allocated(start%energy))          deallocate(start%energy)
     if (allocated(start%jperp))           deallocate(start%jperp)
+    if (allocated(start%density))         deallocate(start%density)
     if (allocated(start%lost))            deallocate(start%lost)
     if (allocated(start%particle_charge)) deallocate(start%particle_charge)
     if (allocated(start%particle_mass))   deallocate(start%particle_mass)
@@ -304,17 +348,16 @@ end subroutine set_starting_positions
 subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diffusion_coefficient_in,species_in,n_particles_in)
 
     use gorilla_applets_types_mod, only: in, start, s
+    use marker_distribution_mod, only: sample_array_1d
 
     real(dp), dimension(:,:,:), intent(in) :: rand_matrix
     integer, dimension(:), intent(in), optional :: species_in
     logical, intent(in), optional :: boole_diffusion_coefficient_in
     logical :: boole_diffusion_coefficient=.false.
     integer, dimension(:), allocatable :: species
-    integer :: i
+    integer :: i, isp
     integer, intent(in), optional :: n_particles_in
     integer :: n_particles
-    real(dp), dimension(:,:), allocatable :: radial_transport_energies
-    real(dp) :: temperature
 
     if (present(species_in)) then
         allocate(species(size(species_in)))
@@ -335,13 +378,12 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
     start%pitch(:,species) = 2*rand_matrix(4,:,:)-1 !pitch parameter
     start%energy(:,species) = in%energy_eV
     if ((.not. in%boole_monoenergetic).or.boole_diffusion_coefficient) then
-        !start%energy(:,species) = start%epsilon_max*in%energy_eV*rand_matrix(5,:,:) !boltzmann energy distribution
-        temperature = in%energy_eV
-        if (boole_diffusion_coefficient) temperature = s%temperature
-        allocate(radial_transport_energies(n_particles,size(species)))
-        call generate_distribution_sqrt_x_exp_neg_x(start%epsilon_max,radial_transport_energies)
-        !call generate_marker_distribution(start%epsilon_max,radial_transport_energies)
-        start%energy(:,species) = temperature*radial_transport_energies !boltzmann energy distribution
+        !Energies drawn through start%dist_energy (Maxwell sqrt(E)*exp(-E/T) in eV); the diffusion
+        !calibration must re-initialise it at s%temperature before this call.
+        do i = 1, size(species)
+            isp = species(i)
+            call sample_array_1d(start%dist_energy, n_particles, start%energy(:,isp))
+        enddo
     endif
 
     if (in%boole_antithetic_variate) then
@@ -388,19 +430,7 @@ subroutine set_particle_type_specifications
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
     start%epsilon_max = 16.0_dp
 
-    call set_weight
-
 end subroutine set_particle_type_specifications
-
-subroutine set_weight
-
-    use gorilla_applets_types_mod, only: in, weights
-    use tetra_grid_settings_mod, only: sfc_s_min, n_field_periods
-    use constants, only: pi
-
-    weights%w = in%density*(1-sfc_s_min)*4*pi**2/n_field_periods
-
-end subroutine set_weight
 
 subroutine generate_distribution_x4_exp_neg_x(b, output_array)
 

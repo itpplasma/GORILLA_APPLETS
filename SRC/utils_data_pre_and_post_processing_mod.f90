@@ -178,12 +178,15 @@ subroutine allocate_start_type
     allocate(start%pitch(in%num_particles,in%n_species))
     allocate(start%energy(in%num_particles,in%n_species))
     allocate(start%jperp(in%num_particles,in%n_species))
+    allocate(start%density(in%num_particles,in%n_species))
     allocate(start%lost(in%num_particles,in%n_species))
     allocate(start%particle_charge(in%n_species))
     allocate(start%particle_mass(in%n_species))
     allocate(start%cm_over_e(in%n_species))
     allocate(start%t(in%n_species))
     allocate(start%v0(in%n_species))
+
+    start%density = in%density
 
 end subroutine allocate_start_type
 
@@ -238,21 +241,6 @@ subroutine set_starting_positions()
     enddo
 
 end subroutine set_starting_positions
-
-subroutine set_weights
-
-    use gorilla_applets_types_mod, only: in, weights, g, c
-    use constants, only: pi
-
-    weights%w = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
-
-    if (.not. in%boole_monoenergetic) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        weights%w =  weights%w*10/sqrt(pi)
-    endif
-
-    c%weight_factor = 1/(weights%w(1,1)*g%amax)
-
-end subroutine set_weights
 
 subroutine init_velocity_space_distributions()
 
@@ -380,10 +368,10 @@ end subroutine calc_poloidal_flux
 
 subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
-    use gorilla_applets_types_mod, only: in, c, start, s, flux
+    use gorilla_applets_types_mod, only: in, c, start, s, flux, g
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
-    use constants, only: echarge,amp, ame, ev2erg
+    use constants, only: echarge,amp, ame, ev2erg, pi
     use tetra_grid_settings_mod, only: grid_size, grid_kind
     use collis_ions, only: collis_init
     use gorilla_settings_mod, only: coord_system
@@ -394,13 +382,24 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
     integer :: i, j
     integer :: species = 1
-    real(dp) :: m0, z0, n0, s_value, v0
+    real(dp) :: m0, z0, n0, s_value, v0, v_box
     logical :: boole_T_and_n_from_files = .false.
     logical :: boole_analytic_temperature_profile = .true.
 
     if (present(species_in)) species = species_in
 
     call set_c
+
+    !c%weight_factor is only consumed by the energy/momentum-conserving collisions. Derive it
+    !directly from the sampling box (uniform position × 2*pi, Boltzmann adds the 10/sqrt(pi)
+    !normalisation of a uniform energy marker pdf on [0, 5T]) so it does not depend on weights%w.
+    !Gated on the sole consumer so applets that place markers deterministically (helical_core,
+    !divertor) can call the collision setup before g%amin/amax/cmin/cmax are populated.
+    if (in%boole_preserve_energy_and_momentum_during_collisions) then
+        v_box = (g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+        c%weight_factor = 1.0_dp/(in%density*v_box*g%amax)
+        if (.not. in%boole_monoenergetic) c%weight_factor = c%weight_factor*sqrt(pi)/10.0_dp
+    endif
 
     if (.not.allocated(efcolf))       allocate(efcolf(c%n))
     if (.not.allocated(velrat))       allocate(velrat(c%n))

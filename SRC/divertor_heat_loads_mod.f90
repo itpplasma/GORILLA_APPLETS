@@ -422,8 +422,7 @@ end subroutine init_marker_distributions
 
 subroutine set_start_type(rand_matrix)
 
-    use gorilla_applets_types_mod, only: in, start, g, weights
-    use constants, only: pi, ev2erg
+    use gorilla_applets_types_mod, only: in, start
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
     integer                              :: i
@@ -440,14 +439,9 @@ subroutine set_start_type(rand_matrix)
         start%pitch(i,1) = sqrt(1-constant/start%x(1,i,1))
     enddo
 
-    weights%w = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
     start%energy = in%energy_eV
+    if (.not. in%boole_monoenergetic) start%energy(:,1) = 5*in%energy_eV*rand_matrix(5,:)
 
-    if (.not. in%boole_monoenergetic) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        weights%w =  weights%w*10/sqrt(pi)
-        start%energy(:,1) = 5*in%energy_eV*rand_matrix(5,:)
-    endif
-    
     if (in%boole_antithetic_variate) then
         start%x(:,1:in%num_particles:2,1) = start%x(:,2:in%num_particles:2,1)
         start%pitch(1:in%num_particles:2,1) = -start%pitch(2:in%num_particles:2,1)
@@ -476,6 +470,9 @@ subroutine allocate_start_type
     allocate(start%pitch(in%num_particles,1))
     allocate(start%energy(in%num_particles,1))
     allocate(start%jperp(in%num_particles,1))
+    allocate(start%density(in%num_particles,1))
+
+    start%density = in%density
 
 end subroutine allocate_start_type
 
