@@ -108,7 +108,7 @@ subroutine initialize_particle_source
     !Allocate particle_source and initialise it. With source tuning (n_source_updates > 0) the
     !desired density profile is the initial guess, so this must be called after
     !calc_desired_density_profile. Without tuning the source is fixed to the constant in%density,
-    !which reproduces the uniform marker weights of set_weight.
+    !which gives every marker the uniform physical density in%density.
 
     use gorilla_applets_types_mod, only: in, g, desired_density, particle_source
     use tetra_grid_settings_mod, only: grid_size
