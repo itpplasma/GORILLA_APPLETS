@@ -207,7 +207,7 @@ function calc_radial_coordinate(ind_tetr, z_save) result(s_value)
     !Normalised radial coordinate of a position inside tetrahedron ind_tetr: the flux label s in flux
     !coordinates, the normalised poloidal flux for axisymmetric devices in cylindrical coordinates
 
-    use gorilla_applets_types_mod, only: flux
+    use utils_data_pre_and_post_processing_mod, only: normalised_poloidal_flux
     use tetra_physics_mod, only: tetra_physics
     use gorilla_settings_mod, only: coord_system
     use tetra_grid_settings_mod, only: grid_kind
@@ -219,7 +219,7 @@ function calc_radial_coordinate(ind_tetr, z_save) result(s_value)
     if (coord_system == 2) then
         s_value = tetra_physics(ind_tetr)%x1(1) + z_save(1)
     else if (grid_kind /= 3) then
-        s_value = (tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)) / flux%poloidal_max
+        s_value = normalised_poloidal_flux(tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save))
     else
         print*, 'Error in calc_radial_coordinate: Computing radial coordinate from A_phi is only valid for &
                 &axisymmetric devices. For stellarators (grid_kind=3), use flux coordinates (coord_system=2).'
