@@ -219,12 +219,15 @@ subroutine allocate_start_type
     allocate(start%pitch(in%num_particles,in%n_species))
     allocate(start%energy(in%num_particles,in%n_species))
     allocate(start%jperp(in%num_particles,in%n_species))
+    allocate(start%density(in%num_particles,in%n_species))
     allocate(start%lost(in%num_particles,in%n_species))
     allocate(start%particle_charge(in%n_species))
     allocate(start%particle_mass(in%n_species))
     allocate(start%cm_over_e(in%n_species))
     allocate(start%t(in%n_species))
     allocate(start%v0(in%n_species))
+
+    start%density = in%density
 
 end subroutine allocate_start_type
 
@@ -284,20 +287,27 @@ subroutine set_starting_positions()
 
 end subroutine set_starting_positions
 
-subroutine set_weights
+subroutine init_velocity_space_distributions()
 
-    use gorilla_applets_types_mod, only: in, weights, g, c
-    use constants, only: pi
+    !Marker distributions of pitch (uniform on [-1, 1]) and energy (fixed for monoenergetic runs,
+    !uniform on [0, 5*T] otherwise), used for sampling and for evaluating the marker weights
 
-    weights%w = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+    use gorilla_applets_types_mod, only: in, start
+    use marker_distribution_mod, only: pdf_flat, init_distribution_1d
 
-    if (.not. in%boole_monoenergetic) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        weights%w =  weights%w*10/sqrt(pi)
+    if (.not. start%dist_lambda%initialized) then
+        call init_distribution_1d(start%dist_lambda, pdf_flat, -1.0_dp, 1.0_dp)
     endif
 
-    c%weight_factor = 1/(weights%w(1,1)*g%amax)
+    if (.not. start%dist_energy%initialized) then
+        if (in%boole_monoenergetic) then
+            call init_distribution_1d(start%dist_energy, pdf_flat, in%energy_eV, in%energy_eV)
+        else
+            call init_distribution_1d(start%dist_energy, pdf_flat, 0.0_dp, 5.0_dp*in%energy_eV)
+        endif
+    endif
 
-end subroutine set_weights
+end subroutine init_velocity_space_distributions
 
 subroutine set_rest_of_start_type()
 
@@ -306,23 +316,11 @@ subroutine set_rest_of_start_type()
     use gorilla_applets_settings_mod, only: i_option
     use constants, only: echarge,ame,clight
     use constants, only: ev2erg
-    use marker_distribution_mod, only: pdf_flat, init_distribution_1d, sample_array_1d
+    use marker_distribution_mod, only: sample_array_1d
 
     integer :: i_species
 
-    ! Initialize lambda (pitch angle) distribution if not already done
-    if (.not. start%dist_lambda%initialized) then
-        call init_distribution_1d(start%dist_lambda, pdf_flat, -1.0_dp, 1.0_dp)
-    endif
-
-    ! Initialize energy distribution if not already done
-    if (.not. start%dist_energy%initialized) then
-        if (in%boole_monoenergetic) then
-            call init_distribution_1d(start%dist_energy, pdf_flat, in%energy_eV, in%energy_eV)
-        else
-            call init_distribution_1d(start%dist_energy, pdf_flat, 0.0_dp, 5.0_dp*in%energy_eV)
-        endif
-    endif
+    call init_velocity_space_distributions
 
     ! Sample pitch and energy for all species
     do i_species = 1, in%n_species
@@ -436,14 +434,15 @@ end function normalised_poloidal_flux
 
 subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
-    use gorilla_applets_types_mod, only: in, c, start, s
+    use gorilla_applets_types_mod, only: in, c, start, s, g
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
-    use constants, only: echarge,amp, ame, ev2erg
+    use constants, only: echarge,amp, ame, ev2erg, pi
     use tetra_grid_settings_mod, only: grid_size, grid_kind
     use collis_ions, only: collis_init
     use gorilla_settings_mod, only: coord_system
     use gorilla_applets_settings_mod, only: i_option
+    use marker_distribution_mod, only: linear_profile_factor
 
     integer, intent(in), optional :: species_in
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
@@ -451,7 +450,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     real(dp) :: v0_l
     integer :: i, j
     integer :: species = 1
-    real(dp) :: m0, z0, n0, s_value, v0
+    real(dp) :: m0, z0, n0, s_value, v0, v_box
     logical :: boole_T_and_n_from_files = .false.
     logical :: boole_analytic_temperature_profile
 
@@ -460,6 +459,17 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     boole_analytic_temperature_profile = (i_option == 12)
 
     call set_c
+
+    !c%weight_factor is only consumed by the energy/momentum-conserving collisions. Derive it
+    !directly from the sampling box (uniform position × 2*pi, Boltzmann adds the 10/sqrt(pi)
+    !normalisation of a uniform energy marker pdf on [0, 5T]) so it does not depend on weights%w.
+    !Gated on the sole consumer so applets that place markers deterministically (helical_core,
+    !divertor) can call the collision setup before g%amin/amax/cmin/cmax are populated.
+    if (in%boole_preserve_energy_and_momentum_during_collisions) then
+        v_box = (g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+        c%weight_factor = 1.0_dp/(in%density*v_box*g%amax)
+        if (.not. in%boole_monoenergetic) c%weight_factor = c%weight_factor*sqrt(pi)/10.0_dp
+    endif
 
     if (.not.allocated(efcolf))       allocate(efcolf(c%n))
     if (.not.allocated(velrat))       allocate(velrat(c%n))
@@ -493,14 +503,12 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
                 stop
             endif
 
-            ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
             if (in%boole_linear_density_simulation) then
-                c%dens_mat(:,i) = in%density * (1.1_dp - s_value) / 1.1_dp
+                c%dens_mat(:,i) = in%density * linear_profile_factor(s_value)
             endif
 
-            ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
             if (in%boole_linear_temperature_simulation) then
-                c%temp_mat(:,i) = in%energy_eV * (1.1_dp - s_value) / 1.1_dp
+                c%temp_mat(:,i) = in%energy_eV * linear_profile_factor(s_value)
             endif
 
             if (boole_analytic_temperature_profile) then

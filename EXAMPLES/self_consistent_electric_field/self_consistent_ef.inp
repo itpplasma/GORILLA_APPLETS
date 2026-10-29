@@ -36,8 +36,8 @@
   n_electric_potential_updates = 10,
 !
   !type of electric potential update
-  !1 ... 1D 
-  !3 ... 3D 
+  !1 ... 1D (flux-surface averaged charge)
+  !3 ... 3D (requires boole_honest_tracing = .true. for both species and n_source_updates = 0)
   update_dimension = 1
 !
   !Simulated density of particles

@@ -84,7 +84,7 @@ subroutine calc_boltzmann
     get_ipert, set_moment_specifications, initialise_output, calc_starting_conditions, initialize_exit_data, calc_poloidal_flux, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
     find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution, &
-    perform_background_density_update, set_weights, prepare_next_round_of_parallelised_particle_pushing
+    perform_background_density_update, prepare_next_round_of_parallelised_particle_pushing
     use gorilla_applets_types_mod, only: output
 
     real(dp) :: v0
@@ -109,7 +109,6 @@ subroutine calc_boltzmann
     call calc_volume_integrals
     call initialize_exit_data
     call calc_starting_conditions(verts)
-    call set_weights
     call calc_poloidal_flux(verts)
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
     call give_file_names

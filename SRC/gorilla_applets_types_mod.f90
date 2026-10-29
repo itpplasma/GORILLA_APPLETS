@@ -35,6 +35,8 @@ module gorilla_applets_types_mod
     real(dp), dimension(:,:),   allocatable :: pitch
     real(dp), dimension(:,:),   allocatable :: energy
     real(dp), dimension(:,:),   allocatable :: jperp
+    real(dp), dimension(:,:),   allocatable :: density    !physical density represented by each marker (defaults to in%density
+                                                          !in the base applets, varies with the particle source in SCEF)
     real(dp), dimension(:),     allocatable :: particle_charge !used in self consistent electric field computation
     real(dp), dimension(:),     allocatable :: particle_mass !used in self consistent electric field computation
     real(dp), dimension(:),     allocatable :: cm_over_e !used in self consistent electric field computation
@@ -195,12 +197,13 @@ module gorilla_applets_types_mod
     integer, dimension(:,:), allocatable :: prisms_per_flux_tube !used in self_consistent_electric_field_mod
     real(dp), dimension(:), allocatable :: s_vertices     ! (grid_size(1)+1) s-coordinate of each flux surface
     real(dp), dimension(:), allocatable :: s_shell_volumes ! (grid_size(1))   volume of each flux shell
+    integer,  dimension(:), allocatable :: hexa_to_vert   ! (n_hexahedra) vertex the hexahedron's charge is assigned to in 3D updates (0 = none)
+    real(dp), dimension(:), allocatable :: vol_vert       ! (nvert) summed volume of the hexahedra assigned to each vertex (0 = not considered)
     end type grid_t
 
     type(grid_t) :: g
 
     type electric_potential_t
-    real(dp), dimension(:), allocatable :: rho_prism
     real(dp), dimension(:), allocatable :: rho_flux_layer
     real(dp), dimension(:), allocatable :: rho_vert
     real(dp), dimension(:), allocatable :: phi_elec_from_rho

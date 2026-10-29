@@ -399,13 +399,30 @@ subroutine calc_starting_conditions
     call allocate_start_type
     call allocate_weights
     call set_start_type(rand_matrix)
+    call init_marker_distributions
 
 end subroutine calc_starting_conditions
 
+subroutine init_marker_distributions
+
+    !The markers are placed deterministically (set_start_type), but their weights are evaluated as for
+    !markers sampled uniformly in the box (R, phi, Z) with uniform pitch and energy
+
+    use gorilla_applets_types_mod, only: start, g
+    use constants, only: pi
+    use marker_distribution_mod, only: pdf_flat, init_distribution_3d
+    use utils_data_pre_and_post_processing_mod, only: init_velocity_space_distributions
+
+    if (.not. start%dist_position%initialized) then
+        call init_distribution_3d(start%dist_position, pdf_flat, [g%amin, 0.0_dp, g%cmin], [g%amax, 2*pi, g%cmax])
+    endif
+    call init_velocity_space_distributions
+
+end subroutine init_marker_distributions
+
 subroutine set_start_type(rand_matrix)
 
-    use gorilla_applets_types_mod, only: in, start, g, weights
-    use constants, only: pi, ev2erg
+    use gorilla_applets_types_mod, only: in, start
 
     real(dp), dimension(:,:), intent(in) :: rand_matrix
     integer                              :: i
@@ -422,14 +439,9 @@ subroutine set_start_type(rand_matrix)
         start%pitch(i,1) = sqrt(1-constant/start%x(1,i,1))
     enddo
 
-    weights%w = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
     start%energy = in%energy_eV
+    if (.not. in%boole_monoenergetic) start%energy(:,1) = 5*in%energy_eV*rand_matrix(5,:)
 
-    if (.not. in%boole_monoenergetic) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        weights%w =  weights%w*10/sqrt(pi)
-        start%energy(:,1) = 5*in%energy_eV*rand_matrix(5,:)
-    endif
-    
     if (in%boole_antithetic_variate) then
         start%x(:,1:in%num_particles:2,1) = start%x(:,2:in%num_particles:2,1)
         start%pitch(1:in%num_particles:2,1) = -start%pitch(2:in%num_particles:2,1)
@@ -458,6 +470,9 @@ subroutine allocate_start_type
     allocate(start%pitch(in%num_particles,1))
     allocate(start%energy(in%num_particles,1))
     allocate(start%jperp(in%num_particles,1))
+    allocate(start%density(in%num_particles,1))
+
+    start%density = in%density
 
 end subroutine allocate_start_type
 

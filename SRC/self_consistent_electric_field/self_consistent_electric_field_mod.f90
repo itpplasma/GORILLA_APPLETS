@@ -26,7 +26,7 @@ subroutine calc_self_consistent_electric_field
     use utils_scef_particle_init_mod, only: calc_starting_conditions, calc_desired_density_profile, &
     initialize_particle_source, update_particle_source, write_particle_source
     use utils_scef_electric_potential_mod, only: allocate_electric_potential_type, initialize_flux_shell_grid, &
-    delete_scef_output_files
+    delete_scef_output_files, initialize_3d_update_grid
     use utils_scef_diffusion_mod, only: calc_diffusion_coefficients
 
     integer :: species, source_step
@@ -43,7 +43,6 @@ subroutine calc_self_consistent_electric_field
 
     !if (.not.in%boole_static_ne) call calc_electron_diffusion_coefficients
 
-    call initialize_exit_data
     call initialize_flux_shell_grid
     if (in%n_source_updates.gt.0) call calc_desired_density_profile   !target density only matters for source tuning
     call initialize_particle_source
@@ -53,6 +52,7 @@ subroutine calc_self_consistent_electric_field
     call unlink_files
     call delete_scef_output_files
     call print_errors_for_bad_inputs
+    if (in%update_dimension.eq.3) call initialize_3d_update_grid
 
     !Prep diffusion coefficients once per species that will use the random walk.
     !Skipping this step reuses the cached A_and_B_species<species>.dat if present.
@@ -61,6 +61,7 @@ subroutine calc_self_consistent_electric_field
             call calc_diffusion_coefficients(species)
         endif
     enddo
+    call initialize_exit_data   !after the calibration, which sizes exit_data for its own test particles
 
     !n_source_updates = 0 runs a single SCEF round with the fixed source set in initialize_particle_source.
     !particle_source_<k>.dat holds the source used in round k (plus the state after the final update).
@@ -104,7 +105,7 @@ subroutine run_scef_iterations(source_step)
     !times and update the electric potential each time. source_step is the source-update
     !iteration index, passed to perform_electric_potential_update for file naming.
 
-    use gorilla_applets_types_mod, only: in, ep, output, start, exit_data
+    use gorilla_applets_types_mod, only: in, ep, output, exit_data
     use utils_data_pre_and_post_processing_mod, only: prepare_next_round_of_parallelised_particle_pushing, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared
     use utils_scef_particle_init_mod, only: calc_starting_conditions
@@ -145,11 +146,9 @@ subroutine run_scef_iterations(source_step)
         if (max(ep%mean_exit_time(1), ep%mean_exit_time(2)) > 0.0_dp) then
             ep%exit_time_correction = in%time_step / max(ep%mean_exit_time(1), ep%mean_exit_time(2))
         endif
-        ep%rho_prism = 0
         do species = 1,2
             if ((species.eq.2).and.(in%boole_static_ne)) cycle
             output%prism_moments(1,:,species) = output%prism_moments(1,:,species) * ep%exit_time_correction
-            ep%rho_prism = ep%rho_prism + real(output%prism_moments(1,:,species))*start%particle_charge(species)
         enddo
 
         call perform_electric_potential_update(i)
