@@ -227,6 +227,7 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
     use supporting_functions_mod, only: bmod_func, vperp_func
     use find_tetra_mod, only: find_tetra
     use constants, only: pi, ev2erg
+    use marker_distribution_mod, only: linear_profile_factor
     use tetra_grid_mod, only: tetra_grid, ntetr
 
     double precision, dimension(3), intent(inout)   :: x
@@ -276,7 +277,7 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
                                              & (tetra_physics(ind_tetr)%h2_1+sum(tetra_physics(ind_tetr)%gh2*(/r,phi,z/)))
         endif
         if (boole_linear_density_simulation) then
-            weights(n,1) = weights(n,1)*(max_poloidal_flux*1.1-poloidal_flux(n))/(max_poloidal_flux*1.1)
+            weights(n,1) = weights(n,1)*linear_profile_factor(poloidal_flux(n)/max_poloidal_flux)
         endif
 
         if (.not. boole_monoenergetic) then
@@ -286,7 +287,7 @@ subroutine orbit_timestep_gorilla_field_lines(x,vpar,vperp,t_step,boole_initiali
                 weights(n,1) = weights(n,1)*sqrt(start_pos_pitch_mat(5,n)*ev2erg)/(energy_eV*ev2erg)**1.5* &
                             & exp(-(start_pos_pitch_mat(5,n)*ev2erg+particle_charge*phi_elec_func)/(energy_eV*ev2erg))
             else
-                temperature_vector(n) = energy_eV*ev2erg*(max_poloidal_flux*1.1-poloidal_flux(n))/(max_poloidal_flux*1.1)
+                temperature_vector(n) = energy_eV*ev2erg*linear_profile_factor(poloidal_flux(n)/max_poloidal_flux)
                 weights(n,1) = weights(n,1)*sqrt(start_pos_pitch_mat(5,n)*ev2erg)/temperature_vector(n)**1.5* &
                 & exp(-(start_pos_pitch_mat(5,n)*ev2erg+particle_charge*phi_elec_func)/temperature_vector(n))
             endif

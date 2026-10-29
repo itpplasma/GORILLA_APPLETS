@@ -35,6 +35,8 @@ module gorilla_applets_types_mod
     real(dp), dimension(:,:),   allocatable :: pitch
     real(dp), dimension(:,:),   allocatable :: energy
     real(dp), dimension(:,:),   allocatable :: jperp
+    real(dp), dimension(:,:),   allocatable :: density    !physical density represented by each marker (defaults to in%density
+                                                          !in the base applets, varies with the particle source in SCEF)
     real(dp), dimension(:),     allocatable :: particle_charge !used in self consistent electric field computation
     real(dp), dimension(:),     allocatable :: particle_mass !used in self consistent electric field computation
     real(dp), dimension(:),     allocatable :: cm_over_e !used in self consistent electric field computation

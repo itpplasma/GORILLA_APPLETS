@@ -145,6 +145,7 @@ subroutine calc_average_charge_density_per_flux_layer(i)
     use tetra_grid_mod, only: nvert, verts_sthetaphi
     use tetra_grid_settings_mod, only: grid_size
     use constants, only: echarge
+    use marker_distribution_mod, only: linear_profile_factor
 
     integer, intent(in) :: i
     integer :: ns, j, species, ind_prism, n_species
@@ -163,7 +164,7 @@ subroutine calc_average_charge_density_per_flux_layer(i)
     if (in%boole_static_ne) then
         do ns = 1,grid_size(1)
             s = (verts_sthetaphi(1, grid_size(3)*(ns-1)+1) + verts_sthetaphi(1,grid_size(3)*ns+1))/2.0_dp
-            electron_densities(ns) = in%density*(1.0_dp-0.9_dp*s)
+            electron_densities(ns) = in%density*linear_profile_factor(s)
         enddo
     endif
 
