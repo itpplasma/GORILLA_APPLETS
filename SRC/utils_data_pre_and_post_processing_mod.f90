@@ -312,10 +312,6 @@ end subroutine init_velocity_space_distributions
 subroutine set_rest_of_start_type()
 
     use gorilla_applets_types_mod, only: in, start
-    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
-    use gorilla_applets_settings_mod, only: i_option
-    use constants, only: echarge,ame,clight
-    use constants, only: ev2erg
     use marker_distribution_mod, only: sample_array_1d
 
     integer :: i_species
@@ -334,6 +330,22 @@ subroutine set_rest_of_start_type()
         start%energy(1:in%num_particles:2,:) = start%energy(2:in%num_particles:2,:)
     endif
 
+    call set_species_properties
+
+end subroutine set_rest_of_start_type
+
+subroutine set_species_properties()
+
+    !Per-species charge, mass, tracing time and reference velocity, read by the shared particle
+    !pushing and weight routines. Applets placing their markers themselves (divertor) call this
+    !directly instead of set_rest_of_start_type.
+
+    use gorilla_applets_types_mod, only: in, start
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
+    use gorilla_applets_settings_mod, only: i_option
+    use constants, only: echarge,ame,clight
+    use constants, only: ev2erg
+
     start%particle_charge = particle_charge
     start%particle_mass = particle_mass
     start%cm_over_e = cm_over_e
@@ -348,7 +360,7 @@ subroutine set_rest_of_start_type()
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
     start%lost = .false.
 
-end subroutine set_rest_of_start_type
+end subroutine set_species_properties
 
 subroutine initialize_exit_data(n_particles_in)
 

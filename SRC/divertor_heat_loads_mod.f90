@@ -388,6 +388,7 @@ end subroutine close_files
 subroutine calc_starting_conditions
 
     use gorilla_applets_types_mod, only: in, start
+    use utils_data_pre_and_post_processing_mod, only: allocate_start_type, allocate_weights, set_species_properties
 
     real(dp), dimension(:,:), allocatable  :: rand_matrix
 
@@ -400,6 +401,7 @@ subroutine calc_starting_conditions
     call allocate_weights
     call set_start_type(rand_matrix)
     call init_marker_distributions
+    call set_species_properties
 
 end subroutine calc_starting_conditions
 
@@ -461,28 +463,6 @@ subroutine set_coordinate_limits
     g%cmax = maxval(verts_rphiz(3,:))
 
 end subroutine set_coordinate_limits
-
-subroutine allocate_start_type
-
-    use gorilla_applets_types_mod, only: start, in
-
-    allocate(start%x(3,in%num_particles,1))
-    allocate(start%pitch(in%num_particles,1))
-    allocate(start%energy(in%num_particles,1))
-    allocate(start%jperp(in%num_particles,1))
-    allocate(start%density(in%num_particles,1))
-
-    start%density = in%density
-
-end subroutine allocate_start_type
-
-subroutine allocate_weights
-
-    use gorilla_applets_types_mod, only: in, weights
-
-    allocate(weights%w(in%num_particles,1))
-
-end subroutine allocate_weights
 
 subroutine create_magnetic_field_file
     use tetra_grid_settings_mod, only: n1,n2,n3
