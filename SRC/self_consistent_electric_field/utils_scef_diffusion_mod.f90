@@ -9,6 +9,8 @@ contains
 subroutine calc_diffusion_coefficients(species)
     !Calibration run: pushes test particles of the given species and fits A, B
     !on every flux layer. Writes A_and_B_<species>.dat for later reuse.
+    !With in%diffusion_scan_s0 > 0 only the flux layer closest to it is calibrated
+    !and the result goes to A_and_B_scan_species<species>.dat instead.
 
     use gorilla_applets_types_mod, only: in, dc, start, s, g, exit_data
     use tetra_grid_settings_mod, only: grid_size
@@ -16,6 +18,7 @@ subroutine calc_diffusion_coefficients(species)
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, initialize_exit_data
     use llsq_mod, only: llsq
     use tetra_physics_mod, only: particle_mass,tetra_physics
+    use constants, only: ev2erg
     use russian_roulette_mod, only: prepare_russian_roulette
     use tetra_grid_settings_mod, only: sfc_s_min
     use utils_scef_particle_init_mod, only: allocate_start_type, set_particle_type_specifications, set_starting_positions, &
@@ -25,12 +28,12 @@ subroutine calc_diffusion_coefficients(species)
 
     integer, intent(in) :: species
 
-    integer :: ns, i, n_particles, file_id, n_ignored
+    integer :: ns, i, n_particles, file_id, n_ignored, ns_first, ns_last
     real(dp) :: extrapolation_factor, A, B, offset, tau_calibration, v0, v_max, weights_before_redistribution
     real(dp) :: standard_deviation, dummy
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str, species_str
-    real(dp), dimension(:), allocatable :: data_for_diffusion_coefficient, data_for_convection_coefficient
+    real(dp), dimension(:), allocatable :: data_for_diffusion_coefficient, data_for_convection_coefficient, energy_start
     logical :: ignore_condition
 
     !Hardcoded per-species calibration duration. Refine for ions when needed.
@@ -43,8 +46,9 @@ subroutine calc_diffusion_coefficients(species)
         print*, 'Error: calc_diffusion_coefficients called with unsupported species ', species
         stop
     end select
+    if (in%diffusion_tau.gt.0.0_dp) tau_calibration = in%diffusion_tau
 
-    s%n_particles = 40000
+    s%n_particles = in%n_particles_diffusion
     call random_number(dummy)
 
     if (.not.allocated(rand_matrix)) allocate(rand_matrix(5,s%n_particles,1))
@@ -61,6 +65,7 @@ subroutine calc_diffusion_coefficients(species)
     if (.not.allocated(s%check)) allocate(s%check(s%k))
     if (.not.allocated(data_for_diffusion_coefficient)) allocate(data_for_diffusion_coefficient(s%n_particles))
     if (.not.allocated(data_for_convection_coefficient)) allocate(data_for_convection_coefficient(s%n_particles))
+    if (.not.allocated(energy_start)) allocate(energy_start(s%n_particles))
     if (.not.allocated(s%boole_large_distance)) allocate(s%boole_large_distance(s%n_particles))
     s%boole_large_distance = .false.
 
@@ -75,7 +80,14 @@ subroutine calc_diffusion_coefficients(species)
 
     s%time = [(start%t(species)/s%k*i,i = 1,s%k)]
 
-    do ns = 2,grid_size(1)
+    ns_first = 2
+    ns_last = grid_size(1)
+    if (in%diffusion_scan_s0.gt.0.0_dp) then
+        ns_first = minloc(abs(g%s_vertices(2:grid_size(1))-in%diffusion_scan_s0), dim=1) + 1
+        ns_last = ns_first
+    endif
+
+    do ns = ns_first,ns_last
 
         print*, 'ns = ', ns, '/', grid_size(1)
 
@@ -87,11 +99,12 @@ subroutine calc_diffusion_coefficients(species)
         call set_starting_positions(rand_matrix,(/species/), s%s0)
         call set_rest_of_individual_particle_specifications(rand_matrix,boole_diffusion_coefficient_in = .true., &
                                                             species_in=(/species/),n_particles_in=s%n_particles)
+        energy_start = start%energy(1:s%n_particles,species) !overwritten by the pushing
 
 
         call prepare_next_round_of_parallelised_particle_pushing(species)
 
-        if (ns.eq.2) then
+        if (ns.eq.ns_first) then
             call calc_collision_coefficients_for_all_tetrahedra(species)
 
             v0 = start%v0(species)
@@ -150,9 +163,12 @@ subroutine calc_diffusion_coefficients(species)
     write(ns_str, '(I0)') ns
     write(species_str, '(I0)') species
     filename = 'exit_s_values_species' // trim(species_str) // '_' // trim(ns_str) // '.dat'
+    !columns: final s, start energy [eV], final energy [eV], lost (1) or not (0)
     open(newunit=file_id,file = filename)
         do i = 1,s%n_particles
-            write(file_id,*) exit_data%x(1,i,species)
+            write(file_id,*) exit_data%x(1,i,species), energy_start(i), &
+                0.5_dp*start%particle_mass(species)*(exit_data%vpar(i,species)**2+exit_data%vperp(i,species)**2)/ev2erg, &
+                exit_data%lost(i,species)
         enddo
     close(file_id)
 
@@ -173,6 +189,15 @@ subroutine calc_diffusion_coefficients(species)
     !print*, weights%w(:,species)
 
     enddo
+
+    if (in%diffusion_scan_s0.gt.0.0_dp) then
+        write(species_str, '(I0)') species
+        filename = 'A_and_B_scan_species' // trim(species_str) // '.dat'
+        open(newunit=file_id,file = filename)
+            write(file_id,*) s%s0, dc%A(ns_first, species), dc%B(ns_first, species)
+        close(file_id)
+        return
+    endif
 
     !Extrapolate values to the boundaries
     extrapolation_factor = (g%s_vertices(2)-g%s_vertices(1))/(g%s_vertices(3)-g%s_vertices(2))

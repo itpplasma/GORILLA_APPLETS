@@ -102,7 +102,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                 v_save = sqrt(vpar_save**2+vperp_save**2)
 
                 if (in%boole_collisions) then
-                    call carry_out_collisions(i, n, t, x, vpar,vperp,ind_tetr, iface, species)
+                    call carry_out_collisions(i, n, t, x, vpar,vperp,ind_tetr, iface, species, in%i_collision_mode)
                     t%step = t%step/start%v0(species) !in carry_out_collisions, t%step is initiated as a length, so you need to divide by v0
                 endif
 

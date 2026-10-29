@@ -133,7 +133,7 @@ module gorilla_applets_types_mod
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
     integer  :: n_mappings_ignored !Used in divertor_heat_loads
     real(dp) :: lambda !Used in divertor_heat_loads
-    integer  :: i_collision_mode = 1 !rmp_response_currents: stost iswmode (1=Coulomb, 5=Euler-Maruyama OU on v_par)
+    integer  :: i_collision_mode = 1 !rmp_response_currents, self consistent electric field: stost iswmode (1=full, 4=pitch-angle only, 5=OU on v_par)
     integer  :: n_background_species = 2
     logical  :: boole_honest_tracing(2) !used in self consistent electric field: honest push (T) vs. random walk (F) per species
     logical  :: boole_recompute_D(2)    !used in self consistent electric field: recompute D per species (T) or reuse cached A_and_B_<species>.dat (F)
@@ -141,6 +141,9 @@ module gorilla_applets_types_mod
     logical  :: reduced_output = .false.            !used in self consistent electric field: write files only on the last EP update per source iteration
     real(dp) :: source_relaxation_factor = 1.0_dp   !used in self consistent electric field: alpha in S := S - alpha*(n - n_target)*factor_from_tracing_time
     real(dp) :: quasineutrality_tol = 0.0_dp        !used in self consistent electric field: early-exit tolerance on sum|n_e-n_i|V / sum(n_e+n_i)V (0 = off)
+    integer  :: n_particles_diffusion = 40000       !used in self consistent electric field: test particles per flux surface in the diffusion calibration
+    real(dp) :: diffusion_tau = -1.0_dp             !used in self consistent electric field: tracing time [s] of the diffusion calibration (<=0 = hardcoded per species)
+    real(dp) :: diffusion_scan_s0 = -1.0_dp         !used in self consistent electric field: >0 calibrates only the flux surface closest to this s and stops (<=0 = all surfaces, then SCEF)
     end type input_t
 
     type(input_t) :: in
