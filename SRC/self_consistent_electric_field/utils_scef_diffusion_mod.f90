@@ -19,12 +19,13 @@ subroutine calc_diffusion_coefficients(species)
     use russian_roulette_mod, only: prepare_russian_roulette
     use tetra_grid_settings_mod, only: sfc_s_min
     use utils_scef_particle_init_mod, only: allocate_start_type, set_particle_type_specifications, set_starting_positions, &
-                                            set_rest_of_individual_particle_specifications, set_weight
+                                            set_rest_of_individual_particle_specifications, allocate_weights, &
+                                            init_marker_distributions
     use utils_scef_particle_pushing_mod, only: parallelised_particle_pushing
 
     integer, intent(in) :: species
 
-    integer :: ns, i, n_particles, file_id, n_ignored, ns_start
+    integer :: ns, i, n_particles, file_id, n_ignored
     real(dp) :: extrapolation_factor, A, B, offset, tau_calibration, v0, v_max, weights_before_redistribution
     real(dp) :: standard_deviation, dummy
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
@@ -64,7 +65,9 @@ subroutine calc_diffusion_coefficients(species)
     s%boole_large_distance = .false.
 
     call allocate_start_type(s%n_particles)
+    call allocate_weights(s%n_particles)
     call set_particle_type_specifications
+    call init_marker_distributions(s%temperature)   !samples the calibration energies at s%temperature
     start%v0(species) = start%v0(species)*sqrt(s%temperature/in%energy_eV)
     call initialize_exit_data(s%n_particles)
 
@@ -72,27 +75,23 @@ subroutine calc_diffusion_coefficients(species)
 
     s%time = [(start%t(species)/s%k*i,i = 1,s%k)]
 
-    ns_start = 15
-
-    do ns = ns_start,grid_size(1)
+    do ns = 2,grid_size(1)
 
         print*, 'ns = ', ns, '/', grid_size(1)
 
 
         !Initiate particles of `species` at the different flux surfaces leaving out the boundaries
         s%s0 = g%s_vertices(ns)
-        s%s0 = 0.5d0
 
         call RANDOM_NUMBER(rand_matrix)
         call set_starting_positions(rand_matrix,(/species/), s%s0)
         call set_rest_of_individual_particle_specifications(rand_matrix,boole_diffusion_coefficient_in = .true., &
                                                             species_in=(/species/),n_particles_in=s%n_particles)
-        call set_weight
 
 
         call prepare_next_round_of_parallelised_particle_pushing(species)
 
-        if (ns.eq.ns_start) then
+        if (ns.eq.2) then
             call calc_collision_coefficients_for_all_tetrahedra(species)
 
             v0 = start%v0(species)
@@ -215,7 +214,7 @@ subroutine calc_density_via_random_walk(species)
     use tetra_physics_mod, only: tetra_physics
     use find_tetra_mod, only: find_tetra
     use utils_scef_electric_potential_mod, only: fill_vector_parts_with_value
-    use utils_scef_particle_pushing_mod, only: calc_particle_weights_and_jperp
+    use utils_orbit_timestep_mod, only: calc_particle_weights_and_jperp
 
     integer, intent(in) :: species
 
@@ -256,7 +255,8 @@ subroutine calc_density_via_random_walk(species)
                 cycle
             endif
             z_save = x_particle - tetra_physics(ind_tetr)%x1
-            call calc_particle_weights_and_jperp(n, z_save, vpar_init, vperp_init, ind_tetr, 1, .false.)
+            call calc_particle_weights_and_jperp(n, z_save, vpar_init, vperp_init, ind_tetr, 1, &
+                                                 boole_include_potential_in = .false.)
         enddo
     elseif ((species .eq. 2) .and. (.not. in%boole_static_ne)) then
         start%x(:, :, 2) = start%x(:, :, 1)

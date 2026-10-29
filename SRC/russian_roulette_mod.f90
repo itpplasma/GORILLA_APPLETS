@@ -37,6 +37,12 @@ subroutine prepare_russian_roulette(v0,v_max,weights_before_redistribution, num_
 
     n_particle_state = num_particle_state
 
+    !Prepare from scratch: may be called repeatedly, e.g. once per species with different v0, v_max
+    if (allocated(rr%boundary_fluxes_plus))  deallocate(rr%boundary_fluxes_plus)
+    if (allocated(rr%boundary_fluxes_minus)) deallocate(rr%boundary_fluxes_minus)
+    if (allocated(rr%velocity_bounds))       deallocate(rr%velocity_bounds)
+    if (allocated(rr%roulette_numbers))      deallocate(rr%roulette_numbers)
+
     if (.not.rr%boole_continuous_rr) call prepare_rr_with_boundary_fluxes(v0,v_max)
     if (     rr%boole_continuous_rr) call prepare_continuous_rr(v0,weights_before_redistribution)
 
