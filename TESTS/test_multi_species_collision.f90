@@ -196,6 +196,16 @@ subroutine test_background_reservoir(all_passed)
         all_passed = .false.
     end if
 
+    ! Guard: an exchange that would drive the background temperature
+    ! non-positive is rejected, keeping the previous reservoir state.
+    u_b = u0
+    temp_b = t0
+    call update_background_reservoir(m_t, m_b, 1.0e5_dp, 0.0_dp, 1.0e-2_dp, u_b, temp_b)
+    if (temp_b /= t0 .or. u_b /= u0) then
+        print *, 'FAIL: background reservoir guard did not reject a non-positive temperature'
+        all_passed = .false.
+    end if
+
 end subroutine test_background_reservoir
 
 end program test_multi_species_collision

@@ -239,7 +239,7 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
 
         !$omp critical
         call update_background_reservoir(particle_mass, c%mass(j), &
-            c%weight_factor*weights%w(n,species)*particle_to_background_coupling_strength, &
+            c%weight_factor*real(weights%w(n,species), dp)*particle_to_background_coupling_strength, &
             delta_vpar, delta_epsilon, c%vpar_mat(j,ind_tetr), c%temp_mat(j,ind_tetr))
         !$omp end critical
     enddo
@@ -254,11 +254,19 @@ pure subroutine update_background_reservoir(m_t, m_b, r, delta_vpar, delta_epsil
 
     real(dp), intent(in) :: m_t, m_b, r, delta_vpar, delta_epsilon
     real(dp), intent(inout) :: u_b, temp_b
-    real(dp) :: u_b_old
+    real(dp) :: u_b_old, temp_b_old
 
     u_b_old = u_b
+    temp_b_old = temp_b
     u_b = u_b_old - r*m_t*delta_vpar/m_b
     temp_b = temp_b - (2.0_dp*r*delta_epsilon + m_b*(u_b**2 - u_b_old**2))/(3.0_dp*ev2erg)
+    ! Guard against a non-positive background temperature: an exchange that
+    ! would drive T_b <= 0 is unphysical, so the reservoir keeps its
+    ! previous state instead of propagating an invalid temperature.
+    if (temp_b <= 0.0_dp) then
+        u_b = u_b_old
+        temp_b = temp_b_old
+    end if
 
 end subroutine update_background_reservoir
 
