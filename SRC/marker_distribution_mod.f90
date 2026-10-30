@@ -1,10 +1,21 @@
 module marker_distribution_mod
 
+    !Distributions used for markers and their weights: the sampling (marker) distributions with
+    !their tables for evaluation and sampling, as well as the physical distribution functions the
+    !weights are built from (pdf_boltzmann and the linear profile shape linear_profile_factor).
+
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
     implicit none
 
     integer, parameter :: default_table_size = 1000
+
+    !Linear density/temperature profiles (boole_linear_density_simulation, boole_linear_temperature_simulation)
+    !fall linearly from 1 on the axis (x = 0) to 0.1 at the boundary (x = 1), x = normalised radial coordinate
+    real(dp), parameter :: linear_profile_slope = -0.9_dp   !d(linear_profile_factor)/dx
+
+    !Temperature in eV used by pdf_maxwell. Set before init_distribution_1d(dist_energy, pdf_maxwell, ...).
+    real(dp) :: maxwell_temperature_eV = 1.0_dp
 
     !---------------------------------------------------------------------------
     ! Unified abstract interface for PDF functions
@@ -192,12 +203,18 @@ end subroutine sample_array_3d
 !-------------------------------------------------------------------------------
 ! Initialize 1D distribution by building the CDF table
 !-------------------------------------------------------------------------------
-subroutine init_distribution_1d(dist, pdf, xmin, xmax, table_size)
+subroutine init_distribution_1d(dist, pdf, xmin, xmax, table_size, normalization)
+
+    !normalization (optional): exact integral of pdf over [xmin, xmax], used for evaluating the pdf
+    !instead of the midpoint sum of the CDF table (which converges slowly for pdfs with a singular
+    !derivative at the boundary, e.g. sqrt(E) at E = 0). The CDF table used for sampling is always
+    !normalised by its own sum, so that it ends at 1.
 
     type(distribution_1d_t), intent(inout) :: dist
     procedure(pdf_interface) :: pdf
     real(dp), intent(in) :: xmin, xmax
     integer, intent(in), optional :: table_size
+    real(dp), intent(in), optional :: normalization
 
     integer :: i, n
     real(dp) :: x, hx
@@ -244,6 +261,7 @@ subroutine init_distribution_1d(dist, pdf, xmin, xmax, table_size)
     if (dist%normalization > 0.0_dp) then
         dist%cdf = dist%cdf / dist%normalization
     endif
+    if (present(normalization)) dist%normalization = normalization
 
     dist%initialized = .true.
 
@@ -387,6 +405,34 @@ function pdf_flat(x) result(val)
     val = 1.0_dp
 end function pdf_flat
 
+function pdf_maxwell(x) result(val)
+
+    !Unnormalised Maxwell energy pdf f(E) ~ sqrt(E) * exp(-E/T), E and T in eV. The caller sets
+    !maxwell_temperature_eV before init_distribution_1d and passes pdf_maxwell_integral as its
+    !normalization.
+
+    real(dp), intent(in) :: x(:)
+    real(dp) :: val
+
+    val = sqrt(x(1))*exp(-x(1)/maxwell_temperature_eV)
+
+end function pdf_maxwell
+
+function pdf_maxwell_integral(energy_max) result(val)
+
+    !Exact integral of pdf_maxwell over [0, energy_max]:
+    !T^(3/2) * (sqrt(pi)/2 * erf(sqrt(u)) - sqrt(u) * exp(-u)), u = energy_max/T
+
+    use constants, only: pi
+
+    real(dp), intent(in) :: energy_max
+    real(dp) :: val, u
+
+    u = energy_max/maxwell_temperature_eV
+    val = maxwell_temperature_eV**1.5_dp * (sqrt(pi)/2.0_dp*erf(sqrt(u)) - sqrt(u)*exp(-u))
+
+end function pdf_maxwell_integral
+
 function pdf_boltzmann(n,T,m,energy,q,Phi) result(val)
 
     use constants, only: pi
@@ -396,5 +442,17 @@ function pdf_boltzmann(n,T,m,energy,q,Phi) result(val)
 
     val = n*(2*pi*T*m)**(-1.5_dp)*exp(-(energy+q*Phi)/T)
 end function pdf_boltzmann
+
+pure function linear_profile_factor(x) result(factor)
+
+    !Shape factor of the linear density/temperature profiles at normalised radial coordinate x
+    !(flux label s, or normalised poloidal flux): 1 on the axis, 0.1 at the boundary
+
+    real(dp), intent(in) :: x
+    real(dp) :: factor
+
+    factor = 1.0_dp + linear_profile_slope*x
+
+end function linear_profile_factor
 
 end module marker_distribution_mod
