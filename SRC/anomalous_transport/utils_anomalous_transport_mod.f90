@@ -214,7 +214,8 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
     use orbit_timestep_gorilla_mod, only: check_coordinate_domain
     use supporting_functions_mod, only: vperp_func
     use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g, s, flux, weights
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g, s, weights
+    use utils_data_pre_and_post_processing_mod, only: normalised_poloidal_flux
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
     use utils_orbit_timestep_mod, only: update_local_tetr_moments, initialize_constants_of_motion, compute_radial_fluxes, &
         calc_particle_weights_and_jperp, identify_particles_entering_annulus
@@ -322,7 +323,7 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
                 ! Use current tetrahedron (ind_tetr) and recompute local coordinates
                 z_local = x - tetra_physics(ind_tetr)%x1
                 local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_local)
-                s_local = (local_poloidal_flux - flux%poloidal_min) / (flux%poloidal_max - flux%poloidal_min)
+                s_local = normalised_poloidal_flux(local_poloidal_flux)
 
                 !$omp critical
                 s%delta_s(k) = s%delta_s(k) + (s_local - s%s0) * weights%w(n,species)
@@ -361,7 +362,7 @@ subroutine calc_diffusion_coefficient(filename_in, D_out)
 !
     use gorilla_applets_types_mod, only: in, s, start, weights
     use llsq_mod, only: llsq
-    use utils_data_pre_and_post_processing_mod, only: initialize_exit_data, set_weights
+    use utils_data_pre_and_post_processing_mod, only: initialize_exit_data
 
     character(len=*), intent(in), optional :: filename_in
     real(dp), intent(out), optional :: D_out
@@ -403,7 +404,6 @@ subroutine calc_diffusion_coefficient(filename_in, D_out)
     call allocate_start_type(n_particles)  ! Use local allocate_start_type with explicit particle count
     call allocate_weights(n_particles)
     call set_starting_positions_point_source(rand_matrix, (/1/))  ! This also sets s%s0
-    call set_weights
     call set_rest_of_start_type(rand_matrix)  ! This also sets start%t(1)
 
     ! Initialize time array based on actual tracing time
@@ -796,7 +796,8 @@ subroutine set_starting_positions_point_source(rand_matrix, species_in)
 ! This point should be approximately at mid-radius in the computational domain.
 ! Also computes and sets s%s0 (the reference flux surface) from this position.
 !
-    use gorilla_applets_types_mod, only: in, start, g, s, flux
+    use gorilla_applets_types_mod, only: in, start, g, s
+    use utils_data_pre_and_post_processing_mod, only: normalised_poloidal_flux
     use tetra_physics_mod, only: tetra_physics
     use find_tetra_mod, only: find_tetra
 
@@ -844,7 +845,7 @@ subroutine set_starting_positions_point_source(rand_matrix, species_in)
         local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi * z_save)
 
         ! Normalize to get s coordinate (no square root)
-        s%s0 = (local_poloidal_flux - flux%poloidal_min) / (flux%poloidal_max - flux%poloidal_min)
+        s%s0 = normalised_poloidal_flux(local_poloidal_flux)
     endif
 
     print*, 'Particles initialized at point: R =', start%x(1,1,species(1)), &
@@ -915,12 +916,15 @@ subroutine allocate_start_type(n_particles_in)
     allocate(start%pitch(n_particles, in%n_species))
     allocate(start%energy(n_particles, in%n_species))
     allocate(start%jperp(n_particles, in%n_species))
+    allocate(start%density(n_particles, in%n_species))
     allocate(start%lost(n_particles, in%n_species))
     allocate(start%particle_charge(in%n_species))
     allocate(start%particle_mass(in%n_species))
     allocate(start%cm_over_e(in%n_species))
     allocate(start%t(in%n_species))
     allocate(start%v0(in%n_species))
+
+    start%density = in%density
 
 end subroutine allocate_start_type
 
@@ -957,6 +961,7 @@ subroutine deallocate_start_type
     if (allocated(start%pitch))           deallocate(start%pitch)
     if (allocated(start%energy))          deallocate(start%energy)
     if (allocated(start%jperp))           deallocate(start%jperp)
+    if (allocated(start%density))         deallocate(start%density)
     if (allocated(start%lost))            deallocate(start%lost)
     if (allocated(start%particle_charge)) deallocate(start%particle_charge)
     if (allocated(start%particle_mass))   deallocate(start%particle_mass)

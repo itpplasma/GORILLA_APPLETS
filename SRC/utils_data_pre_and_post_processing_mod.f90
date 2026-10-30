@@ -219,12 +219,15 @@ subroutine allocate_start_type
     allocate(start%pitch(in%num_particles,in%n_species))
     allocate(start%energy(in%num_particles,in%n_species))
     allocate(start%jperp(in%num_particles,in%n_species))
+    allocate(start%density(in%num_particles,in%n_species))
     allocate(start%lost(in%num_particles,in%n_species))
     allocate(start%particle_charge(in%n_species))
     allocate(start%particle_mass(in%n_species))
     allocate(start%cm_over_e(in%n_species))
     allocate(start%t(in%n_species))
     allocate(start%v0(in%n_species))
+
+    start%density = in%density
 
 end subroutine allocate_start_type
 
@@ -284,38 +287,18 @@ subroutine set_starting_positions()
 
 end subroutine set_starting_positions
 
-subroutine set_weights
+subroutine init_velocity_space_distributions()
 
-    use gorilla_applets_types_mod, only: in, weights, g, c
-    use constants, only: pi
-
-    weights%w = in%density*(g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
-
-    if (.not. in%boole_monoenergetic) then !compare with equation 133 of master thesis of Jonatan Schatzlmayr (remaining parts will be added later)
-        weights%w =  weights%w*10/sqrt(pi)
-    endif
-
-    c%weight_factor = 1/(weights%w(1,1)*g%amax)
-
-end subroutine set_weights
-
-subroutine set_rest_of_start_type()
+    !Marker distributions of pitch (uniform on [-1, 1]) and energy (fixed for monoenergetic runs,
+    !uniform on [0, 5*T] otherwise), used for sampling and for evaluating the marker weights
 
     use gorilla_applets_types_mod, only: in, start
-    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
-    use gorilla_applets_settings_mod, only: i_option
-    use constants, only: echarge,ame,clight
-    use constants, only: ev2erg
-    use marker_distribution_mod, only: pdf_flat, init_distribution_1d, sample_array_1d
+    use marker_distribution_mod, only: pdf_flat, init_distribution_1d
 
-    integer :: i_species
-
-    ! Initialize lambda (pitch angle) distribution if not already done
     if (.not. start%dist_lambda%initialized) then
         call init_distribution_1d(start%dist_lambda, pdf_flat, -1.0_dp, 1.0_dp)
     endif
 
-    ! Initialize energy distribution if not already done
     if (.not. start%dist_energy%initialized) then
         if (in%boole_monoenergetic) then
             call init_distribution_1d(start%dist_energy, pdf_flat, in%energy_eV, in%energy_eV)
@@ -323,6 +306,17 @@ subroutine set_rest_of_start_type()
             call init_distribution_1d(start%dist_energy, pdf_flat, 0.0_dp, 5.0_dp*in%energy_eV)
         endif
     endif
+
+end subroutine init_velocity_space_distributions
+
+subroutine set_rest_of_start_type()
+
+    use gorilla_applets_types_mod, only: in, start
+    use marker_distribution_mod, only: sample_array_1d
+
+    integer :: i_species
+
+    call init_velocity_space_distributions
 
     ! Sample pitch and energy for all species
     do i_species = 1, in%n_species
@@ -335,6 +329,22 @@ subroutine set_rest_of_start_type()
         start%pitch(1:in%num_particles:2,:) = -start%pitch(2:in%num_particles:2,:)
         start%energy(1:in%num_particles:2,:) = start%energy(2:in%num_particles:2,:)
     endif
+
+    call set_species_properties
+
+end subroutine set_rest_of_start_type
+
+subroutine set_species_properties()
+
+    !Per-species charge, mass, tracing time and reference velocity, read by the shared particle
+    !pushing and weight routines. Applets placing their markers themselves (divertor) call this
+    !directly instead of set_rest_of_start_type.
+
+    use gorilla_applets_types_mod, only: in, start
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
+    use gorilla_applets_settings_mod, only: i_option
+    use constants, only: echarge,ame,clight
+    use constants, only: ev2erg
 
     start%particle_charge = particle_charge
     start%particle_mass = particle_mass
@@ -350,7 +360,7 @@ subroutine set_rest_of_start_type()
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)
     start%lost = .false.
 
-end subroutine set_rest_of_start_type
+end subroutine set_species_properties
 
 subroutine initialize_exit_data(n_particles_in)
 
@@ -401,28 +411,50 @@ subroutine calc_poloidal_flux(verts)
     use tetra_grid_mod, only: ntetr, tetra_grid
     
     real(dp), dimension(:,:), intent(in) :: verts
-    integer :: i
-    
-    flux%poloidal_max = 0
-    flux%poloidal_min = tetra_physics(1)%Aphi1
+    integer :: i, k
+    real(dp) :: psi_vertex
+
+    !Range of A_phi over all vertices of the grid
+    flux%poloidal_min = huge(1.0_dp)
+    flux%poloidal_max = -huge(1.0_dp)
     do i = 1, ntetr
-        flux%poloidal_max = max(flux%poloidal_max,tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi* &
-        & (verts([1,2,3],tetra_grid(i)%ind_knot(4))-verts([1,2,3],tetra_grid(i)%ind_knot(1)))))
-        flux%poloidal_min = min(flux%poloidal_min,tetra_physics(i)%Aphi1)
+        do k = 1, 4
+            psi_vertex = tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi* &
+            & (verts([1,2,3],tetra_grid(i)%ind_knot(k))-verts([1,2,3],tetra_grid(i)%ind_knot(1))))
+            flux%poloidal_min = min(flux%poloidal_min, psi_vertex)
+            flux%poloidal_max = max(flux%poloidal_max, psi_vertex)
+        enddo
     enddo
     
 end subroutine calc_poloidal_flux
 
+elemental function normalised_poloidal_flux(psi) result(s)
+
+    !Poloidal flux psi = A_phi normalised to [0, 1] by its range over the computational domain
+    !(flux%poloidal_min/max from calc_poloidal_flux); the radial coordinate in cylindrical coordinates
+    !for axisymmetric devices. A_phi has no fixed sign or offset, so dividing by poloidal_max alone
+    !can give s < 0.
+
+    use gorilla_applets_types_mod, only: flux
+
+    real(dp), intent(in) :: psi
+    real(dp) :: s
+
+    s = (psi - flux%poloidal_min)/(flux%poloidal_max - flux%poloidal_min)
+
+end function normalised_poloidal_flux
+
 subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
-    use gorilla_applets_types_mod, only: in, c, start, s, flux
+    use gorilla_applets_types_mod, only: in, c, start, s, g
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
-    use constants, only: echarge,amp, ame, ev2erg
+    use constants, only: echarge,amp, ame, ev2erg, pi
     use tetra_grid_settings_mod, only: grid_size, grid_kind
     use collis_ions, only: collis_init
     use gorilla_settings_mod, only: coord_system
     use gorilla_applets_settings_mod, only: i_option
+    use marker_distribution_mod, only: linear_profile_factor
 
     integer, intent(in), optional :: species_in
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
@@ -430,7 +462,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     real(dp) :: v0_l
     integer :: i, j
     integer :: species = 1
-    real(dp) :: m0, z0, n0, s_value, v0
+    real(dp) :: m0, z0, n0, s_value, v0, v_box
     logical :: boole_T_and_n_from_files = .false.
     logical :: boole_analytic_temperature_profile
 
@@ -439,6 +471,17 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     boole_analytic_temperature_profile = (i_option == 12)
 
     call set_c
+
+    !c%weight_factor is only consumed by the energy/momentum-conserving collisions. Derive it
+    !directly from the sampling box (uniform position × 2*pi, Boltzmann adds the 10/sqrt(pi)
+    !normalisation of a uniform energy marker pdf on [0, 5T]) so it does not depend on weights%w.
+    !Gated on the sole consumer so applets that place markers deterministically (helical_core,
+    !divertor) can call the collision setup before g%amin/amax/cmin/cmax are populated.
+    if (in%boole_preserve_energy_and_momentum_during_collisions) then
+        v_box = (g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
+        c%weight_factor = 1.0_dp/(in%density*v_box*g%amax)
+        if (.not. in%boole_monoenergetic) c%weight_factor = c%weight_factor*sqrt(pi)/10.0_dp
+    endif
 
     if (.not.allocated(efcolf))       allocate(efcolf(c%n))
     if (.not.allocated(velrat))       allocate(velrat(c%n))
@@ -464,7 +507,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
                 s_value = tetra_physics(i)%x1(1)
             else if (grid_kind /= 3) then
                 ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
-                s_value = tetra_physics(i)%Aphi1 / flux%poloidal_max
+                s_value = normalised_poloidal_flux(tetra_physics(i)%Aphi1)
             else
                 ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
                 print*, 'Error in calc_collision_coefficients_for_all_tetrahedra: Linear profiles with &
@@ -472,14 +515,12 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
                 stop
             endif
 
-            ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
             if (in%boole_linear_density_simulation) then
-                c%dens_mat(:,i) = in%density * (1.1_dp - s_value) / 1.1_dp
+                c%dens_mat(:,i) = in%density * linear_profile_factor(s_value)
             endif
 
-            ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
             if (in%boole_linear_temperature_simulation) then
-                c%temp_mat(:,i) = in%energy_eV * (1.1_dp - s_value) / 1.1_dp
+                c%temp_mat(:,i) = in%energy_eV * linear_profile_factor(s_value)
             endif
 
             if (boole_analytic_temperature_profile) then

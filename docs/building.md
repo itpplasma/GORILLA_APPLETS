@@ -34,8 +34,8 @@ make test                # ctest --output-on-failure in BUILD/
 make clean               # remove BUILD/
 ```
 
-The executable is `BUILD/gorilla_applets_main.x`. The example folders expect
-a link to it in the repository root (`ln -s BUILD/gorilla_applets_main.x .`).
+The executable is `BUILD/gorilla_applets_main.x`. Every example folder links
+to it directly.
 
 ## Tests
 

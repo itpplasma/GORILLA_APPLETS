@@ -220,7 +220,7 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
     use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g, weights
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
     use utils_orbit_timestep_mod, only: initialize_constants_of_motion, compute_radial_fluxes, &
-        identify_particles_entering_annulus, update_local_tetr_moments
+        identify_particles_entering_annulus, update_local_tetr_moments, calc_particle_weights_and_jperp
 
     real(dp), dimension(3), intent(inout)        :: x
     real(dp), intent(inout)                      :: vpar, vperp
@@ -246,8 +246,11 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
             return
         endif
         z_save = x - tetra_physics(ind_tetr)%x1
-        call calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, ind_tetr, species)
-        if (in%boole_delta_f) weights%original(n, species) = weights%w(n, species)
+        call calc_particle_weights_and_jperp(n, z_save, vpar, vperp, ind_tetr, species)
+        if (in%boole_delta_f) then
+            call adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
+            weights%original(n, species) = weights%w(n, species)
+        endif
         particle_status%initialized = .true.
     endif
 
@@ -334,7 +337,8 @@ subroutine eliminate_particles_outside_flux_threshold
 !   s = (local_flux - flux_min) / (flux_max - flux_min)
 ! where s=0 at the magnetic axis and s=1 at the boundary.
 !
-    use gorilla_applets_types_mod, only: in, start, flux
+    use gorilla_applets_types_mod, only: in, start
+    use utils_data_pre_and_post_processing_mod, only: normalised_poloidal_flux
     use tetra_physics_mod, only: tetra_physics
     use find_tetra_mod, only: find_tetra
 
@@ -369,7 +373,7 @@ subroutine eliminate_particles_outside_flux_threshold
             local_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi * z_local)
 
             ! Compute normalized flux (0 at axis, 1 at boundary)
-            normalized_flux = (local_flux - flux%poloidal_min) / (flux%poloidal_max - flux%poloidal_min)
+            normalized_flux = normalised_poloidal_flux(local_flux)
 
             ! Eliminate particle if flux exceeds threshold
             if (normalized_flux > in%flux_threshold_for_elimination) then
@@ -460,7 +464,7 @@ subroutine calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
     dt_dtau = tetra_physics(ind_tetr)%dt_dtau_const
 
     ! Compute gradient of r from gradient of A_phi normalized by poloidal flux at boundary
-    grad_r = tetra_physics(ind_tetr)%gAphi / flux%poloidal_max
+    grad_r = tetra_physics(ind_tetr)%gAphi / (flux%poloidal_max - flux%poloidal_min)
 
     ! Compute contravariant velocity component v^r = v_gc . grad_r
     v_r = sum(v_gc_tau * grad_r) / dt_dtau
@@ -477,6 +481,7 @@ subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
     use constants, only: pi
+    use marker_distribution_mod, only: linear_profile_slope
 
     integer, intent(in) :: n, ind_tetr, species
     real(dp), dimension(3), intent(in) :: z_save
@@ -486,9 +491,9 @@ subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
 
     call calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
 
-    !So far, we work with densities that decline like (1.1_dp - s_value)/1.1_dp, so -v^r\partial f/\partial r turns into
-    !-v^r*1.0_dp/1.1_dp(-f)=v_r*f/1.1_dp
-    weights%w(n,species) = weights%w(n,species) * v_r /1.1_dp!vpar
+    !Densities follow the linear profile f = f_M*linear_profile_factor(r), so -v^r\partial f/\partial r turns into
+    !-v^r*linear_profile_slope*f_M
+    weights%w(n,species) = -weights%w(n,species) * v_r * linear_profile_slope
 
 end subroutine adapt_weights_delta_f
 
@@ -519,114 +524,5 @@ subroutine apply_weight_fading(n, species, t, t_tot)
     endif
 
 end subroutine apply_weight_fading
-
-! ====================================================================
-subroutine calc_particle_weights_and_jperp_helical_core(n, z_save, vpar, vperp, ind_tetr, species_in)
-!
-! Calculates particle weights and perpendicular invariant for helical core.
-! Computes the base weight and all particle-specific factors in one place.
-!
-    use gorilla_applets_types_mod, only: in, flux, start, weights, g
-    use tetra_physics_mod, only: tetra_physics
-    use constants, only: ev2erg, pi
-    use volume_integrals_and_sqrt_g_mod, only: sqrt_g
-    use supporting_functions_mod, only: bmod_func
-    use gorilla_settings_mod, only: coord_system
-    use tetra_grid_settings_mod, only: grid_kind
-    use marker_distribution_mod, only: evaluate_distribution_3d, evaluate_distribution_1d, pdf_boltzmann
-
-    real(dp), intent(in) :: vpar, vperp
-    real(dp), dimension(3), intent(in) :: z_save
-    integer, intent(in) :: n, ind_tetr
-    integer, intent(in), optional :: species_in
-    integer :: species = 1
-    real(dp) :: local_poloidal_flux
-    real(dp) :: r, phi, z
-    real(dp) :: s_value
-    real(dp) :: f, J_x, J_y
-    real(dp) :: x_global(3), pdf_position, pdf_energy_ev, pdf_energy_erg, pdf_lambda, d_lambda_epsilon_d_jperp_vpar, omega_c, &
-    pdf_velocity_space, pdf_gyroangle
-    real(dp) :: density,T,m,energy_ev,energy_erg,q,Phi_elec
-
-    if (present(species_in)) species = species_in
-
-    r = z_save(1)
-    phi = z_save(2)
-    z = z_save(3)
-
-
-    if (in%boole_linear_density_simulation.or.in%boole_linear_temperature_simulation) then
-        if (coord_system == 2) then
-            ! Flux coordinates: use s-coordinate directly (s ranges from sfc_s_min to 1)
-            s_value = tetra_physics(ind_tetr)%x1(1) + z_save(1)
-        else if (grid_kind /= 3) then
-            ! Cylindrical coordinates with axisymmetric device: use poloidal flux from A_phi
-            local_poloidal_flux = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z_save)
-            s_value = local_poloidal_flux / flux%poloidal_max
-        else
-            ! grid_kind == 3 (stellarator) with cylindrical coordinates: not supported
-            print*, 'Error in calc_particle_weights_and_jperp_helical_core: Computing radial coordinate from A_phi is only valid &
-                    &for axisymmetric devices. For stellarators (grid_kind=3), use flux coordinates (coord_system=2).'
-            stop
-        endif
-    endif
-
-    m = start%particle_mass(species)
-    T = in%energy_eV*ev2erg
-    energy_ev = start%energy(n,species)
-    energy_erg = start%energy(n,species)*ev2erg
-    density = in%density
-
-    ! Evaluate marker distributions at particle position/energy/pitch
-    x_global = z_save + tetra_physics(ind_tetr)%x1
-    pdf_position = evaluate_distribution_3d(start%dist_position, x_global)
-    pdf_energy_ev = evaluate_distribution_1d(start%dist_energy, energy_ev)
-    if (pdf_energy_ev.eq.1.0_dp) then
-        pdf_energy_erg = 1.0_dp
-    else
-        pdf_energy_erg = pdf_energy_ev/ev2erg
-    endif
-    pdf_lambda = evaluate_distribution_1d(start%dist_lambda, start%pitch(n,species))
-
-    if (in%boole_refined_sqrt_g) then
-        J_x = (sqrt_g(ind_tetr,1)+r*sqrt_g(ind_tetr,2)+z*sqrt_g(ind_tetr,3))/ &
-            & (sqrt_g(ind_tetr,4)+r*sqrt_g(ind_tetr,5)+z*sqrt_g(ind_tetr,6))
-    else
-        J_x = r + tetra_physics(ind_tetr)%x1(1)
-    endif
-
-    if ((.not.in%boole_delta_f).and.(in%boole_linear_density_simulation)) then
-        ! Linear density profile: n(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
-        density = density*(1.1_dp - s_value)/1.1_dp
-    endif
-
-    pdf_gyroangle = 1/(2*pi)
-
-    if (in%boole_monoenergetic) then
-        f = density*pdf_gyroangle/(2.0_dp*start%v0(species))
-        J_y = start%v0(species)
-        pdf_velocity_space = pdf_lambda*pdf_gyroangle
-    else
-        q = start%particle_charge(species)
-        Phi_elec = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
-        if (in%boole_linear_temperature_simulation) then
-            ! Linear temperature profile: T(s) ~ (1 - s), with 1.1 factor to avoid zero at boundary
-            T = T*(1.1_dp - s_value)/1.1_dp
-        endif
-        f = pdf_boltzmann(density,T,m,energy_erg,q,Phi_elec)
-        omega_c = bmod_func(z_save,ind_tetr)/start%cm_over_e(species)
-        d_lambda_epsilon_d_jperp_vpar = omega_c*sqrt(m/(2.0_dp*energy_erg))
-        J_y = m**2*omega_c
-        pdf_velocity_space = pdf_lambda*pdf_energy_erg*pdf_gyroangle*d_lambda_epsilon_d_jperp_vpar
-    endif
-    if (in%boole_point_source) f = f*((g%amax-g%amin)*(g%cmax-g%cmin)*2*pi)
-
-    weights%w(n,species) = f*J_x*J_y/(pdf_position*pdf_velocity_space)
-    start%jperp(n,species) = m*vperp**2*start%cm_over_e(species)/(2*bmod_func(z_save,ind_tetr))*(-1)
-    ! -1 because of negative gyrophase
-
-    if (in%boole_delta_f) call adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
-
-end subroutine calc_particle_weights_and_jperp_helical_core
 
 end module utils_helical_core_mod
