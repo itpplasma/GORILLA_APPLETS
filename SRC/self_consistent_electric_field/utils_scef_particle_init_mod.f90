@@ -27,7 +27,7 @@ subroutine calc_desired_density_profile
     if (.not.allocated(desired_density%grad))  allocate(desired_density%grad(grid_size(1)))
 
     do ns = 1, grid_size(1)+1
-        rad = g%s_vertices(ns)!sqrt(max(g%s_vertices(ns), 0.0_dp))
+        rad = sqrt(max(g%s_vertices(ns), 0.0_dp))
         desired_density%value(ns) = 0.37d14 * ( 0.74_dp                                     &
                                               + 0.26_dp*(1.0_dp - rad**2.5_dp)**1.5_dp      &
                                               - 0.06_dp*(1.0_dp - exp(-4.0_dp*rad**2)) )
@@ -189,22 +189,24 @@ subroutine update_particle_source
     !Richardson step S := S - alpha * (n - n_target) using the last inner-iteration
     !density in one_d%densities. Values live on s-vertices; the shell-averaged
     !one_d%densities is projected to vertices by midpoint averaging (nearest-shell
-    !at the two boundaries). Logs the |n - n_target| / |n_target| residual (the
-    !electron/ion mismatch is logged after every electric potential update).
+    !at the two boundaries). The outer 10% of the domain keeps its source, because
+    !particles only leave there and none enter, so n stays below n_target whatever
+    !the source. Logs the |n - n_target| / |n_target| residual over the tuned shells
+    !(the electron/ion mismatch is logged after every electric potential update).
 
     use gorilla_applets_types_mod, only: in, g, one_d, desired_density, particle_source
     use tetra_grid_settings_mod, only: grid_size, sfc_s_min
 
     integer :: k, ns_g
-    real(dp) :: alpha, target_mismatch, denom, s_cutoff_low, s_cutoff_high
+    real(dp) :: alpha, target_mismatch, denom, s_cutoff_high
     real(dp), dimension(:), allocatable :: n_shell, n_vert, target_shell
+    logical,  dimension(:), allocatable :: tuned_shell
 
     ns_g = grid_size(1)
     alpha = in%source_relaxation_factor
-    s_cutoff_low  = sfc_s_min + 0.1_dp*(1.0_dp - sfc_s_min)   !inner 10% of the domain is not tuned
-    s_cutoff_high = 1.0_dp    - 0.1_dp*(1.0_dp - sfc_s_min)   !outer 10% of the domain is not tuned: particles leave before the density can equilibrate there
+    s_cutoff_high = 1.0_dp - 0.1_dp*(1.0_dp - sfc_s_min)   !outer 10% of the domain is not tuned
 
-    allocate(n_shell(ns_g), n_vert(ns_g+1), target_shell(ns_g))
+    allocate(n_shell(ns_g), n_vert(ns_g+1), target_shell(ns_g), tuned_shell(ns_g))
 
     n_shell(:) = 0.5_dp * (one_d%densities(:,1) + one_d%densities(:,2))
 
@@ -214,7 +216,7 @@ subroutine update_particle_source
     enddo
     n_vert(ns_g+1) = n_shell(ns_g)
 
-    where (g%s_vertices > s_cutoff_low .and. g%s_vertices < s_cutoff_high)
+    where (g%s_vertices < s_cutoff_high)
         particle_source%value = particle_source%value - alpha*(n_vert - desired_density%value)
     end where
 
@@ -225,14 +227,15 @@ subroutine update_particle_source
     enddo
 
     target_shell(:) = 0.5_dp*(desired_density%value(1:ns_g) + desired_density%value(2:ns_g+1))
-    denom = sum(target_shell * g%s_shell_volumes)
+    tuned_shell(:) = g%s_vertices(2:ns_g+1) < s_cutoff_high   !shells whose both vertices are tuned
+    denom = sum(target_shell * g%s_shell_volumes, mask=tuned_shell)
     if (denom > 0.0_dp) then
-        target_mismatch = sum(abs(n_shell - target_shell) * g%s_shell_volumes) / denom
+        target_mismatch = sum(abs(n_shell - target_shell) * g%s_shell_volumes, mask=tuned_shell) / denom
     else
         target_mismatch = 0.0_dp
     endif
 
-    print*, 'source update: relative |n - n_target| / |n_target| = ', target_mismatch
+    print*, 'source update: relative |n - n_target| / |n_target| over the tuned shells = ', target_mismatch
 
 end subroutine update_particle_source
 
