@@ -103,5 +103,19 @@
   !Intermediate source steps stop their electric potential updates early once
   !sum|n_e-n_i|V / sum(n_e+n_i)V <= quasineutrality_tol (0 = always run all updates).
   !The last source step always runs all n_electric_potential_updates.
-  quasineutrality_tol = 0.1d0
+  quasineutrality_tol = 0.1d0 ,
+!
+  !Collision operator (stost iswmode) for tracing and the diffusion calibration
+  !1 ... full, 2 ... energy scattering and drag, 3 ... drag, 4 ... pitch-angle scattering only
+  i_collision_mode = 1 ,
+!
+  !Test particles per flux surface in the diffusion calibration (boole_recompute_D = .true.)
+  n_particles_diffusion = 40000 ,
+!
+  !Tracing time [s] of the diffusion calibration (<= 0: 3.4d-2 for ions, 3.4d-4 for electrons)
+  diffusion_tau = -1.0d0 ,
+!
+  !> 0: calibrate only the flux surface closest to this s, write exit_s_values_species<k>_<ns>.dat
+  !and A_and_B_scan_species<k>.dat, then stop without SCEF iterations (<= 0: all surfaces, then SCEF)
+  diffusion_scan_s0 = -1.0d0
 /
