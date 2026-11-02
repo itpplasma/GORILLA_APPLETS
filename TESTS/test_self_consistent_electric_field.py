@@ -10,6 +10,12 @@ diffusion calibration for both species (no cached A_and_B_species<k>.dat) and
 one source update after two electric potential updates. The fixed cost is
 splining the VMEC equilibrium (about 6 s).
 
+The outputs are compared against TESTS/REFERENCE/self_consistent_electric_field/.
+The run is pinned to one OpenMP thread, because the random numbers a particle
+draws depend on the thread that traces it. After an intended change of the
+results, rerun the test and copy the files listed in REFERENCE_FILES from the
+work dir into the reference dir.
+
 Paths are passed in by TESTS/CMakeLists.txt via environment variables.
 """
 import math
@@ -20,7 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _ci_utils import StageTimer
+from _ci_utils import StageTimer, compare_numeric_file
 
 try:
     import f90nml
@@ -40,6 +46,17 @@ GORILLA_ROOT = env_path("GORILLA_ROOT")
 BINARY = env_path("GORILLA_APPLETS_BIN")
 WORK_DIR = env_path("WORK_DIR")
 EXAMPLE_DIR = APPLETS_ROOT / "EXAMPLES" / "self_consistent_electric_field"
+REFERENCE_DIR = APPLETS_ROOT / "TESTS" / "REFERENCE" / "self_consistent_electric_field"
+REFERENCE_FILES = [
+    "A_and_B_species1.dat",     # diffusion calibration
+    "A_and_B_species2.dat",
+    "phi_elec_1d_1_1.dat",      # electric potential updates
+    "phi_elec_1d_1_2.dat",
+    "one_d_densities1_1.dat",   # flux-surface densities
+    "one_d_densities1_2.dat",
+    "particle_source_1.dat",    # source before and after the source update
+    "particle_source_2.dat",
+]
 
 # Fresh work dir for every test run
 if WORK_DIR.exists():
@@ -96,6 +113,7 @@ with timer.time("scef"):
     result = subprocess.run(
         [str(BINARY)],
         cwd=WORK_DIR,
+        env={**os.environ, "OMP_NUM_THREADS": "1"},
         capture_output=True,
         text=True,
         check=False,
@@ -123,17 +141,8 @@ def read_rows(name: str):
     return rows
 
 
-# The calibration must give finite diffusion coefficients on every vertex surface
-for species in (1, 2):
-    rows = read_rows(f"A_and_B_species{species}.dat")
-    if len(rows) != tetra_grid["tetra_grid_nml"]["n1"] + 1:
-        sys.exit(f"FAIL: A_and_B_species{species}.dat has {len(rows)} rows, "
-                 f"expected n1+1 = {tetra_grid['tetra_grid_nml']['n1'] + 1}")
-    if not any(row[1] > 0.0 for row in rows):
-        sys.exit(f"FAIL: no positive diffusion coefficient in A_and_B_species{species}.dat")
+for name in REFERENCE_FILES:
+    read_rows(name)   # compare_numeric_file would let NaN through
+    compare_numeric_file(WORK_DIR / name, REFERENCE_DIR / name, rtol=1.0e-10, atol=1.0e-14)
 
-# One source file per source update plus the state after the last one
-for k in range(1, nml["n_source_updates"] + 2):
-    read_rows(f"particle_source_{k}.dat")
-
-print("PASS: SCEF calibration, potential and source updates completed with finite output")
+print("PASS: SCEF calibration, potential and source updates match the reference")
