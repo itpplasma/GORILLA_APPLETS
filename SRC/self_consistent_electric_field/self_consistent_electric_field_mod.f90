@@ -61,6 +61,10 @@ subroutine calc_self_consistent_electric_field
             call calc_diffusion_coefficients(species)
         endif
     enddo
+    if (in%diffusion_scan_s0.gt.0.0_dp) then
+        print*, 'diffusion_scan_s0 > 0: calibration of a single flux surface done, skipping the SCEF iterations'
+        return
+    endif
     call initialize_exit_data   !after the calibration, which sizes exit_data for its own test particles
 
     !n_source_updates = 0 runs a single SCEF round with the fixed source set in initialize_particle_source.
