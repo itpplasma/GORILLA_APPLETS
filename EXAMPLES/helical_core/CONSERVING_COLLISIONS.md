@@ -97,15 +97,33 @@ about 1 eV. The guard that rejects `T <= 0` then fired, which breaks conservatio
 The noise can no longer be reduced with a free coupling factor. Only these help:
 
 - **More markers.** `r` per marker scales as 1/`n_particles`.
-- **Larger, more uniform reservoir cells.** The beam tests use
-  `i_radial_spacing = 1` (equidistant in s), `sfc_s_min = 0.05` and 10x10x20 cells, which
-  gives volumes within a factor of about 3 of the median. The axis hole then makes markers
-  jump across the axis now and then. This does not conserve canonical toroidal angular
-  momentum: about 1.7 % of the beam's angular momentum in the test.
-- **Proposal, not implemented:** keep the reservoir per flux surface, or per flux surface
-  and poloidal sector, instead of per tetrahedron. Parallel flows even out along field
-  lines much faster than collisions act, so this is physically reasonable and cuts the
-  noise by orders of magnitude.
+- **Reservoir cells** (`reservoir_min_volume_fraction`, default 0 = off). Small tetrahedra
+  near the axis are merged into cells of at least this fraction of the median tetrahedron
+  volume (`build_reservoir_cells`):
+  1. **Radial:** starting at the axis, the innermost flux-surface layers are combined
+     radially until the complete poloidal ring of every toroidal slice reaches the
+     threshold. Their thinness comes from the grid geometry near the axis, not from a
+     wish for resolution.
+  2. **Poloidal:** the tetrahedra of each layer and toroidal slice are merged in poloidal
+     order into cells of at least the threshold volume. This starts at the axis and stops
+     at the first layer without small tetrahedra.
+
+  There is no toroidal merging. All tetrahedra of a cell share flow and temperature, and
+  the deferred update sums the exchange over the cell. A layer is identified by the lowest
+  vertex flux of a tetrahedron, a slice by its lowest vertex φ.
+
+  On the small-hole grid (`sfc_s_min = 1e-7`, `i_radial_spacing = 2`, 10x10x20) with
+  fraction 0.3, the 8 innermost of 48 layers form one radial layer, 8170 of 19200
+  tetrahedra (all at s < 0.012) are merged, and every cell reaches the threshold.
+- **Large axis hole: not recommended.** An earlier workaround used `sfc_s_min = 0.05` with
+  `i_radial_spacing = 1`. The axis-hole reflection (x → 3·axis − 2x) then moves markers by
+  several cm, which breaks canonical toroidal angular momentum: a 9.5 % leak of the beam's
+  angular momentum over 500 µs. With a small hole (`sfc_s_min = 1e-7`) the reflection
+  hardly ever happens (0 or 1 events per run), and the angular momentum is conserved to
+  below 1e-3.
+- **Not implemented:** a reservoir per complete flux surface. Parallel flows even out along
+  field lines much faster than collisions act, so this would be physically reasonable and
+  would cut the noise further.
 
 ## Parallelisation and common time (`n_time_slices`)
 
@@ -184,6 +202,7 @@ Input keys (helical_core.inp):
 | `n_time_slices` | 1 | push all markers in common slices |
 | `boole_unidirectional_beam` | false | all markers start with pitch +1; needs `boole_antithetic_variate = .false.` |
 | `beam_density_fraction` | 1 | marker density / background density |
+| `reservoir_min_volume_fraction` | 0 | merge small tetrahedra near the axis into reservoir cells of at least this fraction of the median volume |
 
 Output with conserving collisions:
 
@@ -199,8 +218,28 @@ temperature T0, same mass:
 - common flow u_f = α/(1+α) v0
 - common temperature T_f = (α E0 + 1.5 T0 − (1+α) E0 (u_f/v0)²) / (1.5 (1+α))
 
-For α = 0.2 and E0 = T0 = 1 keV: u_f = 0.167 v0 and T_f = 926 eV. With the fixes, total
-energy is conserved to 1e-5.
+For α = 0.2 and E0 = T0 = 1 keV: u_f = 0.167 v0 and T_f = 926 eV.
+
+This estimate assumes conservation of Σ m v_∥, which does not hold in a torus. In the
+runs about 11 % of Σ m v_∥ goes to the field, and markers and background meet at about
+0.14–0.15 v0. The quantity that is conserved is the canonical toroidal angular momentum:
+to below 1e-3 with a small axis hole. Total energy is conserved to 1e-4 or better.
+Results (beam inside s < 0.7, 20 slices):
+
+| run | markers | meet at [v0] (markers / bg) | T_m / T_b [eV] | ΔE/E | ΔL/L_beam | min T_b [eV] |
+|---|---|---|---|---|---|---|
+| hole 0.05, equidistant s | 6e4 | 0.139 / 0.143 | 897 / 926 | -1e-5 | 0.095 | 330 |
+| hole 1e-7, no cells | 3e4 | 0.150 / 0.145 | 880 / 912 | 3e-3 | -0.001 | 0.1 |
+| hole 1e-7, poloidal cells | 3e4 | 0.139 / 0.147 | 889 / 909 | 2e-4 | 0.000 | 8 |
+
+The two small-hole runs still had 20 rejected updates (T <= 0) in the innermost rings.
+The radial merging removes those cells (run r26).
+
+Checks of the parallel-velocity handling:
+
+- The final v_∥ distributions are Maxwellians shifted by the mean flow.
+- In a fixed background (α = 1e-4) the beam relaxes towards rest and 1000 eV.
+- A standalone `stost` ensemble without orbits gives the same relaxation.
 
 Run setup and plots: `helical/runs/make_run.py` and `helical/runs/plot_relaxation.py` in
 the working area (not in the repository).
