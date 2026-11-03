@@ -28,6 +28,12 @@ add_test(NAME transport_normalization COMMAND test_transport_normalization.x)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_test(
+    NAME transport_benchmark_validation
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_benchmark_transport.py
+)
+
+add_test(
     NAME alpha_lifetime
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/test_alpha_lifetime.py

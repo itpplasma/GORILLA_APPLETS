@@ -88,6 +88,69 @@ precomputation and then a ten-particle trace and checks the output.
 `TESTS/OU_COLLISION_INVARIANT.md` and `TESTS/RMP_DENSITY_RESPONSE.md` describe
 two of the physics checks.
 
+## Transport benchmarks
+
+`TESTS/benchmark_transport.py` measures the actual `cpu`, `cpu-batch` and
+`cuda` transport backends. Build with CUDA enabled to include `cuda`, and run
+the native public-equilibrium test first to prepare its input fixture:
+
+```bash
+ctest --test-dir BUILD -R '^mono_energetic_transport_slow$' --output-on-failure
+python3 TESTS/benchmark_transport.py \
+    --binary BUILD/gorilla_applets_main.x \
+    --fixture BUILD/TESTS/mono_energetic_transport_work \
+    --output transport-benchmark \
+    --particles 128 1024 8192 --threads 1 2 4 8 \
+    --backends cpu cpu-batch cuda --steps 32 --time-step 1e-9 \
+    --species electron --repeats 3 --plot
+```
+
+The output directory must be new. Each process gets a separate copy of the
+fixture with the same seed, second-order polynomial pusher, energy, duration
+and diagnostics. Collisionless option 4 uses the requested number of
+measurements and spacing in seconds. For seeded Lorentz collisions, use
+`--collisions lorentz --flight-time-multiplier 1` without `--steps` or
+`--time-step`: option 2 resolves its cadence and duration from collision and
+bounce times. Electron and deuterium runs are separate benchmark invocations.
+Lorentz runs write and compare full per-marker histories by default. For
+performance measurements with smaller diagnostic output, add
+`--no-particle-histories`: this suppresses only `particle_histories.dat`, while
+retaining coefficients, moment curves, uncertainty, resolved transport metadata
+and loss events. These runs cannot establish per-marker history agreement.
+Keep the default full-history qualification and report the two diagnostic modes
+separately; their whole-process times include different amounts of output.
+The selected diagnostic mode is recorded in metadata, process records and summaries.
+
+To distinguish changes in CPU mathematics from GPU acceleration, add
+`--baseline-binary /path/to/older/gorilla_applets_main.x`. Its scalar runs are
+labelled `baseline-cpu`; `cpu` always uses the current `--binary`. The older
+input omits the new backend selector. Record its revision with
+`--source-revision baseline=REV` and its compiler with `--baseline-compiler`.
+
+JSON and CSV retain every process, its log, terminal counters and available
+setup, upload, kernel, download and recovery timings. Whole-process wall time
+includes mesh setup and diagnostics. The first process for each configuration
+is recorded separately; later repeats are fresh processes that may benefit
+from filesystem caches, rather than a resident GPU warmup. Medians and ranges
+use the later repeats. Output comparisons use the transport test's tolerances;
+failed processes, non-finite output or mismatched observables invalidate the
+configuration and suppress its speedup.
+
+Speedup uses the fastest validated CPU backend and thread count actually
+measured on the same host. A separate speedup relative to the fastest validated
+`cpu-batch` configuration is retained.
+The scalar tracer lacks separate numerical-failure counters: it enters the
+baseline only when it reports no losses and its observables agree with a
+no-loss `cpu-batch` run with explicit terminal counts. Collisionless runs
+compare moment curves, uncertainty, diffusion and loss count; option 2 also
+compares transport metadata, exact loss identifiers and, by default, particle
+histories. These checks establish
+agreement on this fixture, not physical convergence. Repeat on each GPU host;
+do not divide timings from different hosts. `--compiler` and repeated
+`--source-revision NAME=REV` record the build provenance; hardware metadata
+and the binary digest are collected automatically. Plotting additionally
+requires Matplotlib.
+
 ## CINECA Leonardo
 
 The following recipe builds GORILLA_APPLETS and runs the tests on the Leonardo
