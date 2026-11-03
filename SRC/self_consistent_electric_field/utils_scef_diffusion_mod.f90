@@ -364,10 +364,10 @@ count_lost_particles = 0
             B = dc%B(k, species) + dc%grad_B(k, species)*(position(i)-g%s_vertices(k))
 
             if (boole_use_fit_function) then
-                B_fit = sum(dc%polynomial_coefficients_for_B(:, species) &
-                            *(/1.0_dp,position(i),position(i)**2,0.0_dp/))
-                A_fit = sum(dc%polynomial_coefficients_for_A(:, species) &
-                            *(/1.0_dp,position(i),0.0_dp/)) !This is just B differentiated with respect to s
+                B_fit = exp(sum(dc%polynomial_coefficients_for_B(:, species) &
+                                *(/1.0_dp,position(i),position(i)**2,0.0_dp/)))
+                A_fit = B_fit*sum(dc%polynomial_coefficients_for_A(:, species) &
+                                  *(/1.0_dp,position(i),0.0_dp/)) !dB/ds = B * d(ln B)/ds
                 if (position(i).lt.g%s_vertices(4)) then
                     p = (position(i) - sfc_s_min)/(g%s_vertices(4) - sfc_s_min)
                     B = p*B_fit + (1-p)*B
@@ -386,7 +386,7 @@ count_lost_particles = 0
 
             call random_number(xi)
             xi = sqrt(12.0_dp)*(xi-0.5_dp)
-            delta_x = sqrt(2*delta_t*B)*xi + A*delta_t
+            delta_x = sqrt(2*delta_t*max(B,0.0_dp))*xi + A*delta_t
             !print*, 'diffusive part over convective part = ', A,B,abs(sqrt(2*delta_t*B)/(A*delta_t)), &
             !sqrt(2*delta_t*B)*xi/(A*delta_t)
 
@@ -486,16 +486,15 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
     lower_bound = 2
     upper_bound = grid_size(1) - 4
 
-    if (.not.allocated(x)) allocate(x(upper_bound-lower_bound+1))
-    if (.not.allocated(y)) allocate(y(upper_bound-lower_bound+1))
+    !Fit ln B (not B): B varies by orders of magnitude with the temperature profile, and a fit of B
+    !itself can turn negative towards the edge. Surfaces with B <= 0 (noise) are left out.
+    x = pack(g%s_vertices(lower_bound:upper_bound), dc%B(lower_bound:upper_bound, species) > 0.0_dp)
+    y = log(pack(dc%B(lower_bound:upper_bound, species), dc%B(lower_bound:upper_bound, species) > 0.0_dp))
 
-    x = g%s_vertices(lower_bound:upper_bound)
-    y = dc%B(lower_bound:upper_bound, species)
+    call quadratic_fit(size(x), x, y, a0, a1, a2, success) ! Least-squares fit of ln B ≈ a2*s^2 + a1*s + a0
 
-    call quadratic_fit(size(x), x, y, a0, a1, a2, success) ! Least-squares fit of y ≈ a2*x^2 + a1*x + a0
-
-    dc%polynomial_coefficients_for_B(:, species) = (/a0,a1,a2,0.0_dp/)
-    dc%polynomial_coefficients_for_A(:, species) = (/a1,2*a2,0.0_dp/) !this differentiates B with respect to s
+    dc%polynomial_coefficients_for_B(:, species) = (/a0,a1,a2,0.0_dp/)   !of ln B
+    dc%polynomial_coefficients_for_A(:, species) = (/a1,2*a2,0.0_dp/)    !of d(ln B)/ds
 
 end subroutine get_diffusion_coefficient_data
 
