@@ -118,10 +118,18 @@ the same grid.
 
 ## Status and known limitations
 
-- The first low-statistics run is in progress. In the first update, 9974 of 10000
-  electron walkers left the domain (mean exit time 15.7 s), while the ions left after
-  1.07 s on average. The resulting electron excess (quasineutrality mismatch 0.72)
-  has to be removed by the potential iterations.
+- First low-statistics run (settings above, 45 min on one node): over the 8 potential
+  updates the quasineutrality mismatch fell from 0.72 to 0.055, and the source
+  residual |n - n_target|/n_target from 0.49 to 0.27. Not converged:
+  - The marker density is still hollow: about 50–70% of the target in the core and up
+    to 1.9× the target just inside the buffer (r/a ≈ 0.9). More source iterations are
+    needed before E_r can be compared.
+  - E_r: about +8 kV/m at r/a < 0.3, close to the purple reference curve, then an
+    abrupt drop to about 0 at r/a ≈ 0.33. Further out it is about −2 to −3.5 kV/m,
+    whereas both references reach −8 to −10 kV/m.
+  - The drop at r/a ≈ 0.33 coincides with s = s_vertex(4) = 0.1, where the random walk
+    switches from blending tabulated B with the fit to the fit alone. It may be an
+    artefact; not yet checked.
 - Calibrated B falls by about a factor of 60 from the core to the edge. The quadratic
   fit of ln B is within ±20–30% of the values at 500 electrons per surface, apart from
   a few single-surface outliers. It is about 20–30% too high for r/a < 0.3.
