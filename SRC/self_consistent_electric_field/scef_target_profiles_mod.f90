@@ -61,6 +61,25 @@ pure function target_temperature(rad, species) result(T_eV)
 
 end function target_temperature
 
+pure function edge_buffer_weight(rad, width) result(w)
+
+    !Weight of the target profile in the outer buffer 1-width <= rad <= 1: 0 at its inner edge,
+    !1 at the domain boundary, cosine-shaped in between (smooth at both ends). 0 everywhere for width <= 0.
+
+    real(dp), intent(in) :: rad, width
+    real(dp) :: w
+    real(dp), parameter :: pi = 3.141592653589793238_dp
+
+    if ((width.le.0.0_dp) .or. (rad.le.1.0_dp-width)) then
+        w = 0.0_dp
+    elseif (rad.ge.1.0_dp) then
+        w = 1.0_dp
+    else
+        w = 0.5_dp*(1.0_dp - cos(pi*(rad - (1.0_dp-width))/width))
+    endif
+
+end function edge_buffer_weight
+
 pure function rad_from_s(s) result(rad)
 
     !r/a from the toroidal flux label s, clipped to [0,1] so the profiles stay defined

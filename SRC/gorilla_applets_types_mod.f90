@@ -143,6 +143,8 @@ module gorilla_applets_types_mod
     real(dp) :: quasineutrality_tol = 0.0_dp        !used in self consistent electric field: early-exit tolerance on sum|n_e-n_i|V / sum(n_e+n_i)V (0 = off)
     integer  :: n_particles_diffusion = 40000       !used in self consistent electric field: test particles per flux surface in the diffusion calibration
     real(dp) :: diffusion_tau = -1.0_dp             !used in self consistent electric field: tracing time [s] of the diffusion calibration (<=0 = hardcoded per species)
+    real(dp) :: diffusion_tau_collisions = -1.0_dp  !used in self consistent electric field: >0 sets the calibration tracing time on each flux surface to this many local collision times (overrides diffusion_tau)
+    real(dp) :: edge_buffer_width = 0.0_dp          !used in self consistent electric field: width in r/a of the outer buffer where shell densities blend into the target (0 = off)
     real(dp) :: diffusion_scan_s0 = -1.0_dp         !used in self consistent electric field: >0 calibrates only the flux surface closest to this s and stops (<=0 = all surfaces, then SCEF)
     end type input_t
 

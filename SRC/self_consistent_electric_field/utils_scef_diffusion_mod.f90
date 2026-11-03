@@ -95,6 +95,12 @@ subroutine calc_diffusion_coefficients(species)
         !Initiate particles of `species` at the different flux surfaces leaving out the boundaries
         s%s0 = g%s_vertices(ns)
 
+        if (in%diffusion_tau_collisions.gt.0.0_dp) then
+            start%t(species) = in%diffusion_tau_collisions*local_collision_time(s%s0, species)
+            s%time = [(start%t(species)/s%k*i,i = 1,s%k)]
+            print*, 'calibration tracing time = ', start%t(species), ' s'
+        endif
+
         call RANDOM_NUMBER(rand_matrix)
         call set_starting_positions(rand_matrix,(/species/), s%s0)
         call set_rest_of_individual_particle_specifications(rand_matrix,boole_diffusion_coefficient_in = .true., &
@@ -225,6 +231,34 @@ subroutine calc_diffusion_coefficients(species)
     close(file_id)
 
 end subroutine calc_diffusion_coefficients
+
+function local_collision_time(s0, species) result(tau)
+
+    !Collision time [s] at the target n, T on flux surface s0 (NRL plasma formulary, cgs/eV):
+    !electrons tau_e = 3.44e5 T_e^1.5/(n lambda_e), lambda_e = 24 - ln(sqrt(n)/T_e);
+    !ions      tau_i = 2.09e7 T_i^1.5 sqrt(m_i/m_p)/(n Z^4 lambda_i), lambda_i = 23 - ln(Z^3 sqrt(2n)/T_i^1.5)
+
+    use gorilla_applets_types_mod, only: start
+    use constants, only: echarge, amp
+    use scef_target_profiles_mod, only: target_density, target_temperature, rad_from_s
+
+    real(dp), intent(in) :: s0
+    integer, intent(in) :: species
+    real(dp) :: tau, n, T, Z, lambda
+
+    n = target_density(rad_from_s(s0))
+    T = target_temperature(rad_from_s(s0), species)
+    if (species.eq.1) then
+        Z = start%particle_charge(1)/echarge
+        n = n/Z   !target_density is the electron density
+        lambda = 23.0_dp - log(Z**3*sqrt(2.0_dp*n)/T**1.5_dp)
+        tau = 2.09d7*T**1.5_dp*sqrt(start%particle_mass(1)/amp)/(n*Z**4*lambda)
+    else
+        lambda = 24.0_dp - log(sqrt(n)/T)
+        tau = 3.44d5*T**1.5_dp/(n*lambda)
+    endif
+
+end function local_collision_time
 
 subroutine calc_density_via_random_walk(species)
     !Random-walk substitute for direct pushing of `species`. The field-free cached

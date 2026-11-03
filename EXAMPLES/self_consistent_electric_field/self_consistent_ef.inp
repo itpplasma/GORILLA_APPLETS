@@ -115,6 +115,15 @@
   !Tracing time [s] of the diffusion calibration (<= 0: 3.4d-2 for ions, 3.4d-4 for electrons)
   diffusion_tau = -1.0d0 ,
 !
+  !> 0: tracing time of the diffusion calibration on each flux surface = diffusion_tau_collisions local
+  !collision times tau_e (electrons) or tau_i (ions), NRL formulary at the target n, T (overrides diffusion_tau)
+  diffusion_tau_collisions = -1.0d0 ,
+!
+  !Width in r/a of the outer buffer (1-width <= r/a <= 1). There the flux-shell densities, evaluated at the
+  !outer edge of each shell, are blended with a cosine weight from the marker density (inner edge) to the
+  !target density (boundary), and the particle source is not tuned (0 = off)
+  edge_buffer_width = 0.1d0 ,
+!
   !> 0: calibrate only the flux surface closest to this s, write exit_s_values_species<k>_<ns>.dat
   !and A_and_B_scan_species<k>.dat, then stop without SCEF iterations (<= 0: all surfaces, then SCEF)
   diffusion_scan_s0 = -1.0d0

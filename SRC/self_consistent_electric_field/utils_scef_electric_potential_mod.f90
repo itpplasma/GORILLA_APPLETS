@@ -152,11 +152,12 @@ subroutine calc_average_charge_density_per_flux_layer(i)
     use tetra_grid_settings_mod, only: grid_size
     use constants, only: echarge
     use marker_distribution_mod, only: linear_profile_factor
+    use scef_target_profiles_mod, only: target_density, edge_buffer_weight, rad_from_s
 
     integer, intent(in) :: i
     integer :: ns, j, species, ind_prism, n_species
     real(dp), dimension(:), allocatable :: electron_densities
-    real(dp) :: s, electron_density_factor, factor_from_ion_weights
+    real(dp) :: s, electron_density_factor, factor_from_ion_weights, w, target_shell
 
     n_species = in%n_species
 
@@ -207,6 +208,22 @@ subroutine calc_average_charge_density_per_flux_layer(i)
         ep%rho_flux_layer(ns) = ep%rho_flux_layer(ns)/g%s_shell_volumes(ns)
         if (one_d%boole_print_densities) one_d%densities(ns,:) = one_d%densities(ns,:)/g%s_shell_volumes(ns)
     enddo
+
+    !Outer buffer: blend each species' shell density into the (quasineutral) target, with the weight at
+    !the outer edge of the shell, so the outermost shell is exactly the target and carries no charge
+    if (in%edge_buffer_width.gt.0.0_dp) then
+        do ns = 1,grid_size(1)
+            w = edge_buffer_weight(rad_from_s(g%s_vertices(ns+1)), in%edge_buffer_width)
+            if (w.eq.0.0_dp) cycle
+            target_shell = 0.5_dp*(target_density(rad_from_s(g%s_vertices(ns))) + &
+                                   target_density(rad_from_s(g%s_vertices(ns+1))))
+            one_d%densities(ns,1) = (1.0_dp-w)*one_d%densities(ns,1) + w*target_shell
+            one_d%densities(ns,in%n_species) = (1.0_dp-w)*one_d%densities(ns,in%n_species) &
+                                               + w*target_shell*start%particle_charge(1)/echarge
+            ep%rho_flux_layer(ns) = start%particle_charge(1)*one_d%densities(ns,1) &
+                                    + start%particle_charge(in%n_species)*one_d%densities(ns,in%n_species)
+        enddo
+    endif
 
 end subroutine calc_average_charge_density_per_flux_layer
 
@@ -269,7 +286,11 @@ subroutine calc_rho_on_vertices
     !set rho on last flux surface
     value_to_be_set = rho_per_flux_surface(grid_size(1)) + (delta_s(grid_size(1))/delta_s(grid_size(1)-1))* &
                      (rho_per_flux_surface(grid_size(1))-rho_per_flux_surface(grid_size(1)-1))
-    if (.not.in%boole_static_ne) value_to_be_set = -sum(ep%rho_flux_layer*g%s_shell_volumes)/sum(g%s_shell_volumes)
+    if (in%edge_buffer_width.gt.0.0_dp) then
+        value_to_be_set = ep%rho_flux_layer(grid_size(1))   !the outermost shell is the target: no charge
+    elseif (.not.in%boole_static_ne) then
+        value_to_be_set = -sum(ep%rho_flux_layer*g%s_shell_volumes)/sum(g%s_shell_volumes)
+    endif
     call fill_vector_parts_with_value(ep%rho_vert, g%vertices_per_flux_surface(grid_size(1)+1,:), value_to_be_set)
     rho_per_flux_surface(grid_size(1)+1) = value_to_be_set
 

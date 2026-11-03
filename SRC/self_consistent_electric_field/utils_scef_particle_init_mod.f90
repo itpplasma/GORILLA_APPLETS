@@ -185,7 +185,7 @@ subroutine update_particle_source
     !Richardson step S := S - alpha * (n - n_target) using the last inner-iteration
     !density in one_d%densities. Values live on s-vertices; the shell-averaged
     !one_d%densities is projected to vertices by midpoint averaging (nearest-shell
-    !at the two boundaries). The outer 10% of the domain keeps its source, because
+    !at the two boundaries). The outer 10% of the domain (or the outer buffer) keeps its source, because
     !particles only leave there and none enter, so n stays below n_target whatever
     !the source. Logs the |n - n_target| / |n_target| residual over the tuned shells
     !(the electron/ion mismatch is logged after every electric potential update).
@@ -201,6 +201,7 @@ subroutine update_particle_source
     ns_g = grid_size(1)
     alpha = in%source_relaxation_factor
     s_cutoff_high = 1.0_dp - 0.1_dp*(1.0_dp - sfc_s_min)   !outer 10% of the domain is not tuned
+    if (in%edge_buffer_width.gt.0.0_dp) s_cutoff_high = (1.0_dp - in%edge_buffer_width)**2   !nor the outer buffer
 
     allocate(n_shell(ns_g), n_vert(ns_g+1), target_shell(ns_g), tuned_shell(ns_g))
 
