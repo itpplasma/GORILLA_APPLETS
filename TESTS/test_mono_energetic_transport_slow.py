@@ -12,6 +12,7 @@ then invokes the binary in two stages:
 
 Paths are passed in by TESTS/CMakeLists.txt via environment variables.
 """
+import math
 import os
 import shutil
 import subprocess
@@ -38,6 +39,9 @@ APPLETS_ROOT = env_path("APPLETS_ROOT")
 GORILLA_ROOT = env_path("GORILLA_ROOT")
 BINARY = env_path("GORILLA_APPLETS_BIN")
 WORK_DIR = env_path("WORK_DIR")
+COMPARE_BACKEND = os.environ.get("TRANSPORT_COMPARE_BACKEND", "cpu-batch")
+if COMPARE_BACKEND not in ("cpu-batch", "cuda"):
+    sys.exit("TRANSPORT_COMPARE_BACKEND must be cpu-batch or cuda")
 
 MHD_DIR = GORILLA_ROOT / "MHD_EQUILIBRIA"
 REFERENCE_DIR = APPLETS_ROOT / "TESTS" / "REFERENCE" / "mono_energetic_transport"
@@ -62,6 +66,10 @@ gorilla["gorillanml"]["ispecies"] = 1              # electron
 gorilla["gorillanml"]["boole_periodic_relocation"] = True
 gorilla["gorillanml"]["ipusher"] = 2               # polynomial pusher
 gorilla["gorillanml"]["poly_order"] = 2
+gorilla["gorillanml"]["i_precomp"] = 0
+gorilla["gorillanml"]["i_time_tracing_option"] = 1
+gorilla["gorillanml"]["handover_processing_kind"] = 1
+gorilla["gorillanml"]["boole_strong_electric_field"] = False
 gorilla["gorillanml"]["boole_grid_for_find_tetra"] = False
 gorilla["gorillanml"]["boole_adaptive_time_steps"] = False
 
@@ -90,6 +98,7 @@ gorilla_applets["gorilla_applets_nml"]["energy_ev_fluxtv"] = 3.0e3
 
 # Mono-energetic transport: single nu* (i_option=2), no scan
 mono["transpcoefnml"]["i_integrator_type"] = 1
+mono["transpcoefnml"]["transport_backend"] = "cpu"
 mono["transpcoefnml"]["n_particles"] = 3
 mono["transpcoefnml"]["boole_collisions"] = True
 mono["transpcoefnml"]["energy_ev"] = 3.0e3
@@ -128,6 +137,7 @@ timer = StageTimer("mono_energetic_transport", output_path=WORK_DIR / "timings.j
 def run_stage(i_option: int, label: str) -> None:
     gorilla_applets["gorilla_applets_nml"]["i_option"] = i_option
     gorilla_applets.write(str(WORK_DIR / "gorilla_applets.inp"), force=True)
+    mono.write(str(WORK_DIR / "mono_energetic_transp_coef.inp"), force=True)
     print(f"=== {label}: i_option={i_option} ===", flush=True)
     with timer.time(label):
         subprocess.run([str(BINARY)], cwd=WORK_DIR, check=True)
@@ -217,3 +227,167 @@ for row in history_rows:
         sys.exit(f"FAIL: inconsistent time for marker {marker}, step {step}")
 
 print(f"PASS: nu*={nu_star:g}  D11={d11:g}  sigma={sigma:g} (matches reference)")
+
+
+def snapshot_outputs(label: str, filenames: tuple[str, ...]) -> Path:
+    snapshot = WORK_DIR / label
+    snapshot.mkdir()
+    for filename in filenames:
+        shutil.copyfile(WORK_DIR / filename, snapshot / filename)
+    return snapshot
+
+
+def compare_outputs(reference: Path, filenames: tuple[str, ...]) -> None:
+    for filename in filenames:
+        observed = WORK_DIR / filename
+        for line in observed.read_text().splitlines():
+            if line.strip() and not line.lstrip().startswith("#") and not all(
+                math.isfinite(float(token)) for token in line.split()
+            ):
+                sys.exit(f"FAIL: nonfinite value in {filename}")
+        exact = filename in ("n_lost_particles.dat", "loss_summary.dat", "lost_particle_events.dat")
+        compare_numeric_file(
+            observed, reference / filename,
+            rtol=0.0 if exact else 1.0e-8,
+            atol=0.0 if exact else 1.0e-12,
+        )
+
+
+# The same seeded marker histories check the actual transport consumer, not
+# merely the local arithmetic used by both backends.
+transport_outputs = (
+    "nustar_diffcoef_std.dat", "particle_histories.dat", "n_lost_particles.dat",
+    "loss_summary.dat", "lost_particle_events.dat", "transport_metadata.dat",
+)
+scalar_reference = snapshot_outputs("scalar_lorentz", transport_outputs)
+mono["transpcoefnml"]["transport_backend"] = COMPARE_BACKEND
+run_stage(2, f"{COMPARE_BACKEND}_lorentz")
+compare_outputs(scalar_reference, transport_outputs)
+
+mono["transpcoefnml"]["boole_collisions"] = False
+mono["transpcoefnml"]["transport_backend"] = "cpu"
+run_stage(2, "scalar_collisionless")
+scalar_reference = snapshot_outputs("scalar_collisionless", transport_outputs)
+mono["transpcoefnml"]["transport_backend"] = COMPARE_BACKEND
+run_stage(2, f"{COMPARE_BACKEND}_collisionless")
+compare_outputs(scalar_reference, transport_outputs)
+
+# Option 4 shares the tracer but not the monoenergetic dispatcher. Exercise
+# its streamed moment path without storing a particle-by-time matrix.
+mono["transpcoefnml"]["nt_steps_numerical_diff"] = 32
+mono["transpcoefnml"]["total_mc_time"] = 32 * time_step
+mono["transpcoefnml"]["idiffcoef_output"] = 3
+mono["transpcoefnml"]["filename_numerical_diff_coef"] = "numerical_diffcoef.dat"
+mono["transpcoefnml"]["filename_delta_s_squared"] = "mean_square_displacement.dat"
+mono["transpcoefnml"]["filename_std_dvt_delta_s_squared"] = "mean_square_uncertainty.dat"
+mono["transpcoefnml"]["boole_psi_mat"] = False
+mono["transpcoefnml"]["boole_write_particle_histories"] = False
+mono["transpcoefnml"]["transport_backend"] = "cpu"
+run_stage(4, "scalar_numerical_diffusion")
+numerical_outputs = (
+    "numerical_diffcoef.dat", "mean_square_displacement.dat",
+    "mean_square_uncertainty.dat", "n_lost_particles.dat",
+)
+scalar_reference = snapshot_outputs("scalar_numerical_diffusion", numerical_outputs)
+mono["transpcoefnml"]["transport_backend"] = COMPARE_BACKEND
+run_stage(4, f"{COMPARE_BACKEND}_numerical_diffusion")
+compare_outputs(scalar_reference, numerical_outputs)
+mono["transpcoefnml"]["boole_psi_mat"] = True
+run_stage(4, f"{COMPARE_BACKEND}_numerical_diffusion_histories")
+compare_outputs(scalar_reference, numerical_outputs)
+
+# Move the published equilibrium's angular samples close to the outer boundary.
+# Several markers then leave after retaining a nonempty history.
+saved_mono = dict(mono["transpcoefnml"])
+saved_fluxtube = flux_file.read_text()
+flux_rows = saved_fluxtube.splitlines()
+for row_index in range(2, len(flux_rows)):
+    values = flux_rows[row_index].split()
+    values[0] = "0.99999"
+    flux_rows[row_index] = " ".join(values)
+flux_file.write_text("\n".join(flux_rows) + "\n")
+mono["transpcoefnml"].update(
+    n_particles=16, boole_collisions=False, lambda_start=1.0,
+    boole_write_particle_histories=True, idiffcoef_output=2,
+    transport_backend="cpu",
+)
+run_stage(2, "scalar_boundary_loss")
+lost = int((WORK_DIR / "n_lost_particles.dat").read_text())
+if not 0 < lost < 16:
+    sys.exit("FAIL: boundary-loss fixture needs both lost and surviving markers")
+loss_outputs = (
+    "particle_histories.dat", "n_lost_particles.dat", "loss_summary.dat",
+    "transport_metadata.dat", "mean_square_displacement.dat",
+    "mean_square_uncertainty.dat",
+)
+scalar_reference = snapshot_outputs(
+    "scalar_boundary_loss", loss_outputs + ("lost_particle_events.dat",)
+)
+mono["transpcoefnml"]["transport_backend"] = COMPARE_BACKEND
+run_stage(2, f"{COMPARE_BACKEND}_boundary_loss")
+compare_outputs(scalar_reference, loss_outputs)
+reference_events = [line.split() for line in (scalar_reference / "lost_particle_events.dat").read_text().splitlines()]
+observed_events = [line.split() for line in (WORK_DIR / "lost_particle_events.dat").read_text().splitlines()]
+if len(observed_events) != lost:
+    sys.exit("FAIL: boundary-loss event count differs")
+for observed, reference in zip(observed_events, reference_events):
+    if observed[1:4] != reference[1:4]:
+        sys.exit("FAIL: boundary-loss marker, reason or measurement step differs")
+compare_numeric_file(
+    WORK_DIR / "lost_particle_events.dat", scalar_reference / "lost_particle_events.dat",
+    rtol=1.0e-8, atol=1.0e-12,
+)
+
+# Reconstruct the estimator from each marker's retained trajectory prefix.
+initial_psi = {}
+samples = {}
+for line in (WORK_DIR / "particle_histories.dat").read_text().splitlines():
+    _, marker, step, sample_time, psi = (float(value) for value in line.split())
+    marker, step = int(marker), int(step)
+    if step == 0:
+        initial_psi[marker] = psi
+    else:
+        samples.setdefault(step, []).append((sample_time, (psi-initial_psi[marker])**2))
+mean_rows = [line.split() for line in (WORK_DIR / "mean_square_displacement.dat").read_text().splitlines()][:-1]
+error_rows = [line.split() for line in (WORK_DIR / "mean_square_uncertainty.dat").read_text().splitlines()][:-1]
+if len(mean_rows) != len(samples) or len(error_rows) != len(samples):
+    sys.exit("FAIL: moment output does not cover retained measurement steps")
+for step, mean_row, error_row in zip(sorted(samples), mean_rows, error_rows):
+    values = samples[step]
+    second = math.fsum(value[1] for value in values)/len(values)
+    fourth = math.fsum(value[1]**2 for value in values)/len(values)
+    uncertainty = math.sqrt(max(0.0, fourth-second**2)/len(values))
+    if not math.isclose(float(mean_row[0]), values[0][0], rel_tol=1.0e-12, abs_tol=1.0e-18):
+        sys.exit("FAIL: retained-history measurement time differs")
+    if not math.isclose(float(mean_row[1]), second, rel_tol=1.0e-8, abs_tol=1.0e-20):
+        sys.exit("FAIL: second moment omits a retained trajectory prefix")
+    if not math.isclose(float(error_row[1]), uncertainty, rel_tol=1.0e-8, abs_tol=1.0e-20):
+        sys.exit("FAIL: uncertainty omits a retained trajectory prefix")
+flux_file.write_text(saved_fluxtube)
+mono["transpcoefnml"] = saved_mono
+
+for key, invalid, message in (
+    ("transport_backend", "unknown", "transport_backend must be"),
+    ("i_integrator_type", 2, "batch transport requires i_integrator_type=1"),
+    ("boole_random_precalc", False, "batch transport requires precomputed random numbers"),
+):
+    previous = mono["transpcoefnml"][key]
+    mono["transpcoefnml"][key] = invalid
+    mono.write(str(WORK_DIR / "mono_energetic_transp_coef.inp"), force=True)
+    rejected = subprocess.run([str(BINARY)], cwd=WORK_DIR, capture_output=True, text=True)
+    if rejected.returncode == 0 or message not in rejected.stdout + rejected.stderr:
+        sys.exit(f"FAIL: unsupported {key}={invalid!r} was not rejected clearly")
+    mono["transpcoefnml"][key] = previous
+mono.write(str(WORK_DIR / "mono_energetic_transp_coef.inp"), force=True)
+
+gorilla["gorillanml"]["boole_helical_pert"] = True
+gorilla.write(str(WORK_DIR / "gorilla.inp"), force=True)
+rejected = subprocess.run([str(BINARY)], cwd=WORK_DIR, capture_output=True, text=True)
+if rejected.returncode == 0 or "batch transport does not support helical perturbations" not in (
+    rejected.stdout + rejected.stderr
+):
+    sys.exit("FAIL: helical perturbations were not rejected clearly")
+gorilla["gorillanml"]["boole_helical_pert"] = False
+gorilla.write(str(WORK_DIR / "gorilla.inp"), force=True)
+
+print(f"PASS: scalar/{COMPARE_BACKEND} seeded Lorentz and collisionless transport agree")

@@ -128,7 +128,7 @@
             use parmot_mod, only: rmu,ro0
             use velo_mod, only: isw_field_type
             use supporting_functions_mod, only: theta_sym_flux2theta_vmec,theta_vmec2theta_sym_flux
-            use mono_energetic_transp_coef_settings_mod, only: lambda_start,boole_psi_mat
+            use mono_energetic_transp_coef_settings_mod, only: lambda_start,boole_psi_mat,transport_backend
             use gorilla_settings_mod, only: boole_helical_pert, helical_pert_eps_Aphi, helical_pert_m_fourier, &
                                           & helical_pert_n_fourier
             use binsrc_mod, only: binsrc
@@ -176,6 +176,20 @@
             double precision :: delta_psi
             integer(kind=8) :: fit_start_step,fit_end_step,valid_steps
             integer :: kpart = 0 ! progress counter for particles
+            logical :: use_batch
+            double precision, allocatable :: batch_x(:,:),batch_vpar(:),batch_vperp(:),batch_psi0(:)
+            integer, allocatable :: batch_tetr(:),batch_iface(:)
+            logical, allocatable :: batch_initialized(:)
+
+            use_batch = trim(transport_backend) /= 'cpu'
+            if(use_batch) then
+                if(i_integrator_type /= 1) error stop 'batch transport requires i_integrator_type=1'
+                if(.not.boole_random_precalc) error stop 'batch transport requires precomputed random numbers'
+                if(boole_helical_pert) error stop 'batch transport does not support helical perturbations'
+                allocate(batch_x(3,n_particles),batch_vpar(n_particles),batch_vperp(n_particles))
+                allocate(batch_psi0(n_particles),batch_tetr(n_particles),batch_iface(n_particles))
+                allocate(batch_initialized(n_particles))
+            endif
 !
 !------------------------------------------------------------------------------------------------------------!
 !------------------------------------ Initialization of direct integrator -----------------------------------!
@@ -277,6 +291,7 @@
             !$OMP& vmod,coord_system,n_time_steps,lost_particles,psitor_max,i_integrator_type,cm_over_e, &
             !$OMP& lost_reason,lost_step,lost_position, &
             !$OMP& n_contributors, &
+            !$OMP& use_batch,batch_x,batch_vpar,batch_vperp,batch_psi0,batch_tetr,batch_iface,batch_initialized, &
             !$OMP& boole_collisions,eps_collisions,rd_start_pitchpar,rd_xi_collision,num_vec,kpart,boole_psi_mat, &
             !$OMP& delta_psi2_average, delta_psi4_average,lambda_start,helical_pert_eps_Aphi,helical_pert_m_fourier, &
             !$OMP& helical_pert_n_fourier,boole_helical_pert) &
@@ -401,6 +416,10 @@
                                 boole_initialized = .false.
                                 call orbit_timestep_gorilla(x_rand,vpar,vperp,0.d0,boole_initialized,ind_tetr,iface)
 
+                                if(use_batch) then
+                                    if(ind_tetr < 1) error stop 'batch transport start lies outside mesh'
+                                endif
+
                                 if(boole_psi_mat) then
                                     psi_mat(n,1) = psi_rphiz(ind_tetr,x_rand)
                                 else
@@ -426,6 +445,9 @@
                                 !Initialize particle in grid
                                 boole_initialized = .false.
                                 call orbit_timestep_gorilla(x_rand,vpar,vperp,0.d0,boole_initialized,ind_tetr,iface)
+                                if(use_batch) then
+                                    if(ind_tetr < 1) error stop 'batch transport start lies outside mesh'
+                                endif
                         end select
 !
                     case(2)
@@ -436,6 +458,21 @@
                             psi_vec(1,1) = z(1)
                         endif
                 end select !i_integrator_type
+
+                if(use_batch) then
+                    batch_x(:,n) = x_rand
+                    batch_vpar(n) = vpar
+                    batch_vperp(n) = vperp
+                    batch_tetr(n) = ind_tetr
+                    batch_iface(n) = iface
+                    batch_initialized(n) = boole_initialized
+                    if(boole_psi_mat) then
+                        batch_psi0(n) = psi_mat(n,1)
+                    else
+                        batch_psi0(n) = psi_vec(1,1)
+                    endif
+                    cycle
+                endif
 !
 !------------------------------------------------------------------------------------------------------------!
 !----------------------------------- Time steps of individual particles -------------------------------------!
@@ -598,6 +635,13 @@
             enddo !n_particles (Monte Carlo runs)
             !$OMP END DO
             !$OMP END PARALLEL
+
+            if(use_batch) then
+                call advance_transport_batch(batch_x,batch_vpar,batch_vperp,batch_initialized,batch_tetr, &
+                    & batch_iface,batch_psi0,n_time_steps,t_step,boole_collisions,eps_collisions,psi_mat, &
+                    & lost_particles,lost_reason,lost_step,lost_position,delta_psi2_average(1,:), &
+                    & delta_psi4_average(1,:),n_contributors)
+            endif
 !
 !------------------------------------------------------------------------------------------------------------!
 !-------------------------- Calculation of momenta of Delta Psi (t) - ensemble average ----------------------!
@@ -746,5 +790,165 @@
             endif
 !
         end subroutine calc_flux_deviation
+
+        subroutine advance_transport_batch(x,vpar,vperp,initialized,ind_tetr,iface,psi0,n_time_steps,t_step, &
+                & boole_collisions,eps_collisions,psi_mat,lost,lost_reason,lost_step,lost_position, &
+                & sum_psi2,sum_psi4,n_contributors)
+
+            use orbit_timestep_gorilla_batch_mod, only: gorilla_batch_t,gorilla_batch_profile_t,initialize_gorilla_batch, &
+                & finalize_gorilla_batch,orbit_timestep_gorilla_batch
+            use gorilla_status_mod, only: GORILLA_COMPLETE,GORILLA_PHYSICAL_LOSS
+            use mono_energetic_transp_coef_settings_mod, only: transport_backend
+            use tetra_physics_mod, only: coord_system,psi_rphiz
+            use omp_lib, only: omp_get_wtime
+            use, intrinsic :: iso_fortran_env, only: int64
+
+            implicit none
+
+            double precision, intent(inout) :: x(:,:),vpar(:),vperp(:)
+            logical, intent(inout) :: initialized(:)
+            integer, intent(inout) :: ind_tetr(:),iface(:)
+            double precision, intent(in) :: psi0(:),t_step,eps_collisions
+            integer(kind=8), intent(in) :: n_time_steps
+            logical, intent(in) :: boole_collisions
+            double precision, allocatable, intent(inout) :: psi_mat(:,:)
+            logical, intent(inout) :: lost(:)
+            integer, intent(inout) :: lost_reason(:),n_contributors(:)
+            integer(kind=8), intent(inout) :: lost_step(:)
+            double precision, intent(inout) :: lost_position(:,:),sum_psi2(:),sum_psi4(:)
+
+            type(gorilla_batch_t) :: batch
+            type(gorilla_batch_profile_t) :: profile
+            double precision, allocatable :: active_x(:,:),active_vpar(:),active_vperp(:)
+            integer, allocatable :: active_ids(:),active_tetr(:),active_iface(:),status(:)
+            logical, allocatable :: active_initialized(:)
+            integer :: n,n_active,j,ierr,n_particles
+            integer(kind=8) :: k
+            integer(int64) :: orbit_advances,cell_crossings,replay_cells
+            double precision :: psi,delta_psi,vmod,pitch,xi_collision,wall_start
+            double precision :: setup_seconds,upload_seconds,kernel_seconds,download_seconds,replay_seconds
+            character(16) :: backend
+
+            n_particles = size(vpar)
+            allocate(active_x(3,n_particles),active_vpar(n_particles),active_vperp(n_particles))
+            allocate(active_ids(n_particles),active_tetr(n_particles),active_iface(n_particles))
+            allocate(active_initialized(n_particles),status(n_particles))
+            backend = transport_backend
+            if(backend == 'cpu-batch') backend = 'cpu'
+            wall_start = omp_get_wtime()
+            call initialize_gorilla_batch(batch,trim(backend),ierr)
+            if(ierr /= 0) then
+                call finalize_gorilla_batch(batch)
+                print *, 'Cannot initialize transport backend ',trim(transport_backend),'; error ',ierr
+                error stop 'transport batch initialization failed'
+            endif
+
+            orbit_advances = 0_int64
+            cell_crossings = 0_int64
+            replay_cells = 0_int64
+            setup_seconds = 0.d0
+            upload_seconds = 0.d0
+            kernel_seconds = 0.d0
+            download_seconds = 0.d0
+            replay_seconds = 0.d0
+            do k = 1,n_time_steps
+                n_active = 0
+                do n = 1,n_particles
+                    if(lost(n)) cycle
+                    n_active = n_active+1
+                    active_ids(n_active) = n
+                    active_x(:,n_active) = x(:,n)
+                    active_vpar(n_active) = vpar(n)
+                    active_vperp(n_active) = vperp(n)
+                    active_initialized(n_active) = initialized(n)
+                    active_tetr(n_active) = ind_tetr(n)
+                    active_iface(n_active) = iface(n)
+                enddo
+                if(n_active == 0) exit
+                orbit_advances = orbit_advances+int(n_active,int64)
+                call orbit_timestep_gorilla_batch(batch,active_x(:,1:n_active),active_vpar(1:n_active), &
+                    & active_vperp(1:n_active),t_step,active_initialized(1:n_active),active_tetr(1:n_active), &
+                    & active_iface(1:n_active),status(1:n_active),profile,ierr)
+                if(ierr /= 0) then
+                    call finalize_gorilla_batch(batch)
+                    print *, 'Transport batch error ',ierr,', step ',k
+                    error stop 'transport batch advance failed'
+                endif
+                cell_crossings = cell_crossings+profile%cell_crossings
+                replay_cells = replay_cells+profile%replay_cells
+                setup_seconds = setup_seconds+profile%setup_seconds
+                upload_seconds = upload_seconds+profile%upload_seconds
+                kernel_seconds = kernel_seconds+profile%kernel_seconds
+                download_seconds = download_seconds+profile%download_seconds
+                replay_seconds = replay_seconds+profile%replay_seconds
+
+                do j = 1,n_active
+                    n = active_ids(j)
+                    x(:,n) = active_x(:,j)
+                    vpar(n) = active_vpar(j)
+                    vperp(n) = active_vperp(j)
+                    initialized(n) = active_initialized(j)
+                    ind_tetr(n) = active_tetr(j)
+                    iface(n) = active_iface(j)
+                    select case(status(j))
+                        case(GORILLA_PHYSICAL_LOSS)
+                            lost(n) = .true.
+                            lost_reason(n) = 1
+                            lost_step(n) = k
+                            lost_position(:,n) = x(:,n)
+                            cycle
+                        case(GORILLA_COMPLETE)
+                            if(ind_tetr(n) < 1) then
+                                call finalize_gorilla_batch(batch)
+                                error stop 'completed transport marker has no tetrahedron'
+                            endif
+                        case default
+                            call finalize_gorilla_batch(batch)
+                            print *, 'Transport numerical failure: marker ',n,', step ',k,', status ',status(j)
+                            error stop 'numerical failure prevents a complete transport estimate'
+                    end select
+
+                    select case(coord_system)
+                        case(1)
+                            psi = psi_rphiz(ind_tetr(n),x(:,n))
+                        case(2)
+                            psi = x(1,n)
+                        case default
+                            call finalize_gorilla_batch(batch)
+                            error stop 'unsupported transport coordinate system'
+                    end select
+                    if(allocated(psi_mat)) then
+                        psi_mat(n,k+1) = psi
+                    else
+                        delta_psi = psi-psi0(n)
+                        call accumulate_valid_moments([delta_psi**2],1_8,sum_psi2(k:k), &
+                            & sum_psi4(k:k),n_contributors(k:k))
+                    endif
+
+                    if(boole_collisions) then
+                        vmod = sqrt(vpar(n)**2+vperp(n)**2)
+                        pitch = vpar(n)/vmod
+                        xi_collision = -1.d0
+                        if(rd_xi_collision(n,k) > 0.5d0) xi_collision = 1.d0
+                        pitch = lorentz_pitch_step(pitch,eps_collisions,xi_collision)
+                        vpar(n) = vmod*pitch
+                        vperp(n) = sqrt(vmod**2-vpar(n)**2)
+                    endif
+                enddo
+            enddo
+            call finalize_gorilla_batch(batch)
+            print *, 'Transport batch backend ',trim(transport_backend)
+            print *, 'Transport batch markers ',n_particles,', completed ',count(.not.lost),', physical losses ',count(lost)
+            print *, 'Transport batch numerical failures ',0
+            print *, 'Transport batch orbit advances ',orbit_advances
+            print *, 'Transport batch cell crossings ',cell_crossings,', replay cells ',replay_cells
+            print *, 'Transport batch setup time [s] ',setup_seconds
+            print *, 'Transport batch upload time [s] ',upload_seconds
+            print *, 'Transport batch kernel time [s] ',kernel_seconds
+            print *, 'Transport batch download time [s] ',download_seconds
+            print *, 'Transport batch replay time [s] ',replay_seconds
+            print *, 'Transport batch wall time [s] ',omp_get_wtime()-wall_start
+
+        end subroutine advance_transport_batch
 !
     end module flux_deviation_mod
