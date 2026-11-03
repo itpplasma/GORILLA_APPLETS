@@ -39,9 +39,11 @@ subroutine calc_rmp_response_currents
         boole_use_kim_nu, kim_nu_file, &
         compute_spawn_volume, filter_markers_by_trapping, trapping_filter_mode, &
         boole_local_background, set_local_collision_background, &
-        boole_nonlinear_weight, init_nonlinear_weight, &
+        boole_nonlinear_weight, init_nonlinear_weight, canonical_loading, &
+        n_respawn_max, n_prof_bins, da_profile_file, boole_mh_collisions, &
         boole_local_energy_sampling, rescale_energies_to_local_temperature
     use profile_data_mod, only: load_profiles, load_kim_nu
+    use canonical_ntv_mod, only: boole_canonical_ntv, canonical_ntv_init, ntv_lorentz_nu
     use perturbation_field_mod, only: init_constant_perturbation, load_perturbation_field, &
                                       init_step_perturbation, load_eperp_field, boole_skip_phase
 
@@ -91,7 +93,26 @@ subroutine calc_rmp_response_currents
     end if
 
     ! Unperturbed flux label for the nonlinear weights (needs the grid).
-    if (in%boole_delta_f .and. boole_nonlinear_weight) call init_nonlinear_weight()
+    if (in%boole_delta_f .and. canonical_loading()) call init_nonlinear_weight()
+    ! Canonical NTV estimator: linear delta-f weights along the mesh-field orbits
+    ! with the canonical f0 loader, plus full-f p_phi accumulators.
+    if (boole_canonical_ntv) then
+        if (.not. in%boole_delta_f) error stop 'canonical NTV requires boole_delta_f'
+        if (boole_nonlinear_weight) &
+            error stop 'canonical NTV and nonlinear weights are exclusive'
+        if (n_respawn_max > 0) error stop 'canonical NTV forbids respawn'
+        if (n_prof_bins > 0) error stop 'canonical NTV forbids the profile deposit'
+        if (in%anomalous_diffusion_coefficient > 0.0_dp .or. &
+            len_trim(da_profile_file) > 0) &
+            error stop 'canonical NTV does not tally anomalous kicks'
+        ! The stost kicks need the MH correction to leave f0 invariant; the
+        ! Lorentz kicks of the estimator (ntv_lorentz_nu > 0) choose it with
+        ! ntv_lorentz_mh.
+        if (in%boole_collisions .and. .not. boole_mh_collisions &
+            .and. .not. ntv_lorentz_nu > 0.0_dp) &
+            error stop 'canonical NTV requires MH collisions (f0 invariance)'
+        call canonical_ntv_init()
+    end if
 
     ! Collision background from the loaded profiles (needs load_profiles).
     if (in%boole_delta_f .and. in%boole_collisions .and. boole_local_background) &
@@ -100,7 +121,7 @@ subroutine calc_rmp_response_currents
     call calc_starting_conditions_rmp_response_currents
     call eliminate_particles_outside_flux_threshold
     if (in%boole_delta_f) then
-        if (boole_nonlinear_weight .or. boole_uniform_volume_sampling) then
+        if (canonical_loading() .or. boole_uniform_volume_sampling) then
             call spawn_uniform_volume_analytic(species=1)
         else if (boole_equidistant_s_sampling) then
             block
