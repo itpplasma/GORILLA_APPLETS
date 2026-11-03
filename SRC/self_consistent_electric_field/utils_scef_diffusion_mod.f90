@@ -277,7 +277,7 @@ subroutine calc_density_via_random_walk(species)
 
     integer, intent(in) :: species
 
-    real(dp) :: delta_x, delta_t, xi, A, B, cell_size, B_fit, A_fit, p
+    real(dp) :: delta_x, delta_t, xi, A, B, cell_size, s_c, B_c
     integer :: i, ns, k, num_steps_min, count_lost_particles, num_particles, particle_multiplication
     integer :: density_unit, n, ind_tetr, iface
     real(dp), dimension(3) :: x_particle, z_save
@@ -301,8 +301,9 @@ subroutine calc_density_via_random_walk(species)
     !Physical weights: for ions apply the honest-tracing weight formula (sqrt(g)
     !Jacobian + Maxwell-Boltzmann) at each start position via
     !calc_particle_weights_and_jperp, exactly like the first orbit_timestep call
-    !would do. Electrons copy ion positions and weights, mirroring the copy the
-    !honest path does in orbit_timestep_gorilla_self_consistent_ef.
+    !would do. Electrons copy the ion weights. Their positions already equal the ion start
+    !positions (set_starting_positions); start%x(:,:,1) must not be copied here, because
+    !honest ion tracing has overwritten it with the ion exit positions (update_start_type).
     if (species .eq. 1) then
         do n = 1, in%num_particles
             x_particle = start%x(:, n, 1)
@@ -318,7 +319,6 @@ subroutine calc_density_via_random_walk(species)
                                                  boole_include_potential_in = .false.)
         enddo
     elseif ((species .eq. 2) .and. (.not. in%boole_static_ne)) then
-        start%x(:, :, 2) = start%x(:, :, 1)
         weights%w(:, 2)  = weights%w(:, 1)
     endif
 
@@ -364,17 +364,19 @@ count_lost_particles = 0
             B = dc%B(k, species) + dc%grad_B(k, species)*(position(i)-g%s_vertices(k))
 
             if (boole_use_fit_function) then
-                B_fit = exp(sum(dc%polynomial_coefficients_for_B(:, species) &
-                                *(/1.0_dp,position(i),position(i)**2,0.0_dp/)))
-                A_fit = B_fit*sum(dc%polynomial_coefficients_for_A(:, species) &
-                                  *(/1.0_dp,position(i),0.0_dp/)) !dB/ds = B * d(ln B)/ds
-                if (position(i).lt.g%s_vertices(4)) then
-                    p = (position(i) - sfc_s_min)/(g%s_vertices(4) - sfc_s_min)
-                    B = p*B_fit + (1-p)*B
-                    A = p*A_fit + (1-p)*B/position(i) + A
+                !B from the fit of ln B; A holds q*E/T here, so the E_r drift uses the same B as the
+                !diffusion. Below s_c, B -> 0 like s (B = (ds/dr)^2 D_r with finite D_r). Since the
+                !volume element is constant in s, the walk needs the Ito drift dB/ds.
+                s_c = g%s_vertices(4)
+                if (position(i).lt.s_c) then
+                    B_c = exp(sum(dc%polynomial_coefficients_for_B(:, species)*(/1.0_dp,s_c,s_c**2,0.0_dp/)))
+                    B = B_c*position(i)/s_c
+                    A = B*A + B_c/s_c
                 else
-                    B = B_fit
-                    A = A + A_fit
+                    B = exp(sum(dc%polynomial_coefficients_for_B(:, species) &
+                                *(/1.0_dp,position(i),position(i)**2,0.0_dp/)))
+                    A = B*A + B*sum(dc%polynomial_coefficients_for_A(:, species) &
+                                    *(/1.0_dp,position(i),0.0_dp/)) !dB/ds = B * d(ln B)/ds
                 endif
             endif
 
@@ -521,9 +523,12 @@ subroutine calc_convection_coefficient_from_electric_field(species, boole_use_fi
                                       tetra_physics((i-1)*6*grid_size(2)+1)%gPhi(1))
         endif
 
-        dc%A(i, species) = dc%B(i, species)*start%particle_charge(species)*electric_field &
+        !q*E/T; with the fit function the random walk multiplies it by its fitted B, otherwise by the
+        !tabulated B here
+        dc%A(i, species) = start%particle_charge(species)*electric_field &
                            /(target_temperature(rad_from_s(g%s_vertices(i)), species)*ev2erg)
-        if (.not.boole_use_fit_function) dc%A(i, species) = dc%A(i, species) + dc%A_from_first_run(i, species)
+        if (.not.boole_use_fit_function) dc%A(i, species) = dc%B(i, species)*dc%A(i, species) &
+                                                            + dc%A_from_first_run(i, species)
     enddo
 
     do ns = 1,grid_size(1)
