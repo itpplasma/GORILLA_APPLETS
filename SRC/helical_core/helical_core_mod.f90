@@ -81,7 +81,7 @@ subroutine calc_helical_core
     endif
     start%t = in%time_step/in%n_time_slices
     do i_slice = 1, in%n_time_slices
-        call parallelised_particle_pushing_helical_core(species=1, boole_reuse_weights_in=(i_slice.gt.1))
+        call parallelised_particle_pushing_helical_core(species=1, boole_reuse_weights_in=(i_slice.gt.1), i_slice_in=i_slice)
         if (boole_relaxation_diagnostics) then
             !weights are known after the first slice and stay fixed, so the initial row can be written now
             if (i_slice.eq.1) call write_collision_relaxation_diagnostics(relaxation_unit, 0.0_dp, x_0, pitch_0, energy_0, &

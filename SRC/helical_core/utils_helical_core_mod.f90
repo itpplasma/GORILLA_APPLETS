@@ -97,12 +97,14 @@ subroutine read_helical_core_inp_into_type
 end subroutine read_helical_core_inp_into_type
 
 ! ====================================================================
-subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, boole_reuse_weights_in)
+subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, boole_reuse_weights_in, i_slice_in)
 !
 ! Parallelised particle pushing for helical core.
 ! Standard guiding-center orbit integration without anomalous displacement.
 ! Markers continue from start (update_start_type), so repeated calls push them in time slices;
-! boole_reuse_weights_in keeps the weights of the previous slice instead of recomputing them.
+! boole_reuse_weights_in keeps the weights of the previous slice instead of recomputing them, and
+! i_slice_in gives every slice its own random number streams (the same streams in every slice would
+! replay the same collision noise for each marker and heat the markers).
 !
     use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, s
     use tetra_grid_mod, only: ntetr
@@ -115,6 +117,8 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
     integer, intent(in), optional                     :: n_particles_in
     logical, intent(in), optional                     :: boole_reuse_weights_in
     logical                                           :: boole_reuse_weights
+    integer, intent(in), optional                     :: i_slice_in
+    integer                                           :: i_slice
     integer                                           :: kpart, iantithetic, ind_tetr, iface, n_particles
     integer                                           :: p, l, n, i
     real(dp), dimension(3)                            :: x
@@ -132,6 +136,8 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
     endif
     boole_reuse_weights = .false.
     if (present(boole_reuse_weights_in)) boole_reuse_weights = boole_reuse_weights_in
+    i_slice = 1
+    if (present(i_slice_in)) i_slice = i_slice_in
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
     kpart = 0
@@ -141,7 +147,7 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
     t_tot = 0.0_dp
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, boole_reuse_weights) &
+    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, boole_reuse_weights, i_slice) &
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p, l, n, i, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status) &
     !$OMP& FIRSTPRIVATE(thread_flag)
@@ -152,7 +158,7 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
     do p = 1, n_particles/iantithetic
 
         if ((.not.in%boole_precalc_collisions).and.thread_flag) then
-            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num(), 1)
+            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num(), i_slice)
             thread_flag = .false.
         endif
 
