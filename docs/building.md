@@ -112,6 +112,15 @@ measurements and spacing in seconds. For seeded Lorentz collisions, use
 `--collisions lorentz --flight-time-multiplier 1` without `--steps` or
 `--time-step`: option 2 resolves its cadence and duration from collision and
 bounce times. Electron and deuterium runs are separate benchmark invocations.
+Lorentz runs write and compare full per-marker histories by default. For
+performance measurements with smaller diagnostic output, add
+`--no-particle-histories`: this suppresses only `particle_histories.dat`, while
+retaining coefficients, moment curves, uncertainty, resolved transport metadata
+and loss events. These runs cannot establish per-marker history agreement.
+Keep the default full-history qualification and report the two diagnostic modes
+separately; their whole-process times include different amounts of output.
+The selected diagnostic mode is recorded in metadata, process records and summaries.
+
 To distinguish changes in CPU mathematics from GPU acceleration, add
 `--baseline-binary /path/to/older/gorilla_applets_main.x`. Its scalar runs are
 labelled `baseline-cpu`; `cpu` always uses the current `--binary`. The older
@@ -134,7 +143,8 @@ The scalar tracer lacks separate numerical-failure counters: it enters the
 baseline only when it reports no losses and its observables agree with a
 no-loss `cpu-batch` run with explicit terminal counts. Collisionless runs
 compare moment curves, uncertainty, diffusion and loss count; option 2 also
-compares particle histories and transport metadata. These checks establish
+compares transport metadata, exact loss identifiers and, by default, particle
+histories. These checks establish
 agreement on this fixture, not physical convergence. Repeat on each GPU host;
 do not divide timings from different hosts. `--compiler` and repeated
 `--source-revision NAME=REV` record the build provenance; hardware metadata

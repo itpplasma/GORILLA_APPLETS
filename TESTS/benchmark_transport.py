@@ -84,6 +84,9 @@ def arguments():
     parser.add_argument("--backends", nargs="+", choices=["baseline-cpu", "cpu", "cpu-batch", "cuda"],
                         default=["cpu", "cpu-batch", "cuda"])
     parser.add_argument("--collisions", choices=["none", "lorentz"], default="none")
+    parser.add_argument("--no-particle-histories", action="store_true",
+                        help="omit Lorentz per-marker history output for performance measurements; "
+                             "retain moments, coefficients, metadata and loss events (default: full histories)")
     parser.add_argument("--flight-time-multiplier", type=positive_float, default=1.,
                         help="Lorentz option 2 duration in transport timescales")
     parser.add_argument("--timeout", type=positive_float, default=600., help="seconds per process")
@@ -151,7 +154,7 @@ def prepare(case, args, particles, backend):
         "boole_collisions": args.collisions == "lorentz", "energy_ev": 3000.,
         "boole_random_precalc": True, "seed_option": 2, "random_seed_filename": "seed.inp",
         "idiffcoef_output": 3, "boole_psi_mat": True,
-        "boole_write_particle_histories": args.collisions == "lorentz",
+        "boole_write_particle_histories": particle_histories_enabled(args),
         "filename_particle_histories": "particle_histories.dat",
         "filename_transport_metadata": "transport_metadata.dat",
         "filename_transp_diff_coef": "nustar_diffcoef_std.dat",
@@ -199,11 +202,20 @@ def numeric_rows(path):
             yield row
 
 
+def particle_histories_enabled(args):
+    return args.collisions == "lorentz" and not getattr(args, "no_particle_histories", False)
+
+
+def diagnostic_mode(args):
+    return "full-particle-histories" if particle_histories_enabled(args) else "moments-and-losses"
+
+
 def output_files(args):
     common = ["mean_square_displacement.dat", "mean_square_uncertainty.dat", "n_lost_particles.dat"]
     if args.collisions == "lorentz":
-        return common + ["nustar_diffcoef_std.dat", "particle_histories.dat", "transport_metadata.dat",
-                         "loss_summary.dat", "lost_particle_events.dat"]
+        histories = ["particle_histories.dat"] if particle_histories_enabled(args) else []
+        return common + ["nustar_diffcoef_std.dat"] + histories + [
+            "transport_metadata.dat", "loss_summary.dat", "lost_particle_events.dat"]
     return common + ["numerical_diffcoef.dat"]
 
 
@@ -266,30 +278,32 @@ def validate(case, args, record):
             record["resolved_time_step_seconds"] = metadata[6]
             record["resolved_duration_seconds"] = metadata[6] * metadata[7]
             cadence = metadata[6]
-            last_step = {}
-            for row in numeric_rows(case / "particle_histories.dat"):
-                if len(row) != 5 or row[1] != int(row[1]) or row[2] != int(row[2]):
-                    raise ValueError("malformed particle history")
-                marker, step = int(row[1]), int(row[2])
-                if not 1 <= marker <= record["particles"] or step != last_step.get(marker, -1) + 1:
-                    raise ValueError("particle history has missing or repeated samples")
-                if abs(row[3] - step * metadata[6]) > 1.e-12:
-                    raise ValueError("particle history time differs from the resolved cadence")
-                last_step[marker] = step
+            if particle_histories_enabled(args):
+                last_step = {}
+                for row in numeric_rows(case / "particle_histories.dat"):
+                    if len(row) != 5 or row[1] != int(row[1]) or row[2] != int(row[2]):
+                        raise ValueError("malformed particle history")
+                    marker, step = int(row[1]), int(row[2])
+                    if not 1 <= marker <= record["particles"] or step != last_step.get(marker, -1) + 1:
+                        raise ValueError("particle history has missing or repeated samples")
+                    if abs(row[3] - step * metadata[6]) > 1.e-12:
+                        raise ValueError("particle history time differs from the resolved cadence")
+                    last_step[marker] = step
             expected = {marker: int(metadata[7]) for marker in range(1, record["particles"] + 1)}
             events = list(numeric_rows(case / "lost_particle_events.dat"))
             if len(events) != lost:
                 raise ValueError("loss event count differs from loss summary")
             seen = set()
             for row in events:
-                if len(row) != 8 or row[1] != int(row[1]) or row[3] != int(row[3]):
+                if (len(row) != 8 or row[1] != int(row[1]) or row[2] != int(row[2]) or
+                        row[3] != int(row[3])):
                     raise ValueError("malformed loss event")
                 marker, step = int(row[1]), int(row[3])
                 if marker not in expected or marker in seen or not 1 <= step <= metadata[7]:
                     raise ValueError("loss event marker/step outside ensemble")
                 seen.add(marker)
                 expected[marker] = step - 1
-            if last_step != expected:
+            if particle_histories_enabled(args) and last_step != expected:
                 raise ValueError("particle histories do not cover every completed/lost marker")
         for filename in ("mean_square_displacement.dat", "mean_square_uncertainty.dat"):
             rows = numeric_rows(case / filename)
@@ -333,6 +347,7 @@ def run_case(args, particles, threads, backend, replicate):
     case = args.output / f"n{particles}_{backend}_t{threads}_{replicate:02d}"
     record = {"case": case.name, "backend": backend, "particles": particles,
               "threads": threads, "replicate": replicate, "phase": phase, "errors": [],
+              "diagnostic_mode": diagnostic_mode(args),
               "failure_accounting": "unavailable until successful terminal/output validation"}
     binary = args.baseline_binary if backend == "baseline-cpu" else args.binary
     record["binary"] = str(binary)
@@ -388,6 +403,7 @@ def summarize(records):
                     (row["particles"], row["backend"], row["threads"]) == (particles, backend, threads))
         values = [row["wall_seconds"] for row in rows]
         summary.append({"particles": particles, "backend": backend, "threads": threads,
+                        "diagnostic_mode": rows[0].get("diagnostic_mode"),
                         "valid": valid, "repeats": len(rows),
                         "speedup_eligible": valid and all(row["speedup_eligible"] for row in rows),
                         "median_wall_seconds": statistics.median(values) if valid else None,
@@ -464,7 +480,8 @@ def plot_summary(args, summary, metadata):
     axes[1].axhline(1., color=".5", linewidth=.8, linestyle=":")
     inventory = metadata.get("gpu")
     gpu = ", ".join(sorted({line.split(",")[0] for line in inventory.splitlines()})) if inventory else "GPU unavailable or not queried"
-    fig.suptitle(f"{metadata['host']} | GPU inventory: {gpu}", fontsize=10)
+    fig.suptitle(f"{metadata['host']} | GPU inventory: {gpu}\n"
+                 f"Diagnostics: {diagnostic_mode(args)}", fontsize=10)
     fig.savefig(args.output / "transport_benchmark.png", dpi=180)
     fig.savefig(args.output / "transport_benchmark.pdf")
     plt.close(fig)
@@ -506,7 +523,11 @@ def main():
             [args.fixture / "MHD_EQUILIBRIA" / name for name in EQUILIBRIA]},
         "settings": {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
         "comparison": {"rtol": RTOL, "atol": ATOL,
+                       "particle_histories": particle_histories_enabled(args),
+                       "history_scope": "per-marker histories compared" if particle_histories_enabled(args)
+                       else "per-marker histories not compared",
                        "loss_fields": "counts and marker/reason/step identifiers exact; times and positions use numeric tolerances"},
+        "diagnostic_mode": diagnostic_mode(args),
         "wall_scope": "fresh executable: field/mesh setup, transport, transfers, recovery, diagnostics, shutdown",
         "repeat_scope": "one cold-process sample then independent processes; later processes may benefit from OS caches; no resident device warmup",
         "phase_scope": "batch profile only; CUDA device kernel events differ from host whole-process wall",
@@ -547,7 +568,7 @@ def main():
     (args.output / "records.json").write_text(json.dumps(records, indent=2) + "\n")
     (args.output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     with (args.output / "records.csv").open("w", newline="") as out:
-        columns = ["case", "backend", "particles", "threads", "replicate", "phase", "wall_seconds", "valid", "speedup_eligible", "errors", "counters", "profile"]
+        columns = ["case", "backend", "particles", "threads", "replicate", "phase", "diagnostic_mode", "wall_seconds", "valid", "speedup_eligible", "errors", "counters", "profile"]
         writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
         for row in records:
