@@ -9,7 +9,12 @@ then invokes the binary with i_option = 14 (helical core particle tracing).
 The test uses the shared EFIT test equilibrium. HELICAL_CORE_GRID_KIND selects
 the field-aligned or rectangular mesh. It covers the option-14 execution path,
 not helical-core physics: the perturbation stays off, matching the shipped
-example.
+example. The exit data are compared against
+TESTS/REFERENCE/helical_core_grid_kind_<HELICAL_CORE_GRID_KIND>/. The run is
+pinned to one OpenMP thread, because the random numbers a particle draws depend
+on the thread that traces it. After an intended change of the results, run the
+test with UPDATE_REFERENCE=1 in the environment to copy the new exit data into
+the reference dir, and commit it.
 
 Paths are passed in by TESTS/CMakeLists.txt via environment variables.
 """
@@ -18,6 +23,9 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ci_utils import compare_numeric_file
 
 try:
     import f90nml
@@ -37,6 +45,7 @@ GORILLA_ROOT = env_path("GORILLA_ROOT")
 BINARY = env_path("GORILLA_APPLETS_BIN")
 WORK_DIR = env_path("WORK_DIR")
 GRID_KIND = int(os.environ.get("HELICAL_CORE_GRID_KIND", "2"))
+REFERENCE_DIR = APPLETS_ROOT / "TESTS" / "REFERENCE" / f"helical_core_grid_kind_{GRID_KIND}"
 
 # Fresh work dir for every test run
 if WORK_DIR.exists():
@@ -120,6 +129,7 @@ print("=== helical core: i_option=14 ===", flush=True)
 result = subprocess.run(
     [str(BINARY)],
     cwd=WORK_DIR,
+    env={**os.environ, "OMP_NUM_THREADS": "1"},
     capture_output=True,
     text=True,
     check=False,
@@ -139,4 +149,11 @@ n_lost = int(result.stdout.split(expected_marker)[1].split()[0])
 if n_lost == 0:
     sys.exit("FAIL: no ions lost; outer-boundary crossings must be absorbed")
 
-print("PASS: helical core tracing completed and summary marker found")
+if os.environ.get("UPDATE_REFERENCE") == "1":
+    REFERENCE_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.copy(WORK_DIR / "exit_data.dat", REFERENCE_DIR / "exit_data.dat")
+    sys.exit(f"Reference exit data updated in {REFERENCE_DIR}; rerun without UPDATE_REFERENCE")
+
+compare_numeric_file(WORK_DIR / "exit_data.dat", REFERENCE_DIR / "exit_data.dat", rtol=1.0e-10, atol=1.0e-14)
+
+print("PASS: helical core tracing completed and exit data match the reference")
