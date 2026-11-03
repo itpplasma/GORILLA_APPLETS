@@ -118,18 +118,11 @@ the same grid.
 
 ## Status and known limitations
 
-- First low-statistics run (settings above, 45 min on one node): over the 8 potential
-  updates the quasineutrality mismatch fell from 0.72 to 0.055, and the source
-  residual |n - n_target|/n_target from 0.49 to 0.27. Not converged:
-  - The marker density is still hollow: about 50–70% of the target in the core and up
-    to 1.9× the target just inside the buffer (r/a ≈ 0.9). More source iterations are
-    needed before E_r can be compared.
-  - E_r: about +8 kV/m at r/a < 0.3, close to the purple reference curve, then an
-    abrupt drop to about 0 at r/a ≈ 0.33. Further out it is about −2 to −3.5 kV/m,
-    whereas both references reach −8 to −10 kV/m.
-  - The drop at r/a ≈ 0.33 coincides with s = s_vertex(4) = 0.1, where the random walk
-    switches from blending tabulated B with the fit to the fit alone. It may be an
-    artefact; not yet checked.
+- The first low-statistics run (settings above) is invalid: it had the electron start
+  position bug described below, so its E_r is not a result. After the fix, at zero
+  field, the electron walkers stay about 300 s on average and the ions about 1 s, so
+  the first update starts with a large electron excess (quasineutrality mismatch 0.83).
+  The potential iterations have to build up the (negative) E_r that confines the ions.
 - Calibrated B falls by about a factor of 60 from the core to the edge. The quadratic
   fit of ln B is within ±20–30% of the values at 500 electrons per surface, apart from
   a few single-surface outliers. It is about 20–30% too high for r/a < 0.3.
@@ -150,5 +143,13 @@ the same grid.
 - **Debug output.** When the pusher loses a particle it should not lose, it writes a
   debug dump. After a bad potential update, these dumps filled 33 GB in one run. Only
   the first 1000 are now written.
+- **Electron start positions.** Honest ion tracing overwrites `start%x(:,:,1)` with the
+  ion exit positions, and the electron random walk copied it as its start positions,
+  so the walkers started at s ≈ 1. They now start at the ion birth positions.
+- **Random walk at the axis.** B was blended towards a finite tabulated value while the
+  drift B/s assumed B ∝ s, which emptied the core. B now goes linearly to zero below
+  s = 0.1 with the consistent drift dB/ds, and the E_r drift uses the same fitted B.
+  The walk now agrees within 1–3% with the steady-state Fokker–Planck solution, with
+  and without electric field.
 - **Profile coordinate.** The target density and the old analytic temperature model
   were evaluated in s instead of r/a = sqrt(s).
