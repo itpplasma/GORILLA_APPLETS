@@ -18,7 +18,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
-    add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
+    add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, &
     initialise_seed_for_random_numbers_for_each_thread
     use russian_roulette_mod, only: play_russian_roulette, rr, local_rr_t, initiate_local_rr
     use constants, only: ev2erg
@@ -163,7 +163,8 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
             call update_exit_data(particle_status%lost,t%confined,x,vpar,vperp,i,n,species_in=species)
-            call update_start_type(x,vpar,vperp,n,species,ind_tetr)
+            !start keeps the birth state (no update_start_type): SCEF never continues markers, and the
+            !electrons are started from the ion birth positions after the ions have been pushed
         enddo
         !$omp critical
         call add_local_tetr_moments_to_output(local_tetr_moments,species)
