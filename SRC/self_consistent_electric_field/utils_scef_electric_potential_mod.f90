@@ -140,7 +140,8 @@ subroutine calc_phi_elec_from_rho(i)
         ep%phi_elec_from_rho(v) = ep%rho_vert(v)*2.0_dp*T_i*T_e/(T_i+T_e)*ev2erg/(echarge**2*target_density(rad))
     enddo
 
-    if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho/3.0_dp !factor 3.0_dp is there to be on the safe side and avoid overshooting
+    !under-relaxation against overshooting (potential_relaxation_factor, default 1/3)
+    if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho*in%potential_relaxation_factor
 
     !if (i.gt.0) ep%phi_elec_from_rho = ep%phi_elec_from_rho/sqrt(dble(i))
 

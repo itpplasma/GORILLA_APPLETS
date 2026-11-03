@@ -11,7 +11,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     use gorilla_applets_types_mod, only: in
 
     real(dp) :: time_step,energy_eV,n_particles, density, source_relaxation_factor, quasineutrality_tol, diffusion_scan_s0, diffusion_tau, &
-                diffusion_tau_collisions, edge_buffer_width, noise_tolerance_factor
+                diffusion_tau_collisions, edge_buffer_width, noise_tolerance_factor, potential_relaxation_factor
     logical ::boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
                boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
@@ -33,7 +33,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_electric_potential_updates, update_dimension, &
     & n_species, boole_static_ne, boole_honest_tracing, boole_recompute_D, n_source_updates, reduced_output, source_relaxation_factor, &
     & quasineutrality_tol, i_collision_mode, n_particles_diffusion, diffusion_scan_s0, diffusion_tau, &
-    & diffusion_tau_collisions, edge_buffer_width, noise_tolerance_factor
+    & diffusion_tau_collisions, edge_buffer_width, noise_tolerance_factor, potential_relaxation_factor
 
     quasineutrality_tol = 0.0_dp   !optional in the .inp: no early exit unless set
     i_collision_mode = 1           !optional: full collision operator
@@ -43,6 +43,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     diffusion_tau_collisions = -1.0_dp   !optional: calibration time from diffusion_tau
     edge_buffer_width = 0.0_dp     !optional: no outer buffer
     noise_tolerance_factor = 0.0_dp   !optional: no noise-based stopping
+    potential_relaxation_factor = 1.0_dp/3.0_dp   !optional
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
     read(s_inp_unit,nml=self_consistent_ef_nml)
     close(s_inp_unit)
@@ -91,6 +92,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%diffusion_tau_collisions = diffusion_tau_collisions
     in%edge_buffer_width        = edge_buffer_width
     in%noise_tolerance_factor   = noise_tolerance_factor
+    in%potential_relaxation_factor = potential_relaxation_factor
 
     print *,'GORILLA_APPLETS: Loaded input data from self_consistent_ef.inp'
 
@@ -173,6 +175,12 @@ subroutine print_errors_for_bad_inputs
     if ((in%diffusion_scan_s0.gt.0.0_dp) .and. &
         (.not.any((.not.in%boole_honest_tracing).and.in%boole_recompute_D))) then
         print*, 'Error: diffusion_scan_s0 > 0 needs a species with boole_honest_tracing = .false. and boole_recompute_D = .true.'
+        print*, 'Program terminated'
+        stop
+    endif
+
+    if ((in%potential_relaxation_factor.le.0.0_dp) .or. (in%potential_relaxation_factor.gt.1.0_dp)) then
+        print*, 'Error: potential_relaxation_factor must be in (0, 1].'
         print*, 'Program terminated'
         stop
     endif

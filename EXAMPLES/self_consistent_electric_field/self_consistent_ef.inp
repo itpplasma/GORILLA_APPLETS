@@ -131,6 +131,10 @@
   !are both within that factor in two consecutive source steps (0 = off; 1D updates only)
   noise_tolerance_factor = 0.0d0 ,
 !
+  !Under-relaxation of the potential update: Delta Phi = factor * T_h/(e^2 n) * rho, 0 < factor <= 1
+  !(not used with boole_static_ne)
+  potential_relaxation_factor = 0.33333333333333333d0 ,
+!
   !> 0: calibrate only the flux surface closest to this s, write exit_s_values_species<k>_<ns>.dat
   !and A_and_B_scan_species<k>.dat, then stop without SCEF iterations (<= 0: all surfaces, then SCEF)
   diffusion_scan_s0 = -1.0d0
