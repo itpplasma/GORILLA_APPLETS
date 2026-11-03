@@ -266,7 +266,7 @@ subroutine calc_density_via_random_walk(species)
     !then always derived from the current electric field (which reproduces the cached
     !one for E = 0), so the potential carries over between source steps.
 
-    use gorilla_applets_types_mod, only: in, time_t, dc, ep, g, output, start, exit_data, weights, filenames
+    use gorilla_applets_types_mod, only: in, time_t, dc, ep, g, output, start, exit_data, weights, filenames, one_d
     use tetra_grid_settings_mod, only: grid_size, sfc_s_min
     use binsrc_mod, only: binsrc
     use tetra_grid_mod, only: ntetr
@@ -284,6 +284,7 @@ subroutine calc_density_via_random_walk(species)
     real(dp) :: vpar_init, vperp_init
     real(dp), dimension(:), allocatable :: rw_density, rw_prism_densities
     real(dp), dimension(:), allocatable :: position, weight, exit_time
+    real(dp), dimension(:), allocatable :: marker_shell   !density contribution per flux shell of one marker (mean over its walkers)
     type(time_t) :: t
     logical :: boole_lost, boole_use_fit_function = .true.
 
@@ -350,10 +351,18 @@ subroutine calc_density_via_random_walk(species)
     t%step = in%time_step
     num_steps_min = 1000
 
+    !Walkers i = (n-1)*particle_multiplication+1 ... n*particle_multiplication are copies of marker n. The sum
+    !and sum of squares over markers of their per-shell contributions give the statistical error of the densities.
+    allocate(marker_shell(grid_size(1)))
+    if (.not.allocated(one_d%marker_sum)) allocate(one_d%marker_sum(grid_size(1),2), one_d%marker_sum_sq(grid_size(1),2))
+    one_d%marker_sum(:,species) = 0.0_dp
+    one_d%marker_sum_sq(:,species) = 0.0_dp
+
 count_lost_particles = 0
     do i = 1,num_particles
         t%confined = 0.0_dp
         boole_lost = .false.
+        if (mod(i-1,particle_multiplication).eq.0) marker_shell = 0.0_dp
         do while ((t%confined.lt.t%step).and.(.not.boole_lost))
 
             !binsrc finds k such that g%s_vertices(k-1) < position(i) < g%s_vertices(k)
@@ -384,6 +393,7 @@ count_lost_particles = 0
             delta_t = min(t%step/num_steps_min, cell_size**2/((abs(A)+abs(B))*4), t%step - t%confined) !control maximum possible jump
 
             rw_density(k) = rw_density(k) + delta_t*weight(i)
+            marker_shell(k) = marker_shell(k) + delta_t*weight(i)
             t%confined = t%confined + delta_t
 
             call random_number(xi)
@@ -403,6 +413,11 @@ count_lost_particles = 0
             endif
         enddo
         exit_time(i) = t%confined
+        if (mod(i,particle_multiplication).eq.0) then
+            marker_shell = marker_shell/particle_multiplication
+            one_d%marker_sum(:,species) = one_d%marker_sum(:,species) + marker_shell
+            one_d%marker_sum_sq(:,species) = one_d%marker_sum_sq(:,species) + marker_shell**2
+        endif
     enddo
 
     !Scatter per-marker mean exit time back to exit_data%t_confined so the honest-tracing

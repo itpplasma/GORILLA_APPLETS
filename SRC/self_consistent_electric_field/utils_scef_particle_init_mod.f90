@@ -192,6 +192,7 @@ subroutine update_particle_source
 
     use gorilla_applets_types_mod, only: in, g, one_d, desired_density, particle_source
     use tetra_grid_settings_mod, only: grid_size, sfc_s_min
+    use constants, only: pi
 
     integer :: k, ns_g
     real(dp) :: alpha, target_mismatch, denom, s_cutoff_high
@@ -231,8 +232,14 @@ subroutine update_particle_source
     else
         target_mismatch = 0.0_dp
     endif
+    one_d%source_residual = target_mismatch
+    !its expected value from noise alone, with sigma(n_shell) = sqrt(sigma_i^2 + sigma_e^2)/2
+    one_d%source_residual_noise = 0.0_dp
+    if (allocated(one_d%sigma) .and. (denom > 0.0_dp)) one_d%source_residual_noise = sqrt(2.0_dp/pi) &
+        *sum(0.5_dp*sqrt(one_d%sigma(:,1)**2 + one_d%sigma(:,2)**2) * g%s_shell_volumes, mask=tuned_shell)/denom
 
-    print*, 'source update: relative |n - n_target| / |n_target| over the tuned shells = ', target_mismatch
+    print*, 'source update: relative |n - n_target| / |n_target| over the tuned shells = ', target_mismatch, &
+            ', noise level = ', one_d%source_residual_noise
 
 end subroutine update_particle_source
 

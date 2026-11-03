@@ -17,7 +17,7 @@ subroutine calc_self_consistent_electric_field
     use gorilla_applets_settings_mod, only: i_option
     use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_volume_integrals_in_flux_coordinates
-    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, s, output, weights, ep
+    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, s, output, weights, ep, one_d
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
     get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &
@@ -29,7 +29,7 @@ subroutine calc_self_consistent_electric_field
     delete_scef_output_files, initialize_3d_update_grid
     use utils_scef_diffusion_mod, only: calc_diffusion_coefficients
 
-    integer :: species, source_step
+    integer :: species, source_step, n_converged
 
     call set_seed_for_random_numbers
     call read_self_consistent_electric_field_inp_into_type
@@ -70,12 +70,27 @@ subroutine calc_self_consistent_electric_field
     !n_source_updates = 0 runs a single SCEF round with the fixed source set in initialize_particle_source.
     !particle_source_<k>.dat holds the source used in round k (plus the state after the final update).
     call write_particle_source(1)
+    n_converged = 0
     do source_step = 1, max(in%n_source_updates, 1)
         if (in%boole_static_ne) call calc_starting_conditions   !fresh weights (source may have changed since last iter)
         call run_scef_iterations(source_step)
         if (in%n_source_updates.gt.0) then
             call update_particle_source
             call write_particle_source(source_step + 1)
+        endif
+        !Noise-based stop: source residual and quasineutrality mismatch both within noise_tolerance_factor
+        !of their noise levels, in two consecutive source steps
+        if ((in%noise_tolerance_factor.gt.0.0_dp) .and. (in%n_source_updates.gt.0)) then
+            if ((one_d%source_residual.le.in%noise_tolerance_factor*one_d%source_residual_noise) .and. &
+                (one_d%mismatch.le.in%noise_tolerance_factor*one_d%mismatch_noise)) then
+                n_converged = n_converged + 1
+            else
+                n_converged = 0
+            endif
+            if ((n_converged.ge.2) .and. (source_step.lt.in%n_source_updates)) then
+                print*, 'source step ', source_step, ': converged within the noise (twice in a row), stopping'
+                exit
+            endif
         endif
     enddo
 
@@ -109,7 +124,7 @@ subroutine run_scef_iterations(source_step)
     !times and update the electric potential each time. source_step is the source-update
     !iteration index, passed to perform_electric_potential_update for file naming.
 
-    use gorilla_applets_types_mod, only: in, ep, output, exit_data
+    use gorilla_applets_types_mod, only: in, ep, output, exit_data, one_d
     use utils_data_pre_and_post_processing_mod, only: prepare_next_round_of_parallelised_particle_pushing, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared
     use utils_scef_particle_init_mod, only: calc_starting_conditions
@@ -124,7 +139,8 @@ subroutine run_scef_iterations(source_step)
 
     !Intermediate source steps only need a field good enough for the next source update, so they
     !may stop once quasineutral; the last (or only) source step always runs all updates.
-    boole_allow_early_exit = (source_step.lt.in%n_source_updates) .and. (in%quasineutrality_tol.gt.0.0_dp)
+    boole_allow_early_exit = (source_step.lt.in%n_source_updates) .and. &
+                             ((in%quasineutrality_tol.gt.0.0_dp) .or. (in%noise_tolerance_factor.gt.0.0_dp))
 
     do i = 1, max(in%n_electric_potential_updates,1)
         if (.not.in%boole_static_ne) call calc_starting_conditions
@@ -158,8 +174,11 @@ subroutine run_scef_iterations(source_step)
         call perform_electric_potential_update(i)
 
         mismatch = calc_quasineutrality_mismatch()
-        print*, 'quasineutrality mismatch sum|n_e-n_i|V / sum(n_e+n_i)V = ', mismatch
-        boole_converged = boole_allow_early_exit .and. (mismatch.le.in%quasineutrality_tol)
+        one_d%mismatch = mismatch
+        print*, 'quasineutrality mismatch sum|n_e-n_i|V / sum(n_e+n_i)V = ', mismatch, ', noise level = ', one_d%mismatch_noise
+        boole_converged = boole_allow_early_exit .and. &
+            (((in%quasineutrality_tol.gt.0.0_dp) .and. (mismatch.le.in%quasineutrality_tol)) .or. &
+             ((in%noise_tolerance_factor.gt.0.0_dp) .and. (mismatch.le.in%noise_tolerance_factor*one_d%mismatch_noise)))
         boole_last_update = boole_converged .or. (i.eq.max(in%n_electric_potential_updates,1))
         if ((.not.in%reduced_output) .or. boole_last_update) call print_data(i, source_step)
         if (boole_converged) then

@@ -143,6 +143,7 @@ module gorilla_applets_types_mod
     real(dp) :: quasineutrality_tol = 0.0_dp        !used in self consistent electric field: early-exit tolerance on sum|n_e-n_i|V / sum(n_e+n_i)V (0 = off)
     integer  :: n_particles_diffusion = 40000       !used in self consistent electric field: test particles per flux surface in the diffusion calibration
     real(dp) :: diffusion_tau = -1.0_dp             !used in self consistent electric field: tracing time [s] of the diffusion calibration (<=0 = hardcoded per species)
+    real(dp) :: noise_tolerance_factor = 0.0_dp     !used in self consistent electric field: >0 stops potential updates / source steps once the mismatch / source residual is within this factor of their noise levels (0 = off)
     real(dp) :: diffusion_tau_collisions = -1.0_dp  !used in self consistent electric field: >0 sets the calibration tracing time on each flux surface to this many local collision times (overrides diffusion_tau)
     real(dp) :: edge_buffer_width = 0.0_dp          !used in self consistent electric field: width in r/a of the outer buffer where shell densities blend into the target (0 = off)
     real(dp) :: diffusion_scan_s0 = -1.0_dp         !used in self consistent electric field: >0 calibrates only the flux surface closest to this s and stops (<=0 = all surfaces, then SCEF)
@@ -200,6 +201,7 @@ module gorilla_applets_types_mod
     integer  :: ind_c
     integer, dimension(:,:), allocatable :: vertices_per_flux_surface !used in self_consistent_electric_field_mod
     integer, dimension(:,:), allocatable :: prisms_per_flux_tube !used in self_consistent_electric_field_mod
+    integer, dimension(:), allocatable :: shell_of_prism   ! (n_prisms) flux shell each prism lies in
     real(dp), dimension(:), allocatable :: s_vertices     ! (grid_size(1)+1) s-coordinate of each flux surface
     real(dp), dimension(:), allocatable :: s_shell_volumes ! (grid_size(1))   volume of each flux shell
     integer,  dimension(:), allocatable :: hexa_to_vert   ! (n_hexahedra) vertex the hexahedron's charge is assigned to in 3D updates (0 = none)
@@ -267,6 +269,11 @@ module gorilla_applets_types_mod
     type one_d_t
     real(dp), dimension(:,:), allocatable :: densities
     logical                               :: boole_print_densities
+    real(dp), dimension(:,:), allocatable :: marker_sum     ! (grid_size(1), species) sum over markers of each marker's density contribution to the shell
+    real(dp), dimension(:,:), allocatable :: marker_sum_sq  ! (grid_size(1), species) sum over markers of its square
+    real(dp), dimension(:,:), allocatable :: sigma          ! (grid_size(1), species) statistical error of densities
+    real(dp) :: mismatch = 0.0_dp, mismatch_noise = 0.0_dp                ! quasineutrality mismatch and its noise level
+    real(dp) :: source_residual = 0.0_dp, source_residual_noise = 0.0_dp  ! |n - n_target| residual and its noise level
     end type one_d_t
 
     type(one_d_t) one_d

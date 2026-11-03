@@ -124,6 +124,13 @@
   !target density (boundary), and the particle source is not tuned (0 = off)
   edge_buffer_width = 0.1d0 ,
 !
+  !> 0: stop early once the result is within the Monte Carlo noise. The noise levels of the quasineutrality
+  !mismatch and of the source residual |n - n_target| are estimated from the per-marker density
+  !contributions per flux shell. Potential updates of an intermediate source step stop once the mismatch
+  !is <= noise_tolerance_factor * its noise level; the source iteration stops once residual and mismatch
+  !are both within that factor in two consecutive source steps (0 = off; 1D updates only)
+  noise_tolerance_factor = 0.0d0 ,
+!
   !> 0: calibrate only the flux surface closest to this s, write exit_s_values_species<k>_<ns>.dat
   !and A_and_B_scan_species<k>.dat, then stop without SCEF iterations (<= 0: all surfaces, then SCEF)
   diffusion_scan_s0 = -1.0d0

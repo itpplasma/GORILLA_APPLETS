@@ -14,8 +14,9 @@ contains
 subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n_particles_in)
 
     use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, exit_data, s, &
-    g, maximum_s, weights
+    g, maximum_s, weights, one_d
     use tetra_grid_mod, only: ntetr
+    use tetra_grid_settings_mod, only: grid_size
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
     add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, &
@@ -38,6 +39,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     logical                                           :: thread_flag = .true.
     type(local_rr_t)                                  :: local_rr
     real(dp), dimension(10)                           :: particle_state_for_rr
+    real(dp), dimension(:), allocatable               :: marker_shell, shell_sum, shell_sum_sq
 
     if (present(n_particles_in)) then
         n_particles = n_particles_in
@@ -62,12 +64,24 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
 
     t_tot = 0.0_dp
 
+    !Each marker's density contribution per flux shell (sum and sum of squares over the markers) gives the
+    !statistical error of the shell densities, used for the noise-based stopping criteria
+    allocate(marker_shell(grid_size(1)), shell_sum(grid_size(1)), shell_sum_sq(grid_size(1)))
+    shell_sum = 0.0_dp
+    shell_sum_sq = 0.0_dp
+    if (.not.boole_diffusion_coefficient) then
+        if (.not.allocated(one_d%marker_sum)) allocate(one_d%marker_sum(grid_size(1),2), one_d%marker_sum_sq(grid_size(1),2))
+        one_d%marker_sum(:,species) = 0.0_dp
+        one_d%marker_sum_sq(:,species) = 0.0_dp
+    endif
+
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr,weights) &
+    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr,weights, &
+    !$OMP& one_d) &
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p,l,n,i,x,v_save,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
     !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init) &
-    !$OMP& FIRSTPRIVATE(thread_flag,local_rr)
+    !$OMP& FIRSTPRIVATE(thread_flag,local_rr,marker_shell,shell_sum,shell_sum_sq)
     if (omp_get_thread_num().eq.0) print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO SCHEDULE(static)
     !SCHEDULE(dynamic,1)
@@ -88,6 +102,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
             call print_progress(n_particles,kpart,n)
 
             call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp,species)
+            marker_shell = 0.0_dp
 
             i = 0
 
@@ -136,7 +151,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                 endif
 
                 call orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_status,ind_tetr,iface,n,&
-                &local_tetr_moments, local_counter, species, j, t_step_s, k, boole_diffusion_coefficient,local_rr)
+                &local_tetr_moments, local_counter, species, j, t_step_s, k, boole_diffusion_coefficient,local_rr,marker_shell)
 
                 t%confined = t%confined + t%step - t%remain
                 t_tot = t_tot + t%step - t%remain
@@ -163,11 +178,17 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
             call update_exit_data(particle_status%lost,t%confined,x,vpar,vperp,i,n,species_in=species)
+            shell_sum = shell_sum + marker_shell
+            shell_sum_sq = shell_sum_sq + marker_shell**2
             !start keeps the birth state (no update_start_type): SCEF never continues markers, and the
             !electrons are started from the ion birth positions after the ions have been pushed
         enddo
         !$omp critical
         call add_local_tetr_moments_to_output(local_tetr_moments,species)
+        if (.not.boole_diffusion_coefficient) then
+            one_d%marker_sum(:,species) = one_d%marker_sum(:,species) + shell_sum
+            one_d%marker_sum_sq(:,species) = one_d%marker_sum_sq(:,species) + shell_sum_sq
+        endif
         !$omp end critical
     enddo !n
     !$OMP END DO
@@ -178,7 +199,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
 end subroutine parallelised_particle_pushing
 
 subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_status,ind_tetr,iface, n,local_tetr_moments, &
-                                local_counter,species, j, t_step_s, k, boole_diffusion_coefficient,local_rr)
+                                local_counter,species, j, t_step_s, k, boole_diffusion_coefficient,local_rr,marker_shell)
 
     use pusher_tetra_rk_mod, only: pusher_tetra_rk
     use pusher_tetra_poly_mod, only: pusher_tetra_poly
@@ -208,11 +229,12 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     real(dp), dimension(3)                       :: z_save, x_save, z_save_at_x_save
     real(dp)                                     :: t_pass,perpinv, vpar_save, vperp_save
     logical                                      :: boole_t_finished, boole_lost_inside, mirror_condition
-    integer                                      :: ind_tetr_save,iper_phi,k,i
+    integer                                      :: ind_tetr_save,iper_phi,k,i,ns_marker
     type(optional_quantities_type)               :: optional_quantities
     real(dp)                                     :: tau, v, t_pusher, v_save, vpar_init, vperp_init, critical_distance
     type(local_rr_t)                             :: local_rr
     real(dp), dimension(10)                      :: particle_state_for_rr
+    real(dp), dimension(:), intent(inout), optional :: marker_shell   !this marker's density contribution per flux shell
 
 
     v = sqrt(vpar**2+vperp**2)
@@ -323,6 +345,10 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         t_step_s = t_step_s - t_pass
 
         call update_local_tetr_moments(local_tetr_moments,ind_tetr_save,n,optional_quantities,species)
+        if (present(marker_shell) .and. allocated(g%shell_of_prism)) then
+            ns_marker = g%shell_of_prism((ind_tetr_save-1)/3+1)
+            marker_shell(ns_marker) = marker_shell(ns_marker) + real(weights%w(n,species))*optional_quantities%t_hamiltonian
+        endif
         if((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
 
         if (rr%boole_russian_roulette) then

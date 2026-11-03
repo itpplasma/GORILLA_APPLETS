@@ -68,12 +68,17 @@ function calc_quasineutrality_mismatch() result(mismatch)
     !against the nearly empty edge cells, where pointwise relative deviations blow up.
 
     use gorilla_applets_types_mod, only: g, one_d, in, output
+    use constants, only: pi
 
     real(dp) :: mismatch, numer, denom
 
+    one_d%mismatch_noise = 0.0_dp
     if (in%update_dimension.eq.1) then
         numer = sum(abs(one_d%densities(:,1) - one_d%densities(:,2)) * g%s_shell_volumes)
         denom = sum((one_d%densities(:,1) + one_d%densities(:,2)) * g%s_shell_volumes)
+        !expected value of numer/denom from noise alone: <|x|> = sqrt(2/pi)*sigma for Gaussian x
+        if (allocated(one_d%sigma) .and. (denom > 0.0_dp)) one_d%mismatch_noise = sqrt(2.0_dp/pi) &
+            *sum(sqrt(one_d%sigma(:,1)**2 + one_d%sigma(:,2)**2) * g%s_shell_volumes)/denom
     else
         numer = sum(abs(real(output%prism_moments(1,:,1)) - real(output%prism_moments(1,:,2))) * output%prism_volumes)
         denom = sum((real(output%prism_moments(1,:,1)) + real(output%prism_moments(1,:,2))) * output%prism_volumes)
@@ -209,6 +214,22 @@ subroutine calc_average_charge_density_per_flux_layer(i)
         if (one_d%boole_print_densities) one_d%densities(ns,:) = one_d%densities(ns,:)/g%s_shell_volumes(ns)
     enddo
 
+    !Statistical error of the shell densities from the per-marker contributions c_m: n = K*sum_m c_m, so
+    !sigma^2 = K^2*(sum_m c_m^2 - (sum_m c_m)^2/N) with K = n/sum_m c_m (prescribed electrons: 0)
+    if (one_d%boole_print_densities) then
+        if (.not.allocated(one_d%sigma)) allocate(one_d%sigma(grid_size(1),in%n_species))
+        one_d%sigma = 0.0_dp
+        if (allocated(one_d%marker_sum)) then
+            do species = 1,n_species
+                do ns = 1,grid_size(1)
+                    if (one_d%marker_sum(ns,species).gt.0.0_dp) one_d%sigma(ns,species) = &
+                        one_d%densities(ns,species)/one_d%marker_sum(ns,species) &
+                        *sqrt(max(one_d%marker_sum_sq(ns,species) - one_d%marker_sum(ns,species)**2/in%num_particles, 0.0_dp))
+                enddo
+            enddo
+        endif
+    endif
+
     !Outer buffer: blend each species' shell density into the (quasineutral) target, with the weight at
     !the outer edge of the shell, so the outermost shell is exactly the target and carries no charge
     if (in%edge_buffer_width.gt.0.0_dp) then
@@ -222,6 +243,7 @@ subroutine calc_average_charge_density_per_flux_layer(i)
                                                + w*target_shell*start%particle_charge(1)/echarge
             ep%rho_flux_layer(ns) = start%particle_charge(1)*one_d%densities(ns,1) &
                                     + start%particle_charge(in%n_species)*one_d%densities(ns,in%n_species)
+            one_d%sigma(ns,:) = (1.0_dp-w)*one_d%sigma(ns,:)
         enddo
     endif
 
@@ -503,6 +525,7 @@ subroutine associate_flux_labels_with_tetrahedra_and_vertices
 
     allocate(g%vertices_per_flux_surface(grid_size(1)+1,grid_size(2)*grid_size(3)))
     allocate(g%prisms_per_flux_tube(grid_size(1),grid_size(2)*grid_size(3)*2))
+    allocate(g%shell_of_prism(grid_size(1)*grid_size(2)*grid_size(3)*2))
 
     !Fill vertices_per_flux_surface
     do ns = 1,grid_size(1)+1
@@ -524,6 +547,7 @@ subroutine associate_flux_labels_with_tetrahedra_and_vertices
                 do j = 1,2 !count through prisms per hexahedron
                     ind_prism = (nphi-1)*grid_size(1)*grid_size(3)*2 + (ns-1)*grid_size(3)*2 + (ntheta-1)*2 + j
                     g%prisms_per_flux_tube(ns,i) = ind_prism
+                    g%shell_of_prism(ind_prism) = ns
                     i = i + 1
                 enddo
             enddo
