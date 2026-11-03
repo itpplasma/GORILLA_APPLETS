@@ -20,12 +20,44 @@ program gen_deltaf_kernels
     ! Circular chart (grid_kind = 5): R = R0 + r cos(theta), q = q0 + q1 (r/a)**2,
     ! psi_pol = B0 a**2/(2 q1) ln(q/q0), B = (B0/R) sqrt(R0**2 + r**2/q**2) [C1, C2].
     ! Harmonic: delta B, delta Phi = (b_mn, Phi_mn)(s) cos(m theta - n phi).
+    !
+    ! ------------------------------------------------------------------------
+    ! Collisional background drive (opt-in, canonical_ntv_mod ntv_fax_file)
+    ! ------------------------------------------------------------------------
+    ! The collisional axisymmetric background is f_M + f_AX, not the canonical
+    ! Maxwellian f0 alone (Kernbichler et al. PPCF 58 (2016) 104001 Eq. (27),
+    ! Kasilov et al. PoP 21 (2014) 092506 Eq. (65)). Split f_AX = G + h with
+    ! the canonical shift G = f0 - f_M = m v_par h_phi df0/dp_phi (to first
+    ! order in rho*), and write the collisional remainder as
+    !   h/f0 = (d ln f0/dp_phi) m v h_phi chi(position, lambda),
+    ! i.e. chi = lambda h/G with lambda = v_par/v, so chi = lambda for h = G.
+    ! chi is imported from the axisymmetric NEO-2 solution (thin orbit, local).
+    ! The canonical weight source -{f0, H1}/f0 already contains G; the missing
+    ! part is -{h, H1}/f0. In (x, v, lambda) h is axisymmetric, v is conserved
+    ! (magnetostatic H1 = mu dB) and the perturbed mirror force is [F1]
+    !   d lambda/dt = -(mu/(m v)) b.grad B = -(v (1-lambda**2)/2) b.grad ln B,
+    !   delta(d lambda/dt) = -(v (1-lambda**2)/2) b.grad(dB/B).
+    ! The perturbed radial drift acting on h is O(rho*) smaller and dropped
+    ! (thin orbit, as in NEO-2). For an m = 0 harmonic of the axisymmetric
+    ! field b.grad(dB/B) = b^phi d(dB)/dphi / B with b^phi = h_phi/R**2. Then
+    !   dw/dt|_fax = -delta(d lambda/dt) d(h/f0)/d lambda
+    !              = (d ln f0/dp_phi) m v**2 (h_phi/R)**2 (1-lambda**2)/2
+    !                * d chi/d lambda * (d dB/dphi)/B,
+    ! with d chi/d lambda at fixed position from a table [F2] (finite at the
+    ! turning point lambda = 0, unlike d chi/d eta). This is the mirror term of
+    ! Kernbichler Eq. (28) on h, -sigma eta d/d eta = (1-lambda**2)/(2|lambda|)
+    ! d/d lambda (NEO-2 f0_ttmp). Check [F3]: for h = G (chi = lambda)
+    ! the kernel returns (d ln f0/dp_phi) mu (h_phi/R)**2 d(dB)/dphi, the mu
+    ! part of the canonical source (d ln f0/dp_phi) dH1/dphi: the canonical
+    ! drive is the radial drift on f_M plus exactly this mirror term on G.
+    ! Position label (convention free): vartheta = branch arccos(1 - 2 (B -
+    ! Bmin)/(Bmax - Bmin)), branch = sign of dB along b (motion with lambda > 0).
     use, intrinsic :: iso_fortran_env, only: output_unit
     use fortsym_string, only: str_t, str, chars
     use fortsym_arena, only: arena_t
     use fortsym_expr, only: expr_t, sym, num, func, pi_expr, operator(+), &
         operator(-), operator(*), operator(/), operator(**), cos, log, &
-        sqrt
+        sqrt, acos
     use fortsym_diff, only: diff, partial_derivative
     use fortsym_subs, only: subs_many
     use fortsym_print, only: print_expr
@@ -65,6 +97,8 @@ program gen_deltaf_kernels
     type(expr_t) :: db1_dphi, dphi1_dphi, dh1_dphi
     ! Canonical pairs for the bracket identities.
     type(expr_t) :: th, pth, ph, pph
+    ! Collisional background drive.
+    type(expr_t) :: bmin, bmax, branch, dchi, h_phi, r_maj, kappa_f
 
     if (command_argument_count() /= 1) then
         write (output_unit, "(a)") "usage: gen_deltaf_kernels OUTPUT_DIR"
@@ -159,6 +193,16 @@ program gen_deltaf_kernels
         [character(len=16) :: "ln_f0", "dlnf0_dpphi", "dh1_dphi", "dw_dt", &
         "torque_sample"])
 
+    ! ------------------------------------------- collisional background drive
+    bmin = sym(arena, "bmin")
+    bmax = sym(arena, "bmax")
+    branch = sym(arena, "branch")
+    dchi = sym(arena, "dchi_dlambda")
+    h_phi = sym(arena, "h_phi")
+    r_maj = sym(arena, "r_major")
+    kappa_f = sym(arena, "dlnf0_dpphi")
+    call emit_fax()
+
     call suite_end(suite)
 
 contains
@@ -208,6 +252,59 @@ contains
             [character(len=16) :: "bmod", "dbmod_dr", "dbmod_dtheta", "psi_pol", &
             "dpsi_dr", "dpsi_ds", "h_theta", "h_phi", "s", "ds_dr", "R_major"])
     end subroutine emit_circular
+
+    !> Coordinates and weight source of the collisional background drive.
+    subroutine emit_fax()
+        type(expr_t) :: v, lam, mu_lam, gpar, lam_dot, chi_f, hf0, src
+        type(expr_t) :: speed, lam_s, src_g
+        type(expr_t) :: roots(2)
+
+        ! Symbols of the (x, v, lambda) chart at fixed position.
+        v = sym(arena, "v")
+        lam = sym(arena, "lambda")
+        gpar = sym(arena, "gradpar_b")
+        mu_lam = mass*v**2*(1 - lam**2)/(2*bmod)
+        ! [F1] lambda' = v_par'/v (v conserved), m v_par' = -mu b.grad B.
+        lam_dot = -(mu_lam/(mass*v))*gpar
+        call check_identity(suite, native, &
+            "F1 dlambda/dt = -(v (1-lambda**2)/2) b.grad ln B", &
+            lam_dot + v*(1 - lam**2)/2*gpar/bmod)
+
+        ! Source -delta(lambda') d(h/f0)/dlambda with
+        ! delta(lambda') = -(v (1-lambda**2)/2) b.grad(dB/B),
+        ! b.grad(dB/B) = (h_phi/R**2) (d dB/dphi)/B for an m = 0 harmonic.
+        chi_f = func("chi", [lam])
+        hf0 = kappa_f*mass*v*h_phi*chi_f
+        src = (v*(1 - lam**2)/2)*(h_phi/r_maj**2)*(db1_dphi/bmod)*diff(hf0, lam)
+        ! [F2] the table derivative is the lambda derivative of chi.
+        call check_identity(suite, native, "F2 d(h/f0)/dlambda = kappa m v h_phi chi'", &
+            diff(hf0, lam) - kappa_f*mass*v*h_phi*partial_derivative(chi_f, 1))
+        src = subs_many(src, [partial_derivative(chi_f, 1)], [dchi])
+        ! In the caller's variables: v**2 = vpar**2 + 2 mu B/m, lambda = vpar/v.
+        speed = sqrt(vpar**2 + 2*mu*bmod/mass)
+        lam_s = vpar/speed
+        src = subs_many(subs_many(src, [lam], [lam_s]), [v], [speed])
+
+        ! [F3] h = G: chi = lambda, d chi/d lambda = 1; the source is the mu part
+        ! of the canonical drive with b^phi h_phi = (h_phi/R)**2.
+        src_g = subs_many(src, [dchi], [num(arena, 1)])
+        call check_identity(suite, symeng, &
+            "F3 chi = lambda gives (dlnf0/dp_phi) mu (h_phi/R)**2 d dB/dphi", &
+            src_g - kappa_f*mu*(h_phi/r_maj)**2*db1_dphi)
+
+        roots(1) = lam_s
+        roots(2) = branch*acos(1 - 2*(bmod - bmin)/(bmax - bmin))
+        call emit_kernel_file("deltaf_fax_coordinates_kernel", &
+            "evaluate_deltaf_fax_coordinates", &
+            [character(len=16) :: "mass", "mu", "vpar", "bmod", "bmin", "bmax", &
+            "branch"], simplified_all(roots), &
+            [character(len=16) :: "lambda", "vartheta"])
+        call emit_kernel_file("deltaf_fax_weight_kernel", &
+            "evaluate_deltaf_fax_weight", &
+            [character(len=16) :: "mu", "h_phi", "r_major", "dlnf0_dpphi", &
+            "db1_dphi", "dchi_dlambda"], &
+            [simplified(src)], [character(len=16) :: "dw_dt_fax"])
+    end subroutine emit_fax
 
     !> Circular-chart identities.
     subroutine prove_circular()
