@@ -622,7 +622,9 @@ subroutine build_reservoir_cells(min_volume_fraction)
     !flux-surface layer and stopping at the first layer without tetrahedra smaller than
     !min_volume_fraction times the median tetrahedron volume, the tetrahedra of each layer and
     !toroidal slice are merged poloidally (in order of their poloidal angle) into cells of at least
-    !that volume. A layer is identified by the lowest vertex flux of a tetrahedron, a toroidal slice by
+    !that volume. Innermost layers that are too thin for this even as complete rings (their thinness
+    !comes from the grid geometry near the axis) are first combined radially, from the axis outwards,
+    !until the ring of every toroidal slice reaches the volume. A layer is identified by the lowest vertex flux of a tetrahedron, a toroidal slice by
     !its lowest vertex angle phi. min_volume_fraction <= 0 keeps one cell per tetrahedron.
     !All tetrahedra of a cell share the cell's flow and temperature (initialised to the
     !particle-weighted mean of its tetrahedra, exact while the flow is zero).
@@ -636,14 +638,17 @@ subroutine build_reservoir_cells(min_volume_fraction)
 
     real(dp), parameter :: tol = 1.0e-9_dp
     real(dp), dimension(:), allocatable :: s_low, phi_low, theta, centre_a, centre_b, n_group, sort_key, particles
-    real(dp), dimension(:), allocatable :: a_c, b_c
+    real(dp), dimension(:), allocatable :: a_c, b_c, ring_acc
+    real(dp), dimension(:,:), allocatable :: ring_volume
+    integer, dimension(:), allocatable :: radial_cell
     integer, dimension(:), allocatable :: layer_id, slice_id, group_id, perm, n_members
     logical, dimension(:), allocatable :: layer_has_small
     real(dp), dimension(3,4) :: v
     real(dp), dimension(4) :: s_v
     real(dp) :: threshold, cell_volume, u_mean, temp_mean
     integer :: i, k, j, idx, n_layers, n_slices, n_groups, n_cells, ind_phi, ind_a, ind_b, merge_limit, &
-               group_first_cell, cell_first_idx, previous_group, n_merged_tetr
+               group_first_cell, cell_first_idx, previous_group, n_merged_tetr, n_layers_grid
+    logical :: radial_cell_open
 
     if (allocated(c%cell_of_tetr)) deallocate(c%cell_of_tetr)
     if (allocated(c%cell_start)) deallocate(c%cell_start)
@@ -690,6 +695,29 @@ subroutine build_reservoir_cells(min_volume_fraction)
         call cluster_values(s_low, tol, layer_id, n_layers)
         call cluster_values(phi_low, tol, slice_id, n_slices)
         allocate(group_id(ntetr))
+        threshold = min_volume_fraction*median(c%tetr_volume)
+
+        !radial merging of layers whose rings are too small, from the axis outwards
+        n_layers_grid = n_layers
+        allocate(ring_volume(n_layers, n_slices), ring_acc(n_slices), radial_cell(n_layers))
+        ring_volume = 0.0_dp
+        do i = 1, ntetr
+            ring_volume(layer_id(i), slice_id(i)) = ring_volume(layer_id(i), slice_id(i)) + c%tetr_volume(i)
+        enddo
+        n_layers = 0
+        radial_cell_open = .false.
+        do k = 1, n_layers_grid
+            if (.not.radial_cell_open) then
+                n_layers = n_layers + 1
+                ring_acc = 0.0_dp
+                radial_cell_open = .true.
+            endif
+            radial_cell(k) = n_layers
+            ring_acc = ring_acc + ring_volume(k,:)
+            if (minval(ring_acc).ge.threshold) radial_cell_open = .false.
+        enddo
+        layer_id = radial_cell(layer_id)
+
         group_id = (layer_id - 1)*n_slices + slice_id
         n_groups = n_layers*n_slices
 
@@ -712,8 +740,6 @@ subroutine build_reservoir_cells(min_volume_fraction)
         do i = 1, ntetr
             theta(i) = atan2(b_c(i) - centre_b(group_id(i)), a_c(i) - centre_a(group_id(i)))
         enddo
-
-        threshold = min_volume_fraction*median(c%tetr_volume)
 
         !layers 1 .. merge_limit (from the axis outwards) contain small tetrahedra and are merged
         allocate(layer_has_small(n_layers))
@@ -801,6 +827,8 @@ subroutine build_reservoir_cells(min_volume_fraction)
     if (min_volume_fraction.gt.0.0_dp) then
         print*, 'reservoir cells: ', n_cells, ' cells for ', ntetr, ' tetrahedra; ', n_merged_tetr, &
                 ' tetrahedra in ', merge_limit, ' layers merged poloidally, threshold volume ', threshold
+        print*, 'innermost ', n_layers_grid - n_layers, ' grid layers merged radially (', &
+                n_layers_grid, ' grid layers ->', n_layers, ')'
         print*, 'smallest reservoir cell volume = ', minval([(sum(c%tetr_volume(c%cell_members(c%cell_start(k): &
                 c%cell_start(k+1)-1))), k = 1, n_cells)])
     endif
