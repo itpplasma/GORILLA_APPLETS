@@ -66,21 +66,18 @@ end subroutine read_boltzmann_inp_into_type
 
 subroutine calc_boltzmann
 
-    use orbit_timestep_gorilla_mod, only: initialize_gorilla
+    use utils_data_pre_and_post_processing_mod, only: setup_applet, print_applet_summary
     use constants, only: ev2erg,pi,echarge
     use tetra_physics_mod, only: particle_mass,particle_charge
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
-    use tetra_grid_settings_mod, only: grid_kind
     use tetra_grid_mod, only: ntetr
     use gorilla_settings_mod, only: ispecies
-    use gorilla_applets_settings_mod, only: i_option
-    use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use gorilla_applets_types_mod, only: moment_specs, counter, c, in
+    use gorilla_applets_types_mod, only: moment_specs, in
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
-    use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
-    get_ipert, set_moment_specifications, initialise_output, calc_starting_conditions, initialize_exit_data, calc_poloidal_flux, &
-    calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
+    use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, calc_starting_conditions, &
+    initialize_exit_data, calc_poloidal_flux, calc_collision_coefficients_for_all_tetrahedra, &
+    normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
     find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution, &
     perform_background_density_update, prepare_next_round_of_parallelised_particle_pushing
     use gorilla_applets_types_mod, only: output
@@ -91,8 +88,7 @@ subroutine calc_boltzmann
 
     call set_seed_for_random_numbers
     call read_boltzmann_inp_into_type
-    call get_ipert()
-    call initialize_gorilla(i_option,ipert)
+    call setup_applet
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! delete this again afterwards !!!!!!!!!!!!!!!!!!!!!!!
     if (ispecies.eq.4) particle_charge = 15*echarge
@@ -101,8 +97,6 @@ subroutine calc_boltzmann
 
     v0=sqrt(2.0_dp*in%energy_eV*ev2erg/particle_mass)
 
-    call set_moment_specifications
-    call initialise_output
     call calc_square_root_g
     call calc_volume_integrals
     call initialize_exit_data
@@ -126,20 +120,7 @@ subroutine calc_boltzmann
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
     call write_data_to_files
 
-    if (in%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
-    print*, 'Number of lost particles',counter%lost_particles
-    print*, 'average number of pushings = ', counter%tetr_pushings/in%n_particles
-    print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/in%n_particles
-    print*, 'average number of integration steps = ', counter%integration_steps/in%n_particles
-    PRINT*, 'particle mass = ', particle_mass
-    PRINT*, 'absolute value of velocity = ', v0
-    PRINT*, 'particle charge = ', particle_charge
-    PRINT*, 'temperature = ', ev2erg*in%energy_eV
-    print*, 'energy in eV = ', in%energy_eV
-    print*, 'tracing time in seconds = ', in%time_step
-    if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-         print*, 'number of times that particles were pushed across the inside hole = ', counter%lost_inside
-    endif
+    call print_applet_summary('particle', particle_mass, v0, particle_charge)
     !print*, output%radial_flux
 
 end subroutine calc_boltzmann

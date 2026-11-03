@@ -8,20 +8,16 @@ contains
 
 subroutine calc_self_consistent_electric_field
 
-    use orbit_timestep_gorilla_mod, only: initialize_gorilla
-    use constants, only: ev2erg,pi,echarge
+    use utils_data_pre_and_post_processing_mod, only: setup_applet, print_applet_summary
+    use constants, only: pi, echarge
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
-    use tetra_grid_settings_mod, only: grid_kind
     use tetra_grid_mod, only: ntetr, verts_sthetaphi
     use gorilla_settings_mod, only: ispecies
-    use gorilla_applets_settings_mod, only: i_option
-    use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_volume_integrals_in_flux_coordinates
-    use gorilla_applets_types_mod, only: moment_specs, counter, c, in, start, s, output, weights, ep
+    use gorilla_applets_types_mod, only: moment_specs, in, start, s, output, weights, ep
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
-    use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
-    get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &
-    fourier_transform_moments
+    use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, initialize_exit_data, &
+    calc_poloidal_flux, fourier_transform_moments
     use utils_scef_input_mod, only: read_self_consistent_electric_field_inp_into_type, print_errors_for_bad_inputs
     use utils_scef_particle_init_mod, only: calc_starting_conditions, calc_desired_density_profile, &
     initialize_particle_source, update_particle_source, write_particle_source
@@ -33,11 +29,8 @@ subroutine calc_self_consistent_electric_field
 
     call set_seed_for_random_numbers
     call read_self_consistent_electric_field_inp_into_type
-    call get_ipert()
-    call initialize_gorilla(i_option,ipert)
+    call setup_applet
     
-    call set_moment_specifications
-    call initialise_output
     call calc_volume_integrals_in_flux_coordinates
     s%temperature = in%energy_eV
 
@@ -82,20 +75,7 @@ subroutine calc_self_consistent_electric_field
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
     call write_data_to_files
 
-    if (in%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
-    print*, 'Number of lost ions',counter%lost_particles
-    print*, 'average number of pushings = ', counter%tetr_pushings/in%n_particles
-    print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/in%n_particles
-    print*, 'average number of integration steps = ', counter%integration_steps/in%n_particles
-    PRINT*, 'ion mass = ', start%particle_mass(1)
-    PRINT*, 'absolute value of ion velocity = ', start%v0(1)
-    PRINT*, 'ion charge = ', start%particle_charge(1)
-    PRINT*, 'temperature = ', ev2erg*in%energy_eV
-    print*, 'energy in eV = ', in%energy_eV
-    print*, 'tracing time in seconds = ', in%time_step
-    if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-         print*, 'number of times that particles were pushed across the inside hole = ', counter%lost_inside
-    endif
+    call print_applet_summary('ion', start%particle_mass(1), start%v0(1), start%particle_charge(1))
     print*, 'Average abs Delta Phi at all the electric potential updates = ', ep%average_abs_phi_elec_from_rho
     print*, sum(weights%w(:,1))/(in%num_particles*in%density*sum(output%prism_volumes(:)))
     print*, sum(output%prism_volumes(:)*output%prism_moments(1,:,1))/(sum(output%prism_volumes(:))*in%density)

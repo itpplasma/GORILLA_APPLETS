@@ -135,6 +135,51 @@ subroutine initialise_output
     
 end subroutine initialise_output
 
+subroutine setup_applet
+
+    !Initialise GORILLA and the moment output, after the mode has read its input file
+
+    use orbit_timestep_gorilla_mod, only: initialize_gorilla
+    use gorilla_applets_settings_mod, only: i_option
+    use field_mod, only: ipert
+
+    call get_ipert()
+    call initialize_gorilla(i_option,ipert)
+
+    call set_moment_specifications
+    call initialise_output
+
+end subroutine setup_applet
+
+subroutine print_applet_summary(particle_name, particle_mass, v0, particle_charge)
+
+    !Print the counters and particle parameters at the end of a run
+    !particle_name ... 'particle' or 'ion'
+
+    use constants, only: ev2erg
+    use tetra_grid_settings_mod, only: grid_kind
+    use gorilla_applets_types_mod, only: counter, c, in
+
+    character(len=*), intent(in) :: particle_name
+    real(dp), intent(in)         :: particle_mass, v0, particle_charge
+
+    if (in%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
+    print*, 'Number of lost '//particle_name//'s', counter%lost_particles
+    print*, 'average number of pushings = ', counter%tetr_pushings/in%n_particles
+    print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/in%n_particles
+    print*, 'average number of integration steps = ', counter%integration_steps/in%n_particles
+    print*, particle_name//' mass = ', particle_mass
+    print*, 'absolute value of '//particle_name//' velocity = ', v0
+    print*, particle_name//' charge = ', particle_charge
+    print*, 'temperature = ', ev2erg*in%energy_eV
+    print*, 'energy in eV = ', in%energy_eV
+    print*, 'tracing time in seconds = ', in%time_step
+    if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
+         print*, 'number of times that particles were pushed across the inside hole = ', counter%lost_inside
+    endif
+
+end subroutine print_applet_summary
+
 subroutine deallocate_output
 !
 ! Deallocates arrays in the output type to allow reallocation when grid parameters change.

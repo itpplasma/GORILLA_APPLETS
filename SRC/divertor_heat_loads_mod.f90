@@ -75,22 +75,18 @@ end subroutine read_divertor_heat_loads_inp_into_type
 
 subroutine calc_divertor_heat_loads
 
-    use orbit_timestep_gorilla_mod, only: initialize_gorilla
+    use utils_data_pre_and_post_processing_mod, only: setup_applet, print_applet_summary
     use constants, only: ev2erg,pi,echarge
     use tetra_physics_mod, only: particle_mass,particle_charge
     use omp_lib, only: omp_get_thread_num, omp_get_num_threads, omp_set_num_threads
-    use tetra_grid_settings_mod, only: grid_kind
     use tetra_grid_mod, only: ntetr, verts_rphiz
     use gorilla_settings_mod, only: ispecies
-    use gorilla_applets_settings_mod, only: i_option
-    use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
     use gorilla_applets_types_mod, only: moment_specs, counter_t, counter, c, in, time_t, particle_status_t
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
-    use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, get_ipert, &
-    set_moment_specifications, initialise_output, initialize_exit_data, &
-    calc_poloidal_flux, calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
-    fourier_transform_moments
+    use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, initialize_exit_data, &
+    calc_poloidal_flux, calc_collision_coefficients_for_all_tetrahedra, &
+    normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, initialise_loop_variables, &
     add_local_tetr_moments_to_output, add_local_counter_to_counter, carry_out_collisions, update_exit_data, &
     initialise_seed_for_random_numbers_for_each_thread
@@ -105,8 +101,7 @@ subroutine calc_divertor_heat_loads
 
     call set_seed_for_random_numbers
     call read_divertor_heat_loads_inp_into_type
-    call get_ipert()
-    call initialize_gorilla(i_option,ipert)
+    call setup_applet
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! delete this again afterwards !!!!!!!!!!!!!!!!!!!!!!!
     if (ispecies.eq.4) particle_charge = 15*echarge
@@ -118,8 +113,6 @@ subroutine calc_divertor_heat_loads
     iantithetic = 1
     if (in%boole_antithetic_variate) iantithetic = 2
 
-    call set_moment_specifications
-    call initialise_output
     call calc_square_root_g
     call calc_volume_integrals
     call calc_starting_conditions
@@ -198,17 +191,7 @@ subroutine calc_divertor_heat_loads
     call write_data_to_files
     !call create_magnetic_field_file
 
-    if (in%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
-    print*, 'Number of lost particles',counter%lost_particles
-    print*, 'average number of pushings = ', counter%tetr_pushings/in%n_particles
-    print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/in%n_particles
-    print*, 'average number of integration steps = ', counter%integration_steps/in%n_particles
-    PRINT*, 'particle mass = ', particle_mass
-    PRINT*, 'absolute value of velocity = ', v0
-    PRINT*, 'particle charge = ', particle_charge
-    PRINT*, 'temperature = ', ev2erg*in%energy_eV
-    print*, 'energy in eV = ', in%energy_eV
-    print*, 'tracing time in seconds = ', in%time_step
+    call print_applet_summary('particle', particle_mass, v0, particle_charge)
 
 end subroutine calc_divertor_heat_loads
 
