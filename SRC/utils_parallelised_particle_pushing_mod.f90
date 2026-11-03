@@ -4,6 +4,14 @@ module utils_parallelised_particle_pushing_mod
 
     implicit none
 
+    !Deferred background updates of the energy and momentum conserving collisions: while
+    !boole_deferred_background_updates is set, collisions read a frozen background and every thread
+    !adds the parallel momentum and energy [erg] its markers gain into its own slot
+    !background_exchange(1:2, species, tetrahedron, thread). apply_deferred_background_updates sums the
+    !slots in thread order (reproducible for a fixed thread count) and updates each reservoir once.
+    logical :: boole_deferred_background_updates = .false.
+    real(dp), dimension(:,:,:,:), allocatable :: background_exchange
+
 contains
 
 subroutine print_progress(num_particles,kpart,n)
@@ -180,6 +188,7 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     use tetra_physics_mod, only: particle_mass,particle_charge
     use constants, only: echarge,amp
     use gorilla_applets_settings_mod, only: i_option
+    use omp_lib, only: omp_get_thread_num
 
     integer, intent(in) :: i, n, species, iswmode
     real(dp), dimension(3), intent(inout) :: x
@@ -192,8 +201,8 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     real(dp), dimension(1) :: m, z, dens, temp, efcolf,velrat,enrat
     real(dp) :: vpar_background
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar
-    integer :: err, j, p
-    real(dp) :: marker_to_background_ratio, t_max
+    integer :: err, j, p, thread
+    real(dp) :: marker_to_background_ratio, t_max, w_phys
 
     do j = 1,c%n-1
         
@@ -237,16 +246,73 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
 
         !A marker represents weights%w/n_particles physical particles (the moments are normalised the
         !same way), the reservoir holds dens_mat*tetr_volume background particles
-        marker_to_background_ratio = real(weights%w(n,species), dp)/ &
-            (in%n_particles*c%dens_mat(j,ind_tetr)*c%tetr_volume(ind_tetr))
+        w_phys = real(weights%w(n,species), dp)/in%n_particles
 
-        !$omp critical
-        call update_background_reservoir(particle_mass, c%mass(j), marker_to_background_ratio, &
-            delta_vpar, delta_epsilon, c%vpar_mat(j,ind_tetr), c%temp_mat(j,ind_tetr))
-        !$omp end critical
+        if (boole_deferred_background_updates) then
+            thread = omp_get_thread_num()
+            background_exchange(1,j,ind_tetr,thread) = background_exchange(1,j,ind_tetr,thread) + &
+                                                       w_phys*particle_mass*delta_vpar
+            background_exchange(2,j,ind_tetr,thread) = background_exchange(2,j,ind_tetr,thread) + w_phys*delta_epsilon
+        else
+            marker_to_background_ratio = w_phys/(c%dens_mat(j,ind_tetr)*c%tetr_volume(ind_tetr))
+            !$omp critical
+            call update_background_reservoir(particle_mass, c%mass(j), marker_to_background_ratio, &
+                delta_vpar, delta_epsilon, c%vpar_mat(j,ind_tetr), c%temp_mat(j,ind_tetr))
+            !$omp end critical
+        endif
     enddo
 
 end subroutine collisions_with_background_updates
+
+subroutine start_deferred_background_updates
+
+    !Switches the conserving collisions to deferred background updates (see module header)
+
+    use gorilla_applets_types_mod, only: c
+    use tetra_grid_mod, only: ntetr
+    use omp_lib, only: omp_get_max_threads
+
+    if (allocated(background_exchange)) deallocate(background_exchange)
+    allocate(background_exchange(2, c%n, ntetr, 0:omp_get_max_threads()-1))
+    background_exchange = 0.0_dp
+    boole_deferred_background_updates = .true.
+
+end subroutine start_deferred_background_updates
+
+subroutine apply_deferred_background_updates(n_rejected)
+
+    !Gives each reservoir the summed momentum and energy that the markers lost in it since the last
+    !call and resets the exchange. n_rejected counts reservoirs whose update would have driven the
+    !temperature non-positive and was therefore rejected (conservation is broken there).
+
+    use gorilla_applets_types_mod, only: c
+    use tetra_physics_mod, only: particle_mass
+
+    integer, intent(out) :: n_rejected
+    real(dp) :: momentum, energy, u_old, temp_old
+    integer :: j, i, thread
+
+    n_rejected = 0
+    do i = 1, size(background_exchange, 3)
+        do j = 1, c%n-1
+            momentum = 0.0_dp
+            energy = 0.0_dp
+            do thread = 0, size(background_exchange, 4) - 1
+                momentum = momentum + background_exchange(1,j,i,thread)
+                energy = energy + background_exchange(2,j,i,thread)
+            enddo
+            if ((momentum.eq.0.0_dp).and.(energy.eq.0.0_dp)) cycle
+            u_old = c%vpar_mat(j,i)
+            temp_old = c%temp_mat(j,i)
+            !one marker of unit ratio carrying the totals: r*m_t*delta_vpar = momentum/N_b, r*delta_epsilon = energy/N_b
+            call update_background_reservoir(particle_mass, c%mass(j), 1.0_dp/(c%dens_mat(j,i)*c%tetr_volume(i)), &
+                momentum/particle_mass, energy, c%vpar_mat(j,i), c%temp_mat(j,i))
+            if ((c%vpar_mat(j,i).eq.u_old).and.(c%temp_mat(j,i).eq.temp_old)) n_rejected = n_rejected + 1
+        enddo
+    enddo
+    background_exchange = 0.0_dp
+
+end subroutine apply_deferred_background_updates
 
 pure subroutine update_background_reservoir(m_t, m_b, r, delta_vpar, delta_epsilon, u_b, temp_b)
     !Background flow u_b and temperature temp_b [eV] take up the parallel momentum and energy [erg]

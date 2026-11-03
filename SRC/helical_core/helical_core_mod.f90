@@ -32,11 +32,13 @@ subroutine calc_helical_core
         get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &
         calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
         fourier_transform_moments, calc_starting_conditions
+    use utils_parallelised_particle_pushing_mod, only: start_deferred_background_updates, &
+        apply_deferred_background_updates
     use utils_helical_core_mod, only: read_helical_core_inp_into_type, &
         parallelised_particle_pushing_helical_core, eliminate_particles_outside_flux_threshold, &
         set_unidirectional_beam, write_collision_relaxation_diagnostics, write_collision_relaxation_profiles
 
-    integer :: i_slice, relaxation_unit
+    integer :: i_slice, relaxation_unit, n_rejected
     logical :: boole_relaxation_diagnostics
     real(dp), dimension(:), allocatable :: pitch_0, energy_0
     real(dp), dimension(:,:), allocatable :: x_0
@@ -72,6 +74,7 @@ subroutine calc_helical_core
         x_0 = start%x(:,:,1)
         pitch_0 = start%pitch(:,1)
         energy_0 = start%energy(:,1)
+        call start_deferred_background_updates
         lost_0 = start%lost(:,1)
         u_b_0 = c%vpar_mat(1,:)
         temp_b_0 = c%temp_mat(1,:)
@@ -83,6 +86,9 @@ subroutine calc_helical_core
     do i_slice = 1, in%n_time_slices
         call parallelised_particle_pushing_helical_core(species=1, boole_reuse_weights_in=(i_slice.gt.1), i_slice_in=i_slice)
         if (boole_relaxation_diagnostics) then
+            call apply_deferred_background_updates(n_rejected)
+            if (n_rejected.gt.0) print*, 'WARNING: background updates rejected (T <= 0) in ', n_rejected, &
+                                         ' tetrahedra in slice ', i_slice, ', energy and momentum not conserved there'
             !weights are known after the first slice and stay fixed, so the initial row can be written now
             if (i_slice.eq.1) call write_collision_relaxation_diagnostics(relaxation_unit, 0.0_dp, x_0, pitch_0, energy_0, &
                                                                           lost_0, u_b_0, temp_b_0)
