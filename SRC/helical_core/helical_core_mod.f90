@@ -31,6 +31,7 @@ subroutine calc_helical_core
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
         get_ipert, set_moment_specifications, initialise_output, initialize_exit_data, calc_poloidal_flux, &
         calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
+        build_reservoir_cells, &
         fourier_transform_moments, calc_starting_conditions
     use utils_parallelised_particle_pushing_mod, only: start_deferred_background_updates, &
         apply_deferred_background_updates
@@ -74,6 +75,7 @@ subroutine calc_helical_core
         x_0 = start%x(:,:,1)
         pitch_0 = start%pitch(:,1)
         energy_0 = start%energy(:,1)
+        call build_reservoir_cells(in%reservoir_min_volume_fraction)
         call start_deferred_background_updates
         lost_0 = start%lost(:,1)
         u_b_0 = c%vpar_mat(1,:)

@@ -32,7 +32,7 @@ subroutine read_helical_core_inp_into_type
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
                boole_eliminate_particles_outside_flux, boole_delta_f, boole_unidirectional_beam
     integer :: i_integrator_type, seed_option, n_species, n_time_slices
-    real(dp) :: flux_threshold_for_elimination, beam_density_fraction
+    real(dp) :: flux_threshold_for_elimination, beam_density_fraction, reservoir_min_volume_fraction
 
     integer :: s_inp_unit
 
@@ -43,12 +43,13 @@ subroutine read_helical_core_inp_into_type
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, &
     & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f, &
-    & n_time_slices, boole_unidirectional_beam, beam_density_fraction
+    & n_time_slices, boole_unidirectional_beam, beam_density_fraction, reservoir_min_volume_fraction
 
     !optional keys keep their input_t defaults when absent from the file
     n_time_slices = in%n_time_slices
     boole_unidirectional_beam = in%boole_unidirectional_beam
     beam_density_fraction = in%beam_density_fraction
+    reservoir_min_volume_fraction = in%reservoir_min_volume_fraction
 
     open(newunit = s_inp_unit, file='helical_core.inp', status='unknown')
     read(s_inp_unit,nml=helical_core_nml)
@@ -86,6 +87,7 @@ subroutine read_helical_core_inp_into_type
     in%n_time_slices = n_time_slices
     in%boole_unidirectional_beam = boole_unidirectional_beam
     in%beam_density_fraction = beam_density_fraction
+    in%reservoir_min_volume_fraction = reservoir_min_volume_fraction
 
     ! Set defaults for anomalous transport-specific parameters (disabled)
     in%boole_calc_diffusion_coefficient = .false.
@@ -672,8 +674,8 @@ end subroutine write_collision_relaxation_diagnostics
 subroutine write_collision_relaxation_profiles
 !
 ! Final state of the conserving collisions for radial profiles (cylindrical coordinates):
-! background_reservoir.dat: per tetrahedron s, R, Z, physical volume [cm^3], density, u_par/v0, T [eV]
-!                          (s, R, Z at the centroid, s = normalised poloidal flux)
+! background_reservoir.dat: per tetrahedron s, R, Z, physical volume [cm^3], density, u_par/v0, T [eV],
+!                          reservoir cell (s, R, Z at the centroid, s = normalised poloidal flux)
 ! markers_final.dat:       per marker s, R, Z, v_par/v0, energy [eV], physical weight, lost flag
 !
     use gorilla_applets_types_mod, only: in, c, start, weights
@@ -689,7 +691,7 @@ subroutine write_collision_relaxation_profiles
     integer :: i, k, n, ind_tetr, iface, file_unit
 
     open(newunit=file_unit, file='background_reservoir.dat', status='replace')
-    write(file_unit,'(A)') '#s R Z volume density u_par/v0 T'
+    write(file_unit,'(A)') '#s R Z volume density u_par/v0 T cell'
     do i = 1, size(c%tetr_volume)
         do k = 1, 4
             verts(:,k) = verts_rphiz(:,tetra_grid(i)%ind_knot(k))
@@ -698,8 +700,8 @@ subroutine write_collision_relaxation_profiles
         centroid = sum(verts, dim=2)/4.0_dp
         z = centroid - tetra_physics(i)%x1
         s_n = normalised_poloidal_flux(tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi*z))
-        write(file_unit,'(7ES17.9)') s_n, centroid(1), centroid(3), c%tetr_volume(i), c%dens_mat(1,i), &
-            c%vpar_mat(1,i)/start%v0(1), c%temp_mat(1,i)
+        write(file_unit,'(7ES17.9,I10)') s_n, centroid(1), centroid(3), c%tetr_volume(i), c%dens_mat(1,i), &
+            c%vpar_mat(1,i)/start%v0(1), c%temp_mat(1,i), c%cell_of_tetr(i)
     enddo
     close(file_unit)
 

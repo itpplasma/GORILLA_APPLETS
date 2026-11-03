@@ -281,33 +281,44 @@ end subroutine start_deferred_background_updates
 
 subroutine apply_deferred_background_updates(n_rejected)
 
-    !Gives each reservoir the summed momentum and energy that the markers lost in it since the last
-    !call and resets the exchange. n_rejected counts reservoirs whose update would have driven the
-    !temperature non-positive and was therefore rejected (conservation is broken there).
+    !Gives each reservoir cell (c%cell_start/c%cell_members, see build_reservoir_cells) the summed
+    !momentum and energy that the markers lost in its tetrahedra since the last call, copies the new
+    !state to all its tetrahedra and resets the exchange. n_rejected counts cells whose update would
+    !have driven the temperature non-positive and was therefore rejected (conservation is broken there).
 
     use gorilla_applets_types_mod, only: c
     use tetra_physics_mod, only: particle_mass
 
     integer, intent(out) :: n_rejected
-    real(dp) :: momentum, energy, u_old, temp_old
-    integer :: j, i, thread
+    real(dp) :: momentum, energy, particles, u, temp, u_old, temp_old
+    integer :: j, k, m, i, thread
 
     n_rejected = 0
-    do i = 1, size(background_exchange, 3)
+    do k = 1, size(c%cell_start) - 1
         do j = 1, c%n-1
             momentum = 0.0_dp
             energy = 0.0_dp
-            do thread = 0, size(background_exchange, 4) - 1
-                momentum = momentum + background_exchange(1,j,i,thread)
-                energy = energy + background_exchange(2,j,i,thread)
+            particles = 0.0_dp
+            do m = c%cell_start(k), c%cell_start(k+1) - 1
+                i = c%cell_members(m)
+                do thread = 0, size(background_exchange, 4) - 1
+                    momentum = momentum + background_exchange(1,j,i,thread)
+                    energy = energy + background_exchange(2,j,i,thread)
+                enddo
+                particles = particles + c%dens_mat(j,i)*c%tetr_volume(i)
             enddo
             if ((momentum.eq.0.0_dp).and.(energy.eq.0.0_dp)) cycle
+            i = c%cell_members(c%cell_start(k))
             u_old = c%vpar_mat(j,i)
             temp_old = c%temp_mat(j,i)
+            u = u_old
+            temp = temp_old
             !one marker of unit ratio carrying the totals: r*m_t*delta_vpar = momentum/N_b, r*delta_epsilon = energy/N_b
-            call update_background_reservoir(particle_mass, c%mass(j), 1.0_dp/(c%dens_mat(j,i)*c%tetr_volume(i)), &
-                momentum/particle_mass, energy, c%vpar_mat(j,i), c%temp_mat(j,i))
-            if ((c%vpar_mat(j,i).eq.u_old).and.(c%temp_mat(j,i).eq.temp_old)) n_rejected = n_rejected + 1
+            call update_background_reservoir(particle_mass, c%mass(j), 1.0_dp/particles, &
+                momentum/particle_mass, energy, u, temp)
+            if ((u.eq.u_old).and.(temp.eq.temp_old)) n_rejected = n_rejected + 1
+            c%vpar_mat(j,c%cell_members(c%cell_start(k):c%cell_start(k+1)-1)) = u
+            c%temp_mat(j,c%cell_members(c%cell_start(k):c%cell_start(k+1)-1)) = temp
         enddo
     enddo
     background_exchange = 0.0_dp

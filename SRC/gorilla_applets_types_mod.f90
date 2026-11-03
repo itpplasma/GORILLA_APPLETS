@@ -82,6 +82,9 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: dens
     real(dp), dimension(:), allocatable :: temp
     real(dp), dimension(:), allocatable :: tetr_volume !physical tetrahedron volume [cm^3], used by the background reservoir
+    integer, dimension(:), allocatable :: cell_start   !reservoir cell k consists of the tetrahedra
+    integer, dimension(:), allocatable :: cell_members !cell_members(cell_start(k):cell_start(k+1)-1)
+    integer, dimension(:), allocatable :: cell_of_tetr !reservoir cell of each tetrahedron
     integer :: randcoli = int(1.0d5)
     integer :: n !number of background species
     real(dp) :: maxcol = 0
@@ -133,6 +136,8 @@ module gorilla_applets_types_mod
     integer  :: n_time_slices = 1 !Used in helical_core: all markers are pushed together in slices of time_step/n_time_slices
     logical  :: boole_unidirectional_beam = .false. !Used in helical_core: all markers start with pitch +1
     real(dp) :: beam_density_fraction = 1.0_dp !Used in helical_core: marker density / background density
+    real(dp) :: reservoir_min_volume_fraction = 0.0_dp !Used in helical_core: merge small tetrahedra near the axis poloidally into
+                                                       !reservoir cells of at least this fraction of the median volume (0 = off)
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
     integer  :: n_mappings_ignored !Used in divertor_heat_loads
     real(dp) :: lambda !Used in divertor_heat_loads
