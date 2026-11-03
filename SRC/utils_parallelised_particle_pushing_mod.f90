@@ -193,9 +193,7 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     real(dp) :: vpar_background
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar
     integer :: err, j, p
-    real(dp) :: particle_to_background_coupling_strength, t_max
-
-    particle_to_background_coupling_strength = 0.0001_dp
+    real(dp) :: marker_to_background_ratio, t_max
 
     do j = 1,c%n-1
         
@@ -237,9 +235,13 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         delta_vpar = vpar - vpar_save
         delta_epsilon = particle_mass/2*(vpar**2 + vperp**2 - vpar_save**2 - vperp_save**2)
 
+        !A marker represents weights%w/n_particles physical particles (the moments are normalised the
+        !same way), the reservoir holds dens_mat*tetr_volume background particles
+        marker_to_background_ratio = real(weights%w(n,species), dp)/ &
+            (in%n_particles*c%dens_mat(j,ind_tetr)*c%tetr_volume(ind_tetr))
+
         !$omp critical
-        call update_background_reservoir(particle_mass, c%mass(j), &
-            c%weight_factor*real(weights%w(n,species), dp)*particle_to_background_coupling_strength, &
+        call update_background_reservoir(particle_mass, c%mass(j), marker_to_background_ratio, &
             delta_vpar, delta_epsilon, c%vpar_mat(j,ind_tetr), c%temp_mat(j,ind_tetr))
         !$omp end critical
     enddo

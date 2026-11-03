@@ -462,7 +462,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     real(dp) :: v0_l
     integer :: i, j
     integer :: species = 1
-    real(dp) :: m0, z0, n0, s_value, v0, v_box
+    real(dp) :: m0, z0, n0, s_value, v0
     logical :: boole_T_and_n_from_files = .false.
     logical :: boole_analytic_temperature_profile
 
@@ -472,16 +472,9 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
     call set_c
 
-    !c%weight_factor is only consumed by the energy/momentum-conserving collisions. Derive it
-    !directly from the sampling box (uniform position × 2*pi, Boltzmann adds the 10/sqrt(pi)
-    !normalisation of a uniform energy marker pdf on [0, 5T]) so it does not depend on weights%w.
-    !Gated on the sole consumer so applets that place markers deterministically (helical_core,
-    !divertor) can call the collision setup before g%amin/amax/cmin/cmax are populated.
-    if (in%boole_preserve_energy_and_momentum_during_collisions) then
-        v_box = (g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
-        c%weight_factor = 1.0_dp/(in%density*v_box*g%amax)
-        if (.not. in%boole_monoenergetic) c%weight_factor = c%weight_factor*sqrt(pi)/10.0_dp
-    endif
+    !The energy/momentum-conserving collisions update a background reservoir per tetrahedron, whose
+    !particle number is density times the physical tetrahedron volume
+    if (in%boole_preserve_energy_and_momentum_during_collisions) call calc_physical_tetrahedron_volumes
 
     if (.not.allocated(efcolf))       allocate(efcolf(c%n))
     if (.not.allocated(velrat))       allocate(velrat(c%n))
@@ -571,6 +564,57 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
 end subroutine calc_collision_coefficients_for_all_tetrahedra
 
+subroutine calc_physical_tetrahedron_volumes
+
+    !c%tetr_volume = coordinate volume times the Jacobian at the centroid, which is exact for the
+    !Jacobian R of cylindrical coordinates (linear in the tetrahedron) and uses the linearised
+    !sqrt(g) of GORILLA in flux coordinates. Toroidal angles are unwrapped relative to vertex 1.
+
+    use gorilla_applets_types_mod, only: c
+    use tetra_grid_mod, only: ntetr, tetra_grid, verts_rphiz, verts_sthetaphi
+    use tetra_physics_mod, only: tetra_physics, coord_system
+    use constants, only: pi
+
+    integer :: i, k, ind_phi
+    real(dp), dimension(3,4) :: v
+    real(dp), dimension(3) :: centroid
+    real(dp), dimension(3,3) :: edges
+    real(dp) :: coordinate_volume, jacobian
+
+    if (allocated(c%tetr_volume)) deallocate(c%tetr_volume)
+    allocate(c%tetr_volume(ntetr))
+
+    ind_phi = 2
+    if (coord_system.eq.2) ind_phi = 3
+
+    do i = 1, ntetr
+        do k = 1, 4
+            if (coord_system.eq.1) then
+                v(:,k) = verts_rphiz(:,tetra_grid(i)%ind_knot(k))
+            else
+                v(:,k) = verts_sthetaphi(:,tetra_grid(i)%ind_knot(k))
+            endif
+        enddo
+        do k = 2, 4
+            v(ind_phi,k) = v(ind_phi,1) + modulo(v(ind_phi,k) - v(ind_phi,1) + pi, 2.0_dp*pi) - pi
+        enddo
+        edges = v(:,2:4) - spread(v(:,1), 2, 3)
+        coordinate_volume = abs(edges(1,1)*(edges(2,2)*edges(3,3) - edges(3,2)*edges(2,3)) &
+                              - edges(1,2)*(edges(2,1)*edges(3,3) - edges(3,1)*edges(2,3)) &
+                              + edges(1,3)*(edges(2,1)*edges(3,2) - edges(3,1)*edges(2,2)))/6.0_dp
+        centroid = sum(v, dim=2)/4.0_dp
+        if (coord_system.eq.1) then
+            jacobian = centroid(1)
+        else
+            jacobian = abs(tetra_physics(i)%sqg1 + sum(tetra_physics(i)%gsqg*(centroid - v(:,1))))
+        endif
+        c%tetr_volume(i) = coordinate_volume*jacobian
+    enddo
+
+    print*, 'total physical volume of the tetrahedra = ', sum(c%tetr_volume)
+
+end subroutine calc_physical_tetrahedron_volumes
+
 subroutine deallocate_collision_arrays
 !
 ! Deallocates collision coefficient arrays to allow reallocation when grid parameters change.
@@ -588,6 +632,7 @@ subroutine deallocate_collision_arrays
     if (allocated(c%dens))       deallocate(c%dens)
     if (allocated(c%temp))       deallocate(c%temp)
     if (allocated(c%randcol))    deallocate(c%randcol)
+    if (allocated(c%tetr_volume)) deallocate(c%tetr_volume)
 
 end subroutine deallocate_collision_arrays
 

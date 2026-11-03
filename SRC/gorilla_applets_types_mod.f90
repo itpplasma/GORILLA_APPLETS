@@ -81,10 +81,10 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: charge_num
     real(dp), dimension(:), allocatable :: dens
     real(dp), dimension(:), allocatable :: temp
+    real(dp), dimension(:), allocatable :: tetr_volume !physical tetrahedron volume [cm^3], used by the background reservoir
     integer :: randcoli = int(1.0d5)
     integer :: n !number of background species
     real(dp) :: maxcol = 0
-    real(dp) :: weight_factor
     end type collisions_t
 
     type(collisions_t) :: c
@@ -130,6 +130,9 @@ module gorilla_applets_types_mod
     logical  :: boole_eliminate_particles_outside_flux !Used in helical_core
     real(dp) :: flux_threshold_for_elimination !Used in helical_core (0=axis, 1=boundary)
     logical  :: boole_delta_f = .false. !Used in helical_core: use delta-f method for weights
+    integer  :: n_time_slices = 1 !Used in helical_core: all markers are pushed together in slices of time_step/n_time_slices
+    logical  :: boole_unidirectional_beam = .false. !Used in helical_core: all markers start with pitch +1
+    real(dp) :: beam_density_fraction = 1.0_dp !Used in helical_core: marker density / background density
     integer  :: n_poincare_mappings !Used in divertor_heat_loads
     integer  :: n_mappings_ignored !Used in divertor_heat_loads
     real(dp) :: lambda !Used in divertor_heat_loads
