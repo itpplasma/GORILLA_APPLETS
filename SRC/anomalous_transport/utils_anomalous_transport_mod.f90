@@ -267,12 +267,11 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
                     x_new = 3*(/g%raxis, x(2), g%zaxis/) - 2*x
                     vperp = vperp_func(z_save, perpinv, ind_tetr_save)
                     call find_tetra(x_new, vpar, vperp, ind_tetr, iface)
-                    x = x_new
                     if (ind_tetr.eq.-1) then
                         print*, "ATTENTION: particle pushing across the hole surrounding the magnetic axis was unsuccessful"
                         exit
-                    !else
-                        !print*, "particle pushing across the hole surrounding the magnetic axis was successful"
+                    else
+                        x = x_new
                     endif
                 else
                     ! Particle left at the outer boundary - displace toward the magnetic axis
