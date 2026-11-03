@@ -7,6 +7,15 @@ project (GORILLA_APPLETS
 
 enable_language(Fortran)
 
+option(GORILLA_ENABLE_CUDA "Build the polynomial CUDA batch backend" OFF)
+if(GORILLA_ENABLE_CUDA)
+  if(CMAKE_VERSION VERSION_LESS 3.18)
+    message(FATAL_ERROR "GORILLA_ENABLE_CUDA requires CMake 3.18 or newer")
+  endif()
+  enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
+endif()
+
 if(UNIX AND NOT APPLE)
   include_directories(/usr/include)
 elseif(APPLE)

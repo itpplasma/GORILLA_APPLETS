@@ -37,6 +37,47 @@ make clean               # remove BUILD/
 The executable is `BUILD/gorilla_applets_main.x`. Every example folder links
 to it directly.
 
+## Batched transport with CUDA
+
+Applications selected by `i_option=2`, `3` or `4` in
+`gorilla_applets_nml` can advance their active markers in batches. Set
+`transport_backend` in the `TRANSPCOEFNML` namelist of
+`mono_energetic_transp_coef.inp` to `cpu` (the default scalar tracer),
+`cpu-batch` (the OpenMP batch reference) or `cuda`.
+
+Build against the GORILLA revision recorded in `GORILLA_REF`. CUDA is optional
+and needs CMake 3.18 or newer, a CUDA toolkit and a supported NVIDIA GPU:
+
+```bash
+git -C ../GORILLA checkout "$(cat GORILLA_REF)"
+cmake -S . -B BUILD -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DGORILLA_ENABLE_CUDA=ON -DGORILLA_RUNTIME_CHECKS=OFF \
+  -DCMAKE_Fortran_COMPILER=gfortran -DCMAKE_CUDA_COMPILER=nvcc \
+  -DCMAKE_CUDA_ARCHITECTURES=75
+cmake --build BUILD
+OMP_NUM_THREADS=4 ctest --test-dir BUILD --output-on-failure \
+  -R 'mono_energetic_transport_(slow|cuda)'
+```
+
+Replace architecture `75` (Tesla T4) with the target GPU's architecture,
+for example `120` for Blackwell with a toolkit that supports it. A CPU-only
+build needs no CUDA installation.
+
+The CUDA path currently requires polynomial order 2, `i_precomp=0`, constant
+time parametrization (`i_time_tracing_option=1`),
+`handover_processing_kind=1`, `boole_adaptive_time_steps=.false.` and
+`boole_strong_electric_field=.false.`. Disable optional orbit quantities with
+`boole_time_Hamiltonian=.false.`, `boole_gyrophase=.false.`,
+`boole_vpar_int=.false.` and `boole_vpar2_int=.false.`. Batch transport requires
+`i_integrator_type=1`, `boole_random_precalc=.true.` and no helical perturbation.
+Unsupported settings fail explicitly.
+
+Lorentz scattering, measurements and transport estimation stay on the host.
+A cell rejected by the CUDA checks is retraced from its unchanged entry state
+by the CPU pusher. Numerical failures abort the estimate; physical losses
+retain all successful earlier samples. Timings report setup, transfers,
+device execution, CPU recovery and complete batch-consumer wall time.
+
 ## Tests
 
 The CTest suite consists of Fortran unit tests (collision operators, RMP

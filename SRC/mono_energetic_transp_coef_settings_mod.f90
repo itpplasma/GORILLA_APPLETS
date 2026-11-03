@@ -9,6 +9,7 @@
         integer, public, protected :: i_integrator_type, n_particles
         logical, public, protected :: boole_collisions,boole_psi_mat
         double precision, public, protected :: energy_eV
+        character(16), public, protected :: transport_backend = 'cpu'
 !
         !Settings for random numbers to model collisions
         logical, public, protected :: boole_random_precalc
@@ -43,7 +44,7 @@
             & total_MC_time,filename_numerical_diff_coef,nt_steps_numerical_diff, &
             & boole_psi_mat,nu_star_start,nu_exp_basis,n_nu_scans,flight_time_multiplier, &
             & random_seed_filename,boole_write_particle_histories,filename_particle_histories, &
-            & filename_transport_metadata
+            & filename_transport_metadata,transport_backend
 !
     contains
 !            
@@ -54,6 +55,12 @@
             open(newunit=inp_unit, file='mono_energetic_transp_coef.inp', status='unknown')
             read(inp_unit,nml=TRANSPCOEFNML)
             close(inp_unit)
+
+            select case(trim(transport_backend))
+                case('cpu','cpu-batch','cuda')
+                case default
+                    error stop 'transport_backend must be cpu, cpu-batch or cuda'
+            end select
 
             if(flight_time_multiplier <= 0.d0) then
                 error stop 'flight_time_multiplier must be positive'

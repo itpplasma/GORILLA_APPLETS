@@ -66,6 +66,22 @@ GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/mono_energetic_transport_work"
 )
 
+if(GORILLA_ENABLE_CUDA)
+    add_test(
+        NAME mono_energetic_transport_cuda
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_mono_energetic_transport_slow.py
+    )
+    set_tests_properties(mono_energetic_transport_cuda PROPERTIES
+        ENVIRONMENT
+            "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
+GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/mono_energetic_transport_cuda_work;\
+TRANSPORT_COMPARE_BACKEND=cuda"
+    )
+endif()
+
 add_test(
     NAME helical_core
     COMMAND ${Python3_EXECUTABLE}
