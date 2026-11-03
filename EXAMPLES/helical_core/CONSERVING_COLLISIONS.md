@@ -231,9 +231,14 @@ Results (beam inside s < 0.7, 20 slices):
 | hole 0.05, equidistant s | 6e4 | 0.139 / 0.143 | 897 / 926 | -1e-5 | 0.095 | 330 |
 | hole 1e-7, no cells | 3e4 | 0.150 / 0.145 | 880 / 912 | 3e-3 | -0.001 | 0.1 |
 | hole 1e-7, poloidal cells | 3e4 | 0.139 / 0.147 | 889 / 909 | 2e-4 | 0.000 | 8 |
+| hole 1e-7, radial + poloidal cells | 3e4 | 0.139 / 0.146 | 883 / 909 | 1.4e-4 | 0.0006 | 1.4 |
 
-The two small-hole runs still had 20 rejected updates (T <= 0) in the innermost rings.
-The radial merging removes those cells (run r26).
+All three small-hole runs had rejected updates (T <= 0): 20, 20 and 16. With radial plus
+poloidal cells, every cell reaches the threshold of 0.3 times the median volume. The
+coldest cells are then merged cells near s ≈ 0.001–0.002 with volumes just above the
+threshold (T_b = 17 eV, u_b = −0.5 v0 at the end). A threshold of 0.3 times the median
+volume is therefore not enough for 3e4 markers near the axis. Under test: threshold 1.0
+(r27) and 6e4 markers (r28).
 
 Checks of the parallel-velocity handling:
 
