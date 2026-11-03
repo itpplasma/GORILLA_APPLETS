@@ -145,11 +145,15 @@ the same grid.
   the first 1000 are now written.
 - **Electron start positions.** Honest ion tracing overwrites `start%x(:,:,1)` with the
   ion exit positions, and the electron random walk copied it as its start positions,
-  so the walkers started at s ≈ 1. They now start at the ion birth positions.
+  so the walkers started at s ≈ 1. They now start at the ion birth positions, and the
+  SCEF pusher no longer writes the end state into `start` at all (it never continues
+  markers; with `boole_static_ne` the ions would otherwise have restarted from their exit
+  positions in the later potential updates of a source step).
 - **Random walk at the axis.** B was blended towards a finite tabulated value while the
   drift B/s assumed B ∝ s, which emptied the core. B now goes linearly to zero below
   s = 0.1 with the consistent drift dB/ds, and the E_r drift uses the same fitted B.
-  The walk now agrees within 1–3% with the steady-state Fokker–Planck solution, with
-  and without electric field.
+  The walk now agrees with the steady-state Fokker–Planck solution of the walker
+  (`rw_reference.py`, not in the repository) to about 1% rms inside the buffer, with and
+  without electric field.
 - **Profile coordinate.** The target density and the old analytic temperature model
   were evaluated in s instead of r/a = sqrt(s).
