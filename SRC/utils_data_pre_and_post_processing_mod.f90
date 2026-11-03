@@ -455,6 +455,8 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     use gorilla_settings_mod, only: coord_system
     use gorilla_applets_settings_mod, only: i_option
     use marker_distribution_mod, only: linear_profile_factor
+    use scef_target_profiles_mod, only: target_density, target_ion_temperature, target_electron_temperature, &
+                                        rad_from_s
 
     integer, intent(in), optional :: species_in
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
@@ -464,11 +466,11 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     integer :: species = 1
     real(dp) :: m0, z0, n0, s_value, v0, v_box
     logical :: boole_T_and_n_from_files = .false.
-    logical :: boole_analytic_temperature_profile
+    logical :: boole_target_profiles
 
     if (present(species_in)) species = species_in
-    ! The analytic SCEF temperature model must not replace other applet profiles.
-    boole_analytic_temperature_profile = (i_option == 12)
+    ! SCEF collides with its target n, T_i, T_e profiles; other applets keep their own background.
+    boole_target_profiles = (i_option == 12)
 
     call set_c
 
@@ -492,14 +494,13 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
 
     c%temp_mat = in%energy_eV
-    if (i_option.eq.12) c%temp_mat(c%n, :) = s%temperature
     ! Ion densities only; electron density is set below via quasi-neutrality.
     c%dens_mat(1:c%n-1, :) = in%density
 
     if (boole_T_and_n_from_files) call get_T_and_n_from_files
 
     ! Apply linear density and/or temperature profiles based on input settings
-    if (in%boole_linear_density_simulation .or. in%boole_linear_temperature_simulation .or. boole_analytic_temperature_profile) then
+    if (in%boole_linear_density_simulation .or. in%boole_linear_temperature_simulation .or. boole_target_profiles) then
         do i = 1, ntetr/grid_size(2), 3
             ! Compute s_value (normalized flux coordinate) for this tetrahedron
             if (coord_system == 2) then
@@ -523,9 +524,10 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
                 c%temp_mat(:,i) = in%energy_eV * linear_profile_factor(s_value)
             endif
 
-            if (boole_analytic_temperature_profile) then
-                c%temp_mat(1,   i) = 1770.0_dp*(0.06_dp + 0.94_dp*(1.0_dp - s_value**2.9_dp)**2)
-                c%temp_mat(c%n, i) = c%temp_mat(1, i) + 3190.0_dp*(1.0_dp - s_value**2.1_dp)**5.4_dp
+            if (boole_target_profiles) then
+                c%dens_mat(1:c%n-1, i) = target_density(rad_from_s(s_value))
+                c%temp_mat(1:c%n-1, i) = target_ion_temperature(rad_from_s(s_value))
+                c%temp_mat(c%n,     i) = target_electron_temperature(rad_from_s(s_value))
             endif
         enddo
     endif

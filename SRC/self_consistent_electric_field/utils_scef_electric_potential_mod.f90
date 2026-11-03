@@ -91,9 +91,13 @@ subroutine calc_phi_elec_from_rho(i)
 
     use gorilla_applets_types_mod, only: in, ep, start, output, exit_data
     use constants, only: ev2erg, eps, echarge
+    use tetra_grid_mod, only: nvert, verts_sthetaphi
+    use scef_target_profiles_mod, only: target_density, target_ion_temperature, target_electron_temperature, &
+                                        rad_from_s
 
     integer, intent(in) :: i
-    real(dp) :: factor
+    integer :: v
+    real(dp) :: rad, T_i, T_e
 
     ep%rho_flux_layer = 0
     ep%rho_vert = 0
@@ -121,13 +125,15 @@ subroutine calc_phi_elec_from_rho(i)
     ! endif
 
 
-    factor = in%energy_eV*ev2erg/(echarge**2*in%density)!T/(n_0*e^2)= 4*pi*r_D^2
-
-    !decrease factor in case very few particles are simulated
-    !if (in%n_particles.lt.100.0_dp) factor = factor*in%n_particles/100.0_dp
-
-
-    ep%phi_elec_from_rho =  ep%rho_vert*factor
+    !Local factor T_h/(e^2 n) at the target profiles, with the harmonic mean T_h = 2*T_i*T_e/(T_i+T_e):
+    !twice the linearised Boltzmann response 1/(e^2 n (1/T_i+1/T_e)) of both species, so it reduces to the
+    !former T/(n_0*e^2) = 4*pi*r_D^2 for uniform T_i = T_e
+    do v = 1, nvert
+        rad = rad_from_s(verts_sthetaphi(1,v))
+        T_i = target_ion_temperature(rad)
+        T_e = target_electron_temperature(rad)
+        ep%phi_elec_from_rho(v) = ep%rho_vert(v)*2.0_dp*T_i*T_e/(T_i+T_e)*ev2erg/(echarge**2*target_density(rad))
+    enddo
 
     if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho/3.0_dp !factor 3.0_dp is there to be on the safe side and avoid overshooting
 

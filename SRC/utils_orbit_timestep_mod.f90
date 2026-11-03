@@ -101,7 +101,9 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     use supporting_functions_mod, only: bmod_func
     use gorilla_settings_mod, only: coord_system
     use marker_distribution_mod, only: evaluate_distribution_3d, evaluate_distribution_1d, pdf_boltzmann, &
-                                       linear_profile_factor
+                                       linear_profile_factor, maxwell_temperature_eV
+    use gorilla_applets_settings_mod, only: i_option
+    use scef_target_profiles_mod, only: target_temperature, rad_from_s
 
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
@@ -111,7 +113,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     integer :: species
     logical :: boole_include_potential
     real(dp) :: r, z, s_value, x_global(3)
-    real(dp) :: density, T, m, q, energy_erg, Phi_elec, omega_c, f, J_x, J_y
+    real(dp) :: density, T, m, q, energy_erg, Phi_elec, omega_c, f, J_x, J_y, energy_scale
     real(dp) :: pdf_position, pdf_lambda, pdf_energy_erg, pdf_gyroangle, pdf_velocity_space
 
     species = 1
@@ -133,6 +135,14 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
         s_value = calc_radial_coordinate(ind_tetr, z_save)
         if (in%boole_linear_density_simulation.and.(.not.in%boole_delta_f)) density = density*linear_profile_factor(s_value)
         if (in%boole_linear_temperature_simulation) T = T*linear_profile_factor(s_value)
+    endif
+
+    !SCEF: f at the local target temperature. The marker energies were drawn at maxwell_temperature_eV
+    !and rescaled by energy_scale = T/maxwell_temperature_eV, which rescales their pdf alike.
+    energy_scale = 1.0_dp
+    if ((i_option.eq.12) .and. (.not.in%boole_monoenergetic)) then
+        T = target_temperature(rad_from_s(calc_radial_coordinate(ind_tetr, z_save)), species)*ev2erg
+        energy_scale = T/(maxwell_temperature_eV*ev2erg)
     endif
 
     !Spatial Jacobian
@@ -158,7 +168,8 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     else
         q = start%particle_charge(species)
         energy_erg = start%energy(n,species)*ev2erg
-        pdf_energy_erg = evaluate_distribution_1d(start%dist_energy, start%energy(n,species))/ev2erg
+        pdf_energy_erg = evaluate_distribution_1d(start%dist_energy, start%energy(n,species)/energy_scale) &
+                         /(ev2erg*energy_scale)
         if (boole_include_potential) then
             Phi_elec = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
         else

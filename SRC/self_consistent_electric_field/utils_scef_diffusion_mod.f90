@@ -471,6 +471,7 @@ subroutine calc_convection_coefficient_from_electric_field(species, boole_use_fi
     use constants, only: ev2erg
     use gorilla_applets_types_mod, only: dc, in, s, start, g
     use tetra_grid_settings_mod, only: grid_size
+    use scef_target_profiles_mod, only: target_temperature, rad_from_s
 
     integer, intent(in) :: species
     logical, intent(in) :: boole_use_fit_function
@@ -487,7 +488,8 @@ subroutine calc_convection_coefficient_from_electric_field(species, boole_use_fi
                                       tetra_physics((i-1)*6*grid_size(2)+1)%gPhi(1))
         endif
 
-        dc%A(i, species) = dc%B(i, species)*start%particle_charge(species)*electric_field/(s%temperature*ev2erg)
+        dc%A(i, species) = dc%B(i, species)*start%particle_charge(species)*electric_field &
+                           /(target_temperature(rad_from_s(g%s_vertices(i)), species)*ev2erg)
         if (.not.boole_use_fit_function) dc%A(i, species) = dc%A(i, species) + dc%A_from_first_run(i, species)
     enddo
 

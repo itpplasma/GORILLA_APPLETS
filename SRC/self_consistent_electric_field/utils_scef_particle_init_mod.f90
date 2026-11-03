@@ -9,14 +9,13 @@ contains
 subroutine calc_desired_density_profile
 
     !Fills desired_density%value on g%s_vertices and desired_density%grad on
-    !the flux shells connecting them. Profile expressed in rad = sqrt(s):
-    !  n(rad) = 0.37e14 * (0.74 + 0.26*(1 - rad^2.5)^1.5 - 0.06*(1 - exp(-4*rad^2)))  [cm^-3]
+    !the flux shells connecting them, from target_density (scef_target_profiles_mod).
 
     use gorilla_applets_types_mod, only: g, desired_density
     use tetra_grid_settings_mod, only: grid_size
+    use scef_target_profiles_mod, only: target_density, rad_from_s
 
     integer :: ns
-    real(dp) :: rad
 
     if (.not.allocated(g%s_vertices)) then
         print*, 'Error, calc_desired_density_profile called before g%s_vertices was populated.'
@@ -27,10 +26,7 @@ subroutine calc_desired_density_profile
     if (.not.allocated(desired_density%grad))  allocate(desired_density%grad(grid_size(1)))
 
     do ns = 1, grid_size(1)+1
-        rad = sqrt(max(g%s_vertices(ns), 0.0_dp))
-        desired_density%value(ns) = 0.37d14 * ( 0.74_dp                                     &
-                                              + 0.26_dp*(1.0_dp - rad**2.5_dp)**1.5_dp      &
-                                              - 0.06_dp*(1.0_dp - exp(-4.0_dp*rad**2)) )
+        desired_density%value(ns) = target_density(rad_from_s(g%s_vertices(ns)))
     enddo
 
     do ns = 1, grid_size(1)
@@ -352,14 +348,15 @@ end subroutine set_starting_positions
 subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diffusion_coefficient_in,species_in,n_particles_in)
 
     use gorilla_applets_types_mod, only: in, start, s
-    use marker_distribution_mod, only: sample_array_1d
+    use marker_distribution_mod, only: sample_array_1d, maxwell_temperature_eV
+    use scef_target_profiles_mod, only: target_temperature, rad_from_s
 
     real(dp), dimension(:,:,:), intent(in) :: rand_matrix
     integer, dimension(:), intent(in), optional :: species_in
     logical, intent(in), optional :: boole_diffusion_coefficient_in
     logical :: boole_diffusion_coefficient=.false.
     integer, dimension(:), allocatable :: species
-    integer :: i, isp
+    integer :: i, isp, n
     integer, intent(in), optional :: n_particles_in
     integer :: n_particles
 
@@ -394,6 +391,18 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
         start%x(:,1:n_particles:2,species) = start%x(:,2:n_particles:2,species)
         start%pitch(1:n_particles:2,species) = -start%pitch(2:n_particles:2,species)
         start%energy(1:n_particles:2,species) = start%energy(2:n_particles:2,species)
+    endif
+
+    !Markers carry the local target temperature: energies drawn at maxwell_temperature_eV are rescaled
+    !by T(s)/maxwell_temperature_eV (calc_particle_weights_and_jperp rescales the marker pdf alike)
+    if (.not. in%boole_monoenergetic) then
+        do i = 1, size(species)
+            isp = species(i)
+            do n = 1, n_particles
+                start%energy(n,isp) = start%energy(n,isp) &
+                                      *target_temperature(rad_from_s(start%x(1,n,isp)), isp)/maxwell_temperature_eV
+            enddo
+        enddo
     endif
 
 end subroutine set_rest_of_individual_particle_specifications
