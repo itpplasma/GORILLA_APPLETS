@@ -4,6 +4,11 @@ module utils_scef_particle_pushing_mod
 
     implicit none
 
+    !Debug dumps of treat_particles_that_are_lost_but_should_not_be (stdout and pushing_problems.dat)
+    !are capped: after a bad potential update they can repeat millions of times (18 GB of log in one run)
+    integer, parameter :: max_problem_dumps = 1000
+    integer :: n_problem_dumps = 0
+
 contains
 
 subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n_particles_in)
@@ -430,20 +435,25 @@ subroutine treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_
     integer, intent(inout)                       :: ind_tetr
     real(dp)                                     :: v
     integer                                      :: problem_unit
+    logical                                      :: boole_dump
 
-    print*, 'This should not happen.'
     vperp      = vperp_func(z_save,          perpinv,ind_tetr_save)
 
-    print*, 'x_save, vpar_save, vperp_save = ', x_save, vpar_save, vperp_save
-    print*, 'x, vpar, vperp = ', x, vpar, vperp
-    print*, 'vpar/vpar_init, vperp/vperp_init = ', vpar/vpar_init, vperp/vperp_init
-
-    !$omp critical
-    open(newunit = problem_unit, file = filenames%pushing_problems, position = 'append')
-    write(problem_unit,*) 'x_save, vpar_save, vperp_save = ', x_save, vpar_save, vperp_save
-    write(problem_unit,*) 'x, vpar, vperp = ', x, vpar, vperp
-    close(problem_unit)
-    !$omp end critical
+    !$omp critical (scef_problem_dumps)
+    n_problem_dumps = n_problem_dumps + 1
+    boole_dump = (n_problem_dumps.le.max_problem_dumps)
+    if (boole_dump) then
+        print*, 'This should not happen.'
+        print*, 'x_save, vpar_save, vperp_save = ', x_save, vpar_save, vperp_save
+        print*, 'x, vpar, vperp = ', x, vpar, vperp
+        print*, 'vpar/vpar_init, vperp/vperp_init = ', vpar/vpar_init, vperp/vperp_init
+        open(newunit = problem_unit, file = filenames%pushing_problems, position = 'append')
+        write(problem_unit,*) 'x_save, vpar_save, vperp_save = ', x_save, vpar_save, vperp_save
+        write(problem_unit,*) 'x, vpar, vperp = ', x, vpar, vperp
+        close(problem_unit)
+        if (n_problem_dumps.eq.max_problem_dumps) print*, 'Further pushing-problem dumps are suppressed.'
+    endif
+    !$omp end critical (scef_problem_dumps)
 
     !Continue tracing the particle from the previous tetrahedron crossing:
     !this time half the value of vpar to avoid running into the same problem again
