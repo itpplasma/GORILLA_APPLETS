@@ -17,7 +17,7 @@ subroutine read_boltzmann_inp_into_type
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
                boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
-    integer :: i_integrator_type, seed_option, n_background_density_updates
+    integer :: i_integrator_type, seed_option, n_background_density_updates !i_integrator_type, seed_option: read for compatibility with existing input files, unused
 
     integer :: b_inp_unit
 
@@ -46,8 +46,6 @@ subroutine read_boltzmann_inp_into_type
     in%boole_linear_density_simulation = boole_linear_density_simulation
     in%boole_antithetic_variate = boole_antithetic_variate
     in%boole_linear_temperature_simulation = boole_linear_temperature_simulation
-    in%i_integrator_type = i_integrator_type
-    in%seed_option = seed_option
     in%num_particles = int(n_particles)
     in%boole_write_vertex_indices = boole_write_vertex_indices
     in%boole_write_vertex_coordinates = boole_write_vertex_coordinates
@@ -113,9 +111,6 @@ subroutine calc_boltzmann
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
     call give_file_names
     call unlink_files
-
-    if (in%i_integrator_type.eq.2) print*, 'Error: i_integrator_type set to 2, this module only works with &
-                                    & i_integrator_type set to 1'
 
     if (in%n_background_density_updates.eq.0) then
         call parallelised_particle_pushing(v0)

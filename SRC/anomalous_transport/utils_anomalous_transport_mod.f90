@@ -27,7 +27,7 @@ subroutine read_anomalous_transport_inp_into_type
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, &
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
                boole_calc_diffusion_coefficient
-    integer :: i_integrator_type, seed_option, n_species, i_scan_option
+    integer :: i_integrator_type, seed_option, n_species, i_scan_option !i_integrator_type, seed_option: read for compatibility with existing input files, unused
 
     integer :: s_inp_unit
 
@@ -56,8 +56,6 @@ subroutine read_anomalous_transport_inp_into_type
     in%boole_linear_density_simulation = boole_linear_density_simulation
     in%boole_antithetic_variate = boole_antithetic_variate
     in%boole_linear_temperature_simulation = boole_linear_temperature_simulation
-    in%i_integrator_type = i_integrator_type
-    in%seed_option = seed_option
     in%num_particles = int(n_particles)
     in%boole_write_vertex_indices = boole_write_vertex_indices
     in%boole_write_vertex_coordinates = boole_write_vertex_coordinates

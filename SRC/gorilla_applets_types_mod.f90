@@ -90,53 +90,51 @@ module gorilla_applets_types_mod
     type(collisions_t) :: c
 
     type input_t
-    real(dp) :: time_step
-    real(dp) :: energy_eV
-    real(dp) :: n_particles
-    real(dp) :: density
-    logical  :: boole_squared_moments
-    logical  :: boole_point_source
-    logical  :: boole_collisions
-    logical  :: boole_precalc_collisions
-    logical  :: boole_refined_sqrt_g
-    logical  :: boole_monoenergetic
-    logical  :: boole_linear_density_simulation
-    logical  :: boole_antithetic_variate
-    logical  :: boole_linear_temperature_simulation
-    integer  :: i_integrator_type
-    integer  :: seed_option
-    integer  :: num_particles
-    logical  :: boole_write_vertex_indices
-    logical  :: boole_write_vertex_coordinates
-    logical  :: boole_write_prism_volumes
-    logical  :: boole_write_refined_prism_volumes
-    logical  :: boole_write_boltzmann_density
-    logical  :: boole_write_electric_potential
-    logical  :: boole_write_moments
-    logical  :: boole_write_fourier_moments
-    logical  :: boole_write_exit_data
-    logical  :: boole_write_grid_data
+    real(dp) :: time_step = 0.0_dp
+    real(dp) :: energy_eV = 0.0_dp
+    real(dp) :: n_particles = 0.0_dp
+    real(dp) :: density = 0.0_dp
+    logical  :: boole_squared_moments = .false.
+    logical  :: boole_point_source = .false.
+    logical  :: boole_collisions = .false.
+    logical  :: boole_precalc_collisions = .false.
+    logical  :: boole_refined_sqrt_g = .false.
+    logical  :: boole_monoenergetic = .false.
+    logical  :: boole_linear_density_simulation = .false.
+    logical  :: boole_antithetic_variate = .false.
+    logical  :: boole_linear_temperature_simulation = .false.
+    integer  :: num_particles = 0
+    logical  :: boole_write_vertex_indices = .false.
+    logical  :: boole_write_vertex_coordinates = .false.
+    logical  :: boole_write_prism_volumes = .false.
+    logical  :: boole_write_refined_prism_volumes = .false.
+    logical  :: boole_write_boltzmann_density = .false.
+    logical  :: boole_write_electric_potential = .false.
+    logical  :: boole_write_moments = .false.
+    logical  :: boole_write_fourier_moments = .false.
+    logical  :: boole_write_exit_data = .false.
+    logical  :: boole_write_grid_data = .false.
     logical  :: boole_preserve_energy_and_momentum_during_collisions = .false.
     integer  :: n_background_density_updates = 0
-    logical  :: boole_static_ne !used in self consistent electric field computation
+    logical  :: boole_static_ne = .false. !used in self consistent electric field computation
     integer  :: n_species = 1 !used in self consistent electric field computation
-    integer  :: n_electric_potential_updates !used in self consistent electric field computation
+    integer  :: n_electric_potential_updates = 0 !used in self consistent electric field computation
     integer  :: update_dimension = 1 !used in self consistent electric field computation
-    logical  :: boole_calc_diffusion_coefficient !used in anomalous transport
+    logical  :: boole_calc_diffusion_coefficient = .false. !used in anomalous transport
     integer  :: i_scan_option = 0 !used in anomalous transport: 0=no scan, 1=scan over eps_Phi, 2=scan over n2, 3=scan over n3
-    real(dp) :: anomalous_diffusion_coefficient   !anomalous diffusion coefficient in cm^2/s
-    logical  :: boole_divertor_intersection !Used in divertor_heat_loads
-    logical  :: boole_poincare_plot !Used in divertor_heat_loads
-    logical  :: boole_eliminate_particles_outside_flux !Used in helical_core
-    real(dp) :: flux_threshold_for_elimination !Used in helical_core (0=axis, 1=boundary)
+    real(dp) :: anomalous_diffusion_coefficient = 0.0_dp !anomalous diffusion coefficient in cm^2/s
+    logical  :: boole_divertor_intersection = .false. !Used in divertor_heat_loads
+    logical  :: boole_poincare_plot = .false. !Used in divertor_heat_loads
+    logical  :: boole_eliminate_particles_outside_flux = .false. !Used in helical_core
+    real(dp) :: flux_threshold_for_elimination = 0.0_dp !Used in helical_core (0=axis, 1=boundary)
     logical  :: boole_delta_f = .false. !Used in helical_core: use delta-f method for weights
-    integer  :: n_poincare_mappings !Used in divertor_heat_loads
-    integer  :: n_mappings_ignored !Used in divertor_heat_loads
-    real(dp) :: lambda !Used in divertor_heat_loads
+    integer  :: n_poincare_mappings = 0 !Used in divertor_heat_loads
+    integer  :: n_mappings_ignored = 0 !Used in divertor_heat_loads
+    real(dp) :: lambda = 0.0_dp !Used in divertor_heat_loads
     integer  :: i_collision_mode = 1 !rmp_response_currents, self consistent electric field: stost iswmode (1=full, 4=pitch-angle only, 5=OU on v_par)
     integer  :: n_background_species = 2
-    logical  :: boole_honest_tracing(2) !used in self consistent electric field: honest push (T) vs. random walk (F) per species
-    logical  :: boole_recompute_D(2)    !used in self consistent electric field: recompute D per species (T) or reuse cached A_and_B_<species>.dat (F)
+    logical  :: boole_honest_tracing(2) = .false. !used in self consistent electric field: honest push (T) vs. random walk (F) per species
+    logical  :: boole_recompute_D(2) = .false. !used in self consistent electric field: recompute D per species (T) or reuse cached A_and_B_<species>.dat (F)
     integer  :: n_source_updates = 1                !used in self consistent electric field: outer source-tuning iterations
     logical  :: reduced_output = .false.            !used in self consistent electric field: write files only on the last EP update per source iteration
     real(dp) :: source_relaxation_factor = 1.0_dp   !used in self consistent electric field: alpha in S := S - alpha*(n - n_target)*factor_from_tracing_time
