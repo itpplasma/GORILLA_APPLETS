@@ -180,6 +180,39 @@ subroutine write_particle_source(source_step)
 
 end subroutine write_particle_source
 
+
+subroutine read_restart_particle_source
+
+    !Start from the particle source of an earlier run (restart_source_file, as written by
+    !write_particle_source: s_vertex, value on grid_size(1)+1 lines, same s-grid) instead of the target.
+
+    use gorilla_applets_types_mod, only: in, g, particle_source
+    use tetra_grid_settings_mod, only: grid_size
+
+    integer :: k, file_id, ios
+    real(dp) :: s_file
+
+    open(newunit = file_id, file = trim(in%restart_source_file), status = 'old', action = 'read', iostat = ios)
+    if (ios.ne.0) then
+        print*, 'Error: cannot open restart_source_file ', trim(in%restart_source_file)
+        stop
+    endif
+    do k = 1, grid_size(1)+1
+        read(file_id, *, iostat = ios) s_file, particle_source%value(k)
+        if ((ios.ne.0) .or. (abs(s_file - g%s_vertices(k)).gt.1.0d-6)) then
+            print*, 'Error: restart_source_file ', trim(in%restart_source_file), ' does not match the s-grid of this run'
+            stop
+        endif
+    enddo
+    close(file_id)
+
+    do k = 1, grid_size(1)
+        particle_source%grad(k) = (particle_source%value(k+1) - particle_source%value(k)) &
+                                 /(g%s_vertices(k+1) - g%s_vertices(k))
+    enddo
+    print*, 'restart: particle source read from ', trim(in%restart_source_file)
+
+end subroutine read_restart_particle_source
 subroutine update_particle_source
 
     !Richardson step S := S - alpha * (n - n_target) using the last inner-iteration

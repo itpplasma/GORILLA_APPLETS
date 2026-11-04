@@ -135,6 +135,15 @@
   !(not used with boole_static_ne)
   potential_relaxation_factor = 0.33333333333333333d0 ,
 !
+  !Per flux shell: adapt the relaxation factor (starting at potential_relaxation_factor) from how the charge
+  !imbalance responded to the last step, reduced after an overshoot (sign change), raised otherwise (1D only)
+  boole_adaptive_relaxation = .false. ,
+!
+  !Start from the potential (phi_elec_1d_<src>_<upd>.dat, 1D only) and/or the particle source
+  !(particle_source_<k>.dat) of an earlier run on the same grid ('' = initial potential / target density)
+  restart_phi_file = '' ,
+  restart_source_file = '' ,
+!
   !> 0: calibrate only the flux surface closest to this s, write exit_s_values_species<k>_<ns>.dat
   !and A_and_B_scan_species<k>.dat, then stop without SCEF iterations (<= 0: all surfaces, then SCEF)
   diffusion_scan_s0 = -1.0d0

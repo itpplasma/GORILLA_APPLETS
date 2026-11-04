@@ -24,9 +24,9 @@ subroutine calc_self_consistent_electric_field
     fourier_transform_moments
     use utils_scef_input_mod, only: read_self_consistent_electric_field_inp_into_type, print_errors_for_bad_inputs
     use utils_scef_particle_init_mod, only: calc_starting_conditions, calc_desired_density_profile, &
-    initialize_particle_source, update_particle_source, write_particle_source
+    initialize_particle_source, update_particle_source, write_particle_source, read_restart_particle_source
     use utils_scef_electric_potential_mod, only: allocate_electric_potential_type, initialize_flux_shell_grid, &
-    delete_scef_output_files, initialize_3d_update_grid
+    delete_scef_output_files, initialize_3d_update_grid, read_restart_phi
     use utils_scef_diffusion_mod, only: calc_diffusion_coefficients
 
     integer :: species, source_step, n_converged
@@ -48,6 +48,9 @@ subroutine calc_self_consistent_electric_field
     call initialize_particle_source
     call calc_poloidal_flux(verts_sthetaphi)
     call allocate_electric_potential_type
+    !Restart files are read before delete_scef_output_files, which would remove them if they lie in the run directory
+    if (len_trim(in%restart_source_file).gt.0) call read_restart_particle_source
+    if (len_trim(in%restart_phi_file).gt.0) call read_restart_phi
     call give_file_names
     call unlink_files
     call delete_scef_output_files

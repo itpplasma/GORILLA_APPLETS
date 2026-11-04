@@ -94,15 +94,16 @@ end function calc_quasineutrality_mismatch
 
 subroutine calc_phi_elec_from_rho(i)
 
-    use gorilla_applets_types_mod, only: in, ep, start, output, exit_data
+    use gorilla_applets_types_mod, only: in, ep, start, output, exit_data, g
     use constants, only: ev2erg, eps, echarge
     use tetra_grid_mod, only: nvert, verts_sthetaphi
+    use tetra_grid_settings_mod, only: grid_size
     use scef_target_profiles_mod, only: target_density, target_ion_temperature, target_electron_temperature, &
                                         rad_from_s
 
     integer, intent(in) :: i
-    integer :: v
-    real(dp) :: rad, T_i, T_e
+    integer :: v, k
+    real(dp) :: rad, T_i, T_e, f
 
     ep%rho_flux_layer = 0
     ep%rho_vert = 0
@@ -140,8 +141,17 @@ subroutine calc_phi_elec_from_rho(i)
         ep%phi_elec_from_rho(v) = ep%rho_vert(v)*2.0_dp*T_i*T_e/(T_i+T_e)*ev2erg/(echarge**2*target_density(rad))
     enddo
 
-    !under-relaxation against overshooting (potential_relaxation_factor, default 1/3)
-    if (.not.in%boole_static_ne) ep%phi_elec_from_rho = ep%phi_elec_from_rho*in%potential_relaxation_factor
+    !under-relaxation against overshooting (potential_relaxation_factor, default 1/3), either global or
+    !per flux surface (boole_adaptive_relaxation: average of the factors of the two adjacent shells)
+    if (in%boole_adaptive_relaxation) then
+        call update_shell_relaxation_factors
+        do k = 1, grid_size(1)+1
+            f = 0.5_dp*(ep%relaxation_factor_shell(max(k-1,1)) + ep%relaxation_factor_shell(min(k,grid_size(1))))
+            ep%phi_elec_from_rho(g%vertices_per_flux_surface(k,:)) = ep%phi_elec_from_rho(g%vertices_per_flux_surface(k,:))*f
+        enddo
+    elseif (.not.in%boole_static_ne) then
+        ep%phi_elec_from_rho = ep%phi_elec_from_rho*in%potential_relaxation_factor
+    endif
 
     !if (i.gt.0) ep%phi_elec_from_rho = ep%phi_elec_from_rho/sqrt(dble(i))
 
@@ -150,6 +160,102 @@ subroutine calc_phi_elec_from_rho(i)
     ! print*, 'maximum phi is', maxval(ep%phi_elec_from_rho), 'minimum phi is', minval(ep%phi_elec_from_rho)
 
 end subroutine calc_phi_elec_from_rho
+
+subroutine update_shell_relaxation_factors
+
+    !Adaptive relaxation per flux shell. The relative charge imbalance x = (Z n_i - n_e)/(Z n_i + n_e)
+    !responds to the last potential step, made with factor f, as x_new = (1 - c) x_old. The step that
+    !would have removed x_old completely has the factor f/c, so the next factor is 0.8 f/c (slightly
+    !under-relaxed against noise): c > 1 (x changed sign, overshoot) reduces f, c < 1 (x kept its sign)
+    !raises it. Only shells whose previous imbalance is above 3x its noise level are adapted, by at most
+    !a factor 4 down or 2 up per update, within [0.01, 1]; the factors are then smoothed over neighbouring
+    !shells (1-2-1), because the potential step of one shell moves the markers of its neighbours too.
+
+    use gorilla_applets_types_mod, only: in, ep, one_d, start
+    use tetra_grid_settings_mod, only: grid_size
+    use constants, only: echarge
+
+    integer :: ns, n
+    real(dp) :: Z, c, f_new
+    real(dp), dimension(grid_size(1)) :: imbalance, noise, f
+
+    n = grid_size(1)
+    if (.not.allocated(ep%relaxation_factor_shell)) then
+        allocate(ep%relaxation_factor_shell(n), ep%imbalance_prev(n), ep%imbalance_noise_prev(n))
+        ep%relaxation_factor_shell = in%potential_relaxation_factor
+    endif
+
+    Z = start%particle_charge(1)/echarge
+    imbalance = 0.0_dp
+    noise = 0.0_dp
+    do ns = 1, n
+        if (Z*one_d%densities(ns,1) + one_d%densities(ns,in%n_species) .le. 0.0_dp) cycle
+        imbalance(ns) = (Z*one_d%densities(ns,1) - one_d%densities(ns,in%n_species)) &
+                        /(Z*one_d%densities(ns,1) + one_d%densities(ns,in%n_species))
+        noise(ns) = sqrt((Z*one_d%sigma(ns,1))**2 + one_d%sigma(ns,in%n_species)**2) &
+                    /(Z*one_d%densities(ns,1) + one_d%densities(ns,in%n_species))
+    enddo
+
+    if (ep%boole_have_imbalance_prev) then
+        f = ep%relaxation_factor_shell
+        do ns = 1, n
+            if (abs(ep%imbalance_prev(ns)) .le. 3.0_dp*ep%imbalance_noise_prev(ns)) cycle
+            c = 1.0_dp - imbalance(ns)/ep%imbalance_prev(ns)
+            if (c .gt. 0.1_dp) then
+                f_new = 0.8_dp*ep%relaxation_factor_shell(ns)/c
+            else
+                f_new = 2.0_dp*ep%relaxation_factor_shell(ns)
+            endif
+            f_new = min(max(f_new, 0.25_dp*ep%relaxation_factor_shell(ns)), 2.0_dp*ep%relaxation_factor_shell(ns))
+            f(ns) = min(max(f_new, 0.01_dp), 1.0_dp)
+        enddo
+        ep%relaxation_factor_shell(1) = (2.0_dp*f(1) + f(2))/3.0_dp
+        do ns = 2, n-1
+            ep%relaxation_factor_shell(ns) = 0.25_dp*(f(ns-1) + 2.0_dp*f(ns) + f(ns+1))
+        enddo
+        ep%relaxation_factor_shell(n) = (f(n-1) + 2.0_dp*f(n))/3.0_dp
+    endif
+
+    ep%imbalance_prev = imbalance
+    ep%imbalance_noise_prev = noise
+    ep%boole_have_imbalance_prev = .true.
+    print*, 'adaptive relaxation factors per shell: min ', minval(ep%relaxation_factor_shell), &
+            ', max ', maxval(ep%relaxation_factor_shell)
+
+end subroutine update_shell_relaxation_factors
+
+subroutine read_restart_phi
+
+    !Start from the 1D potential of an earlier run (restart_phi_file, as written by print_data:
+    !one value per flux surface, grid_size(1)+1 lines) instead of the initial potential.
+
+    use gorilla_applets_types_mod, only: in, g
+    use tetra_grid_settings_mod, only: grid_size
+    use tetra_physics_mod, only: make_tetra_physics, phi_elec, coord_system
+    use field_mod, only: ipert
+
+    integer :: k, file_id, ios
+    real(dp) :: phi_surface
+
+    open(newunit = file_id, file = trim(in%restart_phi_file), status = 'old', action = 'read', iostat = ios)
+    if (ios.ne.0) then
+        print*, 'Error: cannot open restart_phi_file ', trim(in%restart_phi_file)
+        stop
+    endif
+    do k = 1, grid_size(1)+1
+        read(file_id, *, iostat = ios) phi_surface
+        if (ios.ne.0) then
+            print*, 'Error: restart_phi_file ', trim(in%restart_phi_file), ' has fewer than grid_size(1)+1 values'
+            stop
+        endif
+        phi_elec(g%vertices_per_flux_surface(k,:)) = phi_surface
+    enddo
+    close(file_id)
+
+    call make_tetra_physics(coord_system, ipert, boole_keep_phi_elec=.true.)
+    print*, 'restart: electric potential read from ', trim(in%restart_phi_file)
+
+end subroutine read_restart_phi
 
 subroutine calc_average_charge_density_per_flux_layer(i)
 
@@ -455,6 +561,14 @@ subroutine print_data(i, source_step)
         close(pe_unit)
     endif
 
+    if (boole_1d_output .and. allocated(ep%relaxation_factor_shell)) then
+        open(newunit = pe_unit, file = 'relaxation_factor_' // trim(tag) // '.dat')
+        do k = 1, grid_size(1)
+            write(pe_unit,*) ep%relaxation_factor_shell(k), ep%imbalance_prev(k), ep%imbalance_noise_prev(k)
+        enddo
+        close(pe_unit)
+    endif
+
     if (.not.boole_1d_output) then
         filename_phi_elec = 'phi_elec_after_electric_potential_update_' // trim(tag) // '.dat'
         open(newunit = pe_unit, file = filename_phi_elec)
@@ -501,6 +615,7 @@ subroutine delete_scef_output_files
     call execute_command_line('rm -f'                                                  // &
                               ' number_of_lost_particles.dat'                          // &
                               ' phi_elec_1d_*_*.dat'                                   // &
+                              ' relaxation_factor_*_*.dat'                             // &
                               ' one_d_densities*_*.dat'                                // &
                               ' phi_elec_after_electric_potential_update_*.dat'        // &
                               ' ion_densities_after_electric_potential_update_*.dat'   // &

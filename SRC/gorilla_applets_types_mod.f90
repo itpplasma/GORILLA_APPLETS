@@ -144,6 +144,9 @@ module gorilla_applets_types_mod
     integer  :: n_particles_diffusion = 40000       !used in self consistent electric field: test particles per flux surface in the diffusion calibration
     real(dp) :: diffusion_tau = -1.0_dp             !used in self consistent electric field: tracing time [s] of the diffusion calibration (<=0 = hardcoded per species)
     real(dp) :: potential_relaxation_factor = 1.0_dp/3.0_dp  !used in self consistent electric field: under-relaxation of the potential update (not for boole_static_ne)
+    logical  :: boole_adaptive_relaxation = .false. !used in self consistent electric field: per-shell relaxation factors adapted from the response of the charge imbalance (1D, starts at potential_relaxation_factor)
+    character(len=256) :: restart_phi_file = ''    !used in self consistent electric field: phi_elec_1d_*_*.dat of an earlier run to start from (1D, '' = start from the initial potential)
+    character(len=256) :: restart_source_file = '' !used in self consistent electric field: particle_source_*.dat of an earlier run to start from ('' = target density)
     real(dp) :: noise_tolerance_factor = 0.0_dp     !used in self consistent electric field: >0 stops potential updates / source steps once the mismatch / source residual is within this factor of their noise levels (0 = off)
     real(dp) :: diffusion_tau_collisions = -1.0_dp  !used in self consistent electric field: >0 sets the calibration tracing time on each flux surface to this many local collision times (overrides diffusion_tau)
     real(dp) :: edge_buffer_width = 0.0_dp          !used in self consistent electric field: width in r/a of the outer buffer where shell densities blend into the target (0 = off)
@@ -220,6 +223,10 @@ module gorilla_applets_types_mod
     real(dp) :: exit_time_correction = 1.0_dp
     real(dp) :: mean_abs_rho_at_first_update
     real(dp) :: mean_exit_time(2) = 0.0_dp  ! per species, set by RW routine and driver after honest push
+    real(dp), dimension(:), allocatable :: relaxation_factor_shell ! (grid_size(1)) adaptive relaxation factor per flux shell
+    real(dp), dimension(:), allocatable :: imbalance_prev          ! (grid_size(1)) relative charge imbalance of the previous update
+    real(dp), dimension(:), allocatable :: imbalance_noise_prev    ! (grid_size(1)) its Monte Carlo noise level
+    logical :: boole_have_imbalance_prev = .false.
     end type electric_potential_t
 
     type(electric_potential_t) :: ep
