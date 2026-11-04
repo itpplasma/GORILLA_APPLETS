@@ -124,3 +124,19 @@ GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
 GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/self_consistent_electric_field_work"
 )
+
+# Reference tests of the applets without other end-to-end coverage
+foreach(mode IN ITEMS boltzmann divertor_heat_loads anomalous_transport)
+    add_test(
+        NAME reference_${mode}
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_applet_reference.py ${mode}
+    )
+    set_tests_properties(reference_${mode} PROPERTIES
+        ENVIRONMENT
+            "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
+GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/reference_${mode}_work"
+    )
+endforeach()

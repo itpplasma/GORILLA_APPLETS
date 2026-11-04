@@ -135,6 +135,52 @@ subroutine initialise_output
     
 end subroutine initialise_output
 
+subroutine setup_applet
+
+    !Initialise GORILLA and the moment output, after the mode has read its input file
+
+    use orbit_timestep_gorilla_mod, only: initialize_gorilla
+    use gorilla_applets_settings_mod, only: i_option
+    use field_mod, only: ipert
+
+    call get_ipert()
+    call initialize_gorilla(i_option,ipert)
+
+    call set_moment_specifications
+    call initialise_output
+
+end subroutine setup_applet
+
+subroutine print_applet_summary(particle_name, particle_mass, v0, particle_charge)
+
+    !Print the counters and particle parameters at the end of a run
+    !particle_name ... 'particle' or 'ion'
+
+    use constants, only: ev2erg
+    use tetra_grid_settings_mod, only: grid_kind
+    use gorilla_applets_types_mod, only: counter, c, in
+
+    character(len=*), intent(in) :: particle_name
+    real(dp), intent(in)         :: particle_mass, v0, particle_charge
+
+    if (in%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
+    print*, 'Number of lost '//particle_name//'s', counter%lost_particles
+    print*, 'average number of pushings = ', counter%tetr_pushings/in%n_particles
+    print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/in%n_particles
+    print*, 'average number of integration steps = ', counter%integration_steps/in%n_particles
+    print*, 'number of times the pusher gave up on a particle = ', counter%pusher_failures
+    print*, particle_name//' mass = ', particle_mass
+    print*, 'absolute value of '//particle_name//' velocity = ', v0
+    print*, particle_name//' charge = ', particle_charge
+    print*, 'temperature = ', ev2erg*in%energy_eV
+    print*, 'energy in eV = ', in%energy_eV
+    print*, 'tracing time in seconds = ', in%time_step
+    if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
+         print*, 'number of times that particles were pushed across the inside hole = ', counter%lost_inside
+    endif
+
+end subroutine print_applet_summary
+
 subroutine deallocate_output
 !
 ! Deallocates arrays in the output type to allow reallocation when grid parameters change.
@@ -461,10 +507,12 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     real(dp), dimension(:), allocatable :: efcolf_l, velrat_l, enrat_l, dens_l, temp_l
     real(dp) :: v0_l
     integer :: i, j
-    integer :: species = 1
+    integer :: species
     real(dp) :: m0, z0, n0, s_value, v0, v_box
     logical :: boole_T_and_n_from_files = .false.
     logical :: boole_analytic_temperature_profile
+
+    species = 1
 
     if (present(species_in)) species = species_in
     ! The analytic SCEF temperature model must not replace other applet profiles.
@@ -707,12 +755,13 @@ subroutine normalise_prism_moments_and_prism_moments_squared(species_in, boole_s
 
     integer, intent(in), optional :: species_in
     logical, intent(in), optional :: boole_skip_time_normalisation_in
-    integer :: species = 1
+    integer :: species
     integer :: n
     real(dp) :: time
     logical :: boole_skip_time_normalisation
 
     time = in%time_step
+    species = 1
     if (present(species_in)) species = species_in
     time = start%t(species)
 

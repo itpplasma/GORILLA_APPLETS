@@ -25,6 +25,122 @@ subroutine identify_particles_entering_annulus(x,local_counter,boole_lost_inside
 
 end subroutine identify_particles_entering_annulus
 
+subroutine place_particle_on_grid(x,vpar,vperp,ind_tetr,iface,z_save)
+
+    !Find the tetrahedron of a particle that has no grid position yet
+    !ind_tetr = -1 ... particle lies outside the grid, z_save is not set
+
+    use orbit_timestep_gorilla_mod, only: check_coordinate_domain
+    use find_tetra_mod, only: find_tetra
+    use tetra_physics_mod, only: tetra_physics
+
+    real(dp), dimension(3), intent(inout) :: x
+    real(dp), intent(in)                  :: vpar, vperp
+    integer, intent(out)                  :: ind_tetr, iface
+    real(dp), dimension(3), intent(inout) :: z_save
+
+    call check_coordinate_domain(x) !Check coordinate domain (optionally perform modulo operation)
+    call find_tetra(x,vpar,vperp,ind_tetr,iface) !Find tetrahedron index and face index for position x
+    if (ind_tetr.ne.-1) z_save = x-tetra_physics(ind_tetr)%x1
+
+end subroutine place_particle_on_grid
+
+subroutine push_within_tetrahedron(ind_tetr,iface,x,vpar,z_save,t_push,t_pass,boole_t_finished,iper_phi,optional_quantities, &
+                                 & boole_pusher_failed)
+
+    !Push the particle with the pusher selected by ipusher for at most t_push, until it leaves the tetrahedron
+    !boole_pusher_failed = .true. ... the pusher could not push the particle and removed it (ind_tetr = -1)
+
+    use pusher_tetra_rk_mod, only: pusher_tetra_rk
+    use pusher_tetra_poly_mod, only: pusher_tetra_poly
+    use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
+
+    integer, intent(inout)                        :: ind_tetr, iface
+    real(dp), dimension(3), intent(inout)         :: x
+    real(dp), intent(inout)                       :: vpar
+    real(dp), dimension(3), intent(inout)         :: z_save
+    real(dp), intent(in)                          :: t_push
+    real(dp), intent(out)                         :: t_pass
+    logical, intent(out)                          :: boole_t_finished
+    integer, intent(out)                          :: iper_phi
+    type(optional_quantities_type), intent(inout) :: optional_quantities
+    logical, intent(out)                          :: boole_pusher_failed
+
+    select case(ipusher)
+        case(1)
+            call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t_push,t_pass,boole_t_finished,iper_phi,boole_pusher_failed)
+        case(2)
+            call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_push,&
+                                    & t_pass,boole_t_finished,iper_phi,optional_quantities,boole_pusher_failed)
+    end select
+
+end subroutine push_within_tetrahedron
+
+subroutine push_across_axis_hole(x,vpar,vperp,z_save,perpinv,ind_tetr_save,ind_tetr,iface,local_counter,boole_lost_inside)
+
+    !For a particle that has left the grid: if it entered the hole around the magnetic axis
+    !(boole_lost_inside = .true.), reflect it through the axis
+    !ind_tetr = -1 afterwards ... the particle is outside the grid (reflection failed or not in the hole),
+    !                            x is unchanged
+
+    use find_tetra_mod, only: find_tetra
+    use supporting_functions_mod, only: vperp_func
+    use gorilla_applets_types_mod, only: counter_t, g
+
+    real(dp), dimension(3), intent(inout) :: x
+    real(dp), intent(in)                  :: vpar, perpinv
+    real(dp), intent(inout)               :: vperp
+    real(dp), dimension(3), intent(in)    :: z_save
+    integer, intent(in)                   :: ind_tetr_save
+    integer, intent(inout)                :: ind_tetr, iface
+    type(counter_t), intent(inout)        :: local_counter
+    logical, intent(out)                  :: boole_lost_inside
+    real(dp), dimension(3)                :: x_new
+
+    call identify_particles_entering_annulus(x,local_counter,boole_lost_inside)
+    if (.not.boole_lost_inside) return
+
+    x_new = 3*(/g%raxis,x(2),g%zaxis/) - 2*x
+    vperp = vperp_func(z_save,perpinv,ind_tetr_save)
+    call find_tetra(x_new,vpar,vperp,ind_tetr,iface)
+    if (ind_tetr.eq.-1) then
+        print*, "ATTENTION: particle pushing across the hole surrounding the magnetic axis was unsuccessful"
+    else
+        x = x_new
+    endif
+
+end subroutine push_across_axis_hole
+
+subroutine reinject_towards_axis(x,vpar,vperp,z_save,perpinv,ind_tetr_save,ind_tetr,iface)
+
+    !For a particle that has left the grid at the outer boundary: move it (R and Z, phi unchanged)
+    !by a random fraction of 0 to 1% of its distance towards the magnetic axis
+    !ind_tetr = -1 afterwards ... the new position is outside the grid as well, x is unchanged
+
+    use find_tetra_mod, only: find_tetra
+    use supporting_functions_mod, only: vperp_func
+    use gorilla_applets_types_mod, only: g
+
+    real(dp), dimension(3), intent(inout) :: x
+    real(dp), intent(in)                  :: vpar, perpinv
+    real(dp), intent(inout)               :: vperp
+    real(dp), dimension(3), intent(in)    :: z_save
+    integer, intent(in)                   :: ind_tetr_save
+    integer, intent(inout)                :: ind_tetr, iface
+    real(dp), dimension(3)                :: x_new
+    real(dp)                              :: rand_frac
+
+    call random_number(rand_frac)
+    rand_frac = 0.01_dp * rand_frac
+    x_new(1) = x(1) + rand_frac * (g%raxis - x(1))
+    x_new(2) = x(2)
+    x_new(3) = x(3) + rand_frac * (g%zaxis - x(3))
+    vperp = vperp_func(z_save,perpinv,ind_tetr_save)
+    call find_tetra(x_new,vpar,vperp,ind_tetr,iface)
+    if (ind_tetr.ne.-1) x = x_new
+
+end subroutine reinject_towards_axis
+
 subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quantities,species_in)
 
     use gorilla_applets_types_mod, only: moment_specs, weights, in
@@ -35,8 +151,9 @@ subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quan
     integer, intent(in), optional                :: species_in
     complex(dp), dimension(:,:), intent (inout)  :: local_tetr_moments
     integer                                      :: m
-    integer                                      :: species = 1
+    integer                                      :: species
 
+    species = 1
     if (present(species_in)) species = species_in
 
     do m = 1,moment_specs%n_moments

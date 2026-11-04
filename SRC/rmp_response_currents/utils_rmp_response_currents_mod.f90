@@ -268,7 +268,7 @@ subroutine read_rmp_response_currents_inp_into_type
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, &
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
                boole_eliminate_particles_outside_flux, boole_delta_f
-    integer :: i_integrator_type, seed_option, n_species
+    integer :: i_integrator_type, seed_option, n_species !i_integrator_type, seed_option: read for compatibility with existing input files, unused
     real(dp) :: flux_threshold_for_elimination
     ! Collision-operator mode for carry_out_collisions:
     !   1 = full Coulomb (stost iswmode=1, current default)
@@ -330,13 +330,12 @@ subroutine read_rmp_response_currents_inp_into_type
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
     ! Sanity-fix e_cutoff_factor if user passed a non-positive value.
     if (e_cutoff_factor <= 0.0_dp) e_cutoff_factor = 5.0_dp
-    ! Note: in%boole_monoenergetic is no longer used in the rmp applet --
-    ! the new energy_dist_kind module variable takes its place.
+    ! Note: in%boole_monoenergetic is not read in the rmp applet --
+    ! the new energy_dist_kind module variable takes its place. It keeps its
+    ! input_t default (.false.), which the shared routines still branch on.
     in%boole_linear_density_simulation = boole_linear_density_simulation
     in%boole_antithetic_variate = boole_antithetic_variate
     in%boole_linear_temperature_simulation = boole_linear_temperature_simulation
-    in%i_integrator_type = i_integrator_type
-    in%seed_option = seed_option
     in%num_particles = int(n_particles)
     in%boole_write_vertex_indices = boole_write_vertex_indices
     in%boole_write_vertex_coordinates = boole_write_vertex_coordinates
@@ -1002,18 +1001,15 @@ end subroutine parallelised_particle_pushing_rmp_response_currents
 subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
         local_tetr_moments, local_counter, species, t_tot, prof_marker)
 
-    use pusher_tetra_rk_mod, only: pusher_tetra_rk
-    use pusher_tetra_poly_mod, only: pusher_tetra_poly
     use tetra_physics_mod, only: tetra_physics
-    use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
-    use orbit_timestep_gorilla_mod, only: check_coordinate_domain
+    use gorilla_settings_mod, only: optional_quantities_type
     use supporting_functions_mod, only: vperp_func
-    use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, in, time_t, g, weights
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, in, time_t, weights
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min, n_field_periods
     use constants, only: pi
     use utils_orbit_timestep_mod, only: initialize_constants_of_motion, compute_radial_fluxes, &
-        identify_particles_entering_annulus, update_local_tetr_moments
+                                        update_local_tetr_moments, place_particle_on_grid, push_within_tetrahedron, &
+                                        push_across_axis_hole, reinject_towards_axis
 
     real(dp), dimension(3), intent(inout)        :: x
     real(dp), intent(inout)                      :: vpar, vperp
@@ -1026,23 +1022,21 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
     real(dp), intent(in)                         :: t_tot
     complex(dp), dimension(:), intent(inout), optional :: prof_marker
 
-    real(dp), dimension(3)                       :: z_save, x_new, x_pre_push, x_cell
+    real(dp), dimension(3)                       :: z_save, x_pre_push, x_cell
     real(dp)                                     :: lnf0_a, lnf0_b, H_a, H_b
     real(dp)                                     :: T0_b
     complex(dp)                                  :: w_dep
-    real(dp)                                     :: t_pass, perpinv, rand_frac
-    logical                                      :: boole_t_finished, boole_lost_inside
+    real(dp)                                     :: t_pass, perpinv
+    logical                                      :: boole_t_finished, boole_pusher_failed, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
     type(optional_quantities_type)               :: optional_quantities
 
     if (.not.particle_status%initialized) then
-        call check_coordinate_domain(x)
-        call find_tetra(x, vpar, vperp, ind_tetr, iface)
+        call place_particle_on_grid(x, vpar, vperp, ind_tetr, iface, z_save)
         if (ind_tetr.eq.-1) then
             t%remain = t%step
             return
         endif
-        z_save = x - tetra_physics(ind_tetr)%x1
         call calc_particle_weights_and_jperp_rmp_response_currents(n, z_save, vpar, vperp, ind_tetr, species)
         if (in%boole_delta_f) then
             ! Per-particle regularisation parameters from local profile values.
@@ -1083,32 +1077,12 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
 
         if (ind_tetr.eq.-1) then
             if ((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-                call identify_particles_entering_annulus(x, local_counter, boole_lost_inside)
-                if (boole_lost_inside) then
-                    x_new = 3*(/g%raxis, x(2), g%zaxis/) - 2*x
-                    vperp = vperp_func(z_save, perpinv, ind_tetr_save)
-                    call find_tetra(x_new, vpar, vperp, ind_tetr, iface)
-                    if (ind_tetr.ne.-1) then
-                        x = x_new
-                    else
-                        ! Axis reflection failed (reflected position outside mesh).
-                        ! Exit with ind_tetr=-1 so the outer loop can respawn the marker.
-                        exit
-                    endif
-                else
-                    call random_number(rand_frac)
-                    rand_frac = 0.01_dp * rand_frac
-                    x_new(1) = x(1) + rand_frac * (g%raxis - x(1))
-                    x_new(2) = x(2)
-                    x_new(3) = x(3) + rand_frac * (g%zaxis - x(3))
-                    vperp = vperp_func(z_save, perpinv, ind_tetr_save)
-                    call find_tetra(x_new, vpar, vperp, ind_tetr, iface)
-                    if (ind_tetr.ne.-1) then
-                        x = x_new
-                    else
-                        exit
-                    endif
-                endif
+                call push_across_axis_hole(x, vpar, vperp, z_save, perpinv, ind_tetr_save, ind_tetr, iface, &
+                                           local_counter, boole_lost_inside)
+                if (.not.boole_lost_inside) call reinject_towards_axis(x, vpar, vperp, z_save, perpinv, ind_tetr_save, &
+                                                                      ind_tetr, iface)
+                ! Reflection or re-injection failed: exit with ind_tetr=-1 so the outer loop can respawn the marker
+                if (ind_tetr.eq.-1) exit
             else
                 exit
             endif
@@ -1117,13 +1091,13 @@ subroutine orbit_timestep_rmp_response_currents(x, vpar, vperp, t, particle_stat
         ind_tetr_save = ind_tetr
         x_pre_push = x
 
-        select case(ipusher)
-            case(1)
-                call pusher_tetra_rk(ind_tetr, iface, x, vpar, z_save, t%remain, t_pass, boole_t_finished, iper_phi)
-            case(2)
-                call pusher_tetra_poly(poly_order, ind_tetr, iface, x, vpar, z_save, t%remain, &
-                                       t_pass, boole_t_finished, iper_phi, optional_quantities)
-        end select
+        call push_within_tetrahedron(ind_tetr, iface, x, vpar, z_save, t%remain, t_pass, boole_t_finished, iper_phi, &
+                                     optional_quantities, &
+                                     boole_pusher_failed)
+        if (boole_pusher_failed) then !particle removed by the pusher: lost, not re-injected
+            local_counter%pusher_failures = local_counter%pusher_failures + 1
+            exit
+        endif
 
         vperp = vperp_func(z_save, perpinv, ind_tetr_save)
 
@@ -1238,7 +1212,7 @@ subroutine calc_particle_weights_and_jperp_rmp_response_currents(n, z_save, vpar
     real(dp), dimension(3), intent(in) :: z_save
     integer, intent(in) :: n, ind_tetr
     integer, intent(in), optional :: species_in
-    integer :: species = 1
+    integer :: species
     real(dp) :: local_poloidal_flux
     real(dp) :: r, phi, z
     real(dp) :: s_value
@@ -1246,6 +1220,8 @@ subroutine calc_particle_weights_and_jperp_rmp_response_currents(n, z_save, vpar
     real(dp) :: x_global(3), pdf_position, pdf_energy_ev, pdf_energy_erg, pdf_lambda, d_lambda_epsilon_d_jperp_vpar, omega_c, &
     pdf_velocity_space, pdf_gyroangle
     real(dp) :: density, T, m, energy_ev, energy_erg, q, Phi_elec
+
+    species = 1
 
     if (present(species_in)) species = species_in
 

@@ -1,4 +1,4 @@
-! INPUT FILE FOR BOLTZMANN
+! INPUT FILE FOR DIVERTOR HEAT LOADS
 !
 &divertor_heat_loads_nml
 !

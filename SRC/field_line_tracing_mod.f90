@@ -154,6 +154,7 @@ endif
             pitchpar = start_pos_pitch_mat(4,n)
 
             x = x_rand_beg
+            v = v0
             vpar = pitchpar * v0
             vperp = sqrt(v0**2-vpar**2)
             if (.not. boole_monoenergetic) then

@@ -17,7 +17,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
                boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, boole_static_ne, reduced_output
-    integer :: i_integrator_type, seed_option, n_electric_potential_updates, update_dimension, n_species, n_source_updates
+    integer :: i_integrator_type, seed_option, n_electric_potential_updates, update_dimension, n_species, n_source_updates !i_integrator_type, seed_option: read for compatibility with existing input files, unused
     integer :: i_collision_mode, n_particles_diffusion
     logical :: boole_honest_tracing(2), boole_recompute_D(2)
 
@@ -55,8 +55,6 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%boole_linear_density_simulation = boole_linear_density_simulation
     in%boole_antithetic_variate = boole_antithetic_variate
     in%boole_linear_temperature_simulation = boole_linear_temperature_simulation
-    in%i_integrator_type = i_integrator_type
-    in%seed_option = seed_option
     in%num_particles = int(n_particles)
     in%boole_write_vertex_indices = boole_write_vertex_indices
     in%boole_write_vertex_coordinates = boole_write_vertex_coordinates
@@ -92,12 +90,6 @@ subroutine print_errors_for_bad_inputs
 
     use gorilla_applets_types_mod, only: in
     use tetra_physics_mod, only: coord_system
-
-    if (in%i_integrator_type.eq.2) then
-        print*, 'Error: i_integrator_type set to 2, this module only works with i_integrator_type set to 1'
-        print*, 'Program terminated'
-        stop
-    endif
 
     if (in%boole_refined_sqrt_g.eqv..true.) then
         print*, 'Error: boole_refined_sqrt_g set to .true., but this only works for cylindrical coordinates. This module &
