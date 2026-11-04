@@ -232,7 +232,7 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
     real(dp), dimension(3)                       :: z_save, x_new, z_local
     real(dp)                                     :: t_pass, perpinv, t_pusher, local_poloidal_flux, s_local
     real(dp)                                     :: dist_to_axis, rand_frac
-    logical                                      :: boole_t_finished, boole_lost_inside
+    logical                                      :: boole_t_finished, boole_pusher_failed, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
     type(optional_quantities_type)               :: optional_quantities
 
@@ -301,11 +301,17 @@ subroutine orbit_timestep_anomalous_transport(x, vpar, vperp, t, particle_status
 
         select case(ipusher)
             case(1)
-                call pusher_tetra_rk(ind_tetr, iface, x, vpar, z_save, t%remain, t_pass, boole_t_finished, iper_phi)
+                call pusher_tetra_rk(ind_tetr, iface, x, vpar, z_save, t%remain, t_pass, boole_t_finished, iper_phi, &
+                                     boole_pusher_failed)
             case(2)
                 call pusher_tetra_poly(poly_order, ind_tetr, iface, x, vpar, z_save, t_pusher, &
-                                       t_pass, boole_t_finished, iper_phi, optional_quantities)
+                                       t_pass, boole_t_finished, iper_phi, optional_quantities, &
+                                       boole_pusher_failed=boole_pusher_failed)
         end select
+        if (boole_pusher_failed) then !particle removed by the pusher: lost, not re-injected
+            local_counter%pusher_failures = local_counter%pusher_failures + 1
+            exit
+        endif
 
         vperp = vperp_func(z_save, perpinv, ind_tetr_save)
 

@@ -240,7 +240,7 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
     real(dp), intent(out), optional              :: t_remain_out
     real(dp), dimension(3)                       :: z_save, x_save
     real(dp)                                     :: t_remain,t_pass,perpinv
-    logical                                      :: boole_t_finished, boole_lost_inside
+    logical                                      :: boole_t_finished, boole_pusher_failed, boole_lost_inside
     integer                                      :: ind_tetr_save,iper_phi,n
     type(optional_quantities_type)               :: optional_quantities
     real(dp), dimension(3)                       :: x_new
@@ -295,11 +295,18 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
 
         select case(ipusher) !Calculate trajectory
             case(1)
-                call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper_phi)
+                call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper_phi, &
+                                     boole_pusher_failed)
             case(2)
                 call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_remain,&
-                                                    & t_pass,boole_t_finished,iper_phi,optional_quantities)
+                                                    & t_pass,boole_t_finished,iper_phi,optional_quantities, &
+                                                    & boole_pusher_failed=boole_pusher_failed)
         end select
+        if (boole_pusher_failed) then !particle removed by the pusher: lost, not re-injected
+            local_counter%pusher_failures = local_counter%pusher_failures + 1
+            if (present(t_remain_out)) t_remain_out = t_remain
+            exit
+        endif
 
         t_remain = t_remain - t_pass
 

@@ -201,7 +201,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     integer, intent(inout)                       :: ind_tetr,iface
     real(dp), dimension(3)                       :: z_save, x_save, z_save_at_x_save
     real(dp)                                     :: t_pass,perpinv, vpar_save, vperp_save
-    logical                                      :: boole_t_finished, boole_lost_inside, mirror_condition
+    logical                                      :: boole_t_finished, boole_pusher_failed, boole_lost_inside, mirror_condition
     integer                                      :: ind_tetr_save,iper_phi,k,i
     type(optional_quantities_type)               :: optional_quantities
     real(dp)                                     :: tau, v, t_pusher, v_save, vpar_init, vperp_init, critical_distance
@@ -276,11 +276,14 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
 
         select case(ipusher) !Calculate trajectory
             case(1)
-                call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t%remain,t_pass,boole_t_finished,iper_phi)
+                call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t%remain,t_pass,boole_t_finished,iper_phi, &
+                                     boole_pusher_failed)
             case(2)
                 call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_pusher, &
-                                                    & t_pass,boole_t_finished,iper_phi,optional_quantities)
+                                                    & t_pass,boole_t_finished,iper_phi,optional_quantities, &
+                                                    & boole_pusher_failed=boole_pusher_failed)
         end select
+        if (boole_pusher_failed) local_counter%pusher_failures = local_counter%pusher_failures + 1 !recovered at the top of the loop
 
         vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
         v = sqrt(vperp**2+vpar**2)

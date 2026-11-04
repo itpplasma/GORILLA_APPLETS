@@ -124,7 +124,8 @@ subroutine set_counter_zero(counter)
     counter%tetr_pushings = 0
     counter%phi_0_mappings = 0
     counter%integration_steps = 0
-    
+    counter%pusher_failures = 0
+
 end subroutine set_counter_zero
 
 subroutine add_local_counter_to_counter(local_counter)
@@ -137,6 +138,7 @@ subroutine add_local_counter_to_counter(local_counter)
     counter%lost_inside = counter%lost_inside + local_counter%lost_inside
     counter%tetr_pushings = counter%tetr_pushings + local_counter%tetr_pushings
     counter%phi_0_mappings = counter%phi_0_mappings + local_counter%phi_0_mappings
+    counter%pusher_failures = counter%pusher_failures + local_counter%pusher_failures
     
 end subroutine add_local_counter_to_counter
 

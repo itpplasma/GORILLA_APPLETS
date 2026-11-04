@@ -58,6 +58,7 @@ module gorilla_applets_types_mod
     integer(int64) :: tetr_pushings = 0
     integer :: phi_0_mappings = 0
     integer(int64) :: integration_steps = 0
+    integer :: pusher_failures = 0 !particles the pusher gave up on (no analytical solution, no convergence)
     end type counter_t
 
     type(counter_t) :: counter

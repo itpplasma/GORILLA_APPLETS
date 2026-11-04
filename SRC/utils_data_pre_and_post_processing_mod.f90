@@ -168,6 +168,7 @@ subroutine print_applet_summary(particle_name, particle_mass, v0, particle_charg
     print*, 'average number of pushings = ', counter%tetr_pushings/in%n_particles
     print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/in%n_particles
     print*, 'average number of integration steps = ', counter%integration_steps/in%n_particles
+    print*, 'number of times the pusher gave up on a particle = ', counter%pusher_failures
     print*, particle_name//' mass = ', particle_mass
     print*, 'absolute value of '//particle_name//' velocity = ', v0
     print*, particle_name//' charge = ', particle_charge
