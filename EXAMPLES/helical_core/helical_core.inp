@@ -48,9 +48,8 @@
   boole_eliminate_particles_outside_flux = .false.,
   flux_threshold_for_elimination = 0.5d0,
 !
-  !Use delta-f method for particle weights (temporarily off while testing the conserving collisions;
-  !set to .true. to switch it back on)
-  boole_delta_f = .false.,
+  !Use delta-f method for particle weights
+  boole_delta_f = .true.,
 !
   !always initiate pairs of particles where both particles start at the same position but move
   !in opposite direction, this helps to reduce statistical noise
