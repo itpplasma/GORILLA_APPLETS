@@ -473,6 +473,10 @@ subroutine set_particle_type_specifications
             charge = 74.d0*echarge
             mass = 184.d0*amp
             cm_over_e= 184.d0*clight*amp/(74.d0*echarge)
+        case(5) !hydrogen ion
+            charge = echarge
+            mass = amp
+            cm_over_e = clight*amp/echarge
     end select
 
     start%particle_charge = (/charge, -echarge/)

@@ -598,6 +598,7 @@ subroutine set_c
     use gorilla_applets_types_mod, only: c, in
     use tetra_grid_mod, only: ntetr
     use constants, only: amp, ame
+    use gorilla_settings_mod, only: ispecies
 
     c%n = in%n_background_species
 
@@ -615,7 +616,9 @@ subroutine set_c
     allocate(c%dens(c%n))
     allocate(c%temp(c%n))
 
+    !background ions: deuterium, or hydrogen when hydrogen ions are traced (ispecies = 5)
     c%mass(1:c%n-1) = 2.0_dp * amp
+    if (ispecies.eq.5) c%mass(1:c%n-1) = amp
     c%mass(c%n) = ame
     c%charge_num(1:c%n-1) = 1.0_dp
     c%charge_num(c%n) = -1.0_dp

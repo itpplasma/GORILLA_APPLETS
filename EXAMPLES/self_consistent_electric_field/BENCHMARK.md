@@ -41,7 +41,7 @@ flux. They are defined in
 | 0.9 |  222 |  222 | 2.63e13 |
 | 1   |  106 |  106 | 2.52e13 |
 
-The ions are deuterium (`ispecies = 2` in `gorilla.inp`).
+The ions are deuterium (`ispecies = 2` in `gorilla.inp`) up to b05. The benchmark case (Kuczyński et al., Nucl. Fusion 64, 2024) is a hydrogen plasma, so later runs use `ispecies = 5` (hydrogen ion, traced and background), which needs GORILLA with the hydrogen species (itpplasma/GORILLA#123).
 
 ## Model
 
