@@ -93,34 +93,6 @@ endif
 
 end subroutine initialise_loop_variables
 
-subroutine add_local_tetr_moments_to_output(local_tetr_moments,species_in)
-
-    use gorilla_applets_types_mod, only: moment_specs, output
-    use tetra_grid_mod, only: ntetr
-    
-    complex(dp), dimension(:,:), intent(in) :: local_tetr_moments
-    integer, intent(in), optional :: species_in
-    integer :: species = 1
-    integer :: k, n_prisms
-
-    if (present(species_in)) species = species_in
-    
-    n_prisms = ntetr/3
-    
-    output%tetr_moments(:,:,species) = output%tetr_moments(:,:,species) + local_tetr_moments
-    output%prism_moments(:,:,species) = output%prism_moments(:,:,species) + &
-        & (local_tetr_moments(:,(/(1+3*k,k = 0,n_prisms-1)/)) + &
-        &  local_tetr_moments(:,(/(2+3*k,k = 0,n_prisms-1)/)) + &
-        &  local_tetr_moments(:,(/(3+3*k,k = 0,n_prisms-1)/)))
-    if (moment_specs%boole_squared_moments) then
-        output%prism_moments_squared(:,:,species) = output%prism_moments_squared(:,:,species) + &
-            & (local_tetr_moments(:,(/(1+3*k,k = 0,n_prisms-1)/)) + &
-            &  local_tetr_moments(:,(/(2+3*k,k = 0,n_prisms-1)/)) + &
-            &  local_tetr_moments(:,(/(3+3*k,k = 0,n_prisms-1)/)))**2
-    endif
-
-end subroutine add_local_tetr_moments_to_output
-
 subroutine add_marker_moments_to_thread_sums(local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared)
 
     !Adds the moments of one marker (or antithetic pair) to the sums of the calling thread, without
