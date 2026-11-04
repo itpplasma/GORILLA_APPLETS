@@ -61,7 +61,7 @@ subroutine calc_volume_integrals
     use tetra_grid_settings_mod, only: grid_size, n_field_periods
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
     use gorilla_applets_types_mod, only: output, in
-    use, intrinsic :: ieee_arithmetic, only: ieee_set_halting_mode, ieee_set_flag, &
+    use, intrinsic :: ieee_arithmetic, only: ieee_set_halting_mode, ieee_get_halting_mode, ieee_set_flag, &
                                            & ieee_invalid, ieee_overflow, ieee_divide_by_zero, &
                                            & ieee_is_finite
 
@@ -75,6 +75,7 @@ subroutine calc_volume_integrals
                                                         a, a_dash, b, b_dash, c, c_dash, rmin, delta_r, delta_z, phi_0, eta
     integer, dimension(:,:), allocatable             :: tetra_indices_per_prism
     real(dp), dimension(:,:), allocatable            :: r_integrand_constants
+    logical, dimension(3)                            :: halting_saved
 
     print*, 'calc_volume_integrals started'
     n_prisms = ntetr/3
@@ -104,22 +105,26 @@ subroutine calc_volume_integrals
     ! Temporarily disable the halt-on-FPE traps for the parallel region. The
     ! prism-volume / refined-volume formulae divide by vertex R-differences and
     ! take logs of their ratios; for the straight-cylinder limit (grid_kind=5,
-    ! R0>>a) near-theta=90deg prisms have a near-zero R-spread, so a few of these
-    ! terms overflow / divide-by-zero. prism_volumes is computed robustly via the
+    ! R0>>a) or degenerate prisms of rectangular grids, a few of these terms
+    ! overflow / divide-by-zero. prism_volumes is computed robustly via the
     ! exact Pappus form below (so the integrated moments stay clean); the trap
     ! disable only stops those transient FPEs in the auxiliary refined integrals
-    ! from killing the run. N<=10 (R0<=1691) never trips this, so they are
-    ! bit-unchanged.
-    call ieee_set_halting_mode(ieee_invalid,        .false.)
-    call ieee_set_halting_mode(ieee_overflow,       .false.)
-    call ieee_set_halting_mode(ieee_divide_by_zero, .false.)
+    ! from killing the run. The halting mode belongs to each thread, so every
+    ! thread of the team switches its traps off and restores its own state.
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(n_prisms,verts_rphiz,tetra_grid,grid_size,tetra_indices_per_prism,prism_volumes, particle_charge, in, &
     !$OMP& refined_prism_volumes,sqrt_g,r_integrand_constants, elec_pot_vec,n_b,tetra_physics, &
     !$OMP& n_field_periods) &
     !$OMP& PRIVATE(r_values,z_values,rmin,triangle_indices,r_values_intermediate,z_values_intermediate, delta_r, delta_z, eta, &
-    !$OMP& r,z,gradient,z_star,alpha,beta,gamma,delta,epsilon,capital_gamma,capital_delta, limits,a,a_dash,b,b_dash,c,c_dash,phi_0)
+    !$OMP& r,z,gradient,z_star,alpha,beta,gamma,delta,epsilon,capital_gamma,capital_delta, limits,a,a_dash,b,b_dash,c,c_dash,phi_0, &
+    !$OMP& halting_saved)
+    call ieee_get_halting_mode(ieee_invalid,        halting_saved(1))
+    call ieee_get_halting_mode(ieee_overflow,       halting_saved(2))
+    call ieee_get_halting_mode(ieee_divide_by_zero, halting_saved(3))
+    call ieee_set_halting_mode(ieee_invalid,        .false.)
+    call ieee_set_halting_mode(ieee_overflow,       .false.)
+    call ieee_set_halting_mode(ieee_divide_by_zero, .false.)
     !$OMP DO
     do i = 1,n_prisms
         !calculate prism volumes using the basic approach (compare with chapter 4.2 of master thesis from Jonatan Schatzlmayr)
@@ -311,14 +316,14 @@ subroutine calc_volume_integrals
         endif
     enddo
     !$OMP END DO
-    !$OMP END PARALLEL
-    ! Re-enable the halt-on-FPE traps after the OMP region
-    call ieee_set_halting_mode(ieee_invalid,        .true.)
-    call ieee_set_halting_mode(ieee_overflow,       .true.)
-    call ieee_set_halting_mode(ieee_divide_by_zero, .true.)
+    ! Clear the flags raised in the loop, then restore this thread's traps
     call ieee_set_flag(ieee_invalid,        .false.)
     call ieee_set_flag(ieee_overflow,       .false.)
     call ieee_set_flag(ieee_divide_by_zero, .false.)
+    call ieee_set_halting_mode(ieee_invalid,        halting_saved(1))
+    call ieee_set_halting_mode(ieee_overflow,       halting_saved(2))
+    call ieee_set_halting_mode(ieee_divide_by_zero, halting_saved(3))
+    !$OMP END PARALLEL
 
     refined_prism_volumes = abs(refined_prism_volumes)*2*pi/(grid_size(2)*n_field_periods)
     elec_pot_vec = abs(elec_pot_vec)*2*pi/(grid_size(2)*n_field_periods*prism_volumes)
