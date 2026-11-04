@@ -97,7 +97,7 @@ about 1 eV. The guard that rejects `T <= 0` then fired, which breaks conservatio
 The noise can no longer be reduced with a free coupling factor. Only these help:
 
 - **More markers.** `r` per marker scales as 1/`n_particles`.
-- **Reservoir cells** (`reservoir_min_volume_fraction`, default 0 = off). Small tetrahedra
+- **Reservoir cells** (`reservoir_min_volume_fraction`, default 0.5, 0 = off). Small tetrahedra
   near the axis are merged into cells of at least this fraction of the median tetrahedron
   volume (`build_reservoir_cells`):
   1. **Radial:** starting at the axis, the innermost flux-surface layers are combined
@@ -202,7 +202,7 @@ Input keys (helical_core.inp):
 | `n_time_slices` | 1 | push all markers in common slices |
 | `boole_unidirectional_beam` | false | all markers start with pitch +1; needs `boole_antithetic_variate = .false.` |
 | `beam_density_fraction` | 1 | marker density / background density |
-| `reservoir_min_volume_fraction` | 0 | merge small tetrahedra near the axis into reservoir cells of at least this fraction of the median volume |
+| `reservoir_min_volume_fraction` | 0.5 | merge small tetrahedra near the axis into reservoir cells of at least this fraction of the median volume |
 
 Output with conserving collisions:
 
@@ -232,13 +232,27 @@ Results (beam inside s < 0.7, 20 slices):
 | hole 1e-7, no cells | 3e4 | 0.150 / 0.145 | 880 / 912 | 3e-3 | -0.001 | 0.1 |
 | hole 1e-7, poloidal cells | 3e4 | 0.139 / 0.147 | 889 / 909 | 2e-4 | 0.000 | 8 |
 | hole 1e-7, radial + poloidal cells | 3e4 | 0.139 / 0.146 | 883 / 909 | 1.4e-4 | 0.0006 | 1.4 |
+| hole 1e-7, cells, threshold 1.0 | 3e4 | 0.136 / 0.147 | 885 / 913 | 1e-10 | 0.0002 | 129 |
+| hole 1e-7, cells, threshold 0.3 | 6e4 | 0.146 / 0.146 | 892 / 923 | 0 | 0.00004 | 9 |
+| hole 1e-7, cells, threshold 0.5 | 6e4 | 0.140 / 0.148 | 895 / 922 | 1e-10 | 0.00008 | 184 |
+| hole 1e-7, cells, threshold 0.5 | 1.2e5 | 0.148 / 0.147 | 901 / 929 | -2e-10 | 0.0001 | 322 |
 
-All three small-hole runs had rejected updates (T <= 0): 20, 20 and 16. With radial plus
+The first three small-hole runs had rejected updates (T <= 0): 20, 20 and 16. With radial plus
 poloidal cells, every cell reaches the threshold of 0.3 times the median volume. The
 coldest cells are then merged cells near s ≈ 0.001–0.002 with volumes just above the
 threshold (T_b = 17 eV, u_b = −0.5 v0 at the end). A threshold of 0.3 times the median
-volume is therefore not enough for 3e4 markers near the axis. Under test: threshold 1.0
-(r27) and 6e4 markers (r28).
+volume is therefore not enough for 3e4 markers near the axis. Larger cells or more markers
+remove the rejections:
+
+- **Threshold 1.0:** safe even with 3e4 markers, but merges about half of the grid (the
+  five innermost rings), which costs resolution of the rotation near the axis.
+- **Threshold 0.3:** no rejections with 6e4 markers, but the coldest cell still reaches 9 eV.
+- **Threshold 0.5 (the default):** merges one ring more than 0.3, needs about 6e4 markers
+  (2.3e4 inside the beam region), and keeps every cell above 180 eV.
+
+With 1.2e5 markers the cell-to-cell scatter of u_b drops by √2 (0.148 to 0.105 v0). It is
+still about 70 % of the mean flow, so rotation profiles should be read as flux-surface
+averages.
 
 Checks of the parallel-velocity handling:
 
