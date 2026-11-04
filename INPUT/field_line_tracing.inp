@@ -1,4 +1,4 @@
-! INPUT FILE FOR BOLTZMANN
+! INPUT FILE FOR FIELD LINE TRACING
 !
 &field_line_tracing_nml
 !

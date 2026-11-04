@@ -17,7 +17,7 @@ subroutine read_boltzmann_inp_into_type
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
                boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
                boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions
-    integer :: i_integrator_type, seed_option, n_background_density_updates
+    integer :: i_integrator_type, seed_option, n_background_density_updates !i_integrator_type, seed_option: read for compatibility with existing input files, unused
 
     integer :: b_inp_unit
 
@@ -46,8 +46,6 @@ subroutine read_boltzmann_inp_into_type
     in%boole_linear_density_simulation = boole_linear_density_simulation
     in%boole_antithetic_variate = boole_antithetic_variate
     in%boole_linear_temperature_simulation = boole_linear_temperature_simulation
-    in%i_integrator_type = i_integrator_type
-    in%seed_option = seed_option
     in%num_particles = int(n_particles)
     in%boole_write_vertex_indices = boole_write_vertex_indices
     in%boole_write_vertex_coordinates = boole_write_vertex_coordinates
@@ -68,21 +66,18 @@ end subroutine read_boltzmann_inp_into_type
 
 subroutine calc_boltzmann
 
-    use orbit_timestep_gorilla_mod, only: initialize_gorilla
+    use utils_data_pre_and_post_processing_mod, only: setup_applet, print_applet_summary
     use constants, only: ev2erg,pi,echarge
     use tetra_physics_mod, only: particle_mass,particle_charge
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
-    use tetra_grid_settings_mod, only: grid_kind
     use tetra_grid_mod, only: ntetr
     use gorilla_settings_mod, only: ispecies
-    use gorilla_applets_settings_mod, only: i_option
-    use field_mod, only: ipert
     use volume_integrals_and_sqrt_g_mod, only: calc_square_root_g, calc_volume_integrals
-    use gorilla_applets_types_mod, only: moment_specs, counter, c, in
+    use gorilla_applets_types_mod, only: moment_specs, in
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
-    use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, &
-    get_ipert, set_moment_specifications, initialise_output, calc_starting_conditions, initialize_exit_data, calc_poloidal_flux, &
-    calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
+    use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, calc_starting_conditions, &
+    initialize_exit_data, calc_poloidal_flux, calc_collision_coefficients_for_all_tetrahedra, &
+    normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, &
     find_minimal_angle_between_curlA_and_tetrahedron_faces, analyse_particle_weight_distribution, &
     perform_background_density_update, prepare_next_round_of_parallelised_particle_pushing
     use gorilla_applets_types_mod, only: output
@@ -93,8 +88,7 @@ subroutine calc_boltzmann
 
     call set_seed_for_random_numbers
     call read_boltzmann_inp_into_type
-    call get_ipert()
-    call initialize_gorilla(i_option,ipert)
+    call setup_applet
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! delete this again afterwards !!!!!!!!!!!!!!!!!!!!!!!
     if (ispecies.eq.4) particle_charge = 15*echarge
@@ -103,8 +97,6 @@ subroutine calc_boltzmann
 
     v0=sqrt(2.0_dp*in%energy_eV*ev2erg/particle_mass)
 
-    call set_moment_specifications
-    call initialise_output
     call calc_square_root_g
     call calc_volume_integrals
     call initialize_exit_data
@@ -113,9 +105,6 @@ subroutine calc_boltzmann
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
     call give_file_names
     call unlink_files
-
-    if (in%i_integrator_type.eq.2) print*, 'Error: i_integrator_type set to 2, this module only works with &
-                                    & i_integrator_type set to 1'
 
     if (in%n_background_density_updates.eq.0) then
         call parallelised_particle_pushing(v0)
@@ -131,20 +120,7 @@ subroutine calc_boltzmann
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
     call write_data_to_files
 
-    if (in%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
-    print*, 'Number of lost particles',counter%lost_particles
-    print*, 'average number of pushings = ', counter%tetr_pushings/in%n_particles
-    print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/in%n_particles
-    print*, 'average number of integration steps = ', counter%integration_steps/in%n_particles
-    PRINT*, 'particle mass = ', particle_mass
-    PRINT*, 'absolute value of velocity = ', v0
-    PRINT*, 'particle charge = ', particle_charge
-    PRINT*, 'temperature = ', ev2erg*in%energy_eV
-    print*, 'energy in eV = ', in%energy_eV
-    print*, 'tracing time in seconds = ', in%time_step
-    if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-         print*, 'number of times that particles were pushed across the inside hole = ', counter%lost_inside
-    endif
+    call print_applet_summary('particle', particle_mass, v0, particle_charge)
     !print*, output%radial_flux
 
 end subroutine calc_boltzmann
@@ -256,17 +232,14 @@ end subroutine
 subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,ind_tetr,iface, n,local_tetr_moments, &
                                             local_counter, t_remain_out)
 
-    use pusher_tetra_rk_mod, only: pusher_tetra_rk
-    use pusher_tetra_poly_mod, only: pusher_tetra_poly
     use tetra_physics_mod, only: tetra_physics
-    use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
-    use orbit_timestep_gorilla_mod, only: check_coordinate_domain
+    use gorilla_settings_mod, only: optional_quantities_type
     use supporting_functions_mod, only: vperp_func
-    use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, g
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t
     use tetra_grid_settings_mod, only: grid_kind
-    use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
-                                        initialize_constants_of_motion, calc_particle_weights_and_jperp, compute_radial_fluxes
+    use utils_orbit_timestep_mod, only: update_local_tetr_moments, initialize_constants_of_motion, &
+                                        calc_particle_weights_and_jperp, compute_radial_fluxes, place_particle_on_grid, &
+                                        push_within_tetrahedron, push_across_axis_hole
 
     type(counter_t), intent(inout)               :: local_counter
     type(particle_status_t), intent(inout)       :: particle_status
@@ -278,19 +251,16 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
     real(dp), intent(out), optional              :: t_remain_out
     real(dp), dimension(3)                       :: z_save, x_save
     real(dp)                                     :: t_remain,t_pass,perpinv
-    logical                                      :: boole_t_finished, boole_lost_inside
+    logical                                      :: boole_t_finished, boole_pusher_failed, boole_lost_inside
     integer                                      :: ind_tetr_save,iper_phi,n
     type(optional_quantities_type)               :: optional_quantities
-    real(dp), dimension(3)                       :: x_new
     
     if(.not.particle_status%initialized) then !If orbit_timestep is called for the first time without grid position
-        call check_coordinate_domain(x) !Check coordinate domain (optionally perform modulo operation)
-        call find_tetra(x,vpar,vperp,ind_tetr,iface) !Find tetrahedron index and face index for position x
+        call place_particle_on_grid(x,vpar,vperp,ind_tetr,iface,z_save)
         if(ind_tetr.eq.-1) then !If particle doesn't lie inside any tetrahedron
-            t_remain_out = t_step
+            if(present(t_remain_out)) t_remain_out = t_step
             return
         endif
-        z_save = x-tetra_physics(ind_tetr)%x1
         call calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr)
         particle_status%initialized = .true.
     endif
@@ -308,21 +278,9 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
         if(ind_tetr.eq.-1) then
             if(present(t_remain_out)) t_remain_out = t_remain
             if((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-                call identify_particles_entering_annulus(x,local_counter,boole_lost_inside)
-                if (boole_lost_inside) then
-                    x_new = 3*(/g%raxis,x(2),g%zaxis/) - 2*x
-                    vperp = vperp_func(z_save,perpinv,ind_tetr_save)
-                    call find_tetra(x_new,vpar,vperp,ind_tetr,iface)
-                    x = x_new
-                    if (ind_tetr.eq.-1) then
-                        print*, "ATTENTION: particle pushing across the hole surrounding the magnetic axis was unsuccessful"
-                        exit
-                    else
-                        print*, "particle pushing across the hole surrounding the magnetic axis was successful"
-                    endif
-                else
-                    exit
-                endif
+                call push_across_axis_hole(x,vpar,vperp,z_save,perpinv,ind_tetr_save,ind_tetr,iface,local_counter, &
+                                         & boole_lost_inside)
+                if (ind_tetr.eq.-1) exit
             else
                 exit
             endif
@@ -331,13 +289,13 @@ subroutine orbit_timestep_gorilla_boltzmann(x,vpar,vperp,t_step,particle_status,
         ind_tetr_save = ind_tetr
         x_save = x
 
-        select case(ipusher) !Calculate trajectory
-            case(1)
-                call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper_phi)
-            case(2)
-                call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_remain,&
-                                                    & t_pass,boole_t_finished,iper_phi,optional_quantities)
-        end select
+        call push_within_tetrahedron(ind_tetr,iface,x,vpar,z_save,t_remain,t_pass,boole_t_finished,iper_phi,optional_quantities, &
+                                     boole_pusher_failed)
+        if (boole_pusher_failed) then !particle removed by the pusher: lost, not re-injected
+            local_counter%pusher_failures = local_counter%pusher_failures + 1
+            if (present(t_remain_out)) t_remain_out = t_remain
+            exit
+        endif
 
         t_remain = t_remain - t_pass
 

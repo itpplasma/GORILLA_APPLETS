@@ -6,8 +6,11 @@ requests against `main`. Run `make test` before opening a pull request.
 
 ## Continuous integration and merging
 
-- Every pull request, including each layer of a stacked pull request, runs the
-  fast CI tier. Add the label `full-ci` to run the full tier before queueing.
+- The full CI tier runs in the merge queue. To run it on a pull request before
+  queueing, including on a single layer of a stacked pull request, add the
+  label `full-ci`; it then also runs on every later push to that pull request.
+  This works only for branches of this repository, not for forks, whose code
+  would otherwise run on the self-hosted runners.
 - Review a stack layer by layer. When it is ready, retarget the top layer to
   `main` so that the stack is merged as one pull request; the lower pull
   requests then show as merged.

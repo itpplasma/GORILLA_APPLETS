@@ -31,7 +31,7 @@ subroutine read_helical_core_inp_into_type
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, &
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
                boole_eliminate_particles_outside_flux, boole_delta_f, boole_unidirectional_beam
-    integer :: i_integrator_type, seed_option, n_species, n_time_slices
+    integer :: i_integrator_type, seed_option, n_species, n_time_slices !i_integrator_type, seed_option: read for compatibility with existing input files, unused
     real(dp) :: flux_threshold_for_elimination, beam_density_fraction, reservoir_min_volume_fraction
 
     integer :: s_inp_unit
@@ -68,8 +68,6 @@ subroutine read_helical_core_inp_into_type
     in%boole_linear_density_simulation = boole_linear_density_simulation
     in%boole_antithetic_variate = boole_antithetic_variate
     in%boole_linear_temperature_simulation = boole_linear_temperature_simulation
-    in%i_integrator_type = i_integrator_type
-    in%seed_option = seed_option
     in%num_particles = int(n_particles)
     in%boole_write_vertex_indices = boole_write_vertex_indices
     in%boole_write_vertex_coordinates = boole_write_vertex_coordinates
@@ -257,17 +255,14 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
 ! Standard orbit timestep for helical core.
 ! Performs guiding-center orbit integration without anomalous displacement.
 !
-    use pusher_tetra_rk_mod, only: pusher_tetra_rk
-    use pusher_tetra_poly_mod, only: pusher_tetra_poly
     use tetra_physics_mod, only: tetra_physics
-    use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
-    use orbit_timestep_gorilla_mod, only: check_coordinate_domain
+    use gorilla_settings_mod, only: optional_quantities_type
     use supporting_functions_mod, only: vperp_func
-    use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, g, weights
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, in, time_t, weights
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
     use utils_orbit_timestep_mod, only: initialize_constants_of_motion, compute_radial_fluxes, &
-        identify_particles_entering_annulus, update_local_tetr_moments, calc_particle_weights_and_jperp
+                                        update_local_tetr_moments, calc_particle_weights_and_jperp, &
+                                        place_particle_on_grid, push_within_tetrahedron, push_across_axis_hole
 
     real(dp), dimension(3), intent(inout)        :: x
     real(dp), intent(inout)                      :: vpar, vperp
@@ -280,20 +275,18 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
     real(dp), intent(in)                         :: t_tot
     logical, intent(in)                          :: boole_reuse_weights
 
-    real(dp), dimension(3)                       :: z_save, x_new
+    real(dp), dimension(3)                       :: z_save
     real(dp)                                     :: t_pass, perpinv
-    logical                                      :: boole_t_finished, boole_lost_inside
+    logical                                      :: boole_t_finished, boole_pusher_failed, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
     type(optional_quantities_type)               :: optional_quantities
 
     if (.not.particle_status%initialized) then
-        call check_coordinate_domain(x)
-        call find_tetra(x, vpar, vperp, ind_tetr, iface)
+        call place_particle_on_grid(x, vpar, vperp, ind_tetr, iface, z_save)
         if (ind_tetr.eq.-1) then
             t%remain = t%step
             return
         endif
-        z_save = x - tetra_physics(ind_tetr)%x1
         if (.not.boole_reuse_weights) then
             call calc_particle_weights_and_jperp(n, z_save, vpar, vperp, ind_tetr, species)
             if (in%boole_delta_f) then
@@ -317,23 +310,9 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
 
         if (ind_tetr.eq.-1) then
             if ((grid_kind.eq.2).or.(grid_kind.eq.3)) then
-                call identify_particles_entering_annulus(x, local_counter, boole_lost_inside)
-                if (boole_lost_inside) then
-                    ! Particle is near the magnetic axis - reflect across it
-                    x_new = 3*(/g%raxis, x(2), g%zaxis/) - 2*x
-                    vperp = vperp_func(z_save, perpinv, ind_tetr_save)
-                    call find_tetra(x_new, vpar, vperp, ind_tetr, iface)
-                    x = x_new
-                    if (ind_tetr.eq.-1) then
-                        print*, "ATTENTION: particle pushing across the hole surrounding the magnetic axis was unsuccessful"
-                        exit
-                    !else
-                        !print*, "particle pushing across the hole surrounding the magnetic axis was successful"
-                    endif
-                else
-                    ! Particle left at the outer boundary - lost
-                    exit
-                endif
+                call push_across_axis_hole(x, vpar, vperp, z_save, perpinv, ind_tetr_save, ind_tetr, iface, &
+                                           local_counter, boole_lost_inside)
+                if (ind_tetr.eq.-1) exit   ! not in the hole (left at the outer boundary) or reflection failed: lost
             else
                 exit
             endif
@@ -341,13 +320,13 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
 
         ind_tetr_save = ind_tetr
 
-        select case(ipusher)
-            case(1)
-                call pusher_tetra_rk(ind_tetr, iface, x, vpar, z_save, t%remain, t_pass, boole_t_finished, iper_phi)
-            case(2)
-                call pusher_tetra_poly(poly_order, ind_tetr, iface, x, vpar, z_save, t%remain, &
-                                       t_pass, boole_t_finished, iper_phi, optional_quantities)
-        end select
+        call push_within_tetrahedron(ind_tetr, iface, x, vpar, z_save, t%remain, t_pass, boole_t_finished, iper_phi, &
+                                     optional_quantities, &
+                                     boole_pusher_failed)
+        if (boole_pusher_failed) then !particle removed by the pusher: lost, not re-injected
+            local_counter%pusher_failures = local_counter%pusher_failures + 1
+            exit
+        endif
 
         vperp = vperp_func(z_save, perpinv, ind_tetr_save)
 
