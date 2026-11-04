@@ -14,6 +14,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
                 diffusion_tau_collisions, edge_buffer_width, noise_tolerance_factor, potential_relaxation_factor
     character(len=256) :: restart_phi_file, restart_source_file
     logical :: boole_adaptive_relaxation
+    real(dp) :: thermodiffusion_coefficient
     logical ::boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
                boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
@@ -36,7 +37,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & n_species, boole_static_ne, boole_honest_tracing, boole_recompute_D, n_source_updates, reduced_output, source_relaxation_factor, &
     & quasineutrality_tol, i_collision_mode, n_particles_diffusion, diffusion_scan_s0, diffusion_tau, &
     & diffusion_tau_collisions, edge_buffer_width, noise_tolerance_factor, potential_relaxation_factor, &
-    & boole_adaptive_relaxation, restart_phi_file, restart_source_file
+    & boole_adaptive_relaxation, restart_phi_file, restart_source_file, thermodiffusion_coefficient
 
     quasineutrality_tol = 0.0_dp   !optional in the .inp: no early exit unless set
     i_collision_mode = 1           !optional: full collision operator
@@ -48,6 +49,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     noise_tolerance_factor = 0.0_dp   !optional: no noise-based stopping
     potential_relaxation_factor = 1.0_dp/3.0_dp   !optional
     boole_adaptive_relaxation = .false.   !optional: one global relaxation factor
+    thermodiffusion_coefficient = 0.0_dp  !optional: no thermodiffusive drift in the random walk
     restart_phi_file = ''        !optional: start from the initial potential
     restart_source_file = ''     !optional: start from the target density as source
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
@@ -100,6 +102,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%noise_tolerance_factor   = noise_tolerance_factor
     in%potential_relaxation_factor = potential_relaxation_factor
     in%boole_adaptive_relaxation = boole_adaptive_relaxation
+    in%thermodiffusion_coefficient = thermodiffusion_coefficient
     in%restart_phi_file = restart_phi_file
     in%restart_source_file = restart_source_file
 

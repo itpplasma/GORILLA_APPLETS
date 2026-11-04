@@ -274,10 +274,11 @@ subroutine calc_density_via_random_walk(species)
     use find_tetra_mod, only: find_tetra
     use utils_scef_electric_potential_mod, only: fill_vector_parts_with_value
     use utils_orbit_timestep_mod, only: calc_particle_weights_and_jperp
+    use scef_target_profiles_mod, only: target_temperature, rad_from_s
 
     integer, intent(in) :: species
 
-    real(dp) :: delta_x, delta_t, xi, A, B, cell_size, s_c, B_c
+    real(dp) :: delta_x, delta_t, xi, A, B, cell_size, s_c, B_c, s_lo, s_hi
     integer :: i, ns, k, num_steps_min, count_lost_particles, num_particles, particle_multiplication
     integer :: density_unit, n, ind_tetr, iface
     real(dp), dimension(3) :: x_particle, z_save
@@ -387,6 +388,16 @@ count_lost_particles = 0
                     A = B*A + B*sum(dc%polynomial_coefficients_for_A(:, species) &
                                     *(/1.0_dp,position(i),0.0_dp/)) !dB/ds = B * d(ln B)/ds
                 endif
+            endif
+
+            !Thermodiffusion: the walkers carry no energy, so the flux driven by the temperature gradient,
+            !-c*B*n*d(ln T)/ds with c = D12/D11 - 3/2, enters as an explicit drift (central difference in s)
+            if (in%thermodiffusion_coefficient.ne.0.0_dp) then
+                s_lo = max(position(i) - 1.0d-4, 0.0_dp)
+                s_hi = min(position(i) + 1.0d-4, 1.0_dp)
+                A = A - in%thermodiffusion_coefficient*B &
+                        *log(target_temperature(rad_from_s(s_hi), species)/target_temperature(rad_from_s(s_lo), species)) &
+                        /(s_hi - s_lo)
             endif
 
 

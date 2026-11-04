@@ -139,6 +139,10 @@
   !imbalance responded to the last step, reduced after an overshoot (sign change), raised otherwise (1D only)
   boole_adaptive_relaxation = .false. ,
 !
+  !Random-walk species: thermodiffusion coefficient c = D12/D11 - 3/2 (3.5 in the 1/nu regime). The walkers
+  !carry no energy, so the temperature-gradient drive enters as the drift -c*B*d(ln T)/ds (0 = off)
+  thermodiffusion_coefficient = 0.0d0 ,
+!
   !Start from the potential (phi_elec_1d_<src>_<upd>.dat, 1D only) and/or the particle source
   !(particle_source_<k>.dat) of an earlier run on the same grid ('' = initial potential / target density)
   restart_phi_file = '' ,

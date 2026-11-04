@@ -144,6 +144,7 @@ module gorilla_applets_types_mod
     integer  :: n_particles_diffusion = 40000       !used in self consistent electric field: test particles per flux surface in the diffusion calibration
     real(dp) :: diffusion_tau = -1.0_dp             !used in self consistent electric field: tracing time [s] of the diffusion calibration (<=0 = hardcoded per species)
     real(dp) :: potential_relaxation_factor = 1.0_dp/3.0_dp  !used in self consistent electric field: under-relaxation of the potential update (not for boole_static_ne)
+    real(dp) :: thermodiffusion_coefficient = 0.0_dp !used in self consistent electric field: c = D12/D11 - 3/2 of the random walk, drift -c*B*d(ln T)/ds (0 = off; 3.5 in the 1/nu regime)
     logical  :: boole_adaptive_relaxation = .false. !used in self consistent electric field: per-shell relaxation factors adapted from the response of the charge imbalance (1D, starts at potential_relaxation_factor)
     character(len=256) :: restart_phi_file = ''    !used in self consistent electric field: phi_elec_1d_*_*.dat of an earlier run to start from (1D, '' = start from the initial potential)
     character(len=256) :: restart_source_file = '' !used in self consistent electric field: particle_source_*.dat of an earlier run to start from ('' = target density)
