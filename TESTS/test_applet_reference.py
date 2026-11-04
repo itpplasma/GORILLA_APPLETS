@@ -219,8 +219,31 @@ if os.environ.get("UPDATE_REFERENCE") == "1":
         shutil.copy(WORK_DIR / name, REFERENCE_DIR / name)
     sys.exit(f"Reference files of {MODE_NAME} updated in {REFERENCE_DIR}; rerun without UPDATE_REFERENCE")
 
+def compare_moments_summary(name: str, n_rows: int, rtol: float) -> None:
+    """Compare a summary written by summarise_moments. The sums of absolute values and of
+    squares are compared relative to themselves. The signed sums (row 1) and row-index
+    weighted sums (row 4) can cancel to much less than their terms, so they are compared
+    relative to the size of their terms, sum|v| and n_rows*sum|v| of the reference."""
+    obs = [[float(t) for t in ln.split()] for ln in (WORK_DIR / name).read_text().splitlines() if ln.strip()]
+    ref = [[float(t) for t in ln.split()] for ln in (REFERENCE_DIR / name).read_text().splitlines() if ln.strip()]
+    if len(obs) != 4 or len(ref) != 4 or any(len(o) != len(r) for o, r in zip(obs, ref)):
+        sys.exit(f"FAIL: shape mismatch in {name}")
+    scale = [ref[1], ref[1], ref[2], [n_rows * v for v in ref[1]]]
+    for i in range(4):
+        for j, (a, b) in enumerate(zip(obs[i], ref[i])):
+            tol = rtol * abs(scale[i][j]) + 1.0e-14
+            if abs(a - b) > tol:
+                sys.exit(f"FAIL: value mismatch in {name} line {i + 1} token {j + 1}: observed {a!r} "
+                         f"vs reference {b!r} (|diff|={abs(a - b):.3e}, tol={tol:.3e})")
+    print(f"PASS: {name} matches reference within tolerance.")
+
+
 for name in MODE["reference_files"]:
     check_rows(name)   # compare_numeric_file would let NaN through
-    compare_numeric_file(WORK_DIR / name, REFERENCE_DIR / name, rtol=1.0e-10, atol=1.0e-14)
+    if name == "fourier_moments_summary.dat":
+        n_rows = sum(1 for ln in (WORK_DIR / "fourier_moments.dat").read_text().splitlines() if ln.strip())
+        compare_moments_summary(name, n_rows, rtol=1.0e-10)
+    else:
+        compare_numeric_file(WORK_DIR / name, REFERENCE_DIR / name, rtol=1.0e-10, atol=1.0e-14)
 
 print(f"PASS: {MODE_NAME} outputs match the reference")
