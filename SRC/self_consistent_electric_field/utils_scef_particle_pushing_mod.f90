@@ -174,18 +174,14 @@ end subroutine parallelised_particle_pushing
 subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_status,ind_tetr,iface, n,local_tetr_moments, &
                                 local_counter,species, j, t_step_s, k, boole_diffusion_coefficient,local_rr)
 
-    use pusher_tetra_rk_mod, only: pusher_tetra_rk
-    use pusher_tetra_poly_mod, only: pusher_tetra_poly
     use tetra_physics_mod, only: tetra_physics
-    use gorilla_settings_mod, only: ipusher, poly_order, optional_quantities_type
-    use orbit_timestep_gorilla_mod, only: check_coordinate_domain
+    use gorilla_settings_mod, only: optional_quantities_type
     use supporting_functions_mod, only: vperp_func
-    use find_tetra_mod, only: find_tetra
-    use gorilla_applets_types_mod, only: counter_t, particle_status_t, g, start, s, in, time_t, maximum_s, weights
+    use gorilla_applets_types_mod, only: counter_t, particle_status_t, start, s, in, time_t, maximum_s, weights
     use tetra_grid_settings_mod, only: grid_kind, sfc_s_min
-    use utils_orbit_timestep_mod, only: identify_particles_entering_annulus, update_local_tetr_moments, &
-                                        initialize_constants_of_motion, compute_radial_fluxes, calc_particle_jperp, &
-                                        calc_particle_weights_and_jperp
+    use utils_orbit_timestep_mod, only: update_local_tetr_moments, initialize_constants_of_motion, &
+                                        compute_radial_fluxes, calc_particle_jperp, calc_particle_weights_and_jperp, &
+                                        place_particle_on_grid, push_within_tetrahedron
     use constants, only: echarge
     use russian_roulette_mod, only: play_russian_roulette, rr, local_rr_t
 
@@ -211,13 +207,11 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
 
     v = sqrt(vpar**2+vperp**2)
     if(.not.particle_status%initialized) then !If orbit_timestep is called for the first time without grid position
-        call check_coordinate_domain(x) !Check coordinate domain (optionally perform modulo operation)
-        call find_tetra(x,vpar,vperp,ind_tetr,iface) !Find tetrahedron index and face index for position x
+        call place_particle_on_grid(x, vpar, vperp, ind_tetr, iface, z_save)
         if(ind_tetr.eq.-1) then !If particle doesn't lie inside any tetrahedron
             t%remain = t%step
             return
         endif
-        z_save = x-tetra_physics(ind_tetr)%x1
         if ((j.eq.1).or.(.not.in%boole_static_ne)) then
             if (boole_diffusion_coefficient) then
                 !Calibration: uniform weight 1/n_particles so delta_s statistics are unweighted.
@@ -274,15 +268,9 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         t_pusher = t%remain
         if (boole_diffusion_coefficient) t_pusher = min(t%remain,t_step_s)
 
-        select case(ipusher) !Calculate trajectory
-            case(1)
-                call pusher_tetra_rk(ind_tetr,iface,x,vpar,z_save,t%remain,t_pass,boole_t_finished,iper_phi, &
+        call push_within_tetrahedron(ind_tetr, iface, x, vpar, z_save, t_pusher, t_pass, boole_t_finished, iper_phi, &
+                                     optional_quantities, &
                                      boole_pusher_failed)
-            case(2)
-                call pusher_tetra_poly(poly_order,ind_tetr,iface,x,vpar,z_save,t_pusher, &
-                                                    & t_pass,boole_t_finished,iper_phi,optional_quantities, &
-                                                    & boole_pusher_failed=boole_pusher_failed)
-        end select
         if (boole_pusher_failed) local_counter%pusher_failures = local_counter%pusher_failures + 1 !recovered at the top of the loop
 
         vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
