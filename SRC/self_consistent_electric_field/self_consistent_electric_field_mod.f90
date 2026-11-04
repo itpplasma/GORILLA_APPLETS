@@ -127,7 +127,7 @@ subroutine run_scef_iterations(source_step)
     !times and update the electric potential each time. source_step is the source-update
     !iteration index, passed to perform_electric_potential_update for file naming.
 
-    use gorilla_applets_types_mod, only: in, ep, output, exit_data, one_d
+    use gorilla_applets_types_mod, only: in, ep, output, exit_data, one_d, start
     use utils_data_pre_and_post_processing_mod, only: prepare_next_round_of_parallelised_particle_pushing, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared
     use utils_scef_particle_init_mod, only: calc_starting_conditions
@@ -136,7 +136,7 @@ subroutine run_scef_iterations(source_step)
     use utils_scef_diffusion_mod, only: calc_density_via_random_walk
 
     integer, intent(in) :: source_step
-    integer :: i, species
+    integer :: i, species, n_at_limit
     real(dp) :: mismatch
     logical :: boole_allow_early_exit, boole_converged, boole_last_update
 
@@ -157,6 +157,13 @@ subroutine run_scef_iterations(source_step)
                 call parallelised_particle_pushing(species,i,boole_diffusion_coefficient=.false.)
                 call normalise_prism_moments_and_prism_moments_squared(species)
                 ep%mean_exit_time(species) = sum(exit_data%t_confined(:, species))/in%num_particles
+                !markers stopped at the tracing time limit (still confined): their density is cut off there
+                n_at_limit = count(exit_data%t_confined(:, species).ge.(1.0_dp - 1.0d-10)*start%t(species))
+                print*, 'species ', species, ': ', n_at_limit, ' of ', in%num_particles, &
+                        ' markers reached the tracing time limit ', start%t(species), ' s, share of the tracing time: ', &
+                        sum(exit_data%t_confined(:, species), mask=exit_data%t_confined(:, species) &
+                            .ge.(1.0_dp - 1.0d-10)*start%t(species))/max(sum(exit_data%t_confined(:, species)), tiny(1.0_dp)), &
+                        ', longest: ', maxval(exit_data%t_confined(:, species)), ' s'
             endif
         enddo
 

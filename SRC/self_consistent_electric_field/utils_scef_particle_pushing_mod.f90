@@ -36,7 +36,6 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
     complex(dp), dimension(:,:), allocatable          :: local_tetr_moments
-    logical                                           :: thread_flag = .true.
     type(local_rr_t)                                  :: local_rr
     real(dp), dimension(10)                           :: particle_state_for_rr
     real(dp), dimension(:), allocatable               :: marker_shell, shell_sum, shell_sum_sq
@@ -81,19 +80,17 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p,l,n,i,x,v_save,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
     !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init) &
-    !$OMP& FIRSTPRIVATE(thread_flag,local_rr,marker_shell,shell_sum,shell_sum_sq)
+    !$OMP& FIRSTPRIVATE(local_rr,marker_shell,shell_sum,shell_sum_sq)
     if (omp_get_thread_num().eq.0) print*, 'get number of threads', omp_get_num_threads()
-    !$OMP DO SCHEDULE(static)
-    !SCHEDULE(dynamic,1)
-    !SCHEDULE(static)
+    !Dynamic scheduling: marker lifetimes differ by orders of magnitude (long-lived ions in the core),
+    !so fixed blocks of markers per thread leave most threads idle. The random numbers are seeded per
+    !marker (pair), so the result does not depend on which thread pushes which marker.
+    !$OMP DO SCHEDULE(dynamic,1)
 
     !Loop over particles
     do p = 1,n_particles/iantithetic
 
-        if ((.not.in%boole_precalc_collisions).and.thread_flag) then
-            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num(), j)
-            thread_flag = .false.
-        endif
+        if (.not.in%boole_precalc_collisions) call initialise_seed_for_random_numbers_for_each_thread(p, j)
 
         do l = 1,iantithetic
             n = (p-1)*iantithetic+l
@@ -193,6 +190,10 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     enddo !n
     !$OMP END DO
     !$OMP END PARALLEL
+
+    !The serial code after this (e.g. the electron random walk) draws from the master thread's stream, whose
+    !last per-marker seed depends on the dynamic schedule: reset it to a fixed state
+    if (.not.in%boole_precalc_collisions) call initialise_seed_for_random_numbers_for_each_thread(n_particles+1, j)
 
     print*, 'Total tracing time of all particles divided by number of particles is: ', t_tot/n_particles, 's'
 

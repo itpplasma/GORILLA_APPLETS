@@ -483,6 +483,7 @@ subroutine set_particle_type_specifications
     start%particle_mass = (/mass, ame/)
     start%cm_over_e = (/cm_over_e, -clight*ame/echarge/)
     start%t = (/in%time_step, in%time_step/) !/42.0_dp
+    if (in%ion_tracing_time_limit.gt.0.0_dp) start%t(1) = in%ion_tracing_time_limit
     if (in%boole_static_ne) start%t(2) = 0.0_dp
 
     start%v0 = sqrt(2.0_dp*in%energy_eV*ev2erg/start%particle_mass)

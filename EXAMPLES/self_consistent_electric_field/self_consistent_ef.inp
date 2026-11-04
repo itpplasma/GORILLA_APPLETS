@@ -143,6 +143,10 @@
   !carry no energy, so the temperature-gradient drive enters as the drift -c*B*d(ln T)/ds (0 = off)
   thermodiffusion_coefficient = 0.0d0 ,
 !
+  !> 0: maximum tracing time [s] of honestly traced ions (electrons keep time_step). Ions still confined
+  !then are stopped, so their density contribution is cut off; the share is printed every update (<= 0: time_step)
+  ion_tracing_time_limit = -1.0d0 ,
+!
   !Start from the potential (phi_elec_1d_<src>_<upd>.dat, 1D only) and/or the particle source
   !(particle_source_<k>.dat) of an earlier run on the same grid ('' = initial potential / target density)
   restart_phi_file = '' ,
