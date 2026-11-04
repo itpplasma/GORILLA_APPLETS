@@ -11,8 +11,10 @@ one source update after two electric potential updates. The fixed cost is
 splining the VMEC equilibrium (about 6 s).
 
 The outputs are compared against TESTS/REFERENCE/self_consistent_electric_field/.
-The run is pinned to one OpenMP thread, because the random numbers a particle
-draws depend on the thread that traces it. After an intended change of the
+The run is pinned to one OpenMP thread. The honest pusher (used by the
+diffusion calibration) seeds its random numbers per marker, so its results no
+longer depend on the thread count, but the summation order of the per-thread
+moments still changes the last bits. After an intended change of the
 results, rerun the test and copy the files listed in REFERENCE_FILES from the
 work dir into the reference dir.
 
