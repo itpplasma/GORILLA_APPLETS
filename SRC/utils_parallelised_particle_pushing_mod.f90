@@ -52,6 +52,7 @@ subroutine initialise_loop_variables(l, n, local_counter,particle_status,t,local
 
 use gorilla_applets_types_mod, only: in, counter_t, start, time_t, particle_status_t
 use constants, only: ev2erg
+use utils_orbit_timestep_mod, only: is_touched
 use gorilla_applets_settings_mod, only: i_option
 
 integer, intent(in) :: l, n
@@ -73,7 +74,8 @@ particle_status%exit = .false.
 t%step = in%time_step
 if (present(species_in)) t%step = start%t(species)
 t%confined = 0.0_dp
-if (l.eq.1) local_tetr_moments = 0.0_dp
+!with touched-tetrahedron tracking, add_marker_moments_to_thread_sums resets the moments instead
+if ((l.eq.1).and.(.not.allocated(is_touched))) local_tetr_moments = 0.0_dp
 pitchpar = start%pitch(n,species)
 x = start%x(:,n,species)
 v = sqrt(start%energy(n,species)*ev2erg*2/start%particle_mass(species))
@@ -116,8 +118,76 @@ subroutine add_local_tetr_moments_to_output(local_tetr_moments,species_in)
             &  local_tetr_moments(:,(/(2+3*k,k = 0,n_prisms-1)/)) + &
             &  local_tetr_moments(:,(/(3+3*k,k = 0,n_prisms-1)/)))**2
     endif
-    
+
 end subroutine add_local_tetr_moments_to_output
+
+subroutine add_marker_moments_to_thread_sums(local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared)
+
+    !Adds the moments of one marker (or antithetic pair) to the sums of the calling thread, without
+    !synchronisation. The squared moments need the square of the marker's total per prism (its
+    !contributions to a prism are correlated), so they are formed here, marker by marker.
+    !With touched-tetrahedron tracking, only the visited tetrahedra are transferred and then reset.
+
+    use gorilla_applets_types_mod, only: moment_specs
+    use utils_orbit_timestep_mod, only: touched_tetr, is_touched, n_touched
+
+    complex(dp), dimension(:,:), intent(inout) :: local_tetr_moments
+    complex(dp), dimension(:,:), intent(inout) :: thread_tetr_moments, thread_prism_moments_squared
+    integer :: i, k, ind_tetr, first_in_prism
+
+    if (.not.allocated(is_touched)) then
+        thread_tetr_moments = thread_tetr_moments + local_tetr_moments
+        if (moment_specs%boole_squared_moments) then
+            do k = 1, size(thread_prism_moments_squared, 2)
+                thread_prism_moments_squared(:,k) = thread_prism_moments_squared(:,k) + &
+                    (local_tetr_moments(:,3*k-2) + local_tetr_moments(:,3*k-1) + local_tetr_moments(:,3*k))**2
+            enddo
+        endif
+        return
+    endif
+
+    do i = 1, n_touched
+        ind_tetr = touched_tetr(i)
+        thread_tetr_moments(:,ind_tetr) = thread_tetr_moments(:,ind_tetr) + local_tetr_moments(:,ind_tetr)
+        if (moment_specs%boole_squared_moments) then
+            !square each touched prism once, at its first touched tetrahedron
+            k = (ind_tetr + 2)/3
+            first_in_prism = 3*k - 2
+            do while (.not.is_touched(first_in_prism))
+                first_in_prism = first_in_prism + 1
+            enddo
+            if (first_in_prism.eq.ind_tetr) thread_prism_moments_squared(:,k) = thread_prism_moments_squared(:,k) + &
+                (local_tetr_moments(:,3*k-2) + local_tetr_moments(:,3*k-1) + local_tetr_moments(:,3*k))**2
+        endif
+    enddo
+    do i = 1, n_touched
+        local_tetr_moments(:,touched_tetr(i)) = (0.0_dp, 0.0_dp)
+        is_touched(touched_tetr(i)) = .false.
+    enddo
+    n_touched = 0
+
+end subroutine add_marker_moments_to_thread_sums
+
+subroutine add_thread_moments_to_output(thread_tetr_moments, thread_prism_moments_squared, species)
+
+    !Adds the moment sums of one thread to the output; call once per thread inside a critical section.
+
+    use gorilla_applets_types_mod, only: moment_specs, output
+
+    complex(dp), dimension(:,:), intent(in) :: thread_tetr_moments, thread_prism_moments_squared
+    integer, intent(in) :: species
+    integer :: k
+
+    output%tetr_moments(:,:,species) = output%tetr_moments(:,:,species) + thread_tetr_moments
+    do k = 1, size(output%prism_moments, 2)
+        output%prism_moments(:,k,species) = output%prism_moments(:,k,species) + &
+            thread_tetr_moments(:,3*k-2) + thread_tetr_moments(:,3*k-1) + thread_tetr_moments(:,3*k)
+    enddo
+    if (moment_specs%boole_squared_moments) then
+        output%prism_moments_squared(:,:,species) = output%prism_moments_squared(:,:,species) + thread_prism_moments_squared
+    endif
+
+end subroutine add_thread_moments_to_output
 
 subroutine set_counter_zero(counter)
 

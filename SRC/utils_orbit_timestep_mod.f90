@@ -3,8 +3,36 @@ module utils_orbit_timestep_mod
     use, intrinsic :: iso_fortran_env, only: dp => real64
 
     implicit none
-   
+
+    !Tetrahedra with moment contributions from the current marker, per thread. Only active between
+    !start_ and stop_touched_tetr_tracking; then the moments of a marker are transferred and reset
+    !for these tetrahedra only instead of the whole grid.
+    integer, dimension(:), allocatable :: touched_tetr
+    logical, dimension(:), allocatable :: is_touched
+    integer :: n_touched = 0
+    !$omp threadprivate(touched_tetr, is_touched, n_touched)
+
 contains
+
+subroutine start_touched_tetr_tracking(ntetr)
+
+    integer, intent(in) :: ntetr
+
+    if (allocated(touched_tetr)) deallocate(touched_tetr)
+    if (allocated(is_touched)) deallocate(is_touched)
+    allocate(touched_tetr(ntetr), is_touched(ntetr))
+    is_touched = .false.
+    n_touched = 0
+
+end subroutine start_touched_tetr_tracking
+
+subroutine stop_touched_tetr_tracking
+
+    if (allocated(touched_tetr)) deallocate(touched_tetr)
+    if (allocated(is_touched)) deallocate(is_touched)
+    n_touched = 0
+
+end subroutine stop_touched_tetr_tracking
 
 subroutine identify_particles_entering_annulus(x,local_counter,boole_lost_inside)
 
@@ -56,6 +84,14 @@ subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quan
                                                     & weights%w(n,species)*optional_quantities%vpar2_int
         end select
     enddo
+
+    if (allocated(is_touched)) then
+        if (.not.is_touched(ind_tetr)) then
+            is_touched(ind_tetr) = .true.
+            n_touched = n_touched + 1
+            touched_tetr(n_touched) = ind_tetr
+        endif
+    endif
 
 end subroutine update_local_tetr_moments
 
@@ -245,17 +281,16 @@ subroutine compute_radial_fluxes(ind_tetr_save,ind_tetr,x)
         if (.not.(ind_tetr.eq.-1)) then
             change = ind_r(2) - ind_r(1)
             boundary_num = max(ind_r(2), ind_r(1))
-            !$omp critical
+            !$omp atomic update
             output%radial_flux(boundary_num) = output%radial_flux(boundary_num) + change
-            !$omp end critical
         else
-            !$omp critical
             if (ind_r(1).eq.1) then
+                !$omp atomic update
                 output%radial_flux(ind_r(1)) = output%radial_flux(ind_r(1)) - 1
             else
+                !$omp atomic update
                 output%radial_flux(ind_r(1)+1) = output%radial_flux(ind_r(1)+1) + 1
             endif
-            !$omp end critical
         endif
     endif
 

@@ -111,9 +111,11 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
     use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, s
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
-    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
+    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_marker_moments_to_thread_sums, &
+        add_thread_moments_to_output, &
         add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
         initialise_seed_for_random_numbers_for_each_thread
+    use utils_orbit_timestep_mod, only: start_touched_tetr_tracking, stop_touched_tetr_tracking
 
     integer, intent(in)                               :: species
     integer, intent(in), optional                     :: n_particles_in
@@ -128,7 +130,7 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
     type(time_t)                                      :: t
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
-    complex(dp), dimension(:,:), allocatable          :: local_tetr_moments
+    complex(dp), dimension(:,:), allocatable          :: local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared
     logical                                           :: thread_flag = .true.
 
     if (present(n_particles_in)) then
@@ -149,12 +151,23 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
     t_tot = 0.0_dp
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, boole_reuse_weights, i_slice) &
+    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, boole_reuse_weights, i_slice, &
+    !$OMP& moment_specs, ntetr) &
     !$OMP& REDUCTION(+:t_tot) &
-    !$OMP& PRIVATE(p, l, n, i, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status) &
+    !$OMP& PRIVATE(p, l, n, i, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, &
+    !$OMP& thread_tetr_moments, thread_prism_moments_squared) &
     !$OMP& FIRSTPRIVATE(thread_flag)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
+
+    !moments are summed per thread and added to the output once per thread
+    allocate(thread_tetr_moments(moment_specs%n_moments,ntetr))
+    allocate(thread_prism_moments_squared(moment_specs%n_moments, &
+                                          merge(ntetr/3, 0, moment_specs%boole_squared_moments)))
+    thread_tetr_moments = (0.0_dp, 0.0_dp)
+    thread_prism_moments_squared = (0.0_dp, 0.0_dp)
+    local_tetr_moments = (0.0_dp, 0.0_dp)
+    call start_touched_tetr_tracking(ntetr)
 
     !$OMP DO SCHEDULE(static)
     do p = 1, n_particles/iantithetic
@@ -223,11 +236,14 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
             call update_start_type(x, vpar, vperp, n, species, ind_tetr)
         enddo
 
-        !$omp critical
-        call add_local_tetr_moments_to_output(local_tetr_moments, species)
-        !$omp end critical
+        call add_marker_moments_to_thread_sums(local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared)
     enddo
     !$OMP END DO
+
+    !$omp critical
+    call add_thread_moments_to_output(thread_tetr_moments, thread_prism_moments_squared, species)
+    !$omp end critical
+    call stop_touched_tetr_tracking
     !$OMP END PARALLEL
 
     print*, 'Total tracing time / number of particles: ', t_tot/n_particles, 's'
