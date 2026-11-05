@@ -51,11 +51,14 @@ add_library(GORILLA_APPLETS STATIC
 set_source_files_properties(
   utils_data_pre_and_post_processing_mod.f90
   utils_parallelised_particle_pushing_mod.f90
-  PROPERTIES COMPILE_OPTIONS "-fwrapv"
+  PROPERTIES COMPILE_OPTIONS "$<$<Fortran_COMPILER_ID:GNU>:-fwrapv>"
 )
 
+# Static-library consumers need the same OpenMP runtime.
 target_link_libraries(GORILLA_APPLETS
+  PUBLIC
   GORILLA
+  OpenMP::OpenMP_Fortran
   ${LAPACK_LIBRARIES}
   ${BLAS_LIBRARIES}
   netCDF::netcdf
