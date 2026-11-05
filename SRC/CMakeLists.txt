@@ -3,6 +3,7 @@ add_library(GORILLA_APPLETS STATIC
   boltzmann_mod.f90
   gorilla_applets_types_mod.f90
   collis_ions_mod.f90
+  homma_collision_mod.f90
   direct_vmec_integrator_mod.f90
   divertor_heat_loads_mod.f90
   field_line_tracing_mod.f90

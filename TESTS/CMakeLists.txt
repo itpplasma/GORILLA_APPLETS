@@ -25,7 +25,31 @@ target_include_directories(test_transport_normalization.x
 
 add_test(NAME transport_normalization COMMAND test_transport_normalization.x)
 
+foreach(name IN ITEMS homma_coefficients stost_cartesian)
+    add_executable(test_${name}.x test_${name}.f90)
+    target_link_libraries(test_${name}.x GORILLA_APPLETS)
+    target_include_directories(test_${name}.x
+        PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+    add_test(NAME ${name}
+             COMMAND test_${name}.x ${CMAKE_CURRENT_SOURCE_DIR}/REFERENCE/homma)
+endforeach()
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+# Only where Wolfram Language is installed (not in CI); about 6 s. The proofs
+# (DERIVATIONS/homma_hatayama_proofs.wl, about 3 min) are run by hand.
+find_program(WOLFRAM_MATH math)
+if(WOLFRAM_MATH)
+    add_test(
+        NAME homma_derivation_current
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_homma_derivation_current.py
+    )
+    set_tests_properties(homma_derivation_current PROPERTIES
+        TIMEOUT 60
+        ENVIRONMENT "APPLETS_ROOT=${CMAKE_SOURCE_DIR};WOLFRAM_MATH=${WOLFRAM_MATH}"
+    )
+endif()
 
 add_test(
     NAME alpha_lifetime
