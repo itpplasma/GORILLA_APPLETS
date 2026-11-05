@@ -54,8 +54,9 @@ type(time_t) :: t
 real(dp) :: t_step, t_confined, pitchpar, v, vpar, vperp, epsilon
 real(dp), dimension(3) :: x
 complex(dp), dimension(:,:) :: local_tetr_moments
-integer :: species = 1
+integer :: species
 
+species = 1   !not initialised in the declaration: that would imply SAVE, shared by all threads
 if (present(species_in)) species = species_in
 
 call set_counter_zero(local_counter)
@@ -90,9 +91,10 @@ subroutine add_local_tetr_moments_to_output(local_tetr_moments,species_in)
     
     complex(dp), dimension(:,:), intent(in) :: local_tetr_moments
     integer, intent(in), optional :: species_in
-    integer :: species = 1
+    integer :: species
     integer :: k, n_prisms
 
+    species = 1   !not initialised in the declaration: that would imply SAVE, shared by all threads
     if (present(species_in)) species = species_in
     
     n_prisms = ntetr/3
@@ -146,19 +148,21 @@ subroutine carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, specie
     integer, intent(in) :: i, n
     integer, intent(in), optional :: species_in
     integer, intent(in), optional :: iswmode_in
-    integer :: species = 1
-    integer :: iswmode = 1
+    integer :: species
+    integer :: iswmode
     real(dp), dimension(3), intent(inout) :: x
     real(dp), intent(inout) :: vpar, vperp
     type(time_t) :: t
     integer :: ind_tetr, iface
 
+    species = 1   !not initialised in the declaration: that would imply SAVE, shared by all threads
     if (present(species_in)) species = species_in
     !iswmode options:
     !1 - full operator (pitch-angle and energy scattering and drag)
     !2 - energy scattering and drag only
     !3 - drag only
     !4 - pitch-angle scattering only
+    iswmode = 1   !not initialised in the declaration: that would imply SAVE, shared by all threads
     if (present(iswmode_in)) iswmode = iswmode_in
 
     if (i.eq.1) call find_tetra(x,vpar,vperp,ind_tetr,iface)
@@ -360,10 +364,11 @@ subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_
     real(dp), dimension(3), intent(in)  :: x
     real(dp), intent(in)                :: t_confined, vpar, vperp
     logical, intent(in)                 :: boole_particle_lost
-    integer                             :: species = 1
+    integer                             :: species
     real(dp), dimension(3)              :: z_local
     real(dp)                            :: local_poloidal_flux
 
+    species = 1   !not initialised in the declaration: that would imply SAVE, shared by all threads
     if (present(species_in)) species = species_in
 
     if (boole_particle_lost.eqv..true.) exit_data%lost(n,species) = 1

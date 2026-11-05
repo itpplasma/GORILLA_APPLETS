@@ -35,8 +35,9 @@ subroutine update_local_tetr_moments(local_tetr_moments,ind_tetr,n,optional_quan
     integer, intent(in), optional                :: species_in
     complex(dp), dimension(:,:), intent (inout)  :: local_tetr_moments
     integer                                      :: m
-    integer                                      :: species = 1
+    integer                                      :: species
 
+    species = 1   !not initialised in the declaration: that would imply SAVE, shared by all threads
     if (present(species_in)) species = species_in
 
     do m = 1,moment_specs%n_moments
