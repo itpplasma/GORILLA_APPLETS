@@ -463,11 +463,12 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     real(dp), dimension(:), allocatable :: efcolf_l, velrat_l, enrat_l, dens_l, temp_l
     real(dp) :: v0_l
     integer :: i, j
-    integer :: species = 1
+    integer :: species
     real(dp) :: m0, z0, n0, s_value, v0, v_box
     logical :: boole_T_and_n_from_files = .false.
     logical :: boole_target_profiles
 
+    species = 1   !not initialised in the declaration: that would imply SAVE
     if (present(species_in)) species = species_in
     ! SCEF collides with its target n, T_i, T_e profiles; other applets keep their own background.
     boole_target_profiles = (i_option == 12)
@@ -712,12 +713,13 @@ subroutine normalise_prism_moments_and_prism_moments_squared(species_in, boole_s
 
     integer, intent(in), optional :: species_in
     logical, intent(in), optional :: boole_skip_time_normalisation_in
-    integer :: species = 1
+    integer :: species
     integer :: n
     real(dp) :: time
     logical :: boole_skip_time_normalisation
 
     time = in%time_step
+    species = 1   !not initialised in the declaration: that would imply SAVE
     if (present(species_in)) species = species_in
     time = start%t(species)
 

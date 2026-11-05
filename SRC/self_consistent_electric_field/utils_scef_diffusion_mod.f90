@@ -363,7 +363,7 @@ subroutine calc_density_via_random_walk(species)
     real(dp), dimension(:), allocatable :: position, weight, exit_time
     real(dp), dimension(:), allocatable :: marker_shell   !density contribution per flux shell of one marker (mean over its walkers)
     type(time_t) :: t
-    logical :: boole_lost, boole_use_fit_function = .true.
+    logical :: boole_lost, boole_use_fit_function   !set below (an initialiser would imply SAVE)
 
     particle_multiplication = max(int(1.0d4/in%num_particles),1)
     num_particles = in%num_particles*particle_multiplication

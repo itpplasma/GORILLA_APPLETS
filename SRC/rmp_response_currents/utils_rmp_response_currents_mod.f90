@@ -1238,7 +1238,7 @@ subroutine calc_particle_weights_and_jperp_rmp_response_currents(n, z_save, vpar
     real(dp), dimension(3), intent(in) :: z_save
     integer, intent(in) :: n, ind_tetr
     integer, intent(in), optional :: species_in
-    integer :: species = 1
+    integer :: species
     real(dp) :: local_poloidal_flux
     real(dp) :: r, phi, z
     real(dp) :: s_value
@@ -1247,6 +1247,7 @@ subroutine calc_particle_weights_and_jperp_rmp_response_currents(n, z_save, vpar
     pdf_velocity_space, pdf_gyroangle
     real(dp) :: density, T, m, energy_ev, energy_erg, q, Phi_elec
 
+    species = 1   !not initialised in the declaration: that would imply SAVE
     if (present(species_in)) species = species_in
 
     r = z_save(1)

@@ -395,7 +395,7 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
     real(dp), dimension(:,:,:), intent(in) :: rand_matrix
     integer, dimension(:), intent(in), optional :: species_in
     logical, intent(in), optional :: boole_diffusion_coefficient_in
-    logical :: boole_diffusion_coefficient=.false.
+    logical :: boole_diffusion_coefficient
     integer, dimension(:), allocatable :: species
     integer :: i, isp, n
     integer, intent(in), optional :: n_particles_in
@@ -415,6 +415,7 @@ subroutine set_rest_of_individual_particle_specifications(rand_matrix,boole_diff
         n_particles = in%num_particles
     endif
 
+    boole_diffusion_coefficient = .false.   !not initialised in the declaration: that would imply SAVE
     if (present(boole_diffusion_coefficient_in)) boole_diffusion_coefficient = boole_diffusion_coefficient_in
 
     start%pitch(:,species) = 2*rand_matrix(4,:,:)-1 !pitch parameter
