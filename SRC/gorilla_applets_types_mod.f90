@@ -156,6 +156,7 @@ module gorilla_applets_types_mod
     real(dp) :: diffusion_sigma_A_target = -1.0_dp  !used in self consistent electric field: >0 target statistical error [1/s] of the calibrated drift A; a surface whose error is larger is recalibrated with tau = 2B/(N sigma^2) (<=0 = off)
     real(dp) :: diffusion_max_spread_cells = 1.0_dp !used in self consistent electric field: cap of that longer tau, final spread sqrt(2 B tau) <= this many cell widths (<=0 = no cap)
     character(len=256) :: thermodiffusion_table_file = '' !used in self consistent electric field: table of c(s, -dPhi/ds) for the electron random walk, overrides thermodiffusion_coefficient ('' = off)
+    logical  :: boole_measured_drift = .false.      !used in self consistent electric field: electron random walk with the measured calibration drift A and tabulated B (no fit), the calibration field replaced by the current one
     end type input_t
 
     type(input_t) :: in
@@ -265,6 +266,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:),   allocatable :: tab_s            ! thermodiffusion table: s of the rows
     real(dp), dimension(:,:), allocatable :: tab_E, tab_c     ! (n_E, n_s): -dPhi/ds [statV] (ascending) and c
     logical                               :: boole_thermo_table = .false.
+    real(dp), dimension(:,:), allocatable :: E_cal, dB_meas, r_rest, qE_T ! (grid_size+1, species): calibration field -dPhi/ds, B' of the table, (A-B')/B - qE_cal/T, current qE/T
     end type diffusion_coefficients
 
     type(diffusion_coefficients) dc

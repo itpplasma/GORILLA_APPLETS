@@ -147,6 +147,11 @@
   !current field ('' = off). Format: first data line "n_s n_E", then n_s*n_E lines "s -dPhi/ds[statV] c"
   thermodiffusion_table_file = '' ,
 !
+  !Electron random walk with the MEASURED calibration drift and the tabulated B (no fit of ln B, no
+  !thermodiffusion model): A = dB/ds + B*(r + qE/T), r = (A_cal - dB/ds)/B - qE_cal/T from A_and_B_species<k>.dat,
+  !whose 3rd column is the calibration field -dPhi/ds [statV] (missing: field-free calibration assumed)
+  boole_measured_drift = .false. ,
+!
   !> 0: maximum tracing time [s] of honestly traced ions (electrons keep time_step). Ions still confined
   !then are stopped, so their density contribution is cut off; the share is printed every update (<= 0: time_step)
   ion_tracing_time_limit = -1.0d0 ,

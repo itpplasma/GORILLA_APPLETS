@@ -302,7 +302,7 @@ subroutine calc_diffusion_coefficients(species)
     filename = 'A_and_B_species' // trim(species_str) // '.dat'
     open(newunit=file_id,file = filename)
     do i = 1,grid_size(1)+1
-        write(file_id,*) dc%A(i, species), dc%B(i, species)
+        write(file_id,*) dc%A(i, species), dc%B(i, species), vertex_electric_field(i) !3rd: field -dPhi/ds [statV] of the calibration
     enddo
     close(file_id)
 
@@ -419,6 +419,8 @@ subroutine calc_density_via_random_walk(species)
     ! dc%grad_B = 0.0_dp
 
 
+    !With boole_measured_drift the walk uses the tabulated (measured) A and B, otherwise the fit of ln B
+    boole_use_fit_function = .not.in%boole_measured_drift
     if (.not.dc%boole_cached_data_loaded(species)) then
         call get_diffusion_coefficient_data(species, boole_use_fit_function)
         dc%boole_cached_data_loaded(species) = .true.
@@ -448,6 +450,14 @@ count_lost_particles = 0
             cell_size = g%s_vertices(k+1) - g%s_vertices(k)
             A = dc%A(k, species) + dc%grad_A(k, species)*(position(i)-g%s_vertices(k))
             B = dc%B(k, species) + dc%grad_B(k, species)*(position(i)-g%s_vertices(k))
+
+            if (in%boole_measured_drift.and.(k.eq.1)) then
+                !Axis cell: B -> 0 like s; the Ito drift B_2/s_2 replaces the measured one of the first
+                !calibrated surface (whose cloud reaches the axis), the rest of the drift is taken from it
+                B_c = dc%B(2, species)
+                B = B_c*position(i)/g%s_vertices(2)
+                A = B_c/g%s_vertices(2) + B*(dc%r_rest(2, species) + dc%qE_T(2, species))
+            endif
 
             if (boole_use_fit_function) then
                 !B from the fit of ln B; A holds q*E/T here, so the E_r drift uses the same B as the
@@ -553,18 +563,21 @@ end subroutine calc_density_via_random_walk
 
 subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
 
-    use gorilla_applets_types_mod, only: dc, g, in
+    use gorilla_applets_types_mod, only: dc, g, in, start
     use tetra_grid_settings_mod, only: grid_size
     use utils_polyfit_mod, only: quadratic_fit
+    use constants, only: ev2erg
+    use scef_target_profiles_mod, only: target_temperature, rad_from_s
 
     integer, intent(in) :: species
     logical, intent(in) :: boole_use_fit_function
 
     character(len=100) :: filename, species_str
-    integer :: id, ns, lower_bound, upper_bound
+    integer :: id, ns, lower_bound, upper_bound, ios, n_v
     real(dp), dimension(:), allocatable :: x,y
-    logical :: success
+    logical :: success, boole_field_column
     real(dp) :: a0, a1, a2
+    character(len=512) :: line
 
 
     if (.not.allocated(dc%A))                allocate(dc%A(grid_size(1)+1, 2))
@@ -575,11 +588,49 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
 
     write(species_str, '(I0)') species
     filename = 'A_and_B_species' // trim(species_str) // '.dat'
+    if (.not.allocated(dc%E_cal)) allocate(dc%E_cal(grid_size(1)+1, 2), dc%dB_meas(grid_size(1)+1, 2), &
+                                            dc%r_rest(grid_size(1)+1, 2), dc%qE_T(grid_size(1)+1, 2))
+    dc%E_cal(:, species) = 0.0_dp
+    boole_field_column = .true.
     open(newunit=id,file = filename,action='read')
     do ns = 1,grid_size(1)+1
-        read(id,*) dc%A(ns, species), dc%B(ns, species)
+        read(id,'(a)') line
+        read(line,*,iostat=ios) dc%A(ns, species), dc%B(ns, species), dc%E_cal(ns, species)
+        if (ios.ne.0) then   !files of older versions: A and B only
+            read(line,*) dc%A(ns, species), dc%B(ns, species)
+            dc%E_cal(ns, species) = 0.0_dp
+            boole_field_column = .false.
+        endif
     enddo
     close(id)
+    if (in%boole_measured_drift.and.(.not.boole_field_column)) print*, 'Warning: ', trim(filename), &
+        ' has no calibration-field column; the calibration is assumed to be field-free'
+
+    if (in%boole_measured_drift) then
+        if ((in%thermodiffusion_coefficient.ne.0.0_dp).or.(len_trim(in%thermodiffusion_table_file).gt.0)) print*, &
+            'Warning: boole_measured_drift together with a thermodiffusion model: the measured drift already contains it'
+        !B' of the tabulated B (central differences, one-sided at the ends) and the measured rest of the drift,
+        !r = (A - B')/B - qE_cal/T, which sets the zero-flux shape n'/n = r + qE/T of the walk
+        n_v = grid_size(1)+1
+        do ns = 1,n_v
+            if (ns.eq.1) then
+                dc%dB_meas(ns, species) = (dc%B(2, species)-dc%B(1, species))/(g%s_vertices(2)-g%s_vertices(1))
+            elseif (ns.eq.n_v) then
+                dc%dB_meas(ns, species) = (dc%B(n_v, species)-dc%B(n_v-1, species))/(g%s_vertices(n_v)-g%s_vertices(n_v-1))
+            else
+                dc%dB_meas(ns, species) = (dc%B(ns+1, species)-dc%B(ns-1, species))/(g%s_vertices(ns+1)-g%s_vertices(ns-1))
+            endif
+            if (dc%B(ns, species).gt.0.0_dp) then
+                dc%r_rest(ns, species) = (dc%A(ns, species) - dc%dB_meas(ns, species))/dc%B(ns, species) &
+                    - start%particle_charge(species)*dc%E_cal(ns, species) &
+                      /(target_temperature(rad_from_s(g%s_vertices(ns)), species)*ev2erg)
+            else
+                dc%r_rest(ns, species) = 0.0_dp
+            endif
+        enddo
+        if (dc%B(n_v, species).le.0.0_dp) dc%r_rest(n_v, species) = dc%r_rest(n_v-1, species)
+        print*, 'measured drift: r = (A-dB/ds)/B - qE_cal/T at the vertices: ', dc%r_rest(:, species)
+    endif
 
     dc%A_from_first_run(:, species) = dc%A(:, species)
     if (boole_use_fit_function) dc%A(:, species) = 0.0_dp
@@ -624,21 +675,19 @@ subroutine calc_convection_coefficient_from_electric_field(species, boole_use_fi
     real(dp) :: electric_field
 
     do i = 1,grid_size(1)+1
-        if (i.eq.1) then
-            electric_field = -tetra_physics(1)%gPhi(1)
-        elseif (i.eq.grid_size(1)+1) then
-            electric_field = -tetra_physics((grid_size(1)-1)*6*grid_size(2)+1)%gPhi(1)
-        else
-            electric_field = -0.5_dp*(tetra_physics((i-2)*6*grid_size(2)+1)%gPhi(1) + &
-                                      tetra_physics((i-1)*6*grid_size(2)+1)%gPhi(1))
-        endif
+        electric_field = vertex_electric_field(i)
 
         !q*E/T; with the fit function the random walk multiplies it by its fitted B, otherwise by the
         !tabulated B here
         dc%A(i, species) = start%particle_charge(species)*electric_field &
                            /(target_temperature(rad_from_s(g%s_vertices(i)), species)*ev2erg)
-        if (.not.boole_use_fit_function) dc%A(i, species) = dc%B(i, species)*dc%A(i, species) &
-                                                            + dc%A_from_first_run(i, species)
+        if (in%boole_measured_drift) then
+            !measured drift with the calibration field replaced by the current one
+            dc%qE_T(i, species) = dc%A(i, species)
+            dc%A(i, species) = dc%dB_meas(i, species) + dc%B(i, species)*(dc%r_rest(i, species) + dc%qE_T(i, species))
+        elseif (.not.boole_use_fit_function) then
+            dc%A(i, species) = dc%B(i, species)*dc%A(i, species) + dc%A_from_first_run(i, species)
+        endif
         if (dc%boole_thermo_table.and.(species.eq.2)) &
             dc%c_thermo(i, species) = thermodiffusion_table_value(g%s_vertices(i), electric_field)
     enddo
@@ -651,6 +700,28 @@ subroutine calc_convection_coefficient_from_electric_field(species, boole_use_fi
     enddo
 
 end subroutine calc_convection_coefficient_from_electric_field
+
+function vertex_electric_field(i) result(electric_field)
+
+    !-dPhi/ds [statV] at flux-surface vertex i: mean of the (1D) gradients of the two neighbouring shells,
+    !the one shell at the axis and at the edge
+
+    use tetra_physics_mod, only: tetra_physics
+    use tetra_grid_settings_mod, only: grid_size
+
+    integer, intent(in) :: i
+    real(dp) :: electric_field
+
+    if (i.eq.1) then
+        electric_field = -tetra_physics(1)%gPhi(1)
+    elseif (i.eq.grid_size(1)+1) then
+        electric_field = -tetra_physics((grid_size(1)-1)*6*grid_size(2)+1)%gPhi(1)
+    else
+        electric_field = -0.5_dp*(tetra_physics((i-2)*6*grid_size(2)+1)%gPhi(1) + &
+                                  tetra_physics((i-1)*6*grid_size(2)+1)%gPhi(1))
+    endif
+
+end function vertex_electric_field
 
 subroutine read_thermodiffusion_table()
 
