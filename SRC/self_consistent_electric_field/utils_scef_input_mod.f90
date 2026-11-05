@@ -14,7 +14,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
                 diffusion_tau_collisions, edge_buffer_width, noise_tolerance_factor, potential_relaxation_factor
     character(len=256) :: restart_phi_file, restart_source_file
     logical :: boole_adaptive_relaxation
-    real(dp) :: thermodiffusion_coefficient, ion_tracing_time_limit
+    real(dp) :: thermodiffusion_coefficient, ion_tracing_time_limit, diffusion_sigma_A_target, diffusion_max_spread_cells
+    character(len=256) :: thermodiffusion_table_file
     logical ::boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
                boole_monoenergetic, boole_linear_density_simulation, boole_antithetic_variate, &
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
@@ -38,7 +39,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & quasineutrality_tol, i_collision_mode, n_particles_diffusion, diffusion_scan_s0, diffusion_tau, &
     & diffusion_tau_collisions, edge_buffer_width, noise_tolerance_factor, potential_relaxation_factor, &
     & boole_adaptive_relaxation, restart_phi_file, restart_source_file, thermodiffusion_coefficient, &
-    & ion_tracing_time_limit
+    & ion_tracing_time_limit, diffusion_sigma_A_target, diffusion_max_spread_cells, thermodiffusion_table_file
 
     quasineutrality_tol = 0.0_dp   !optional in the .inp: no early exit unless set
     i_collision_mode = 1           !optional: full collision operator
@@ -54,6 +55,9 @@ subroutine read_self_consistent_electric_field_inp_into_type
     ion_tracing_time_limit = -1.0_dp      !optional: ions traced up to time_step
     restart_phi_file = ''        !optional: start from the initial potential
     restart_source_file = ''     !optional: start from the target density as source
+    diffusion_sigma_A_target = -1.0_dp    !optional: calibration time from the collision time only
+    diffusion_max_spread_cells = 1.0_dp   !optional
+    thermodiffusion_table_file = ''       !optional: constant thermodiffusion_coefficient
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
     read(s_inp_unit,nml=self_consistent_ef_nml)
     close(s_inp_unit)
@@ -108,6 +112,9 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%ion_tracing_time_limit = ion_tracing_time_limit
     in%restart_phi_file = restart_phi_file
     in%restart_source_file = restart_source_file
+    in%diffusion_sigma_A_target = diffusion_sigma_A_target
+    in%diffusion_max_spread_cells = diffusion_max_spread_cells
+    in%thermodiffusion_table_file = thermodiffusion_table_file
 
     print *,'GORILLA_APPLETS: Loaded input data from self_consistent_ef.inp'
 

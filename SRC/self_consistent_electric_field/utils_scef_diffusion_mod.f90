@@ -31,6 +31,12 @@ subroutine calc_diffusion_coefficients(species)
     integer :: ns, i, n_particles, file_id, n_ignored, ns_first, ns_last
     real(dp) :: extrapolation_factor, A, B, offset, tau_calibration, v0, v_max, weights_before_redistribution
     real(dp) :: standard_deviation, dummy
+    integer :: pass, quality_unit, series_unit, i0, mid, n_lost, iq
+    real(dp) :: cell_size, tau_new, tau_cap, mean_x, std_x, skewness, kurtosis, A_end, sigma_A_end, B_end, sigma_B_end, &
+                offset_A, A_half1, A_half2, rms_residual, n_coll
+    real(dp), dimension(5) :: q
+    real(dp), dimension(5), parameter :: q_levels = (/0.01_dp, 0.05_dp, 0.5_dp, 0.95_dp, 0.99_dp/)
+    real(dp), dimension(:), allocatable :: x_end, z_sorted
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str, species_str
     real(dp), dimension(:), allocatable :: data_for_diffusion_coefficient, data_for_convection_coefficient, energy_start
@@ -87,6 +93,15 @@ subroutine calc_diffusion_coefficients(species)
         ns_last = ns_first
     endif
 
+    !Quality of the calibration per flux surface (one line each): shape of the final displacement distribution,
+    !the drift from the end positions with its statistical error, and the fit of <ds>(t)
+    write(species_str, '(I0)') species
+    open(newunit=quality_unit, file='calibration_quality_species'//trim(species_str)//'.dat', status='replace')
+    write(quality_unit,'(a)') '# ns s0 tau[s] tau/local_collision_time N lost_fraction mean_ds std_ds sqrt(2*B_fit*tau) '// &
+        'std_ds/cell_width skewness excess_kurtosis q01 q05 q50 q95 q99 (quantiles of (ds-mean)/std) A_fit A_end sigma_A_end '// &
+        'A_fit_first_half A_fit_second_half rms_residual_of_<ds>(t)_fit B_fit B_end sigma_B_end n_passes'
+    close(quality_unit)
+
     do ns = ns_first,ns_last
 
         print*, 'ns = ', ns, '/', grid_size(1)
@@ -94,12 +109,16 @@ subroutine calc_diffusion_coefficients(species)
 
         !Initiate particles of `species` at the different flux surfaces leaving out the boundaries
         s%s0 = g%s_vertices(ns)
+        cell_size = 0.5_dp*(g%s_vertices(ns+1) - g%s_vertices(ns-1))
 
-        if (in%diffusion_tau_collisions.gt.0.0_dp) then
-            start%t(species) = in%diffusion_tau_collisions*local_collision_time(s%s0, species)
-            s%time = [(start%t(species)/s%k*i,i = 1,s%k)]
-            print*, 'calibration tracing time = ', start%t(species), ' s'
-        endif
+        start%t(species) = tau_calibration
+        if (in%diffusion_tau_collisions.gt.0.0_dp) start%t(species) = in%diffusion_tau_collisions*local_collision_time(s%s0, species)
+
+    !Pass 2 only if the drift's statistical error exceeds in%diffusion_sigma_A_target: it scales like tau^(-1/2), so
+    !tau is raised by (sigma_A/target)^2, capped so that the cloud stays within diffusion_max_spread_cells cell widths
+    do pass = 1,2
+        s%time = [(start%t(species)/s%k*i,i = 1,s%k)]
+        print*, 'calibration tracing time = ', start%t(species), ' s'
 
         call RANDOM_NUMBER(rand_matrix)
         call set_starting_positions(rand_matrix,(/species/), s%s0)
@@ -110,7 +129,7 @@ subroutine calc_diffusion_coefficients(species)
 
         call prepare_next_round_of_parallelised_particle_pushing(species)
 
-        if (ns.eq.ns_first) then
+        if ((ns.eq.ns_first).and.(pass.eq.1)) then
             call calc_collision_coefficients_for_all_tetrahedra(species)
 
             v0 = start%v0(species)
@@ -139,10 +158,32 @@ subroutine calc_diffusion_coefficients(species)
 
 
         call llsq ( int(s%k - i + 1, kind=8), s%time(i:s%k), s%delta_s(i:s%k), A, offset)
+        offset_A = offset
 
         data_for_diffusion_coefficient = s%delta_s_squared-2*A*s%time*s%delta_s+A**2*s%time**2
         call llsq ( int(s%k - i + 1, kind=8), s%time(i:s%k), data_for_diffusion_coefficient, B, offset)
         B = B/2
+
+        x_end = exit_data%x(1,1:s%n_particles,species)
+        mean_x = sum(x_end)/s%n_particles
+        std_x = sqrt(sum((x_end-mean_x)**2)/(s%n_particles-1))
+        sigma_A_end = std_x/sqrt(dble(s%n_particles))/start%t(species)
+
+        if ((pass.eq.2).or.(in%diffusion_sigma_A_target.le.0.0_dp)) exit
+        if (sigma_A_end.le.in%diffusion_sigma_A_target) exit
+        tau_new = start%t(species)*(sigma_A_end/in%diffusion_sigma_A_target)**2
+        if ((in%diffusion_max_spread_cells.gt.0.0_dp).and.(std_x.gt.0.0_dp)) then
+            tau_cap = start%t(species)*(in%diffusion_max_spread_cells*cell_size/std_x)**2
+            if (tau_new.gt.tau_cap) then
+                print*, 'calibration: sigma_A target not reachable within ', in%diffusion_max_spread_cells, &
+                        ' cell widths of spread; tau capped (more particles needed)'
+                tau_new = tau_cap
+            endif
+        endif
+        if (tau_new.le.1.01_dp*start%t(species)) exit
+        print*, 'calibration: sigma_A = ', sigma_A_end, ' > target ', in%diffusion_sigma_A_target, ', recalibrating'
+        start%t(species) = tau_new
+    enddo
 
         ! n_ignored = 0
         ! data_for_convection_coefficient = exit_data%x(1,:,species)-s%s0
@@ -168,6 +209,41 @@ subroutine calc_diffusion_coefficients(species)
         print*, 'B = ', B
     write(ns_str, '(I0)') ns
     write(species_str, '(I0)') species
+
+    !Quality of this surface's calibration
+    z_sorted = (x_end-mean_x)/std_x
+    call quicksort(z_sorted, 1, s%n_particles)
+    do iq = 1,5
+        q(iq) = z_sorted(max(1,min(s%n_particles, nint(q_levels(iq)*s%n_particles))))
+    enddo
+    skewness = sum(z_sorted**3)/s%n_particles
+    kurtosis = sum(z_sorted**4)/s%n_particles - 3.0_dp
+    n_lost = count(exit_data%lost(1:s%n_particles,species).ne.0)
+    A_end = (mean_x - s%s0)/start%t(species)
+    B_end = sum((x_end-mean_x)**2)/s%n_particles/(2.0_dp*start%t(species))
+    sigma_B_end = B_end*sqrt(sum(((x_end-mean_x)**2 - 2.0_dp*B_end*start%t(species))**2)/(s%n_particles-1)) &
+                  /(2.0_dp*B_end*start%t(species))/sqrt(dble(s%n_particles))
+    i0 = ceiling(dble(s%k)*0.2_dp)
+    mid = (i0 + s%k)/2
+    rms_residual = sqrt(sum((s%delta_s(i0:s%k) - (A*s%time(i0:s%k) + offset_A))**2)/(s%k - i0 + 1))
+    call llsq ( int(mid - i0 + 1, kind=8), s%time(i0:mid), s%delta_s(i0:mid), A_half1, offset)
+    call llsq ( int(s%k - mid, kind=8), s%time(mid+1:s%k), s%delta_s(mid+1:s%k), A_half2, offset)
+    n_coll = start%t(species)/local_collision_time(s%s0, species)
+    open(newunit=quality_unit, file='calibration_quality_species'//trim(species_str)//'.dat', position='append')
+        write(quality_unit,'(i4,25es14.5,i3)') ns, s%s0, start%t(species), n_coll, dble(s%n_particles), &
+            dble(n_lost)/s%n_particles, mean_x - s%s0, std_x, sqrt(2.0_dp*max(B,0.0_dp)*start%t(species)), std_x/cell_size, &
+            skewness, kurtosis, q, A, A_end, sigma_A_end, A_half1, A_half2, rms_residual, B, B_end, sigma_B_end, pass
+    close(quality_unit)
+
+    !<ds>(t), <ds^2>(t) and the number of contributions per time sample, for checking the fits afterwards
+    filename = 'calibration_series_species' // trim(species_str) // '_' // trim(ns_str) // '.dat'
+    open(newunit=series_unit, file=filename)
+        write(series_unit,'(a)') '# t[s] <ds> <ds^2> n_contributions (fit window: last 80 % of the samples)'
+        do iq = 1,s%k
+            write(series_unit,'(3es16.7,i9)') s%time(iq), s%delta_s(iq), s%delta_s_squared(iq), s%check(iq)
+        enddo
+    close(series_unit)
+
     filename = 'exit_s_values_species' // trim(species_str) // '_' // trim(ns_str) // '.dat'
     !columns: final s, start energy [eV], final energy [eV], lost (1) or not (0)
     open(newunit=file_id,file = filename)
@@ -278,7 +354,7 @@ subroutine calc_density_via_random_walk(species)
 
     integer, intent(in) :: species
 
-    real(dp) :: delta_x, delta_t, xi, A, B, cell_size, s_c, B_c, s_lo, s_hi
+    real(dp) :: delta_x, delta_t, xi, A, B, cell_size, s_c, B_c, s_lo, s_hi, c_thermo
     integer :: i, ns, k, num_steps_min, count_lost_particles, num_particles, particle_multiplication
     integer :: density_unit, n, ind_tetr, iface
     real(dp), dimension(3) :: x_particle, z_save
@@ -392,10 +468,14 @@ count_lost_particles = 0
 
             !Thermodiffusion: the walkers carry no energy, so the flux driven by the temperature gradient,
             !-c*B*n*d(ln T)/ds with c = D12/D11 - 3/2, enters as an explicit drift (central difference in s)
-            if (in%thermodiffusion_coefficient.ne.0.0_dp) then
+            !With thermodiffusion_table_file, c comes from the table at the current field (linear between vertices)
+            c_thermo = in%thermodiffusion_coefficient
+            if (dc%boole_thermo_table.and.(species.eq.2)) c_thermo = dc%c_thermo(k, species) &
+                + (dc%c_thermo(k+1, species)-dc%c_thermo(k, species))*(position(i)-g%s_vertices(k))/cell_size
+            if (c_thermo.ne.0.0_dp) then
                 s_lo = max(position(i) - 1.0d-4, 0.0_dp)
                 s_hi = min(position(i) + 1.0d-4, 1.0_dp)
-                A = A - in%thermodiffusion_coefficient*B &
+                A = A - c_thermo*B &
                         *log(target_temperature(rad_from_s(s_hi), species)/target_temperature(rad_from_s(s_lo), species)) &
                         /(s_hi - s_lo)
             endif
@@ -473,7 +553,7 @@ end subroutine calc_density_via_random_walk
 
 subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
 
-    use gorilla_applets_types_mod, only: dc, g
+    use gorilla_applets_types_mod, only: dc, g, in
     use tetra_grid_settings_mod, only: grid_size
     use utils_polyfit_mod, only: quadratic_fit
 
@@ -503,6 +583,10 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
 
     dc%A_from_first_run(:, species) = dc%A(:, species)
     if (boole_use_fit_function) dc%A(:, species) = 0.0_dp
+
+    if ((species.eq.2).and.(len_trim(in%thermodiffusion_table_file).gt.0)) call read_thermodiffusion_table()
+    if (.not.allocated(dc%c_thermo)) allocate(dc%c_thermo(grid_size(1)+1, 2))
+    dc%c_thermo(:, species) = 0.0_dp
 
     do ns = 1,grid_size(1)
         dc%grad_A(ns, species) = (dc%A(ns+1, species)-dc%A(ns, species))/(g%s_vertices(ns+1)-g%s_vertices(ns))
@@ -555,13 +639,118 @@ subroutine calc_convection_coefficient_from_electric_field(species, boole_use_fi
                            /(target_temperature(rad_from_s(g%s_vertices(i)), species)*ev2erg)
         if (.not.boole_use_fit_function) dc%A(i, species) = dc%B(i, species)*dc%A(i, species) &
                                                             + dc%A_from_first_run(i, species)
+        if (dc%boole_thermo_table.and.(species.eq.2)) &
+            dc%c_thermo(i, species) = thermodiffusion_table_value(g%s_vertices(i), electric_field)
     enddo
+    if (dc%boole_thermo_table.and.(species.eq.2)) then
+        print*, 'thermodiffusion c from the table at the vertices: ', dc%c_thermo(:, species)
+    endif
 
     do ns = 1,grid_size(1)
         dc%grad_A(ns, species) = (dc%A(ns+1, species)-dc%A(ns, species))/(g%s_vertices(ns+1)-g%s_vertices(ns))
     enddo
 
 end subroutine calc_convection_coefficient_from_electric_field
+
+subroutine read_thermodiffusion_table()
+
+    !Thermodiffusion coefficient c = D12/D11 - 3/2 of the electrons as a table in s and in the field -dPhi/ds [statV]
+    !(GORILLA units, so no minor radius is needed). File format, '#' lines are comments:
+    !   n_s n_E
+    !   n_s*n_E lines "s  -dPhi/ds  c", s ascending in blocks of n_E lines, -dPhi/ds ascending within each block
+    !Outside the table c is continued with the value at its edge.
+
+    use gorilla_applets_types_mod, only: dc, in
+
+    integer :: id, n_s, n_E, i, j, ios
+    character(len=512) :: line
+    real(dp) :: s_read
+
+    open(newunit=id, file=trim(in%thermodiffusion_table_file), action='read', status='old')
+    do
+        read(id,'(a)') line
+        line = adjustl(line)
+        if (len_trim(line).eq.0) cycle
+        if (line(1:1).ne.'#') exit
+    enddo
+    read(line,*) n_s, n_E
+    if (allocated(dc%tab_s)) deallocate(dc%tab_s, dc%tab_E, dc%tab_c)
+    allocate(dc%tab_s(n_s), dc%tab_E(n_E, n_s), dc%tab_c(n_E, n_s))
+    do i = 1,n_s
+        do j = 1,n_E
+            do
+                read(id,'(a)',iostat=ios) line
+                if (ios.ne.0) then
+                    print*, 'Error: thermodiffusion table ', trim(in%thermodiffusion_table_file), ' is too short'
+                    stop
+                endif
+                line = adjustl(line)
+                if ((len_trim(line).gt.0).and.(line(1:1).ne.'#')) exit
+            enddo
+            read(line,*) s_read, dc%tab_E(j,i), dc%tab_c(j,i)
+            if (j.eq.1) then
+                dc%tab_s(i) = s_read
+            elseif (s_read.ne.dc%tab_s(i)) then
+                print*, 'Error: thermodiffusion table: s changes inside a block (row ', i, ', column ', j, ')'
+                stop
+            endif
+        enddo
+    enddo
+    close(id)
+    dc%boole_thermo_table = .true.
+    print*, 'thermodiffusion table read: ', n_s, ' values of s in [', dc%tab_s(1), ',', dc%tab_s(n_s), '], ', n_E, ' fields'
+
+end subroutine read_thermodiffusion_table
+
+function thermodiffusion_table_value(s0, field) result(c)
+
+    !Bilinear interpolation of the thermodiffusion table (linear in the field within the two neighbouring rows,
+    !then linear in s), constant beyond its edges
+
+    use gorilla_applets_types_mod, only: dc
+
+    real(dp), intent(in) :: s0, field
+    real(dp) :: c, c_lo, c_hi, w
+    integer :: i, n_s
+
+    n_s = size(dc%tab_s)
+    if (s0.le.dc%tab_s(1)) then
+        c = interp_row(1)
+    elseif (s0.ge.dc%tab_s(n_s)) then
+        c = interp_row(n_s)
+    else
+        i = 1
+        do while (dc%tab_s(i+1).lt.s0)
+            i = i + 1
+        enddo
+        w = (s0 - dc%tab_s(i))/(dc%tab_s(i+1) - dc%tab_s(i))
+        c_lo = interp_row(i)
+        c_hi = interp_row(i+1)
+        c = (1.0_dp - w)*c_lo + w*c_hi
+    endif
+
+contains
+
+    function interp_row(ir) result(cr)
+        integer, intent(in) :: ir
+        real(dp) :: cr, wr
+        integer :: j, n_E
+        n_E = size(dc%tab_E, 1)
+        if (field.le.dc%tab_E(1,ir)) then
+            cr = dc%tab_c(1,ir)
+        elseif (field.ge.dc%tab_E(n_E,ir)) then
+            cr = dc%tab_c(n_E,ir)
+        else
+            j = 1
+            do while (dc%tab_E(j+1,ir).lt.field)
+                j = j + 1
+            enddo
+            wr = (field - dc%tab_E(j,ir))/(dc%tab_E(j+1,ir) - dc%tab_E(j,ir))
+            cr = (1.0_dp - wr)*dc%tab_c(j,ir) + wr*dc%tab_c(j+1,ir)
+        endif
+    end function interp_row
+
+end function thermodiffusion_table_value
 
 subroutine sort_array(array)
   real(dp), dimension(:) :: array

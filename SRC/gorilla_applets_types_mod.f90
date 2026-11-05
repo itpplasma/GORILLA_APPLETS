@@ -153,6 +153,9 @@ module gorilla_applets_types_mod
     real(dp) :: diffusion_tau_collisions = -1.0_dp  !used in self consistent electric field: >0 sets the calibration tracing time on each flux surface to this many local collision times (overrides diffusion_tau)
     real(dp) :: edge_buffer_width = 0.0_dp          !used in self consistent electric field: width in r/a of the outer buffer where shell densities blend into the target (0 = off)
     real(dp) :: diffusion_scan_s0 = -1.0_dp         !used in self consistent electric field: >0 calibrates only the flux surface closest to this s and stops (<=0 = all surfaces, then SCEF)
+    real(dp) :: diffusion_sigma_A_target = -1.0_dp  !used in self consistent electric field: >0 target statistical error [1/s] of the calibrated drift A; a surface whose error is larger is recalibrated with tau = 2B/(N sigma^2) (<=0 = off)
+    real(dp) :: diffusion_max_spread_cells = 1.0_dp !used in self consistent electric field: cap of that longer tau, final spread sqrt(2 B tau) <= this many cell widths (<=0 = no cap)
+    character(len=256) :: thermodiffusion_table_file = '' !used in self consistent electric field: table of c(s, -dPhi/ds) for the electron random walk, overrides thermodiffusion_coefficient ('' = off)
     end type input_t
 
     type(input_t) :: in
@@ -258,6 +261,10 @@ module gorilla_applets_types_mod
     real(dp), dimension(4,2)              :: polynomial_coefficients_for_B
     real(dp), dimension(3,2)              :: polynomial_coefficients_for_A
     logical,  dimension(2)                :: boole_cached_data_loaded = .false. ! (species) A_and_B_species<k>.dat read in
+    real(dp), dimension(:,:), allocatable :: c_thermo         ! (grid_size+1, species) thermodiffusion c at the vertices (table)
+    real(dp), dimension(:),   allocatable :: tab_s            ! thermodiffusion table: s of the rows
+    real(dp), dimension(:,:), allocatable :: tab_E, tab_c     ! (n_E, n_s): -dPhi/ds [statV] (ascending) and c
+    logical                               :: boole_thermo_table = .false.
     end type diffusion_coefficients
 
     type(diffusion_coefficients) dc

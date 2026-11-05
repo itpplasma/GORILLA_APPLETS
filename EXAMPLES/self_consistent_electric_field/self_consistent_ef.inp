@@ -143,6 +143,10 @@
   !carry no energy, so the temperature-gradient drive enters as the drift -c*B*d(ln T)/ds (0 = off)
   thermodiffusion_coefficient = 0.0d0 ,
 !
+  !Electron random walk: table of c(s, -dPhi/ds) that replaces thermodiffusion_coefficient, interpolated at the
+  !current field ('' = off). Format: first data line "n_s n_E", then n_s*n_E lines "s -dPhi/ds[statV] c"
+  thermodiffusion_table_file = '' ,
+!
   !> 0: maximum tracing time [s] of honestly traced ions (electrons keep time_step). Ions still confined
   !then are stopped, so their density contribution is cut off; the share is printed every update (<= 0: time_step)
   ion_tracing_time_limit = -1.0d0 ,
@@ -154,5 +158,11 @@
 !
   !> 0: calibrate only the flux surface closest to this s, write exit_s_values_species<k>_<ns>.dat
   !and A_and_B_scan_species<k>.dat, then stop without SCEF iterations (<= 0: all surfaces, then SCEF)
-  diffusion_scan_s0 = -1.0d0
+  diffusion_scan_s0 = -1.0d0 ,
+!
+  !> 0: target statistical error [1/s] of the calibrated drift A. A surface whose error is larger is calibrated
+  !again with tau raised by (sigma_A/target)^2, capped so that the final spread stays within
+  !diffusion_max_spread_cells cell widths (<= 0: no cap). Quality per surface: calibration_quality_species<k>.dat
+  diffusion_sigma_A_target = -1.0d0 ,
+  diffusion_max_spread_cells = 1.0d0
 /
