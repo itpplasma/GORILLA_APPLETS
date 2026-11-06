@@ -9,6 +9,15 @@ module utils_scef_particle_pushing_mod
     integer, parameter :: max_problem_dumps = 1000
     integer :: n_problem_dumps = 0
 
+    !Per-thread accumulators of the diffusion-coefficient calibration (delta_s statistics per time bin). Each
+    !thread sums into its own copy and adds it to s% once at the end of the parallel region; a shared critical
+    !section per calibration step cost ~19 % of a calibration at 128 threads. With one thread the summation
+    !order is unchanged (0 + sum).
+    real(dp), dimension(:), allocatable   :: th_delta_s, th_delta_s_squared
+    real(dp), dimension(:,:), allocatable :: th_f_v
+    integer, dimension(:), allocatable    :: th_check
+    !$OMP THREADPRIVATE(th_delta_s, th_delta_s_squared, th_f_v, th_check)
+
 contains
 
 subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n_particles_in)
@@ -82,6 +91,14 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init) &
     !$OMP& FIRSTPRIVATE(local_rr,marker_shell,shell_sum,shell_sum_sq)
     if (omp_get_thread_num().eq.0) print*, 'get number of threads', omp_get_num_threads()
+    if (boole_diffusion_coefficient) then
+        allocate(th_delta_s(size(s%delta_s)), th_delta_s_squared(size(s%delta_s_squared)), &
+                 th_check(size(s%check)), th_f_v(size(s%f_v,1),size(s%f_v,2)))
+        th_delta_s = 0.0_dp
+        th_delta_s_squared = 0.0_dp
+        th_check = 0
+        th_f_v = 0.0_dp
+    endif
     !Dynamic scheduling: marker lifetimes differ by orders of magnitude (long-lived ions in the core),
     !so fixed blocks of markers per thread leave most threads idle. The random numbers are seeded per
     !marker (pair), so the result does not depend on which thread pushes which marker.
@@ -189,6 +206,15 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
         !$omp end critical
     enddo !n
     !$OMP END DO
+    if (boole_diffusion_coefficient) then
+        !$omp critical (scef_calibration_merge)
+        s%delta_s = s%delta_s + th_delta_s
+        s%delta_s_squared = s%delta_s_squared + th_delta_s_squared
+        s%check = s%check + th_check
+        s%f_v = s%f_v + th_f_v
+        !$omp end critical (scef_calibration_merge)
+        deallocate(th_delta_s, th_delta_s_squared, th_check, th_f_v)
+    endif
     !$OMP END PARALLEL
 
     !The serial code after this (e.g. the electron random walk) draws from the master thread's stream, whose
@@ -322,19 +348,21 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
                 critical_distance = 1.0_dp-s%s0
                 if (abs(x(1)-s%s0).gt.critical_distance) s%boole_large_distance(n)=.true.
 
-                !$omp critical
-                s%delta_s(k) = s%delta_s(k) + (x(1) - s%s0)*weights%w(n,species)
-                s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2*weights%w(n,species)
+                !thread-private accumulators (merged into s% at the end of parallelised_particle_pushing)
+                th_delta_s(k) = th_delta_s(k) + (x(1) - s%s0)*weights%w(n,species)
+                th_delta_s_squared(k) = th_delta_s_squared(k) + (x(1) - s%s0)**2*weights%w(n,species)
                 if (s%boole_large_distance(n)) then !delete contribution to delta_s, double contribution to delta_s_squared
-                    s%delta_s(k) = s%delta_s(k) - (x(1) - s%s0)*weights%w(n,species)
-                    s%delta_s_squared(k) = s%delta_s_squared(k) + (x(1) - s%s0)**2*weights%w(n,species)
+                    th_delta_s(k) = th_delta_s(k) - (x(1) - s%s0)*weights%w(n,species)
+                    th_delta_s_squared(k) = th_delta_s_squared(k) + (x(1) - s%s0)**2*weights%w(n,species)
                 endif
-                s%check(k) = s%check(k) + 1
+                th_check(k) = th_check(k) + 1
                 i = min(int(s%j/10*v/start%v0(species))+1, s%j)
-                if (int(10*v/start%v0(species))+1.gt.s%j) print*, 'ATTENTION: particle is faster than 10*v_t'
-                s%f_v(k,i) = s%f_v(k,i) + (x(1) - s%s0)**2/s%n_particles
-                !if (n.eq.1520) write(71,*) s%time(k), x, vpar, vperp
-                !$omp end critical
+                if (int(10*v/start%v0(species))+1.gt.s%j) then
+                    !$omp critical (scef_calibration_print)
+                    print*, 'ATTENTION: particle is faster than 10*v_t'
+                    !$omp end critical (scef_calibration_print)
+                endif
+                th_f_v(k,i) = th_f_v(k,i) + (x(1) - s%s0)**2/s%n_particles
                 ! if (s%s0.lt.2.0d-2) then
                 !      write(1000+n,*) s%time(k), x, vpar, v
                 ! endif
