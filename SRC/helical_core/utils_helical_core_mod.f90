@@ -30,9 +30,9 @@ subroutine read_helical_core_inp_into_type
                boole_linear_temperature_simulation, boole_write_vertex_indices, boole_write_vertex_coordinates, &
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, &
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
-               boole_eliminate_particles_outside_flux, boole_delta_f
-    integer :: i_integrator_type, seed_option, n_species !i_integrator_type, seed_option: read for compatibility with existing input files, unused
-    real(dp) :: flux_threshold_for_elimination
+               boole_eliminate_particles_outside_flux, boole_delta_f, boole_unidirectional_beam
+    integer :: i_integrator_type, seed_option, n_species, n_time_slices !i_integrator_type, seed_option: read for compatibility with existing input files, unused
+    real(dp) :: flux_threshold_for_elimination, beam_density_fraction, reservoir_min_volume_fraction
 
     integer :: s_inp_unit
 
@@ -42,7 +42,14 @@ subroutine read_helical_core_inp_into_type
     & seed_option, boole_write_vertex_indices, boole_write_vertex_coordinates, boole_write_prism_volumes, &
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, &
-    & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f
+    & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f, &
+    & n_time_slices, boole_unidirectional_beam, beam_density_fraction, reservoir_min_volume_fraction
+
+    !optional keys keep their input_t defaults when absent from the file
+    n_time_slices = in%n_time_slices
+    boole_unidirectional_beam = in%boole_unidirectional_beam
+    beam_density_fraction = in%beam_density_fraction
+    reservoir_min_volume_fraction = in%reservoir_min_volume_fraction
 
     open(newunit = s_inp_unit, file='helical_core.inp', status='unknown')
     read(s_inp_unit,nml=helical_core_nml)
@@ -75,6 +82,10 @@ subroutine read_helical_core_inp_into_type
     in%boole_eliminate_particles_outside_flux = boole_eliminate_particles_outside_flux
     in%flux_threshold_for_elimination = flux_threshold_for_elimination
     in%boole_delta_f = boole_delta_f
+    in%n_time_slices = n_time_slices
+    in%boole_unidirectional_beam = boole_unidirectional_beam
+    in%beam_density_fraction = beam_density_fraction
+    in%reservoir_min_volume_fraction = reservoir_min_volume_fraction
 
     ! Set defaults for anomalous transport-specific parameters (disabled)
     in%boole_calc_diffusion_coefficient = .false.
@@ -86,20 +97,30 @@ subroutine read_helical_core_inp_into_type
 end subroutine read_helical_core_inp_into_type
 
 ! ====================================================================
-subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
+subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, boole_reuse_weights_in, i_slice_in)
 !
 ! Parallelised particle pushing for helical core.
 ! Standard guiding-center orbit integration without anomalous displacement.
+! Markers continue from start (update_start_type), so repeated calls push them in time slices;
+! boole_reuse_weights_in keeps the weights of the previous slice instead of recomputing them, and
+! i_slice_in gives every slice its own random number streams (the same streams in every slice would
+! replay the same collision noise for each marker and heat the markers).
 !
     use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, s
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
-    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
+    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_marker_moments_to_thread_sums, &
+        add_thread_moments_to_output, &
         add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
         initialise_seed_for_random_numbers_for_each_thread
+    use utils_orbit_timestep_mod, only: start_touched_tetr_tracking, stop_touched_tetr_tracking
 
     integer, intent(in)                               :: species
     integer, intent(in), optional                     :: n_particles_in
+    logical, intent(in), optional                     :: boole_reuse_weights_in
+    logical                                           :: boole_reuse_weights
+    integer, intent(in), optional                     :: i_slice_in
+    integer                                           :: i_slice
     integer                                           :: kpart, iantithetic, ind_tetr, iface, n_particles
     integer                                           :: p, l, n, i
     real(dp), dimension(3)                            :: x
@@ -107,7 +128,7 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
     type(time_t)                                      :: t
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
-    complex(dp), dimension(:,:), allocatable          :: local_tetr_moments
+    complex(dp), dimension(:,:), allocatable          :: local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared
     logical                                           :: thread_flag = .true.
 
     if (present(n_particles_in)) then
@@ -115,6 +136,10 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
     else
         n_particles = in%num_particles
     endif
+    boole_reuse_weights = .false.
+    if (present(boole_reuse_weights_in)) boole_reuse_weights = boole_reuse_weights_in
+    i_slice = 1
+    if (present(i_slice_in)) i_slice = i_slice_in
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
     kpart = 0
@@ -124,18 +149,29 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
     t_tot = 0.0_dp
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles) &
+    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, boole_reuse_weights, i_slice, &
+    !$OMP& moment_specs, ntetr) &
     !$OMP& REDUCTION(+:t_tot) &
-    !$OMP& PRIVATE(p, l, n, i, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status) &
+    !$OMP& PRIVATE(p, l, n, i, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, &
+    !$OMP& thread_tetr_moments, thread_prism_moments_squared) &
     !$OMP& FIRSTPRIVATE(thread_flag)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
+
+    !moments are summed per thread and added to the output once per thread
+    allocate(thread_tetr_moments(moment_specs%n_moments,ntetr))
+    allocate(thread_prism_moments_squared(moment_specs%n_moments, &
+                                          merge(ntetr/3, 0, moment_specs%boole_squared_moments)))
+    thread_tetr_moments = (0.0_dp, 0.0_dp)
+    thread_prism_moments_squared = (0.0_dp, 0.0_dp)
+    local_tetr_moments = (0.0_dp, 0.0_dp)
+    call start_touched_tetr_tracking(ntetr)
 
     !$OMP DO SCHEDULE(static)
     do p = 1, n_particles/iantithetic
 
         if ((.not.in%boole_precalc_collisions).and.thread_flag) then
-            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num(), 1)
+            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num(), i_slice)
             thread_flag = .false.
         endif
 
@@ -154,6 +190,13 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
 
             call initialise_loop_variables(l, n, local_counter, particle_status, t, local_tetr_moments, x, vpar, vperp, species)
 
+            !zero time step only initialises the marker (tetrahedron and weight), so that the first collision
+            !already uses the final particle weight
+            t%step = 0.0_dp
+            call orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
+                                          local_tetr_moments, local_counter, species, start%t(species), boole_reuse_weights)
+            t%step = start%t(species)
+
             i = 0
 
             do while (t%confined.lt.start%t(species))
@@ -169,7 +212,8 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
 
                 ! Perform guiding-center orbit integration (NO anomalous displacement)
                 call orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                              local_tetr_moments, local_counter, species, start%t(species))
+                                              local_tetr_moments, local_counter, species, start%t(species), &
+                                              boole_reuse_weights)
 
                 t%confined = t%confined + t%step - t%remain
                 t_tot = t_tot + t%step - t%remain
@@ -190,11 +234,14 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
             call update_start_type(x, vpar, vperp, n, species, ind_tetr)
         enddo
 
-        !$omp critical
-        call add_local_tetr_moments_to_output(local_tetr_moments, species)
-        !$omp end critical
+        call add_marker_moments_to_thread_sums(local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared)
     enddo
     !$OMP END DO
+
+    !$omp critical
+    call add_thread_moments_to_output(thread_tetr_moments, thread_prism_moments_squared, species)
+    !$omp end critical
+    call stop_touched_tetr_tracking
     !$OMP END PARALLEL
 
     print*, 'Total tracing time / number of particles: ', t_tot/n_particles, 's'
@@ -203,7 +250,7 @@ end subroutine parallelised_particle_pushing_helical_core
 
 ! ====================================================================
 subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_tetr, iface, n, &
-                                    local_tetr_moments, local_counter, species, t_tot)
+                                    local_tetr_moments, local_counter, species, t_tot, boole_reuse_weights)
 !
 ! Standard orbit timestep for helical core.
 ! Performs guiding-center orbit integration without anomalous displacement.
@@ -226,6 +273,7 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
     complex(dp), dimension(:,:), intent(inout)   :: local_tetr_moments
     type(counter_t), intent(inout)               :: local_counter
     real(dp), intent(in)                         :: t_tot
+    logical, intent(in)                          :: boole_reuse_weights
 
     real(dp), dimension(3)                       :: z_save
     real(dp)                                     :: t_pass, perpinv
@@ -239,10 +287,12 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
             t%remain = t%step
             return
         endif
-        call calc_particle_weights_and_jperp(n, z_save, vpar, vperp, ind_tetr, species)
-        if (in%boole_delta_f) then
-            call adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
-            weights%original(n, species) = weights%w(n, species)
+        if (.not.boole_reuse_weights) then
+            call calc_particle_weights_and_jperp(n, z_save, vpar, vperp, ind_tetr, species)
+            if (in%boole_delta_f) then
+                call adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
+                weights%original(n, species) = weights%w(n, species)
+            endif
         endif
         particle_status%initialized = .true.
     endif
@@ -491,5 +541,182 @@ subroutine apply_weight_fading(n, species, t, t_tot)
     endif
 
 end subroutine apply_weight_fading
+
+! ====================================================================
+subroutine set_unidirectional_beam
+!
+! Turns the markers into a cold beam along the magnetic field: pitch +1 for all markers and a marker
+! density of beam_density_fraction times the background density.
+!
+    use gorilla_applets_types_mod, only: in, start
+
+    if (.not.in%boole_unidirectional_beam) return
+
+    if (in%boole_antithetic_variate) then
+        print*, 'Error: boole_unidirectional_beam requires boole_antithetic_variate = .false.'
+        stop
+    endif
+
+    start%pitch = 1.0_dp
+    start%density = in%density*in%beam_density_fraction
+
+    print*, 'Unidirectional beam: pitch 1, marker density / background density = ', in%beam_density_fraction
+
+end subroutine set_unidirectional_beam
+
+! ====================================================================
+subroutine write_collision_relaxation_diagnostics(file_unit, time, x, pitch, energy_eV, lost, u_b, temp_b)
+!
+! Writes one row of marker and background reservoir totals for the energy and momentum conserving
+! collisions (species 1, first background ion species, cylindrical coordinates). Markers carry
+! weights%w/n_particles physical particles, the reservoir of a tetrahedron dens_mat*tetr_volume
+! particles; sums are in cgs, velocities are normalised by v0. Lost markers keep their state at the
+! boundary (update_start_type), so the _lost columns are what left the domain.
+! Parallel momentum P = sum m v_par is not an invariant in a torus (mirror force, varying b); the
+! canonical toroidal angular momentum L = sum (m v_par h_phi + q/c A_phi) of the markers plus
+! sum m_b u_par h_phi of the background is, up to the h_phi difference between a marker and the
+! centroid of its tetrahedron. Background averages <.>_b are taken over the tetrahedra inside
+! flux_threshold_for_elimination when markers outside it are eliminated, else over all.
+!
+! Columns: time [s], <v_par>_m/v0, <u_par>_b/v0, P_m, P_b, P_lost, E_m, E_b, E_lost, E_total,
+!          L_m, L_b, L_lost, L_total, <T>_b [eV], T_m [eV] (kinetic energy in the frame moving
+!          with <v_par>_m), min T_b [eV], max |u_par|_b/v0, number of confined markers
+!
+    use gorilla_applets_types_mod, only: in, c, start, weights
+    use constants, only: ev2erg, clight, pi
+    use tetra_physics_mod, only: tetra_physics
+    use tetra_grid_mod, only: tetra_grid, verts_rphiz
+    use find_tetra_mod, only: find_tetra
+    use utils_data_pre_and_post_processing_mod, only: normalised_poloidal_flux
+
+    integer, intent(in)                  :: file_unit
+    real(dp), intent(in)                 :: time
+    real(dp), dimension(:,:), intent(in) :: x
+    real(dp), dimension(:), intent(in)   :: pitch, energy_eV
+    logical, dimension(:), intent(in)    :: lost
+    real(dp), dimension(:), intent(in)   :: u_b, temp_b
+
+    real(dp), dimension(size(pitch))     :: w_phys, w_lost, v, vpar, p_phi
+    real(dp), dimension(size(c%tetr_volume)) :: n_b, h_phi_b
+    logical, dimension(size(c%tetr_volume))  :: region
+    real(dp), dimension(3) :: x_n, z, centroid
+    real(dp), dimension(3,4) :: verts
+    real(dp) :: m_t, q_t, m_b, n_m, p_m, e_m, n_bt, p_b, e_b, p_lost, e_lost, l_m, l_b, l_lost, &
+                vpar_mean, temp_m, vpar_n, vperp_n
+    integer :: n, i, k, ind_tetr, iface
+
+    m_t = start%particle_mass(1)
+    q_t = start%particle_charge(1)
+    m_b = c%mass(1)
+
+    w_phys = merge(0.0_dp, real(weights%w(:,1), dp)/in%n_particles, lost)
+    w_lost = merge(real(weights%w(:,1), dp)/in%n_particles, 0.0_dp, lost)
+    v = sqrt(2.0_dp*energy_eV*ev2erg/m_t)
+    vpar = pitch*v
+
+    !canonical toroidal angular momentum at the marker positions (zero weight where it cannot be located)
+    p_phi = 0.0_dp
+    do n = 1, size(pitch)
+        if (real(weights%w(n,1), dp).eq.0.0_dp) cycle
+        x_n = x(:,n)
+        vpar_n = vpar(n)
+        vperp_n = sqrt(max(v(n)**2 - vpar_n**2, 0.0_dp))
+        call find_tetra(x_n, vpar_n, vperp_n, ind_tetr, iface)
+        if (ind_tetr.eq.-1) cycle
+        z = x_n - tetra_physics(ind_tetr)%x1
+        p_phi(n) = m_t*vpar(n)*(tetra_physics(ind_tetr)%h2_1 + sum(tetra_physics(ind_tetr)%gh2*z)) + &
+                   q_t/clight*(tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*z))
+    enddo
+
+    p_lost = m_t*sum(w_lost*vpar)
+    e_lost = sum(w_lost*energy_eV)*ev2erg
+    l_lost = sum(w_lost*p_phi)
+    n_m = sum(w_phys)
+    p_m = m_t*sum(w_phys*vpar)
+    e_m = sum(w_phys*energy_eV)*ev2erg
+    l_m = sum(w_phys*p_phi)
+    vpar_mean = p_m/(m_t*n_m)
+    temp_m = 2.0_dp/3.0_dp*(e_m/n_m - 0.5_dp*m_t*vpar_mean**2)/ev2erg
+
+    do i = 1, size(c%tetr_volume)
+        do k = 1, 4
+            verts(:,k) = verts_rphiz(:,tetra_grid(i)%ind_knot(k))
+        enddo
+        verts(2,2:4) = verts(2,1) + modulo(verts(2,2:4) - verts(2,1) + pi, 2.0_dp*pi) - pi
+        centroid = sum(verts, dim=2)/4.0_dp
+        z = centroid - tetra_physics(i)%x1
+        h_phi_b(i) = tetra_physics(i)%h2_1 + sum(tetra_physics(i)%gh2*z)
+        region(i) = .true.
+        if (in%boole_eliminate_particles_outside_flux) region(i) = normalised_poloidal_flux( &
+            tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi*z)).le.in%flux_threshold_for_elimination
+    enddo
+
+    n_b = c%dens_mat(1,:)*c%tetr_volume
+    p_b = m_b*sum(n_b*u_b)
+    e_b = sum(n_b*(1.5_dp*temp_b*ev2erg + 0.5_dp*m_b*u_b**2))
+    l_b = m_b*sum(n_b*u_b*h_phi_b)
+    n_bt = sum(n_b, mask=region)
+
+    write(file_unit,'(18ES17.9,I10)') time, vpar_mean/start%v0(1), &
+        sum(n_b*u_b, mask=region)/n_bt/start%v0(1), p_m, p_b, p_lost, e_m, e_b, e_lost, e_m + e_b + e_lost, &
+        l_m, l_b, l_lost, l_m + l_b + l_lost, sum(n_b*temp_b, mask=region)/n_bt, temp_m, &
+        minval(temp_b), maxval(abs(u_b))/start%v0(1), count((.not.lost).and.(real(weights%w(:,1), dp).ne.0.0_dp))
+    flush(file_unit)
+
+end subroutine write_collision_relaxation_diagnostics
+
+! ====================================================================
+subroutine write_collision_relaxation_profiles
+!
+! Final state of the conserving collisions for radial profiles (cylindrical coordinates):
+! background_reservoir.dat: per tetrahedron s, R, Z, physical volume [cm^3], density, u_par/v0, T [eV],
+!                          reservoir cell (s, R, Z at the centroid, s = normalised poloidal flux)
+! markers_final.dat:       per marker s, R, Z, v_par/v0, energy [eV], physical weight, lost flag
+!
+    use gorilla_applets_types_mod, only: in, c, start, weights
+    use constants, only: pi, ev2erg
+    use tetra_physics_mod, only: tetra_physics
+    use tetra_grid_mod, only: tetra_grid, verts_rphiz
+    use find_tetra_mod, only: find_tetra
+    use utils_data_pre_and_post_processing_mod, only: normalised_poloidal_flux
+
+    real(dp), dimension(3,4) :: verts
+    real(dp), dimension(3) :: centroid, x_n, z
+    real(dp) :: s_n, v, vpar_n, vperp_n
+    integer :: i, k, n, ind_tetr, iface, file_unit
+
+    open(newunit=file_unit, file='background_reservoir.dat', status='replace')
+    write(file_unit,'(A)') '#s R Z volume density u_par/v0 T cell'
+    do i = 1, size(c%tetr_volume)
+        do k = 1, 4
+            verts(:,k) = verts_rphiz(:,tetra_grid(i)%ind_knot(k))
+        enddo
+        verts(2,2:4) = verts(2,1) + modulo(verts(2,2:4) - verts(2,1) + pi, 2.0_dp*pi) - pi
+        centroid = sum(verts, dim=2)/4.0_dp
+        z = centroid - tetra_physics(i)%x1
+        s_n = normalised_poloidal_flux(tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi*z))
+        write(file_unit,'(7ES17.9,I10)') s_n, centroid(1), centroid(3), c%tetr_volume(i), c%dens_mat(1,i), &
+            c%vpar_mat(1,i)/start%v0(1), c%temp_mat(1,i), c%cell_of_tetr(i)
+    enddo
+    close(file_unit)
+
+    open(newunit=file_unit, file='markers_final.dat', status='replace')
+    write(file_unit,'(A)') '#s R Z v_par/v0 energy_eV weight lost'
+    do n = 1, in%num_particles
+        if (real(weights%w(n,1), dp).eq.0.0_dp) cycle
+        x_n = start%x(:,n,1)
+        v = sqrt(2.0_dp*start%energy(n,1)*ev2erg/start%particle_mass(1))
+        vpar_n = start%pitch(n,1)*v
+        vperp_n = sqrt(max(v**2 - vpar_n**2, 0.0_dp))
+        s_n = -1.0_dp
+        call find_tetra(x_n, vpar_n, vperp_n, ind_tetr, iface)
+        if (ind_tetr.ne.-1) s_n = normalised_poloidal_flux(tetra_physics(ind_tetr)%Aphi1 + &
+                                  sum(tetra_physics(ind_tetr)%gAphi*(x_n - tetra_physics(ind_tetr)%x1)))
+        write(file_unit,'(6ES17.9,I3)') s_n, start%x(1,n,1), start%x(3,n,1), vpar_n/start%v0(1), start%energy(n,1), &
+            real(weights%w(n,1), dp)/in%n_particles, merge(1, 0, start%lost(n,1))
+    enddo
+    close(file_unit)
+
+end subroutine write_collision_relaxation_profiles
 
 end module utils_helical_core_mod

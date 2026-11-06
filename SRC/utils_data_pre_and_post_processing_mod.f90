@@ -508,7 +508,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     real(dp) :: v0_l
     integer :: i, j
     integer :: species
-    real(dp) :: m0, z0, n0, s_value, v0, v_box
+    real(dp) :: m0, z0, n0, s_value, v0
     logical :: boole_T_and_n_from_files = .false.
     logical :: boole_analytic_temperature_profile
 
@@ -520,16 +520,9 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
     call set_c
 
-    !c%weight_factor is only consumed by the energy/momentum-conserving collisions. Derive it
-    !directly from the sampling box (uniform position × 2*pi, Boltzmann adds the 10/sqrt(pi)
-    !normalisation of a uniform energy marker pdf on [0, 5T]) so it does not depend on weights%w.
-    !Gated on the sole consumer so applets that place markers deterministically (helical_core,
-    !divertor) can call the collision setup before g%amin/amax/cmin/cmax are populated.
-    if (in%boole_preserve_energy_and_momentum_during_collisions) then
-        v_box = (g%amax-g%amin)*(g%cmax-g%cmin)*2*pi
-        c%weight_factor = 1.0_dp/(in%density*v_box*g%amax)
-        if (.not. in%boole_monoenergetic) c%weight_factor = c%weight_factor*sqrt(pi)/10.0_dp
-    endif
+    !The energy/momentum-conserving collisions update a background reservoir per tetrahedron, whose
+    !particle number is density times the physical tetrahedron volume
+    if (in%boole_preserve_energy_and_momentum_during_collisions) call calc_physical_tetrahedron_volumes
 
     if (.not.allocated(efcolf))       allocate(efcolf(c%n))
     if (.not.allocated(velrat))       allocate(velrat(c%n))
@@ -619,6 +612,349 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
 
 end subroutine calc_collision_coefficients_for_all_tetrahedra
 
+subroutine calc_physical_tetrahedron_volumes
+
+    !c%tetr_volume = coordinate volume times the Jacobian at the centroid, which is exact for the
+    !Jacobian R of cylindrical coordinates (linear in the tetrahedron) and uses the linearised
+    !sqrt(g) of GORILLA in flux coordinates. Toroidal angles are unwrapped relative to vertex 1.
+
+    use gorilla_applets_types_mod, only: c
+    use tetra_grid_mod, only: ntetr, tetra_grid, verts_rphiz, verts_sthetaphi
+    use tetra_physics_mod, only: tetra_physics, coord_system
+    use constants, only: pi
+
+    integer :: i, k, ind_phi
+    real(dp), dimension(3,4) :: v
+    real(dp), dimension(3) :: centroid
+    real(dp), dimension(3,3) :: edges
+    real(dp) :: coordinate_volume, jacobian
+
+    if (allocated(c%tetr_volume)) deallocate(c%tetr_volume)
+    allocate(c%tetr_volume(ntetr))
+
+    ind_phi = 2
+    if (coord_system.eq.2) ind_phi = 3
+
+    do i = 1, ntetr
+        do k = 1, 4
+            if (coord_system.eq.1) then
+                v(:,k) = verts_rphiz(:,tetra_grid(i)%ind_knot(k))
+            else
+                v(:,k) = verts_sthetaphi(:,tetra_grid(i)%ind_knot(k))
+            endif
+        enddo
+        do k = 2, 4
+            v(ind_phi,k) = v(ind_phi,1) + modulo(v(ind_phi,k) - v(ind_phi,1) + pi, 2.0_dp*pi) - pi
+        enddo
+        edges = v(:,2:4) - spread(v(:,1), 2, 3)
+        coordinate_volume = abs(edges(1,1)*(edges(2,2)*edges(3,3) - edges(3,2)*edges(2,3)) &
+                              - edges(1,2)*(edges(2,1)*edges(3,3) - edges(3,1)*edges(2,3)) &
+                              + edges(1,3)*(edges(2,1)*edges(3,2) - edges(3,1)*edges(2,2)))/6.0_dp
+        centroid = sum(v, dim=2)/4.0_dp
+        if (coord_system.eq.1) then
+            jacobian = centroid(1)
+        else
+            jacobian = abs(tetra_physics(i)%sqg1 + sum(tetra_physics(i)%gsqg*(centroid - v(:,1))))
+        endif
+        c%tetr_volume(i) = coordinate_volume*jacobian
+    enddo
+
+    print*, 'total physical volume of the tetrahedra = ', sum(c%tetr_volume)
+
+end subroutine calc_physical_tetrahedron_volumes
+
+subroutine build_reservoir_cells(min_volume_fraction)
+
+    !Groups tetrahedra into reservoir cells for the energy and momentum conserving collisions. Every
+    !tetrahedron is its own cell, except close to the magnetic axis: starting from the innermost
+    !flux-surface layer and stopping at the first layer without tetrahedra smaller than
+    !min_volume_fraction times the median tetrahedron volume, the tetrahedra of each layer and
+    !toroidal slice are merged poloidally (in order of their poloidal angle) into cells of at least
+    !that volume. Innermost layers that are too thin for this even as complete rings (their thinness
+    !comes from the grid geometry near the axis) are first combined radially, from the axis outwards,
+    !until the ring of every toroidal slice reaches the volume. A layer is identified by the lowest vertex flux of a tetrahedron, a toroidal slice by
+    !its lowest vertex angle phi. min_volume_fraction <= 0 keeps one cell per tetrahedron.
+    !All tetrahedra of a cell share the cell's flow and temperature (initialised to the
+    !particle-weighted mean of its tetrahedra, exact while the flow is zero).
+
+    use gorilla_applets_types_mod, only: c
+    use tetra_grid_mod, only: ntetr, tetra_grid, verts_rphiz, verts_sthetaphi
+    use tetra_physics_mod, only: tetra_physics, coord_system
+    use constants, only: pi
+
+    real(dp), intent(in) :: min_volume_fraction
+
+    real(dp), parameter :: tol = 1.0e-9_dp
+    real(dp), dimension(:), allocatable :: s_low, phi_low, theta, centre_a, centre_b, n_group, sort_key, particles
+    real(dp), dimension(:), allocatable :: a_c, b_c, ring_acc
+    real(dp), dimension(:,:), allocatable :: ring_volume
+    integer, dimension(:), allocatable :: radial_cell
+    integer, dimension(:), allocatable :: layer_id, slice_id, group_id, perm, n_members
+    logical, dimension(:), allocatable :: layer_has_small
+    real(dp), dimension(3,4) :: v
+    real(dp), dimension(4) :: s_v
+    real(dp) :: threshold, cell_volume, u_mean, temp_mean
+    integer :: i, k, j, idx, n_layers, n_slices, n_groups, n_cells, ind_phi, ind_a, ind_b, merge_limit, &
+               group_first_cell, cell_first_idx, previous_group, n_merged_tetr, n_layers_grid
+    logical :: radial_cell_open
+
+    if (allocated(c%cell_of_tetr)) deallocate(c%cell_of_tetr)
+    if (allocated(c%cell_start)) deallocate(c%cell_start)
+    if (allocated(c%cell_members)) deallocate(c%cell_members)
+    allocate(c%cell_of_tetr(ntetr))
+
+    if (min_volume_fraction.le.0.0_dp) then
+        c%cell_of_tetr = [(i, i = 1, ntetr)]
+        n_cells = ntetr
+    else
+        ind_phi = 2
+        ind_a = 1 !poloidal plane coordinates whose centroid angle orders the tetrahedra of a layer
+        ind_b = 3
+        if (coord_system.eq.2) ind_phi = 3
+        allocate(s_low(ntetr), phi_low(ntetr), a_c(ntetr), b_c(ntetr), theta(ntetr))
+        do i = 1, ntetr
+            do k = 1, 4
+                if (coord_system.eq.1) then
+                    v(:,k) = verts_rphiz(:,tetra_grid(i)%ind_knot(k))
+                else
+                    v(:,k) = verts_sthetaphi(:,tetra_grid(i)%ind_knot(k))
+                endif
+            enddo
+            v(ind_phi,2:4) = v(ind_phi,1) + modulo(v(ind_phi,2:4) - v(ind_phi,1) + pi, 2.0_dp*pi) - pi
+            if (coord_system.eq.1) then
+                do k = 1, 4
+                    s_v(k) = normalised_poloidal_flux(tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi*(v(:,k) - v(:,1))))
+                enddo
+                a_c(i) = sum(v(ind_a,:))/4.0_dp
+                b_c(i) = sum(v(ind_b,:))/4.0_dp
+            else
+                s_v = v(1,:)
+                !flux coordinates: order by the poloidal angle theta itself
+                v(2,2:4) = v(2,1) + modulo(v(2,2:4) - v(2,1) + pi, 2.0_dp*pi) - pi
+                a_c(i) = cos(sum(v(2,:))/4.0_dp)
+                b_c(i) = sin(sum(v(2,:))/4.0_dp)
+            endif
+            s_low(i) = minval(s_v)
+            phi_low(i) = modulo(minval(v(ind_phi,:)), 2.0_dp*pi)
+            if (phi_low(i).gt.2.0_dp*pi - tol) phi_low(i) = 0.0_dp
+        enddo
+
+        allocate(layer_id(ntetr), slice_id(ntetr))
+        call cluster_values(s_low, tol, layer_id, n_layers)
+        call cluster_values(phi_low, tol, slice_id, n_slices)
+        allocate(group_id(ntetr))
+        threshold = min_volume_fraction*median(c%tetr_volume)
+
+        !radial merging of layers whose rings are too small, from the axis outwards
+        n_layers_grid = n_layers
+        allocate(ring_volume(n_layers, n_slices), ring_acc(n_slices), radial_cell(n_layers))
+        ring_volume = 0.0_dp
+        do i = 1, ntetr
+            ring_volume(layer_id(i), slice_id(i)) = ring_volume(layer_id(i), slice_id(i)) + c%tetr_volume(i)
+        enddo
+        n_layers = 0
+        radial_cell_open = .false.
+        do k = 1, n_layers_grid
+            if (.not.radial_cell_open) then
+                n_layers = n_layers + 1
+                ring_acc = 0.0_dp
+                radial_cell_open = .true.
+            endif
+            radial_cell(k) = n_layers
+            ring_acc = ring_acc + ring_volume(k,:)
+            if (minval(ring_acc).ge.threshold) radial_cell_open = .false.
+        enddo
+        layer_id = radial_cell(layer_id)
+
+        group_id = (layer_id - 1)*n_slices + slice_id
+        n_groups = n_layers*n_slices
+
+        !poloidal angle of each centroid around the centre of its layer and slice
+        allocate(centre_a(n_groups), centre_b(n_groups), n_group(n_groups))
+        centre_a = 0.0_dp
+        centre_b = 0.0_dp
+        n_group = 0.0_dp
+        do i = 1, ntetr
+            centre_a(group_id(i)) = centre_a(group_id(i)) + a_c(i)
+            centre_b(group_id(i)) = centre_b(group_id(i)) + b_c(i)
+            n_group(group_id(i)) = n_group(group_id(i)) + 1.0_dp
+        enddo
+        centre_a = centre_a/max(n_group, 1.0_dp)
+        centre_b = centre_b/max(n_group, 1.0_dp)
+        if (coord_system.eq.2) then
+            centre_a = 0.0_dp
+            centre_b = 0.0_dp
+        endif
+        do i = 1, ntetr
+            theta(i) = atan2(b_c(i) - centre_b(group_id(i)), a_c(i) - centre_a(group_id(i)))
+        enddo
+
+        !layers 1 .. merge_limit (from the axis outwards) contain small tetrahedra and are merged
+        allocate(layer_has_small(n_layers))
+        layer_has_small = .false.
+        do i = 1, ntetr
+            if (c%tetr_volume(i).lt.threshold) layer_has_small(layer_id(i)) = .true.
+        enddo
+        merge_limit = 0
+        do while (merge_limit.lt.n_layers)
+            if (.not.layer_has_small(merge_limit+1)) exit
+            merge_limit = merge_limit + 1
+        enddo
+
+        allocate(sort_key(ntetr), perm(ntetr))
+        sort_key = real(group_id, dp) + 0.999_dp*(theta + pi)/(2.0_dp*pi)
+        call sort_index(sort_key, perm)
+
+        n_cells = 0
+        previous_group = -1
+        group_first_cell = 0
+        cell_first_idx = 1
+        cell_volume = 0.0_dp
+        do idx = 1, ntetr
+            i = perm(idx)
+            if (layer_id(i).gt.merge_limit) then
+                n_cells = n_cells + 1
+                c%cell_of_tetr(i) = n_cells
+                previous_group = group_id(i)
+                cycle
+            endif
+            if ((group_id(i).ne.previous_group).or.(cell_volume.ge.threshold)) then
+                n_cells = n_cells + 1
+                if (group_id(i).ne.previous_group) group_first_cell = n_cells
+                cell_first_idx = idx
+                cell_volume = 0.0_dp
+            endif
+            c%cell_of_tetr(i) = n_cells
+            cell_volume = cell_volume + c%tetr_volume(i)
+            previous_group = group_id(i)
+            !at the end of a merged group, a last cell below the threshold joins the previous one
+            if (idx.lt.ntetr) then
+                if (group_id(perm(idx+1)).eq.group_id(i)) cycle
+            endif
+            if ((cell_volume.lt.threshold).and.(n_cells.gt.group_first_cell)) then
+                c%cell_of_tetr(perm(cell_first_idx:idx)) = n_cells - 1
+                n_cells = n_cells - 1
+            endif
+            cell_volume = threshold !the next tetrahedron starts a new cell
+        enddo
+    endif
+
+    !cell members in compressed form
+    allocate(n_members(n_cells), c%cell_start(n_cells+1), c%cell_members(ntetr))
+    n_members = 0
+    do i = 1, ntetr
+        n_members(c%cell_of_tetr(i)) = n_members(c%cell_of_tetr(i)) + 1
+    enddo
+    c%cell_start(1) = 1
+    do k = 1, n_cells
+        c%cell_start(k+1) = c%cell_start(k) + n_members(k)
+    enddo
+    n_members = 0
+    do i = 1, ntetr
+        k = c%cell_of_tetr(i)
+        c%cell_members(c%cell_start(k) + n_members(k)) = i
+        n_members(k) = n_members(k) + 1
+    enddo
+
+    !common state of the merged cells
+    n_merged_tetr = 0
+    do k = 1, n_cells
+        if (c%cell_start(k+1) - c%cell_start(k).le.1) cycle
+        n_merged_tetr = n_merged_tetr + c%cell_start(k+1) - c%cell_start(k)
+        do j = 1, c%n-1
+            associate(members => c%cell_members(c%cell_start(k):c%cell_start(k+1)-1))
+                particles = c%dens_mat(j,members)*c%tetr_volume(members)
+                u_mean = sum(particles*c%vpar_mat(j,members))/sum(particles)
+                temp_mean = sum(particles*c%temp_mat(j,members))/sum(particles)
+                c%vpar_mat(j,members) = u_mean
+                c%temp_mat(j,members) = temp_mean
+            end associate
+        enddo
+    enddo
+
+    if (min_volume_fraction.gt.0.0_dp) then
+        print*, 'reservoir cells: ', n_cells, ' cells for ', ntetr, ' tetrahedra; ', n_merged_tetr, &
+                ' tetrahedra in ', merge_limit, ' layers merged poloidally, threshold volume ', threshold
+        print*, 'innermost ', n_layers_grid - n_layers, ' grid layers merged radially (', &
+                n_layers_grid, ' grid layers ->', n_layers, ')'
+        print*, 'smallest reservoir cell volume = ', minval([(sum(c%tetr_volume(c%cell_members(c%cell_start(k): &
+                c%cell_start(k+1)-1))), k = 1, n_cells)])
+    endif
+
+contains
+
+    function median(values) result(m)
+        real(dp), dimension(:), intent(in) :: values
+        real(dp) :: m
+        integer, dimension(size(values)) :: p
+        call sort_index(values, p)
+        m = values(p((size(values)+1)/2))
+    end function median
+
+end subroutine build_reservoir_cells
+
+subroutine cluster_values(values, tol, ids, n_ids)
+
+    !ids(i) = rank of the cluster of values(i) among clusters of values closer than tol, ascending
+
+    real(dp), dimension(:), intent(in) :: values
+    real(dp), intent(in) :: tol
+    integer, dimension(:), intent(out) :: ids
+    integer, intent(out) :: n_ids
+    integer, dimension(size(values)) :: p
+    integer :: k
+
+    call sort_index(values, p)
+    n_ids = 1
+    ids(p(1)) = 1
+    do k = 2, size(values)
+        if (values(p(k)) - values(p(k-1)).gt.tol) n_ids = n_ids + 1
+        ids(p(k)) = n_ids
+    enddo
+
+end subroutine cluster_values
+
+subroutine sort_index(a, p)
+
+    !Heapsort: p is the permutation that sorts a ascending
+
+    real(dp), dimension(:), intent(in) :: a
+    integer, dimension(:), intent(out) :: p
+    integer :: n, i, last, tmp
+
+    n = size(a)
+    p = [(i, i = 1, n)]
+    do i = n/2, 1, -1
+        call sift_down(i, n)
+    enddo
+    do last = n, 2, -1
+        tmp = p(1)
+        p(1) = p(last)
+        p(last) = tmp
+        call sift_down(1, last-1)
+    enddo
+
+contains
+
+    subroutine sift_down(start, end)
+        integer, intent(in) :: start, end
+        integer :: root, child, t
+        root = start
+        do while (2*root.le.end)
+            child = 2*root
+            if (child.lt.end) then
+                if (a(p(child)).lt.a(p(child+1))) child = child + 1
+            endif
+            if (a(p(root)).ge.a(p(child))) return
+            t = p(root)
+            p(root) = p(child)
+            p(child) = t
+            root = child
+        enddo
+    end subroutine sift_down
+
+end subroutine sort_index
+
 subroutine deallocate_collision_arrays
 !
 ! Deallocates collision coefficient arrays to allow reallocation when grid parameters change.
@@ -636,6 +972,10 @@ subroutine deallocate_collision_arrays
     if (allocated(c%dens))       deallocate(c%dens)
     if (allocated(c%temp))       deallocate(c%temp)
     if (allocated(c%randcol))    deallocate(c%randcol)
+    if (allocated(c%tetr_volume)) deallocate(c%tetr_volume)
+    if (allocated(c%cell_of_tetr)) deallocate(c%cell_of_tetr)
+    if (allocated(c%cell_start)) deallocate(c%cell_start)
+    if (allocated(c%cell_members)) deallocate(c%cell_members)
 
 end subroutine deallocate_collision_arrays
 
