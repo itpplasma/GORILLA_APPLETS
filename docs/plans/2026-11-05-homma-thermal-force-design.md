@@ -236,3 +236,25 @@ A control run subtracts it.
 - **Velocity driver.** It gyrates the Cartesian velocity exactly between
   kicks, so B05/B06 report the mean velocity itself, not a guiding-centre
   equivalent.
+- **Slab driver stepping.** Collisions sit on the fixed grid `t_n = n Δt`;
+  output times sample the exact free motion in between and never shorten a
+  collision step. (A first version cut steps at output times, which made
+  dense outputs silently reduce the effective `Δt`.)
+- **Homma Figs. 1–4 reproduced** (`EXAMPLES/thermal_force_homma2014`, W3+,
+  300 eV/m, 1e4 ions). Paired-difference drift `d⟨X⟩/dt` at Ωt = 700:
+  full orbit and guiding centre converge to the same −5.46 m/s as `Δt → 0`;
+  the 1.8 % above the first-order target −5.36 m/s grows with time and with
+  `(∇T)²` (0.3 % at 100 eV/m): the cloud spreads through `T(x)`.
+- **Full orbit with a fixed collision step aliases with the gyration.** For
+  `Ω_a Δt ≳ 2` (Homma's 0.05 and 0.15 τ_s are 5.5 and 16.6 rad) the full
+  orbit gets a spurious transverse drift of +0.4 to +0.5 m/s (10 %) and an
+  `X` drift up to 12 % high. The guiding-centre model, with an independent
+  gyrophase per step, is free of it: −5.56 m/s at 0.15 τ_s, −5.46 at 0.02.
+  Converged, the full orbit keeps a physical transverse drift of −0.07 m/s
+  (friction on the drift velocity, order `ν/Ω_a`) that the guiding-centre
+  model does not contain.
+- **Initial transient.** All ions start at the same particle position, which
+  correlates gyrophase and guiding-centre position. In the full orbit this
+  makes `⟨X⟩` run up to 10 µm ahead of the guiding centre for about 2 τ_s,
+  and leaves a constant `⟨Y⟩` offset of about −10 µm; afterwards both models
+  drift alike. Drift fits must start after the transient (Ωt ≳ 300).
