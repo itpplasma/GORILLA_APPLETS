@@ -12,9 +12,10 @@ module thermal_force_mod
 ! Driver 'slab': uniform B, temperature linear in space (B07 temperature
 ! screening, Homma 2014 Figs. 1-4). orbit_model 'guiding_centre' is the
 ! GORILLA model (homma_gc_step: random gyrophase, kick, shift
-! dX = -b x dv/Omega_a, then streaming along b); 'full_orbit' follows the
-! particle: Cartesian kick with the background at the particle, then the
-! exact helix until the next collision.
+! dX = -b x dv/Omega_a, then streaming along b). 'full_orbit' is a reference
+! for checking the guiding-centre reduction, not GORILLA physics: Homma's
+! model, Cartesian kick with the background at the particle, then the exact
+! helix until the next collision (requires Omega_a dt <~ 1).
 !
 ! With boole_control_run the same ions are also followed with grad T = 0 and
 ! the same random numbers; the paired difference isolates the thermal force.

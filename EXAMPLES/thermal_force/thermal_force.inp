@@ -3,7 +3,8 @@
 ! bi-Maxwellian W3+ population in an H+ background (no gradient).
 ! Design: docs/plans/2026-11-05-homma-thermal-force-design.md
 &thermal_force_nml
- driver = 'velocity' ,                   ! 'velocity': homogeneous plasma, no spatial motion
+ driver = 'velocity' ,                   ! 'velocity': homogeneous plasma, no spatial motion; 'slab': uniform B, linear T
+ orbit_model = 'guiding_centre' ,        ! slab: 'guiding_centre' (GORILLA) or 'full_orbit' (reference only, needs Omega_a dt <~ 1)
  test_mass_amu = 183.84d0 ,
  test_charge_number = 3.d0 ,
  background_mass_amu = 1.007276466621d0 ,  ! proton
