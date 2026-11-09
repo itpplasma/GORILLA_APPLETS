@@ -19,6 +19,7 @@
   use anomalous_transport_mod, only: calc_anomalous_transport
   use helical_core_mod, only: calc_helical_core
   use rmp_response_currents_mod, only: calc_rmp_response_currents
+  use thermal_force_mod, only: calc_thermal_force
 !
   implicit none
 !
@@ -157,6 +158,12 @@
         case(15) !Calculate RMP response currents
 !
             call calc_rmp_response_currents
+!
+!-------------------------------------------------------------------------------------------!
+!
+        case(16) !Thermal force: Homma-Hatayama collision operator, benchmark drivers
+!
+            call calc_thermal_force
 !
 !-------------------------------------------------------------------------------------------!
 !

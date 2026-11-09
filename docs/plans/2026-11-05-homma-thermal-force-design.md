@@ -220,3 +220,19 @@ A control run subtracts it.
 | tokamak geometry and namelist | adopted as driver 3. Per our decision, the slab driver comes first |
 | explicit-friction bias at 0.05 τ_s | not adopted as an input; our own B08 scan decides |
 | `boltzmann_mod.f90:94` sets charge 15 e but leaves `cm_over_e` at Z = 74 | confirmed inconsistent: the pusher uses `cm_over_e`, so orbits see Z = 74. Not touched here; the new applet sets all three. To be raised separately |
+
+## 10. Findings during implementation
+
+- **Second-order gyro-orbit correction (step 3).** With the background on the
+  gyro orbit, the mean drift exceeds the first-order target by a relative
+  amount proportional to `(∇T)²`: 1.2e-3 for W1+ at 100 eV/m (ρ = 10 mm),
+  less for higher charge states. The B07 comparison must allow for it or use
+  gradients small enough.
+- **Euler–Maruyama heating (step 4).** The explicit friction step makes a
+  Maxwellian at `T_b` settle at `T_eff ≈ T_b (1 + 0.5 Δt/τ_s)`: +5.2 %, 2.5 %,
+  1.0 %, 0.5 % at `Δt/τ_s` = 0.1, 0.05, 0.02, 0.01 (2e5 ions, 5 τ_s). This is
+  the textbook equilibrium-variance bias `νΔt/2` of the explicit step. B08
+  decides whether a better friction step is needed; until then `Δt ≤ 0.01 τ_s`.
+- **Velocity driver.** It gyrates the Cartesian velocity exactly between
+  kicks, so B05/B06 report the mean velocity itself, not a guiding-centre
+  equivalent.

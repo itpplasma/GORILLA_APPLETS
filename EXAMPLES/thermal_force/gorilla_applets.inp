@@ -1,0 +1,6 @@
+! GORILLA_APPLETS: thermal force (Homma-Hatayama collision operator)
+! gorilla.inp and tetra_grid.inp are read at start-up by every applet; the
+! velocity driver of i_option = 16 does not use them otherwise.
+&GORILLA_APPLETS_NML
+ i_option = 16 ,
+/
