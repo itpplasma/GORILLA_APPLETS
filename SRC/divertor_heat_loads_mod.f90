@@ -88,13 +88,14 @@ subroutine calc_divertor_heat_loads
     calc_poloidal_flux, calc_collision_coefficients_for_all_tetrahedra, &
     normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, initialise_loop_variables, &
-    add_local_tetr_moments_to_output, add_local_counter_to_counter, carry_out_collisions, update_exit_data, &
-    initialise_seed_for_random_numbers_for_each_thread
+    add_marker_moments_to_thread_sums, add_thread_moments_to_output, add_local_counter_to_counter, carry_out_collisions, &
+    update_exit_data, initialise_seed_for_random_numbers_for_each_thread
+    use utils_orbit_timestep_mod, only: start_touched_tetr_tracking, stop_touched_tetr_tracking
 
     integer :: kpart,i,n,l,p,ind_tetr,iface,iantithetic
     real(dp) :: v0,vpar,vperp
     real(dp), dimension(3) :: x
-    complex(dp), dimension(:,:), allocatable :: local_tetr_moments
+    complex(dp), dimension(:,:), allocatable :: local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared
     type(counter_t) :: local_counter
     type(time_t) :: t
     type(particle_status_t) :: particle_status
@@ -126,9 +127,19 @@ subroutine calc_divertor_heat_loads
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart,v0, in, c, iantithetic) &
-    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status)
+    !$OMP& SHARED(counter, kpart,v0, in, c, iantithetic, moment_specs, ntetr) &
+    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status, &
+    !$OMP& thread_tetr_moments,thread_prism_moments_squared)
     print*, 'get number of threads', omp_get_num_threads()
+    !moments are summed per thread and added to the output once per thread
+    allocate(thread_tetr_moments(moment_specs%n_moments,ntetr))
+    allocate(thread_prism_moments_squared(moment_specs%n_moments, &
+                                          merge(ntetr/3, 0, moment_specs%boole_squared_moments)))
+    thread_tetr_moments = (0.0_dp, 0.0_dp)
+    thread_prism_moments_squared = (0.0_dp, 0.0_dp)
+    local_tetr_moments = (0.0_dp, 0.0_dp)
+    call start_touched_tetr_tracking(ntetr)
+
     !$OMP DO SCHEDULE(static)
 
     !Loop over particles
@@ -178,11 +189,14 @@ subroutine calc_divertor_heat_loads
             !$omp end critical
             call update_exit_data(particle_status%lost,t%confined,x,vpar,vperp,i,n,local_counter%phi_0_mappings)
         enddo
-        !$omp critical
-        call add_local_tetr_moments_to_output(local_tetr_moments)
-        !$omp end critical
+        call add_marker_moments_to_thread_sums(local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared)
     enddo !n
     !$OMP END DO
+
+    !$omp critical
+    call add_thread_moments_to_output(thread_tetr_moments, thread_prism_moments_squared, 1)
+    !$omp end critical
+    call stop_touched_tetr_tracking
     !$OMP END PARALLEL
 
     call normalise_prism_moments_and_prism_moments_squared

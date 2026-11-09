@@ -12,9 +12,11 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     g, maximum_s, weights
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
-    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
+    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_marker_moments_to_thread_sums, &
+    add_thread_moments_to_output, &
     add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
     initialise_seed_for_random_numbers_for_each_thread
+    use utils_orbit_timestep_mod, only: start_touched_tetr_tracking, stop_touched_tetr_tracking
     use russian_roulette_mod, only: play_russian_roulette, rr, local_rr_t, initiate_local_rr
     use constants, only: ev2erg
 
@@ -29,7 +31,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     type(time_t)                                      :: t
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
-    complex(dp), dimension(:,:), allocatable          :: local_tetr_moments
+    complex(dp), dimension(:,:), allocatable          :: local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared
     logical                                           :: thread_flag = .true.
     type(local_rr_t)                                  :: local_rr
     real(dp), dimension(10)                           :: particle_state_for_rr
@@ -58,12 +60,22 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     t_tot = 0.0_dp
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr,weights) &
+    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr,weights, &
+    !$OMP& moment_specs, ntetr) &
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p,l,n,i,x,v_save,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
-    !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init) &
+    !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init, thread_tetr_moments, thread_prism_moments_squared) &
     !$OMP& FIRSTPRIVATE(thread_flag,local_rr)
     if (omp_get_thread_num().eq.0) print*, 'get number of threads', omp_get_num_threads()
+    !moments are summed per thread and added to the output once per thread
+    allocate(thread_tetr_moments(moment_specs%n_moments,ntetr))
+    allocate(thread_prism_moments_squared(moment_specs%n_moments, &
+                                          merge(ntetr/3, 0, moment_specs%boole_squared_moments)))
+    thread_tetr_moments = (0.0_dp, 0.0_dp)
+    thread_prism_moments_squared = (0.0_dp, 0.0_dp)
+    local_tetr_moments = (0.0_dp, 0.0_dp)
+    call start_touched_tetr_tracking(ntetr)
+
     !$OMP DO SCHEDULE(static)
     !SCHEDULE(dynamic,1)
     !SCHEDULE(static)
@@ -160,11 +172,14 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
             call update_exit_data(particle_status%lost,t%confined,x,vpar,vperp,i,n,species_in=species)
             call update_start_type(x,vpar,vperp,n,species,ind_tetr)
         enddo
-        !$omp critical
-        call add_local_tetr_moments_to_output(local_tetr_moments,species)
-        !$omp end critical
+        call add_marker_moments_to_thread_sums(local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared)
     enddo !n
     !$OMP END DO
+
+    !$omp critical
+    call add_thread_moments_to_output(thread_tetr_moments, thread_prism_moments_squared, species)
+    !$omp end critical
+    call stop_touched_tetr_tracking
     !$OMP END PARALLEL
 
     print*, 'Total tracing time of all particles divided by number of particles is: ', t_tot/n_particles, 's'
