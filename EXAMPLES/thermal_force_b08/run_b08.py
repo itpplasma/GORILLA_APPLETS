@@ -10,6 +10,10 @@ Scans (each a subcommand, results appended to <work_dir>/b08_<scan>.csv):
          the full orbit as a reference ('full'). Drift = least-squares slope of
          the paired difference <X>(t) over Omega_a t = 300..700 (after the
          initial transient); one row per seed.
+  models The three models on one footing: same scan as 'dt' over
+         dt = 0.001..0.1 tau_s, but the drift is fitted over t = 3..7 tau_s,
+         after the initial transient for every charge state (the transient
+         lasts about 2 tau_s, i.e. Omega_a t ~ 670 for W1+).
   relax  B04 relaxation of the drifting bi-Maxwellian W3+ population versus
          collision step: p_par, p_perp, u_par at t = 1, 3, 10 tau_s.
   n      Statistics versus ion number: W3+ gc_orbit at dt = 0.02 tau_s, average
@@ -17,7 +21,7 @@ Scans (each a subcommand, results appended to <work_dir>/b08_<scan>.csv):
          difference, with the reported standard error, to compare with the
          seed-to-seed scatter.
 
-Usage: python3 run_b08.py <dt|relax|n|all> [work_dir]   (default ./run)
+Usage: python3 run_b08.py <dt|models|relax|n|all> [work_dir]   (default ./run)
 Then:  python3 plot_b08.py [work_dir]
 Binary: ../../BUILD/gorilla_applets_main.x or $GORILLA_APPLETS_BIN;
 threads: $OMP_NUM_THREADS (default 8, physical cores).
@@ -70,9 +74,9 @@ def run_case(case_dir, overrides):
     return rows
 
 
-def slope(rows, run, key):
-    """Least-squares slope of <key>(t) over the fit window, cm -> m per s."""
-    pts = [(r["t_s"], r[key] / 100.0) for r in rows if r["run"] == run and r["omega_t"] >= FIT_WINDOW[0] - 1e-9]
+def slope(rows, run, key, column="omega_t", start=FIT_WINDOW[0]):
+    """Least-squares slope of <key>(t) over the fit window (column >= start), cm -> m per s."""
+    pts = [(r["t_s"], r[key] / 100.0) for r in rows if r["run"] == run and r[column] >= start - 1e-9]
     t, y = np.array(pts).T
     return np.polyfit(t, y, 1)[0]
 
@@ -100,6 +104,25 @@ def scan_dt(work, seeds=4, n=10000):
                                          slope(rows, "difference", "mean_x"), slope(rows, "difference", "mean_y"),
                                          omega_tau])
                 print(f"dt scan: {model} Z={z} dt={dt} done", flush=True)
+
+
+def scan_models(work, seeds=4, n=10000):
+    out = work / "b08_models.csv"
+    header = ["model", "Z", "dt_over_tau_s", "omega_dt", "seed", "n", "dXdt_m_s", "dYdt_m_s", "omega_tau_s"]
+    window = [3.0 + 0.5 * k for k in range(9)]           # t / tau_s = 3, 3.5, ..., 7
+    for model, opts in MODELS.items():
+        for z in (1, 3, 10):
+            for dt in (0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1):
+                for seed in range(1, seeds + 1):
+                    rows = run_case(work / "tmp", {**SCREENING, **opts, "test_charge_number": float(z),
+                                                   "output_time_unit": "tau_s", "output_times": [0.0] + window,
+                                                   "dt_coll_over_tau_s": dt, "n_particles": n, "seed": seed})
+                    omega_tau = header_value(work, rows)
+                    append(out, header, [model, z, dt, omega_tau * dt, seed, n,
+                                         slope(rows, "difference", "mean_x", "t_over_tau_s", window[0]),
+                                         slope(rows, "difference", "mean_y", "t_over_tau_s", window[0]),
+                                         omega_tau])
+                print(f"models scan: {model} Z={z} dt={dt} done", flush=True)
 
 
 def header_value(work, rows):
@@ -140,11 +163,11 @@ def scan_n(work):
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ("dt", "relax", "n", "all"):
+    if len(sys.argv) < 2 or sys.argv[1] not in ("dt", "models", "relax", "n", "all"):
         sys.exit(__doc__)
     work = Path(sys.argv[2]) if len(sys.argv) > 2 else HERE / "run"
     work.mkdir(parents=True, exist_ok=True)
-    scans = {"dt": scan_dt, "relax": scan_relax, "n": scan_n}
+    scans = {"dt": scan_dt, "models": scan_models, "relax": scan_relax, "n": scan_n}
     for name in (scans if sys.argv[1] == "all" else [sys.argv[1]]):
         f = work / f"b08_{name}.csv"
         if f.exists():

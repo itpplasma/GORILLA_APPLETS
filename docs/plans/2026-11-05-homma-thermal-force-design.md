@@ -293,3 +293,11 @@ A control run subtracts it.
     and fall as N^-1/2 (N = 1e3 … 1e6). The paired difference to the
     control run reduces the standard error of the drift by a factor 137,
     i.e. the same precision as about 2e4 times more ions without it.
+- **The three models on one footing** (`run_b08.py models`, drift over
+  t = 3–7 τ_s, after the transient, relative to the first-order drift with
+  collisions at the particle): at Δt = 0.001 τ_s the guiding centre with
+  collisions at X+ρ agrees with the full orbit to +0.19 ± 0.13 % (W1+),
+  +0.23 ± 0.11 % (W3+), +0.09 ± 0.03 % (W10+). Collisions at X miss
+  50 %, 25 %, 9 % of the drift, as the first-order targets predict, at every
+  Δt. Both converged models lie 1.3 % above first order for W1+ (cloud drift
+  into colder plasma over the longer window), at it for W3+ and W10+.
