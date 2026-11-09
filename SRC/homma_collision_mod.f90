@@ -59,8 +59,23 @@ module homma_collision_mod
         real(dp) :: flow(3) = 0.0_dp
     end type homma_local_t
 
+    ! Background with a constant temperature gradient (benchmark profiles):
+    ! T(x) = bg0%temperature + grad_t.(x - x0), other quantities uniform. The
+    ! heat flux is evaluated with the local T(x).
+    type, public :: homma_linear_profile_t
+        type(homma_background_t) :: bg0
+        real(dp) :: x0(3) = 0.0_dp
+        real(dp) :: grad_t(3) = 0.0_dp          ! energy per length
+        logical :: heat_flux = .true.           ! .false.: Maxwellian operator only
+    end type homma_linear_profile_t
+
+    ! Where homma_gc_step evaluates the background
+    integer, parameter, public :: homma_at_guiding_centre = 1
+    integer, parameter, public :: homma_at_gyro_orbit = 2
+
     public :: homma_heat_flux, homma_local_setup, homma_kernel_scalars, homma_kernel_dimensionless
     public :: homma_coefficients_split, homma_coefficients, homma_cholesky, homma_kick
+    public :: homma_local_at, homma_perp_basis, homma_gc_step
     public :: homma_n_series, homma_r_series
 
 contains
@@ -272,6 +287,101 @@ pure subroutine homma_kick(locs, v, dt, xi, dv, ierr)
     dv = a*dt + matmul(l, xi)*sqrt(dt)
 
 end subroutine homma_kick
+
+pure subroutine homma_local_at(units, test_mass, test_charge, prof, x, b_field, loc, ierr)
+
+    ! Prefactors at position x for a linear temperature profile.
+    ! ierr = 2 if T(x) <= 0.
+
+    type(homma_units_t), intent(in) :: units
+    real(dp), intent(in) :: test_mass, test_charge
+    type(homma_linear_profile_t), intent(in) :: prof
+    real(dp), intent(in) :: x(3), b_field(3)
+    type(homma_local_t), intent(out) :: loc
+    integer, intent(out) :: ierr
+    type(homma_background_t) :: bg
+    real(dp) :: q(3)
+
+    ierr = 0
+    bg = prof%bg0
+    bg%temperature = prof%bg0%temperature + dot_product(prof%grad_t, x - prof%x0)
+    if (bg%temperature <= 0.0_dp) then
+        ierr = 2
+        return
+    end if
+    q = 0.0_dp
+    if (prof%heat_flux) q = homma_heat_flux(units, bg, prof%grad_t, b_field)
+    call homma_local_setup(units, test_mass, test_charge, bg, q, loc)
+
+end subroutine homma_local_at
+
+pure subroutine homma_perp_basis(b_hat, e1, e2)
+
+    ! Unit vectors e1, e2 with (e1, e2, b_hat) right-handed and orthonormal.
+
+    real(dp), intent(in) :: b_hat(3)
+    real(dp), intent(out) :: e1(3), e2(3)
+    real(dp) :: a(3)
+
+    if (abs(b_hat(1)) < 0.9_dp) then
+        a = [1.0_dp, 0.0_dp, 0.0_dp]
+    else
+        a = [0.0_dp, 1.0_dp, 0.0_dp]
+    end if
+    e1 = a - dot_product(a, b_hat)*b_hat
+    e1 = e1/norm2(e1)
+    e2 = cross(b_hat, e1)
+
+end subroutine homma_perp_basis
+
+pure subroutine homma_gc_step(units, test_mass, test_charge, prof, b_field, background_at, &
+                              x_gc, vpar, vperp, dt, phase_u, xi, dx_gc, ierr)
+
+    ! One collision step of a guiding centre at x_gc with (vpar, vperp):
+    !   1. gyrophase phi = 2 pi phase_u, v = vpar b + vperp (cos phi e1 + sin phi e2)
+    !   2. background at x_gc (homma_at_guiding_centre) or at the particle
+    !      x_gc + rho, rho = b x v/Omega_a (homma_at_gyro_orbit)
+    !   3. Euler-Maruyama kick dv (homma_kick)
+    !   4. vpar, vperp from v + dv; guiding-centre shift dx_gc = -b x dv/Omega_a,
+    !      the particle position stays fixed.
+    ! Omega_a = k_lorentz q_a |B|/m_a carries the sign of the charge.
+    ! phase_u: uniform on [0, 1); xi: three standard normal numbers.
+    ! ierr /= 0 (from homma_local_at or homma_kick): vpar, vperp unchanged, dx_gc = 0.
+
+    type(homma_units_t), intent(in) :: units
+    real(dp), intent(in) :: test_mass, test_charge
+    type(homma_linear_profile_t), intent(in) :: prof
+    real(dp), intent(in) :: b_field(3), x_gc(3), dt, phase_u, xi(3)
+    integer, intent(in) :: background_at
+    real(dp), intent(inout) :: vpar, vperp
+    real(dp), intent(out) :: dx_gc(3)
+    integer, intent(out) :: ierr
+    type(homma_local_t) :: loc(1)
+    real(dp) :: b_abs, b_hat(3), e1(3), e2(3), omega, phi, v(3), dv(3), x_eval(3)
+
+    dx_gc = 0.0_dp
+    b_abs = norm2(b_field)
+    b_hat = b_field/b_abs
+    omega = units%k_lorentz*test_charge*b_abs/test_mass
+
+    call homma_perp_basis(b_hat, e1, e2)
+    phi = 2.0_dp*pi*phase_u
+    v = vpar*b_hat + vperp*(cos(phi)*e1 + sin(phi)*e2)
+
+    x_eval = x_gc
+    if (background_at == homma_at_gyro_orbit) x_eval = x_gc + cross(b_hat, v)/omega
+
+    call homma_local_at(units, test_mass, test_charge, prof, x_eval, b_field, loc(1), ierr)
+    if (ierr /= 0) return
+    call homma_kick(loc, v, dt, xi, dv, ierr)
+    if (ierr /= 0) return
+
+    v = v + dv
+    vpar = dot_product(v, b_hat)
+    vperp = norm2(v - vpar*b_hat)
+    dx_gc = -cross(b_hat, dv)/omega
+
+end subroutine homma_gc_step
 
 pure function horner(c, w) result(s)
 

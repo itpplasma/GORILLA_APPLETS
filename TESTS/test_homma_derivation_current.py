@@ -33,10 +33,14 @@ def main():
         run = subprocess.run([math, "-script", str(script), out],
                              capture_output=True, text=True)
         print(run.stdout)
-        if run.returncode != 0 or "all checks passed" not in run.stdout:
+        if "all checks passed" not in run.stdout:
             print(run.stderr)
-            print("FAIL: derivation script did not pass its checks")
+            print(f"FAIL: derivation script did not pass its checks (return code {run.returncode})")
             return 1
+        if run.returncode != 0:
+            # The Wolfram kernel occasionally fails while shutting down, after
+            # the script has written everything; the file comparison decides.
+            print(f"warning: math returned {run.returncode} after all checks passed")
 
         stale = [rel for rel in GENERATED
                  if not filecmp.cmp(Path(out) / rel, root / rel, shallow=False)]

@@ -25,7 +25,7 @@ target_include_directories(test_transport_normalization.x
 
 add_test(NAME transport_normalization COMMAND test_transport_normalization.x)
 
-foreach(name IN ITEMS homma_coefficients stost_cartesian)
+foreach(name IN ITEMS homma_coefficients homma_kick stost_cartesian)
     add_executable(test_${name}.x test_${name}.f90)
     target_link_libraries(test_${name}.x GORILLA_APPLETS)
     target_include_directories(test_${name}.x
