@@ -1,0 +1,33 @@
+! Thermal-force applet (i_option = 16). CGS units, temperatures in eV, masses in amu.
+! This example is benchmark case B04: homogeneous relaxation of a drifting
+! bi-Maxwellian W3+ population in an H+ background (no gradient).
+! Design: docs/plans/2026-11-05-homma-thermal-force-design.md
+&thermal_force_nml
+ driver = 'velocity' ,                   ! 'velocity': homogeneous plasma, no spatial motion
+ test_mass_amu = 183.84d0 ,
+ test_charge_number = 3.d0 ,
+ background_mass_amu = 1.007276466621d0 ,  ! proton
+ background_charge_number = 1.d0 ,
+ density_cm3 = 1.d14 ,
+ temperature_ev = 50.d0 ,
+ flow_cm_s = 0.d0, 0.d0, 0.d0 ,
+ grad_temperature_ev_cm = 0.d0, 0.d0, 0.d0 ,
+ coulomb_log = 15.d0 ,
+ heat_flux_model = 'homma2014' ,         ! 'homma2014' or 'none' (Maxwellian operator)
+ collision_background_at = 'gyro_orbit' ,! 'gyro_orbit' or 'guiding_centre' (orbit drivers)
+ b_gauss = 0.d0, 0.d0, 1.d4 ,
+ test_distribution = 'drifting_bimaxwellian' ,  ! or 'maxwellian' (test_temperature_ev)
+ test_temperature_ev = 50.d0 ,
+ test_temperature_par_ev = 200.d0 ,
+ test_temperature_perp_ev = 50.d0 ,
+ test_drift_cm_s = 0.d0, 0.d0, 7.2d5 ,
+ start_x_cm = 0.d0, 0.d0, 0.d0 ,
+ dt_coll_over_tau_s = 0.01d0 ,           ! tau_s at v = sqrt(3 T_b/m_a)
+ output_time_unit = 'tau_s' ,            ! 'tau_s' or 'gyro' (Omega_a t)
+ output_times = 0.d0, 0.01d0, 0.03d0, 0.1d0, 0.3d0, 1.d0, 3.d0, 10.d0, 30.d0 ,
+ boole_gyration = .true. ,
+ boole_control_run = .false. ,           ! .true.: also grad T = 0 with the same random numbers
+ n_particles = 10000 ,
+ seed = 1 ,
+ output_file = 'thermal_force_velocity.csv' ,
+/
