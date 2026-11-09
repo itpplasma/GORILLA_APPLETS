@@ -1,0 +1,16 @@
+&TETRA_GRID_NML
+ boole_n_field_periods   = .false. ,
+ boole_write_mesh_obj    = .false. ,
+ filename_mesh_rphiz     = 'mesh_rphiz.obj' ,
+ filename_mesh_sthetaphi = 'mesh_sthetaphi.obj' ,
+ grid_kind               = 5 ,
+ n1                      = 40 ,
+ n2                      = 40 ,
+ n3                      = 40 ,
+ n_field_periods_manual  = 1000 ,
+ R0_analytic_circ        = 1.0e5 ,
+ a_analytic_circ         = 100.0 ,
+ B0_analytic_circ        = 1.0e4 ,
+ q0_analytic_circ        = 10.0 ,
+ q1_analytic_circ        = 0.0 ,
+/

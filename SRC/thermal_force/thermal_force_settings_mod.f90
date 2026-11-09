@@ -21,6 +21,11 @@ module thermal_force_settings_mod
         ! model, exact helix between Cartesian kicks at the particle; needs
         ! Omega_a dt <~ 1, otherwise the kicks alias with the gyration)
         character(len=32) :: orbit_model = 'guiding_centre'
+        ! guiding-centre models: apply the collisional guiding-centre shift
+        ! dX = -b x dv/Omega_a (classical transport, perpendicular thermal force,
+        ! temperature screening); .false.: collisions change v_par, v_perp only,
+        ! as GORILLA's other collision operators
+        logical :: boole_collision_shift = .true.
         ! test species
         real(dp) :: test_mass_amu = 183.84_dp
         real(dp) :: test_charge_number = 3.0_dp
@@ -76,7 +81,7 @@ subroutine load_thermal_force_inp(inp)
     real(dp) :: density_cm3, temperature_ev, flow_cm_s(3), grad_temperature_ev_cm(3), coulomb_log, b_gauss(3)
     real(dp) :: test_temperature_ev, test_temperature_par_ev, test_temperature_perp_ev, test_drift_cm_s(3)
     real(dp) :: start_x_cm(3), dt_coll_over_tau_s, output_times(max_output_times)
-    logical :: boole_gyration, boole_control_run
+    logical :: boole_gyration, boole_control_run, boole_collision_shift
     integer :: n_particles, seed, unit, n_trajectories
     character(len=256) :: output_file, trajectory_file
     real(dp) :: trajectory_dt_gyro
@@ -87,7 +92,7 @@ subroutine load_thermal_force_inp(inp)
         test_temperature_ev, test_temperature_par_ev, test_temperature_perp_ev, test_drift_cm_s, &
         start_x_cm, dt_coll_over_tau_s, output_time_unit, output_times, boole_gyration, &
         boole_control_run, n_particles, seed, output_file, orbit_model, n_trajectories, &
-        trajectory_dt_gyro, trajectory_file
+        trajectory_dt_gyro, trajectory_file, boole_collision_shift
 
     ! defaults from the type
     driver = inp%driver; test_mass_amu = inp%test_mass_amu; test_charge_number = inp%test_charge_number
@@ -104,6 +109,7 @@ subroutine load_thermal_force_inp(inp)
     n_particles = inp%n_particles; seed = inp%seed; output_file = inp%output_file
     orbit_model = inp%orbit_model; n_trajectories = inp%n_trajectories
     trajectory_dt_gyro = inp%trajectory_dt_gyro; trajectory_file = inp%trajectory_file
+    boole_collision_shift = inp%boole_collision_shift
 
     open(newunit=unit, file='thermal_force.inp', status='old', action='read')
     read(unit, nml=thermal_force_nml)
@@ -123,6 +129,7 @@ subroutine load_thermal_force_inp(inp)
     inp%n_particles = n_particles; inp%seed = seed; inp%output_file = output_file
     inp%orbit_model = orbit_model; inp%n_trajectories = n_trajectories
     inp%trajectory_dt_gyro = trajectory_dt_gyro; inp%trajectory_file = trajectory_file
+    inp%boole_collision_shift = boole_collision_shift
 
     call check_input(inp)
     print *, 'GORILLA_APPLETS: Loaded input data from thermal_force.inp'
@@ -136,8 +143,14 @@ subroutine check_input(inp)
 
     select case (trim(inp%driver))
     case ('velocity', 'slab')
+    case ('tokamak')
+        if (trim(inp%orbit_model) /= 'guiding_centre') &
+            call input_error('driver ''tokamak'' requires orbit_model = ''guiding_centre''')
+        if (inp%grad_temperature_ev_cm(2) /= 0.0_dp) &
+            call input_error('driver ''tokamak'': grad_temperature_ev_cm(2) (phi component) must be zero')
+        if (inp%n_trajectories > 0) call input_error('driver ''tokamak'' has no trajectory output')
     case default
-        call input_error('driver must be ''velocity'' or ''slab'' (tokamak driver follows)')
+        call input_error('driver must be ''velocity'', ''slab'' or ''tokamak''')
     end select
     select case (trim(inp%orbit_model))
     case ('guiding_centre', 'full_orbit')

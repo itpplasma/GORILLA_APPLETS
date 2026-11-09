@@ -1,0 +1,5 @@
+! GORILLA_APPLETS: thermal force (Homma-Hatayama collision operator), tokamak driver.
+! The mesh and field come from tetra_grid.inp, gorilla.inp and field_divB0.inp.
+&GORILLA_APPLETS_NML
+ i_option = 16 ,
+/

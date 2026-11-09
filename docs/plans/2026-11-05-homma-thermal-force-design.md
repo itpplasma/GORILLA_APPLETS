@@ -301,3 +301,69 @@ A control run subtracts it.
   50 %, 25 %, 9 % of the drift, as the first-order targets predict, at every
   Δt. Both converged models lie 1.3 % above first order for W1+ (cloud drift
   into colder plasma over the longer window), at it for W3+ and W10+.
+- **Tokamak driver** (`driver = 'tokamak'`, `EXAMPLES/thermal_force_tokamak`).
+  GORILLA is initialised as usual, then the test species (mass, charge,
+  `cm_over_e`) is set and the pusher precomputation redone. At a collision the
+  field direction comes from the mesh (covariant `h_k`, linear per
+  tetrahedron, physical `b = (h_1, h_2/R, h_3)`) and `|B|` from `bmod_func`;
+  `homma_gc_step` runs in the local frame `(R, 0, Z)`; the shift
+  `(ΔR, ΔX_φ/R, ΔZ)` moves the guiding centre through the mesh with
+  `displace_by_straight_line`; GORILLA's `push_within_tetrahedron` integrates
+  the orbit in between. Lost ions are counted and frozen.
+  - Mesh: R₀ = 1 km with one toroidal field period of `2π/1000`
+    (`boole_n_field_periods = .false.`, `n_field_periods_manual = 1000`,
+    exact for the axisymmetric field) keeps the tetrahedra at about
+    5 × 16 × 5 cm; the full torus with `n2 = 80` gives 80 m long cells.
+  - GORILLA's mesh check reports "invalid normal vectors" for the analytic
+    circular grid in general (also 30 440 for its own example 8), not caused
+    by this setup; the orbits are unaffected.
+  - W3+, 100 eV/m: d⟨R⟩/dt = −1.793 ± 0.014 m/s (target −1.788 with
+    collisions at X+ρ, slab −1.797), d⟨Z⟩/dt ≈ 0; with
+    `boole_collision_shift = .false.` the screening drift vanishes.
+- **Collision shift switch** (`boole_collision_shift`, default `.true.`,
+  slab and tokamak). `.false.` gives GORILLA's traditional velocity-only
+  collisions: the parallel thermal force acts, the perpendicular one and the
+  gyro-orbit friction drift do not.
+- **Tokamak checks** (`EXAMPLES/thermal_force_tokamak/check_tokamak.py`,
+  about 50 s, `run/tokamak_checks.png`):
+  1. Collisionless orbits (n = 1e6 cm⁻³, Δt = 1e-6 τ_s): vertical drift
+     against `c m (⟨v∥²⟩ + ⟨v⊥²⟩/2)/(q B R)` plus the parallel streaming along
+     the tilted field `⟨v∥⟩ r/(q R₀)`, with the sampled moments: 0.999, 0.997,
+     0.987 for W1+, W3+, W10+. The remainder is a position offset of about
+     1e-6 cm, identical for both GORILLA pushers and halved by 2× mesh
+     refinement: GORILLA's mesh discretisation. The drift ∝ m/q confirms the
+     species override.
+  2. Screening drift W1+, W3+, W10+: tokamak and slab agree with each other
+     and within 0.6 % with the targets; with the shift off it vanishes.
+  3. Step dependence 0.005–0.15 τ_s: tokamak and slab coincide.
+  4. Classical diffusion (∇T = 0): var R, var Z of the tokamak equal var x,
+     var y of the slab within the 1 % sampling error (shift conversion).
+
+## 11. Status 2026-11-09 and open questions
+
+Done: steps 1–6 (derivation, kernel, kick, velocity, slab, tokamak drivers),
+B01–B08 on the GORILLA side, Homma Figs. 1–4 reproduced. Deliberately last:
+conversion to the benchmark CSV format and the comparison with kin6d.
+
+Open:
+- **B09–B11** wait for case files from the kin6d side. B10/B11 need, in the
+  slab driver: profiles beyond linear T (exponential T, n), binned output
+  along s; B11 also absorbing boundaries, a source, background flow and an
+  electric field.
+- **B12** (toroidal transport, Γ_z = −D_z ∇n_z + n_z V_z). With Homma's
+  background (ions at rest, local Braginskii q) the tokamak driver covers the
+  classical channel and the impurity's own neoclassical diffusion, but not
+  the neoclassical convection: in a torus the diamagnetic particle and heat
+  fluxes are not divergence-free (B ∝ 1/R), and the Pfirsch–Schlüter return
+  flows u∥(θ), q∥(θ) carry the friction and thermal force that drive it.
+  Needed: (0) a decision on the background-flow model, u_i = ω R e_φ +
+  K B/n, q_i = q_dia + L B with ω(E_r, p_i'), K, L from a closure
+  (Hirshman–Sigmar for the main-ion regime, or NEO/JOREK), to agree with the
+  kin6d side; (1) a flux-surface background provider (n_i(ψ), T_i(ψ), flow
+  and q from the model; the kernel already accepts any u and q); (2) E_r via
+  GORILLA's potential if nonzero; (3) radial flux diagnostics and fits.
+  Validity: Homma's distorted Maxwellian is a collisional closure; banana
+  regime only as a stress test. Reading: Korving et al. 2024 (benchmark
+  repo literature), Helander & Sigmar 2002.
+- **Optional:** a semi-implicit friction step to remove the heating bias
+  T_eff = T_b (1 + 0.5 Δt/τ_s); a kernel change, ask first.
