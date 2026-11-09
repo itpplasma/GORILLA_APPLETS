@@ -109,8 +109,8 @@ subroutine calc_volume_integrals
     ! grids (grid_kind=1), the row of regular prisms touching the midplane Z=0
     ! has b_dash = 0 together with a horizontal edge, so gamma or beta of the
     ! refined volume vanishes and the closed form gives 0/0 although its limit
-    ! is finite (g26884 divertor grid: 0.5 % of the prisms); these prisms fall
-    ! back to the unrefined volume below. prism_volumes is computed robustly via the
+    ! is finite (g26884 divertor grid: 0.5 % of the prisms); these prisms use
+    ! refined_volume_by_quadrature instead. prism_volumes is computed robustly via the
     ! exact Pappus form below (so the integrated moments stay clean); the trap
     ! disable only stops those transient FPEs in the auxiliary refined integrals
     ! from killing the run. The halting mode belongs to each thread, so every
@@ -255,6 +255,16 @@ subroutine calc_volume_integrals
                                                                     & (delta/beta*(capital_delta+beta*r(2))+epsilon/2*r(2)**2) + &
                     & log((capital_delta+beta*r(1))/(a_dash+gamma*r(1)))*(delta*(r(2)-r(1))+epsilon/2*(r(2)**2-r(1)**2)) - &
                     & log((capital_delta+beta*r(2))/(capital_delta+beta*r(1)))*epsilon*capital_delta**2/(2*beta**2)
+
+            ! The closed form subtracts terms of order (a_dash/(beta*r))**2 * log(1 + beta*r/a_dash)
+            ! (same for gamma) that cancel to the integral; for small beta*r/a_dash (small prisms
+            ! or nearly constant |B|) this loses all digits and at beta or gamma = 0 it is 0/0
+            ! (row of prisms at the midplane Z=0 of rectangular grids, where b_dash = 0). Such
+            ! prisms use the quadrature of the same integrand instead.
+            if (minval(abs(b_dash + c_dash*gradient))*r(2) < 1.0e-2_dp*abs(a_dash) .or. &
+                & .not. ieee_is_finite(refined_prism_volumes(i))) then
+                refined_prism_volumes(i) = refined_volume_by_quadrature(r, z, a, b, c, a_dash, b_dash, c_dash)
+            endif
         endif
 
         if (.not. in%boole_monoenergetic) then
@@ -424,5 +434,45 @@ subroutine calc_volume_integrals_in_flux_coordinates
     print*, 'calc_volume_integrals finished'
 
 end subroutine calc_volume_integrals_in_flux_coordinates
+
+pure function refined_volume_by_quadrature(r, z, a, b, c, a_dash, b_dash, c_dash) result(integral)
+!
+! Integral of (a + b*x + c*y)/(a_dash + b_dash*x + c_dash*y) over the triangle with
+! vertices (0,0), (r(1),z(1)), (r(2),z(2)), i.e. the poloidal integral of the refined
+! prism volume (appendix B of the master thesis of Jonatan Schatzlmayr) without its
+! closed form. Used where the closed form is 0/0 (beta, gamma or c_dash = 0) although
+! the integral is finite. The integrand is smooth (the denominator is |B| > 0), so an
+! 8x8 Gauss-Legendre rule on the collapsed square (Duffy transformation) is exact to
+! round-off. Returns the absolute value, like the closed form after abs().
+!
+    real(dp), dimension(2), intent(in) :: r, z
+    real(dp), intent(in)               :: a, b, c, a_dash, b_dash, c_dash
+    real(dp)                           :: integral
+    real(dp), dimension(4), parameter  :: t = (/0.1834346424956498_dp, 0.5255324099163290_dp, &
+                                                & 0.7966664774136267_dp, 0.9602898564975363_dp/)
+    real(dp), dimension(4), parameter  :: w = (/0.3626837833783620_dp, 0.3137066458778873_dp, &
+                                                & 0.2223810344533745_dp, 0.1012285362903763_dp/)
+    real(dp), dimension(8)             :: nodes, weights
+    real(dp)                           :: u, v, x, y
+    integer                            :: i, j
+
+    ! Gauss-Legendre nodes and weights mapped from [-1,1] to [0,1]
+    nodes = 0.5_dp*(/1-t(4:1:-1), 1+t/)
+    weights = 0.5_dp*(/w(4:1:-1), w/)
+
+    ! (u,v) in [0,1]^2 -> u*((r1,z1) + v*((r2,z2)-(r1,z1))), Jacobian u*|r1*z2 - z1*r2|
+    integral = 0.0_dp
+    do i = 1,8
+        u = nodes(i)
+        do j = 1,8
+            v = nodes(j)
+            x = u*(r(1) + v*(r(2)-r(1)))
+            y = u*(z(1) + v*(z(2)-z(1)))
+            integral = integral + weights(i)*weights(j)*u*(a + b*x + c*y)/(a_dash + b_dash*x + c_dash*y)
+        enddo
+    enddo
+    integral = abs(integral*(r(1)*z(2) - z(1)*r(2)))
+
+end function refined_volume_by_quadrature
 
 end module volume_integrals_and_sqrt_g_mod
