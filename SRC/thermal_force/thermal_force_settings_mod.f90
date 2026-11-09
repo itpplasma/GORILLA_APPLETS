@@ -17,7 +17,9 @@ module thermal_force_settings_mod
         ! 'slab': uniform B, linear temperature profile, ions move in space
         character(len=32) :: driver = 'velocity'
         ! slab driver: 'guiding_centre' (GORILLA model, homma_gc_step) or
-        ! 'full_orbit' (exact helix between Cartesian kicks at the particle)
+        ! 'full_orbit' (reference only, not GORILLA physics: Homma's full-orbit
+        ! model, exact helix between Cartesian kicks at the particle; needs
+        ! Omega_a dt <~ 1, otherwise the kicks alias with the gyration)
         character(len=32) :: orbit_model = 'guiding_centre'
         ! test species
         real(dp) :: test_mass_amu = 183.84_dp

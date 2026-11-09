@@ -245,6 +245,14 @@ A control run subtracts it.
   full orbit and guiding centre converge to the same −5.46 m/s as `Δt → 0`;
   the 1.8 % above the first-order target −5.36 m/s grows with time and with
   `(∇T)²` (0.3 % at 100 eV/m): the cloud spreads through `T(x)`.
+- **Full orbit as a reference option.** The slab driver has
+  `orbit_model = 'full_orbit'` (Homma's model) besides the GORILLA model
+  `'guiding_centre'`. It is not GORILLA physics; it serves to check the
+  guiding-centre reduction inside one code and to draw Homma's Figs. 1 and 3.
+  Both models cost the same per collision step (about 340 ns, dominated by
+  the kernel); the full orbit needs `Ω_a Δt ≲ 1`, the guiding centre only
+  collision accuracy, and in real geometry the full orbit would also need a
+  gyro-resolving pusher.
 - **Full orbit with a fixed collision step aliases with the gyration.** For
   `Ω_a Δt ≳ 2` (Homma's 0.05 and 0.15 τ_s are 5.5 and 16.6 rad) the full
   orbit gets a spurious transverse drift of +0.4 to +0.5 m/s (10 %) and an
@@ -258,3 +266,30 @@ A control run subtracts it.
   makes `⟨X⟩` run up to 10 µm ahead of the guiding centre for about 2 τ_s,
   and leaves a constant `⟨Y⟩` offset of about −10 µm; afterwards both models
   drift alike. Drift fits must start after the transient (Ωt ≳ 300).
+- **B08 convergence campaign** (`EXAMPLES/thermal_force_b08`, 14 min on 8
+  cores; drift at 100 eV/m from the paired difference over Ωt = 300–700,
+  4 seeds × 1e4 ions per point):
+  - Guiding centre, background at X: no measurable Δt dependence up to
+    0.15 τ_s (|bias| ≤ 0.05 % per 0.01 τ_s); converged drift within
+    0.1–0.3 % of the first-order target.
+  - Guiding centre, background on the gyro orbit: first-order bias, the
+    drift magnitude grows by 0.21 % (W1+), 0.13 % (W3+), < 0.01 % (W10+) per
+    0.01 τ_s; +3 % (W1+), +1.4 % (W3+) at 0.1 τ_s.
+  - Converged drifts exceed the first-order targets by 0.6 % (W1+), 0.1 %
+    (W3+), 0.2 % (W10+): the cloud drifts and spreads into colder plasma,
+    second order in ∇T.
+  - Full orbit (reference): converges only for Ω_a Δt ≲ 1; at larger steps
+    X errors of 5–60 % and transverse drifts of 10–70 %. For W1+ the window
+    Ωt = 300–700 lies inside the initial transient (≈ 2 τ_s = 670/Ω_a): −8 %
+    in X, +23 % in Y even at Δt = 0.001 τ_s; over Ωt = 1500–3000 full orbit
+    and guiding centre agree (−0.918, −0.916 m/s) and Y vanishes. The
+    benchmark's B07 window (Ωt = 100–700) is therefore transient-dominated for
+    W1+ in any full-orbit code; the guiding centre has no such transient.
+  - B04 relaxation (velocity driver): explicit friction overdamps and heats;
+    p∥, p⊥ at 10 τ_s exceed T_b by 0.7 %, 2.5 %, 5 %, 15 %, 33 % at
+    Δt/τ_s = 0.01, 0.05, 0.1, 0.25, 0.5; u∥ at 1 τ_s is 4 % low at 0.1 τ_s.
+    1 % accuracy needs Δt ≤ 0.01–0.02 τ_s.
+  - Statistics: the reported standard errors match the seed-to-seed scatter
+    and fall as N^-1/2 (N = 1e3 … 1e6). The paired difference to the
+    control run reduces the standard error of the drift by a factor 137,
+    i.e. the same precision as about 2e4 times more ions without it.
