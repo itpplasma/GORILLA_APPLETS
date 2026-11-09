@@ -5,6 +5,9 @@ Plots and convergence fits for the B08 campaign of run_b08.py.
   b08_dt.png       B07 drift versus collision step, relative to our first-order
                    targets (TESTS/REFERENCE/homma/B07_targets.csv), and the
                    transverse drift; error bars from the seed-to-seed scatter
+  b08_models.png   the three models on one footing: drift over t = 3..7 tau_s
+                   relative to the full first-order target (collisions at the
+                   particle), with the first-order prediction for collisions at X
   b08_relax.png    B04 moments at 1, 3, 10 tau_s versus collision step
   b08_n.png        standard error of the drift versus ion number: reported by
                    the applet and from the seed-to-seed scatter
@@ -128,6 +131,56 @@ def plot_dt(work, summary):
     fig.savefig(work / "b08_dt.png", dpi=140)
 
 
+def plot_models(work, summary):
+    rows = read(work / "b08_models.csv")
+    tg = targets()
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r["model"], int(r["Z"]), r["dt_over_tau_s"])].append(r)
+    labels = {"full": ("full orbit (reference)", AQUA, "^"),
+              "gc_orbit": ("guiding centre, collisions at X+ρ", BLUE, "s"),
+              "gc_gc": ("guiding centre, collisions at X", ORANGE, "o")}
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.6), facecolor=SURFACE)
+    for ax, z in zip(axes, (1, 3, 10)):
+        ref = tg[z]["gyro_orbit_dXdt_m_s"]
+        omega_tau = None
+        converged = {}
+        for model, (label, color, marker) in labels.items():
+            dts = sorted({k[2] for k in groups if k[0] == model and k[1] == z})
+            stats = []
+            for dt in dts:
+                g = groups[(model, z, dt)]
+                omega_tau = g[0]["omega_tau_s"]
+                stats.append(seed_stats([r["dXdt_m_s"] for r in g]))
+            m, s_ = np.array(stats).T
+            ax.errorbar(dts, (m / ref - 1.0) * 100.0, yerr=s_ / abs(ref) * 100.0, color=color, marker=marker,
+                        markersize=5, linewidth=1.4, capsize=2, label=label)
+            converged[model] = (dts[0], m[0], s_[0])
+        ax.axhline(0.0, color=INK, linestyle="--", linewidth=1.0, label="first order, collisions at the particle")
+        ax.axhline((tg[z]["gc_dXdt_m_s"] / ref - 1.0) * 100.0, color=MUTED, linestyle=":", linewidth=1.2,
+                   label="first order, collisions at X")
+        ax.axvline(1.0 / omega_tau, color=MUTED, linestyle=":", linewidth=1.0)
+        ax.text(1.0 / omega_tau, 0.97, " Ω_a Δt = 1", color=MUTED, fontsize=8, va="top",
+                transform=ax.get_xaxis_transform())
+        ax.set_xscale("log")
+        ax.set_xlabel("collision step Δt / τ_s")
+        ax.set_title(f"W{z}+ (fit t = 3–7 τ_s = Ω_a t {3*omega_tau:.0f}–{7*omega_tau:.0f})", fontsize=10,
+                     color=INK, loc="left")
+        style(ax)
+        dt0, mf, sf = converged["full"]
+        for model in ("gc_orbit", "gc_gc"):
+            _, mg, sg = converged[model]
+            summary.append(f"models Z={z:2d} dt={dt0}: {model:8s} {mg:.5f} +- {sg:.5f} m/s vs full orbit "
+                           f"{mf:.5f} +- {sf:.5f}: {model}/full - 1 = {mg/mf-1:+.4f} +- "
+                           f"{np.hypot(sg/mf, mg*sf/mf**2):.4f}")
+    axes[0].set_ylabel("d⟨X⟩/dt relative to first-order drift\n(collisions at the particle) [%]")
+    axes[0].legend(frameon=False, fontsize=7.5, labelcolor=INK, loc="center left")
+    fig.suptitle("Screening drift of the three models, ∇T = 100 eV/m, paired difference, after the initial "
+                 "transient", fontsize=11, color=INK)
+    fig.tight_layout()
+    fig.savefig(work / "b08_models.png", dpi=140)
+
+
 def plot_relax(work):
     rows = read(work / "b08_relax.csv")
     groups = defaultdict(list)
@@ -192,6 +245,8 @@ def main():
     summary = []
     if (work / "b08_dt.csv").exists():
         plot_dt(work, summary)
+    if (work / "b08_models.csv").exists():
+        plot_models(work, summary)
     if (work / "b08_relax.csv").exists():
         plot_relax(work)
     if (work / "b08_n.csv").exists():
