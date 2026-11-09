@@ -17,8 +17,18 @@ module thermal_force_mod
 ! model, Cartesian kick with the background at the particle, then the exact
 ! helix until the next collision (requires Omega_a dt <~ 1).
 !
+! Driver 'tokamak': GORILLA guiding-centre orbits on its tetrahedral mesh in
+! cylindrical coordinates (coord_system = 1), e.g. the analytic circular
+! tokamak (grid_kind = 5). Collisions as in the slab guiding-centre model, at
+! the field direction and |B| of the mesh; the guiding-centre shift moves the
+! ion through the mesh with displace_by_straight_line; between collisions
+! GORILLA's pusher integrates the orbit. The background temperature is linear
+! in R and Z, T = T_0 + grad T . (x - start_x_cm).
+!
 ! With boole_control_run the same ions are also followed with grad T = 0 and
 ! the same random numbers; the paired difference isolates the thermal force.
+! boole_collision_shift = .false. leaves the guiding centre in place at a
+! collision (velocity-only collisions, GORILLA's traditional scope).
 !
 ! Units inside: CGS (GORILLA constants_mod), temperatures as energies.
 ! Design: docs/plans/2026-11-05-homma-thermal-force-design.md
@@ -63,6 +73,7 @@ subroutine calc_thermal_force()
     type(setup_t) :: su
 
     call load_thermal_force_inp(inp)
+    if (trim(inp%driver) == 'tokamak') call initialize_gorilla_for_test_ion(inp)
     call build_setup(inp, su)
 
     print '(a,es12.5,a,es12.5,a,es12.5,a)', ' thermal force: tau_s = ', su%tau_s, ' s, Omega_a = ', su%omega_a, &
@@ -73,6 +84,8 @@ subroutine calc_thermal_force()
         call run_velocity_driver(inp, su)
     case ('slab')
         call run_slab_driver(inp, su)
+    case ('tokamak')
+        call run_tokamak_driver(inp, su)
     end select
 
 end subroutine calc_thermal_force
@@ -108,6 +121,11 @@ subroutine build_setup(inp, su)
     su%prof_control%grad_t = 0.0_dp
 
     su%b_field = inp%b_gauss
+    if (trim(inp%driver) == 'tokamak') then
+        call tokamak_start_field(inp, su%b_field)
+        ! the profile lives in the local physical frame (R, 0, Z), see tokamak_ion
+        su%prof_gradient%x0 = [inp%start_x_cm(1), 0.0_dp, inp%start_x_cm(3)]
+    end if
     su%b_hat = su%b_field/norm2(su%b_field)
     call homma_perp_basis(su%b_hat, su%e1, su%e2)
     su%omega_a = su%units%k_lorentz*su%q_a*norm2(su%b_field)/su%m_a
@@ -307,12 +325,12 @@ subroutine slab_ion(inp, su, ip, traj_unit, sums, fails)
                 if (ierr /= 0) fails(2) = fails(2) + 1
             end if
         else
-            call guiding_centre_kick(su, su%prof_gradient, background_at, su%dt, phase_u, xi, &
-                                     x_grad, vpar_grad, vperp_grad, ierr)
+            call guiding_centre_kick(su, su%prof_gradient, background_at, inp%boole_collision_shift, su%dt, &
+                                     phase_u, xi, x_grad, vpar_grad, vperp_grad, ierr)
             if (ierr /= 0) fails(1) = fails(1) + 1
             if (inp%boole_control_run) then
-                call guiding_centre_kick(su, su%prof_control, background_at, su%dt, phase_u, xi, &
-                                         x_ctrl, vpar_ctrl, vperp_ctrl, ierr)
+                call guiding_centre_kick(su, su%prof_control, background_at, inp%boole_collision_shift, su%dt, &
+                                         phase_u, xi, x_ctrl, vpar_ctrl, vperp_ctrl, ierr)
                 if (ierr /= 0) fails(2) = fails(2) + 1
             end if
             if (traced) call record_trajectory(traj_unit, ip, t, su, x_grad - inp%start_x_cm)
@@ -382,13 +400,287 @@ contains
 
 end subroutine slab_ion
 
-subroutine guiding_centre_kick(su, prof, background_at, h, phase_u, xi, x, vpar, vperp, ierr)
+subroutine initialize_gorilla_for_test_ion(inp)
 
-    ! Collision of a guiding centre (homma_gc_step) including its shift.
+    ! Build GORILLA's mesh and field, then set the test species (mass, charge
+    ! and cm_over_e, used by the pusher) and redo the pusher precomputation,
+    ! which contains cm_over_e. Requires cylindrical coordinates.
+
+    use constants, only: clight, echarge
+    use orbit_timestep_gorilla_mod, only: initialize_gorilla
+    use tetra_physics_mod, only: particle_mass, particle_charge, cm_over_e
+    use tetra_physics_poly_precomp_mod, only: make_precomp_poly
+    use gorilla_settings_mod, only: coord_system
+
+    type(thermal_force_input_t), intent(in) :: inp
+
+    if (coord_system /= 1) error stop 'thermal force: driver tokamak needs coord_system = 1 (R, phi, Z) in gorilla.inp'
+    call initialize_gorilla()
+    particle_mass = inp%test_mass_amu*amu_g
+    particle_charge = inp%test_charge_number*echarge
+    cm_over_e = clight*particle_mass/particle_charge
+    call make_precomp_poly()
+
+end subroutine initialize_gorilla_for_test_ion
+
+subroutine tokamak_field(x, ind_tetr, b_field)
+
+    ! Magnetic field vector at x (R, phi, Z) in physical components (R, phi, Z)
+    ! from the mesh: covariant h_k = h_k,1 + grad h_k . (x - x_1) per
+    ! tetrahedron, physical b = (h_1, h_2/R, h_3) normalised, |B| from bmod_func.
+
+    use tetra_physics_mod, only: tetra_physics
+    use supporting_functions_mod, only: bmod_func
+
+    real(dp), intent(in) :: x(3)
+    integer, intent(in) :: ind_tetr
+    real(dp), intent(out) :: b_field(3)
+    real(dp) :: z(3), h(3)
+
+    z = x - tetra_physics(ind_tetr)%x1
+    h(1) = tetra_physics(ind_tetr)%h1_1 + sum(tetra_physics(ind_tetr)%gh1*z)
+    h(2) = (tetra_physics(ind_tetr)%h2_1 + sum(tetra_physics(ind_tetr)%gh2*z))/x(1)
+    h(3) = tetra_physics(ind_tetr)%h3_1 + sum(tetra_physics(ind_tetr)%gh3*z)
+    b_field = bmod_func(z, ind_tetr)*h/norm2(h)
+
+end subroutine tokamak_field
+
+subroutine tokamak_start_field(inp, b_field)
+
+    use find_tetra_mod, only: find_tetra
+
+    type(thermal_force_input_t), intent(in) :: inp
+    real(dp), intent(out) :: b_field(3)
+    real(dp) :: x(3)
+    integer :: ind_tetr, iface
+
+    x = inp%start_x_cm          ! find_tetra may map x into its periodic domain
+    ! test velocity only for the face disambiguation; v_par must not vanish
+    call find_tetra(x, 1.0_dp, 1.0_dp, ind_tetr, iface)
+    if (ind_tetr == -1) error stop 'thermal force: start_x_cm lies outside the GORILLA mesh'
+    call tokamak_field(x, ind_tetr, b_field)
+
+end subroutine tokamak_start_field
+
+subroutine run_tokamak_driver(inp, su)
+
+    ! As the slab driver: collisions on the fixed grid t_n = n dt, GORILLA
+    ! orbit integration in between, sampled at the output times.
+
+    type(thermal_force_input_t), intent(in) :: inp
+    type(setup_t), intent(in) :: su
+    real(dp), allocatable :: sums(:,:,:,:)
+    integer(int64) :: fails(2), n_lost(2)
+    integer :: ip
+
+    allocate(sums(2, n_s, 3, size(su%t_out)))
+    sums = 0.0_dp
+    fails = 0
+    n_lost = 0
+
+    !$omp parallel do schedule(dynamic, 16) default(shared) private(ip) reduction(+:sums, fails, n_lost)
+    do ip = 1, inp%n_particles
+        call tokamak_ion(inp, su, ip, sums, fails, n_lost)
+    end do
+    !$omp end parallel do
+
+    if (any(fails > 0)) print '(a,2i12)', ' thermal force: kernel failures (gradient, control) = ', fails
+    if (any(n_lost > 0)) print '(a,2i12)', ' thermal force: ions lost from the mesh (gradient, control) = ', n_lost
+    call write_slab_output(inp, su, sums, fails, n_lost)
+
+end subroutine run_tokamak_driver
+
+subroutine tokamak_ion(inp, su, ip, sums, fails, n_lost)
+
+    ! One test ion on the GORILLA mesh, gradient and control run in lockstep
+    ! with the same random numbers. The particle starts at start_x_cm; its
+    ! guiding centre at start_x_cm - rho. A lost ion (left the mesh, or the
+    ! pusher gave up) keeps its last state and is counted.
+
+    use find_tetra_mod, only: find_tetra
+    use anomalous_transport_displacement_mod, only: displace_by_straight_line
+    use tetra_grid_settings_mod, only: n_field_periods
+
+    type(thermal_force_input_t), intent(in) :: inp
+    type(setup_t), intent(in) :: su
+    integer, intent(in) :: ip
+    real(dp), intent(inout) :: sums(:,:,:,:)
+    integer(int64), intent(inout) :: fails(2), n_lost(2)
+
+    type :: state_t
+        real(dp) :: x(3), vpar, vperp
+        integer :: ind_tetr, iface, turns
+        logical :: lost
+    end type state_t
+
+    type(rng_t) :: rng
+    type(state_t) :: st(2)
+    real(dp) :: v(3), b_hat(3), rho(3), xi(3), phase_u, t, t_next, q(n_s, 2)
+    integer(int64) :: n_step
+    integer :: k, n_out, r, n_runs, ierr, background_at
+
+    n_out = size(su%t_out)
+    n_runs = merge(2, 1, inp%boole_control_run)
+    background_at = merge(homma_at_gyro_orbit, homma_at_guiding_centre, &
+                          trim(inp%collision_background_at) == 'gyro_orbit')
+
+    call rng_seed(rng, int(inp%seed, int64), int(ip, int64))
+    call sample_initial_velocity(inp, su, rng, v)
+    b_hat = su%b_hat
+    rho = cross(b_hat, v)/su%omega_a
+    st(1)%vpar = dot_product(v, b_hat)
+    st(1)%vperp = norm2(v - st(1)%vpar*b_hat)
+    st(1)%x = inp%start_x_cm - [rho(1), rho(2)/inp%start_x_cm(1), rho(3)]
+    st(1)%turns = 0
+    st(1)%lost = .false.
+    call find_tetra(st(1)%x, st(1)%vpar, st(1)%vperp, st(1)%ind_tetr, st(1)%iface)
+    if (st(1)%ind_tetr == -1) st(1)%lost = .true.
+    st(2) = st(1)
+    do r = 1, 2
+        if (st(r)%lost) n_lost(r) = n_lost(r) + 1
+    end do
+
+    t = 0.0_dp
+    n_step = 0
+    k = 1
+    do while (k <= n_out)
+        if (su%t_out(k) > 0.0_dp) exit
+        call accumulate(k)
+        k = k + 1
+    end do
+
+    do while (k <= n_out)
+        ! collision at t, same random numbers for both runs
+        phase_u = rng_uniform(rng)
+        call rng_normal3(rng, xi)
+        call collide(st(1), su%prof_gradient, 1)
+        if (n_runs == 2) call collide(st(2), su%prof_control, 2)
+
+        ! GORILLA orbit to the next collision, sampled at the output times
+        n_step = n_step + 1
+        t_next = n_step*su%dt
+        do while (k <= n_out)
+            if (su%t_out(k) > t_next) exit
+            call push_all(su%t_out(k) - t)
+            t = su%t_out(k)
+            call accumulate(k)
+            k = k + 1
+        end do
+        if (k > n_out) exit
+        call push_all(t_next - t)
+        t = t_next
+    end do
+
+contains
+
+    subroutine collide(s, prof, r)
+
+        type(state_t), intent(inout) :: s
+        type(homma_linear_profile_t), intent(in) :: prof
+        integer, intent(in) :: r
+        real(dp) :: b_field(3), dx(3), x_local(3)
+
+        if (s%lost) return
+        call tokamak_field(s%x, s%ind_tetr, b_field)
+        ! local physical frame (R, 0, Z): the profile depends on R and Z only
+        x_local = [s%x(1), 0.0_dp, s%x(3)]
+        call homma_gc_step(su%units, su%m_a, su%q_a, prof, b_field, background_at, x_local, s%vpar, s%vperp, &
+                           su%dt, phase_u, xi, dx, ierr)
+        if (ierr /= 0) then
+            fails(r) = fails(r) + 1
+            return
+        end if
+        if (.not. inp%boole_collision_shift) return
+        call displace_by_straight_line(s%x, s%ind_tetr, s%iface, [dx(1), dx(2)/s%x(1), dx(3)], s%vpar, s%vperp)
+        if (s%ind_tetr == -1) then
+            s%lost = .true.
+            n_lost(r) = n_lost(r) + 1
+        end if
+
+    end subroutine collide
+
+    subroutine push_all(h)
+
+        real(dp), intent(in) :: h
+        integer :: r
+
+        if (h <= 0.0_dp) return
+        do r = 1, n_runs
+            call push_orbit(st(r), h, r)
+        end do
+
+    end subroutine push_all
+
+    subroutine push_orbit(s, h, r)
+
+        ! GORILLA guiding-centre orbit over h (as orbit_timestep_anomalous_transport)
+
+        use tetra_physics_mod, only: tetra_physics
+        use gorilla_settings_mod, only: optional_quantities_type
+        use supporting_functions_mod, only: vperp_func
+        use utils_orbit_timestep_mod, only: push_within_tetrahedron, initialize_constants_of_motion
+
+        type(state_t), intent(inout) :: s
+        real(dp), intent(in) :: h
+        integer, intent(in) :: r
+        type(optional_quantities_type) :: optional_quantities
+        real(dp) :: z_save(3), perpinv, t_remain, t_pass
+        integer :: ind_tetr_save, iper_phi
+        logical :: boole_t_finished, boole_pusher_failed
+
+        if (s%lost) return
+        z_save = s%x - tetra_physics(s%ind_tetr)%x1
+        call initialize_constants_of_motion(s%vperp, z_save, s%ind_tetr, perpinv)
+        t_remain = h
+        do
+            ind_tetr_save = s%ind_tetr
+            call push_within_tetrahedron(s%ind_tetr, s%iface, s%x, s%vpar, z_save, t_remain, t_pass, &
+                                         boole_t_finished, iper_phi, optional_quantities, boole_pusher_failed)
+            if (boole_pusher_failed .or. s%ind_tetr == -1) then
+                s%lost = .true.
+                n_lost(r) = n_lost(r) + 1
+                return
+            end if
+            s%vperp = vperp_func(z_save, perpinv, ind_tetr_save)
+            s%turns = s%turns + iper_phi
+            t_remain = t_remain - t_pass
+            if (boole_t_finished) exit
+        end do
+
+    end subroutine push_orbit
+
+    subroutine accumulate(k)
+
+        use constants, only: pi
+
+        integer, intent(in) :: k
+        integer :: r
+        real(dp) :: phi
+
+        do r = 1, 2
+            phi = st(r)%x(2) + st(r)%turns*2.0_dp*pi/n_field_periods
+            q(:, r) = [st(r)%x(1) - inp%start_x_cm(1), inp%start_x_cm(1)*(phi - inp%start_x_cm(2)), &
+                       st(r)%x(3) - inp%start_x_cm(3), 0.5_dp*su%m_a*(st(r)%vpar**2 + st(r)%vperp**2)]
+        end do
+        sums(1,:,run_gradient,k) = sums(1,:,run_gradient,k) + q(:,1)
+        sums(2,:,run_gradient,k) = sums(2,:,run_gradient,k) + q(:,1)**2
+        sums(1,:,run_control,k) = sums(1,:,run_control,k) + q(:,2)
+        sums(2,:,run_control,k) = sums(2,:,run_control,k) + q(:,2)**2
+        sums(1,:,run_difference,k) = sums(1,:,run_difference,k) + (q(:,1) - q(:,2))
+        sums(2,:,run_difference,k) = sums(2,:,run_difference,k) + (q(:,1) - q(:,2))**2
+
+    end subroutine accumulate
+
+end subroutine tokamak_ion
+
+subroutine guiding_centre_kick(su, prof, background_at, shift, h, phase_u, xi, x, vpar, vperp, ierr)
+
+    ! Collision of a guiding centre (homma_gc_step), with its shift if shift.
 
     type(setup_t), intent(in) :: su
     type(homma_linear_profile_t), intent(in) :: prof
     integer, intent(in) :: background_at
+    logical, intent(in) :: shift
     real(dp), intent(in) :: h, phase_u, xi(3)
     real(dp), intent(inout) :: x(3), vpar, vperp
     integer, intent(out) :: ierr
@@ -396,7 +688,7 @@ subroutine guiding_centre_kick(su, prof, background_at, h, phase_u, xi, x, vpar,
 
     call homma_gc_step(su%units, su%m_a, su%q_a, prof, su%b_field, background_at, x, vpar, vperp, &
                        h, phase_u, xi, dx, ierr)
-    x = x + dx
+    if (shift) x = x + dx
 
 end subroutine guiding_centre_kick
 
@@ -449,7 +741,7 @@ subroutine record_trajectory(unit, ip, t, su, x)
 
 end subroutine record_trajectory
 
-subroutine write_slab_output(inp, su, sums, fails)
+subroutine write_slab_output(inp, su, sums, fails, n_lost)
 
     ! One row per run (gradient, control, difference) and output time: mean
     ! position relative to start_x_cm (particle for full orbit, guiding centre
@@ -460,6 +752,7 @@ subroutine write_slab_output(inp, su, sums, fails)
     type(setup_t), intent(in) :: su
     real(dp), intent(in) :: sums(:,:,:,:)
     integer(int64), intent(in) :: fails(2)
+    integer(int64), intent(in), optional :: n_lost(2)
     character(len=10), parameter :: run_names(3) = [character(len=10) :: 'gradient', 'control', 'difference']
     real(dp) :: mean(n_s), se(n_s), n
     integer :: unit, k, r, n_runs
@@ -468,8 +761,16 @@ subroutine write_slab_output(inp, su, sums, fails)
     n_runs = merge(3, 1, inp%boole_control_run)
 
     open(newunit=unit, file=trim(inp%output_file), status='replace', action='write')
-    write(unit, '(a)') '# code: GORILLA_APPLETS thermal_force (i_option = 16), driver slab'
+    write(unit, '(a,a)') '# code: GORILLA_APPLETS thermal_force (i_option = 16), driver ', trim(inp%driver)
     write(unit, '(a,a)') '# orbit_model: ', trim(inp%orbit_model)
+    write(unit, '(a,l1)') '# collision_shift: ', inp%boole_collision_shift
+    if (trim(inp%driver) == 'tokamak') then
+        write(unit, '(a)') '# positions (guiding centre): x = R - R_s, y = R_s (phi - phi_s), z = Z - Z_s; ' // &
+            'R_s, phi_s, Z_s = start_x_cm'
+        write(unit, '(a,i0,", ",i0)') '# lost_ions_gradient_control: ', n_lost
+    else
+        write(unit, '(a)') '# positions: relative to start_x_cm; particle (full orbit) or guiding centre'
+    end if
     write(unit, '(a,a)') '# collision_background_at: ', trim(inp%collision_background_at)
     write(unit, '(a,a)') '# heat_flux_model: ', trim(inp%heat_flux_model)
     write(unit, '(a,3es24.16)') '# grad_temperature_ev_cm: ', inp%grad_temperature_ev_cm

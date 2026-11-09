@@ -1,0 +1,31 @@
+! Thermal-force applet (i_option = 16), driver 'tokamak': benchmark case B07
+! (temperature screening, W3+ in H+, 100 eV/m) in GORILLA's analytic circular
+! tokamak (tetra_grid.inp: grid_kind = 5, R0 = 1 km, a = 1 m, B0 = 1 T,
+! q = 10). Ions start on the outboard midplane at R = R0 + 50 cm; grad T along
+! R. Mapping to the slab: e_x <-> e_R, e_y <-> -e_Z, e_z <-> e_phi.
+! CGS units, temperatures in eV, masses in amu.
+&thermal_force_nml
+ driver = 'tokamak' ,
+ orbit_model = 'guiding_centre' ,
+ boole_collision_shift = .true. ,        ! .false.: velocity-only collisions (no screening drift)
+ collision_background_at = 'gyro_orbit' ,! or 'guiding_centre'
+ test_mass_amu = 183.84d0 ,
+ test_charge_number = 3.d0 ,
+ background_mass_amu = 1.007276466621d0 ,
+ background_charge_number = 1.d0 ,
+ density_cm3 = 1.d14 ,
+ temperature_ev = 50.d0 ,                ! at start_x_cm
+ grad_temperature_ev_cm = 1.d0, 0.d0, 0.d0 ,   ! physical (R, phi, Z) components: 100 eV/m along R
+ coulomb_log = 15.d0 ,
+ heat_flux_model = 'homma2014' ,
+ test_distribution = 'maxwellian' ,
+ test_temperature_ev = 50.d0 ,
+ start_x_cm = 100050.d0, 0.003d0, 0.d0 , ! (R [cm], phi [rad], Z [cm]); phi inside the field period 2 pi/1000
+ dt_coll_over_tau_s = 0.01d0 ,
+ output_time_unit = 'gyro' ,
+ output_times = 0.d0, 300.d0, 400.d0, 500.d0, 600.d0, 700.d0 ,
+ boole_control_run = .true. ,
+ n_particles = 2000 ,
+ seed = 1 ,
+ output_file = 'thermal_force_tokamak.csv' ,
+/
