@@ -14,7 +14,11 @@ module thermal_force_settings_mod
 
     type, public :: thermal_force_input_t
         ! 'velocity': homogeneous plasma, Cartesian velocities with Lorentz rotation
+        ! 'slab': uniform B, linear temperature profile, ions move in space
         character(len=32) :: driver = 'velocity'
+        ! slab driver: 'guiding_centre' (GORILLA model, homma_gc_step) or
+        ! 'full_orbit' (exact helix between Cartesian kicks at the particle)
+        character(len=32) :: orbit_model = 'guiding_centre'
         ! test species
         real(dp) :: test_mass_amu = 183.84_dp
         real(dp) :: test_charge_number = 3.0_dp
@@ -51,6 +55,11 @@ module thermal_force_settings_mod
         integer :: n_particles = 10000
         integer :: seed = 1
         character(len=256) :: output_file = 'thermal_force_velocity.csv'
+        ! slab driver: positions of the first n_trajectories ions (gradient run)
+        ! every trajectory_dt_gyro gyro periods (full orbit) or collision step
+        integer :: n_trajectories = 0
+        real(dp) :: trajectory_dt_gyro = 0.25_dp
+        character(len=256) :: trajectory_file = 'thermal_force_trajectories.csv'
     end type thermal_force_input_t
 
     public :: load_thermal_force_inp
@@ -60,21 +69,23 @@ contains
 subroutine load_thermal_force_inp(inp)
 
     type(thermal_force_input_t), intent(out) :: inp
-    character(len=32) :: driver, heat_flux_model, collision_background_at, test_distribution, output_time_unit
+    character(len=32) :: driver, orbit_model, heat_flux_model, collision_background_at, test_distribution, output_time_unit
     real(dp) :: test_mass_amu, test_charge_number, background_mass_amu, background_charge_number
     real(dp) :: density_cm3, temperature_ev, flow_cm_s(3), grad_temperature_ev_cm(3), coulomb_log, b_gauss(3)
     real(dp) :: test_temperature_ev, test_temperature_par_ev, test_temperature_perp_ev, test_drift_cm_s(3)
     real(dp) :: start_x_cm(3), dt_coll_over_tau_s, output_times(max_output_times)
     logical :: boole_gyration, boole_control_run
-    integer :: n_particles, seed, unit
-    character(len=256) :: output_file
+    integer :: n_particles, seed, unit, n_trajectories
+    character(len=256) :: output_file, trajectory_file
+    real(dp) :: trajectory_dt_gyro
 
     namelist /thermal_force_nml/ driver, test_mass_amu, test_charge_number, background_mass_amu, &
         background_charge_number, density_cm3, temperature_ev, flow_cm_s, grad_temperature_ev_cm, &
         coulomb_log, heat_flux_model, collision_background_at, b_gauss, test_distribution, &
         test_temperature_ev, test_temperature_par_ev, test_temperature_perp_ev, test_drift_cm_s, &
         start_x_cm, dt_coll_over_tau_s, output_time_unit, output_times, boole_gyration, &
-        boole_control_run, n_particles, seed, output_file
+        boole_control_run, n_particles, seed, output_file, orbit_model, n_trajectories, &
+        trajectory_dt_gyro, trajectory_file
 
     ! defaults from the type
     driver = inp%driver; test_mass_amu = inp%test_mass_amu; test_charge_number = inp%test_charge_number
@@ -89,6 +100,8 @@ subroutine load_thermal_force_inp(inp)
     output_time_unit = inp%output_time_unit; output_times = inp%output_times
     boole_gyration = inp%boole_gyration; boole_control_run = inp%boole_control_run
     n_particles = inp%n_particles; seed = inp%seed; output_file = inp%output_file
+    orbit_model = inp%orbit_model; n_trajectories = inp%n_trajectories
+    trajectory_dt_gyro = inp%trajectory_dt_gyro; trajectory_file = inp%trajectory_file
 
     open(newunit=unit, file='thermal_force.inp', status='old', action='read')
     read(unit, nml=thermal_force_nml)
@@ -106,6 +119,8 @@ subroutine load_thermal_force_inp(inp)
     inp%output_time_unit = output_time_unit; inp%output_times = output_times
     inp%boole_gyration = boole_gyration; inp%boole_control_run = boole_control_run
     inp%n_particles = n_particles; inp%seed = seed; inp%output_file = output_file
+    inp%orbit_model = orbit_model; inp%n_trajectories = n_trajectories
+    inp%trajectory_dt_gyro = trajectory_dt_gyro; inp%trajectory_file = trajectory_file
 
     call check_input(inp)
     print *, 'GORILLA_APPLETS: Loaded input data from thermal_force.inp'
@@ -118,10 +133,17 @@ subroutine check_input(inp)
     integer :: n_out
 
     select case (trim(inp%driver))
-    case ('velocity')
+    case ('velocity', 'slab')
     case default
-        call input_error('driver must be ''velocity'' (slab and tokamak drivers follow)')
+        call input_error('driver must be ''velocity'' or ''slab'' (tokamak driver follows)')
     end select
+    select case (trim(inp%orbit_model))
+    case ('guiding_centre', 'full_orbit')
+    case default
+        call input_error('orbit_model must be ''guiding_centre'' or ''full_orbit''')
+    end select
+    if (inp%n_trajectories < 0) call input_error('n_trajectories must not be negative')
+    if (inp%trajectory_dt_gyro <= 0.0_dp) call input_error('trajectory_dt_gyro must be positive')
     select case (trim(inp%heat_flux_model))
     case ('homma2014', 'none')
     case default

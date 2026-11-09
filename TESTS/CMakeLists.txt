@@ -176,3 +176,15 @@ set_tests_properties(thermal_force_velocity PROPERTIES
 GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/thermal_force_velocity_work"
 )
+
+add_test(
+    NAME thermal_force_slab
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_thermal_force_slab.py
+)
+set_tests_properties(thermal_force_slab PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/thermal_force_slab_work"
+)
