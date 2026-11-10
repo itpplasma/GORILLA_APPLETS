@@ -21,8 +21,7 @@
  !MHD equilibrium filename
  !g_file_filename = 'MHD_EQUILIBRIA/g_file_for_test' ,
  g_file_filename = 'DATA/ASDEX/g26884.4300' ,
- !convex_wall_filename = 'MHD_EQUILIBRIA/convex_wall_for_test.dat' ,
- convex_wall_filename = 'DATA/ASDEX/convexwall.dat' ,
+ convex_wall_filename = 'MHD_EQUILIBRIA/convex_wall_for_test.dat' ,
  netcdf_filename = 'MHD_EQUILIBRIA/netcdf_file_for_test.nc' ,
 !
  !MESH_SOLEDGE3X_EIRENE filename
