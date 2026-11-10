@@ -157,6 +157,8 @@ module gorilla_applets_types_mod
     real(dp) :: diffusion_max_spread_cells = 1.0_dp !used in self consistent electric field: cap of that longer tau, final spread sqrt(2 B tau) <= this many cell widths (<=0 = no cap)
     character(len=256) :: thermodiffusion_table_file = '' !used in self consistent electric field: table of c(s, -dPhi/ds) for the electron random walk, overrides thermodiffusion_coefficient ('' = off)
     logical  :: boole_measured_drift = .false.      !used in self consistent electric field: electron random walk with the measured calibration drift A and tabulated B (no fit), the calibration field replaced by the current one
+    integer  :: recalibration_mode = 0 !used in self consistent electric field: redo the A,B calibration (boole_recompute_D species) in the current field: 0 never, 1 before every source step after the first, 2 before every potential update after the first
+    logical  :: boole_continuous_background = .false. !used in self consistent electric field: collision coefficients from the target n, T at the particle s at every collision instead of the per-prism tables
     end type input_t
 
     type(input_t) :: in

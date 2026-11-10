@@ -297,9 +297,15 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     real(dp) :: z_cell(3), psi_pol_loc, s_loc, nu_kim_phys, nu_kim_code
     logical  :: use_kim_nu_now
 
-    efcolf = c%efcolf_mat(:,ind_tetr)
-    velrat = c%velrat_mat(:,ind_tetr)
-    enrat = c%enrat_mat(:,ind_tetr)
+    if (in%boole_continuous_background) then
+        !SCEF target profiles evaluated at the particle's own flux label (coord_system 2: x(1) = s)
+        !instead of the per-prism value stored in c%efcolf_mat etc. (a staircase in s)
+        call collision_coefficients_at_position(x(1), efcolf, velrat, enrat)
+    else
+        efcolf = c%efcolf_mat(:,ind_tetr)
+        velrat = c%velrat_mat(:,ind_tetr)
+        enrat = c%enrat_mat(:,ind_tetr)
+    endif
 
     vpar_background = c%vpar_mat(:,ind_tetr)
 
@@ -350,6 +356,34 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     !cm_over_e = clight*particle_mass/particle_charge
 
 end subroutine collisions_without_background_updates
+
+subroutine collision_coefficients_at_position(s_value, efcolf, velrat, enrat)
+
+    !Collision coefficients for the SCEF target background (density, T_i, T_e from
+    !scef_target_profiles_mod, electrons quasineutral) at flux label s_value, computed exactly as
+    !calc_collision_coefficients_for_all_tetrahedra does per prism, but at the particle position.
+
+    use gorilla_applets_types_mod, only: in, c
+    use collis_ions, only: collis_init
+    use tetra_physics_mod, only: particle_mass, particle_charge
+    use constants, only: echarge
+    use scef_target_profiles_mod, only: target_density, target_ion_temperature, target_electron_temperature, &
+                                        rad_from_s
+
+    real(dp), intent(in) :: s_value
+    real(dp), dimension(:), intent(out) :: efcolf, velrat, enrat
+    real(dp), dimension(c%n) :: dens_l, temp_l
+    real(dp) :: rad, v0_l
+
+    rad = rad_from_s(min(max(s_value, 0.0_dp), 1.0_dp))
+    dens_l(1:c%n-1) = target_density(rad)
+    temp_l(1:c%n-1) = target_ion_temperature(rad)
+    temp_l(c%n)     = target_electron_temperature(rad)
+    dens_l(c%n)     = sum(c%charge_num(1:c%n-1)*dens_l(1:c%n-1))
+    call collis_init(particle_mass, particle_charge/echarge, c%mass, c%charge_num, dens_l, temp_l, &
+                     in%energy_eV, v0_l, efcolf, velrat, enrat)
+
+end subroutine collision_coefficients_at_position
 
 subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_0_mappings,species_in,ind_tetr)
 

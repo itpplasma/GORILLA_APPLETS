@@ -119,20 +119,19 @@ subroutine collis_init(m1,Z1,m,Z,dens,temp,e0,v0,efcolf,velrat,enrat)
 
   integer :: n,i, i_end
   real(dp), dimension(:) :: m,Z,dens,temp,efcolf,velrat,enrat
-  real(dp), dimension(:), allocatable :: lambda
+  real(dp) :: lambda   !scalar per species (was an allocatable array: one malloc per call)
   real(dp) :: m1,Z1,e0, v0, frecol_base
 
   n = size(temp)
-  allocate(lambda(n))
 
   v0=sqrt(2.d0*e0*ev2erg/m1)
   frecol_base = 2.d0*pi*echarge**4*Z1**2/(m1**2*v0**3)
 
   do i = 1,n
-    call lambda_alpha_beta(Z1, Z(i), m1, m(i), temp(i), temp(i), dens(i), dens(i), lambda(i))
+    call lambda_alpha_beta(Z1, Z(i), m1, m(i), temp(i), temp(i), dens(i), dens(i), lambda)
     enrat(i)=e0/temp(i)
     velrat(i)=v0/sqrt(2.d0*temp(i)*ev2erg/m(i))
-    efcolf(i)=frecol_base*Z(i)**2*lambda(i)*dens(i)*velrat(i)/v0
+    efcolf(i)=frecol_base*Z(i)**2*lambda*dens(i)*velrat(i)/v0
   enddo
 
 end subroutine collis_init

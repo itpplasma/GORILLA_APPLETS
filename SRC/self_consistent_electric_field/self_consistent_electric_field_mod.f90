@@ -129,9 +129,11 @@ subroutine run_scef_iterations(source_step)
 
     use gorilla_applets_types_mod, only: in, ep, output, exit_data, one_d, start
     use utils_data_pre_and_post_processing_mod, only: prepare_next_round_of_parallelised_particle_pushing, &
-    calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared
+    calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
+    initialize_exit_data
     use utils_scef_particle_init_mod, only: calc_starting_conditions
     use utils_scef_particle_pushing_mod, only: parallelised_particle_pushing
+    use utils_scef_diffusion_mod, only: calc_diffusion_coefficients
     use utils_scef_electric_potential_mod, only: perform_electric_potential_update, calc_quasineutrality_mismatch, print_data
     use utils_scef_diffusion_mod, only: calc_density_via_random_walk
 
@@ -146,6 +148,22 @@ subroutine run_scef_iterations(source_step)
                              ((in%quasineutrality_tol.gt.0.0_dp) .or. (in%noise_tolerance_factor.gt.0.0_dp))
 
     do i = 1, max(in%n_electric_potential_updates,1)
+        !Optional recalibration of the random-walk A,B in the current field (the first update uses the
+        !calibration done before the loop): recalibration_mode 1 before the first update of every later
+        !source step, 2 before every later update. The calibration reallocates start, weights and exit_data
+        !for its own test particles; initialize_exit_data and calc_starting_conditions restore them, exactly
+        !as after the initial calibration.
+        if (((in%recalibration_mode.eq.1) .and. (source_step.gt.1) .and. (i.eq.1)) .or. &
+            ((in%recalibration_mode.eq.2) .and. ((source_step.gt.1).or.(i.gt.1)))) then
+            do species = 1,2
+                if ((.not.in%boole_honest_tracing(species)).and.in%boole_recompute_D(species)) then
+                    print*, 'recalibrating A,B of species ', species, ' before update ', i, ' of source step ', source_step
+                    call calc_diffusion_coefficients(species)
+                    call save_calibration_files(species, source_step, i)
+                endif
+            enddo
+            call initialize_exit_data
+        endif
         if (.not.in%boole_static_ne) call calc_starting_conditions
         do species = 1,2 !trace electrons and ions
             if ((species.eq.2).and.(in%boole_static_ne)) cycle
@@ -198,5 +216,27 @@ subroutine run_scef_iterations(source_step)
     enddo
 
 end subroutine run_scef_iterations
+
+subroutine save_calibration_files(species, source_step, i)
+
+    !Keep a copy of the calibration output of every recalibration: A_and_B_species<k>_<source_step>_<i>.dat
+    !and calibration_quality_species<k>_<source_step>_<i>.dat (the plain names are overwritten each time).
+
+    integer, intent(in) :: species, source_step, i
+    character(len=64) :: suffix
+    character(len=256) :: base(2)
+    integer :: j
+    logical :: exists
+
+    write(suffix,'(i0,a,i0,a,i0,a)') species, '_', source_step, '_', i, '.dat'
+    base(1) = 'A_and_B_species'
+    base(2) = 'calibration_quality_species'
+    do j = 1, 2
+        inquire(file=trim(base(j))//char(48+species)//'.dat', exist=exists)
+        if (exists) call execute_command_line('cp '//trim(base(j))//char(48+species)//'.dat '// &
+                                              trim(base(j))//trim(suffix))
+    enddo
+
+end subroutine save_calibration_files
 
 end module self_consistent_electric_field_mod
