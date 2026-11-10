@@ -358,7 +358,7 @@ subroutine eliminate_particles_outside_flux_threshold
 end subroutine eliminate_particles_outside_flux_threshold
 
 ! ====================================================================
-subroutine calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
+subroutine calc_v_r(z_save, vpar, vperp, ind_tetr, v_r, v_psi)
 !
 ! Computes the contravariant velocity component in the radial direction (v^r).
 !
@@ -383,6 +383,7 @@ subroutine calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
     real(dp), intent(in) :: vpar, vperp
     integer, intent(in) :: ind_tetr
     real(dp), intent(out) :: v_r
+    real(dp), intent(out), optional :: v_psi   !d A_phi/dt along the guiding-center orbit [G cm^2/s]
 
     real(dp) :: perpinv, k1, k3, bmod, phi_elec, vperp2, vpar2
     real(dp), dimension(4) :: z4, b, amat_in_z
@@ -438,6 +439,7 @@ subroutine calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
 
     ! Compute contravariant velocity component v^r = v_gc . grad_r
     v_r = sum(v_gc_tau * grad_r) / dt_dtau
+    if (present(v_psi)) v_psi = sum(v_gc_tau * tetra_physics(ind_tetr)%gAphi) / dt_dtau
 
 end subroutine calc_v_r
 
@@ -450,20 +452,41 @@ subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
     use tetra_physics_mod, only: tetra_physics
     use volume_integrals_and_sqrt_g_mod, only: sqrt_g
     use supporting_functions_mod, only: bmod_func
-    use constants, only: pi
+    use constants, only: pi, ev2erg
     use marker_distribution_mod, only: linear_profile_slope
+    use vertex_data_mod, only: vertex_data_profiles
 
     integer, intent(in) :: n, ind_tetr, species
     real(dp), dimension(3), intent(in) :: z_save
     real(dp), intent(in) :: vpar, vperp
 
-    real(dp) :: v_r, base_weight, r, z
+    real(dp) :: v_r, v_psi, base_weight, r, z
+    real(dp) :: dens, temp_i, temp_e, ddens, dtemp_i, dtemp_e, temp, dtemp, energy_eV
 
-    call calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
+    if (in%boole_profiles_from_vertex_data) then
+        !Local Maxwellian f_M(n(psi), T(psi), E) with psi = A_phi and Phi = 0 (E = kinetic energy):
+        !-v^psi df_M/dpsi = -v^psi f_M [n'/n + (E/T - 3/2) T'/T]. weights%w already holds the f_M weight
+        !with the local n and T (calc_particle_weights_and_jperp).
+        call calc_v_r(z_save, vpar, vperp, ind_tetr, v_r, v_psi)
+        r = tetra_physics(ind_tetr)%x1(1) + z_save(1)
+        z = tetra_physics(ind_tetr)%x1(3) + z_save(3)
+        call vertex_data_profiles(ind_tetr, r, z, dens, temp_i, temp_e, ddens, dtemp_i, dtemp_e)
+        if (start%particle_charge(species) > 0.0_dp) then
+            temp = temp_i
+            dtemp = dtemp_i
+        else
+            temp = temp_e
+            dtemp = dtemp_e
+        endif
+        energy_eV = 0.5_dp*start%particle_mass(species)*(vpar**2 + vperp**2)/ev2erg
+        weights%w(n,species) = -weights%w(n,species) * v_psi * (ddens/dens + (energy_eV/temp - 1.5_dp)*dtemp/temp)
+    else
+        call calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
 
-    !Densities follow the linear profile f = f_M*linear_profile_factor(r), so -v^r\partial f/\partial r turns into
-    !-v^r*linear_profile_slope*f_M
-    weights%w(n,species) = -weights%w(n,species) * v_r * linear_profile_slope
+        !Densities follow the linear profile f = f_M*linear_profile_factor(r), so -v^r\partial f/\partial r turns into
+        !-v^r*linear_profile_slope*f_M
+        weights%w(n,species) = -weights%w(n,species) * v_r * linear_profile_slope
+    endif
 
 end subroutine adapt_weights_delta_f
 

@@ -253,10 +253,10 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
         if (in%boole_linear_density_simulation.and.(.not.in%boole_delta_f)) density = density*linear_profile_factor(s_value)
         if (in%boole_linear_temperature_simulation) T = T*linear_profile_factor(s_value)
     endif
-    !Local density and temperature from the vertex data (grid_kind = 7), same delta-f convention as above
+    !Local density and temperature from the vertex data (grid_kind = 7)
     if (in%boole_profiles_from_vertex_data) then
         call vertex_data_profiles(ind_tetr, x_global(1), x_global(3), n_vertex, T_i_vertex, T_e_vertex)
-        if (.not.in%boole_delta_f) density = n_vertex
+        density = n_vertex   !also for delta-f: the source -v^psi df_M/dpsi needs the local f_M
         if (start%particle_charge(species) > 0.0_dp) then
             T = T_i_vertex*ev2erg
         else
