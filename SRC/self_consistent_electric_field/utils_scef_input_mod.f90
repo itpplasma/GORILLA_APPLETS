@@ -14,6 +14,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
                 diffusion_tau_collisions, edge_buffer_width, noise_tolerance_factor, potential_relaxation_factor
     character(len=256) :: restart_phi_file, restart_source_file
     logical :: boole_adaptive_relaxation, boole_measured_drift, boole_continuous_background
+    integer :: source_buffer_mode
+    real(dp) :: source_buffer_bound_factor
     integer :: recalibration_mode
     real(dp) :: thermodiffusion_coefficient, ion_tracing_time_limit, diffusion_sigma_A_target, diffusion_max_spread_cells
     character(len=256) :: thermodiffusion_table_file
@@ -41,7 +43,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & diffusion_tau_collisions, edge_buffer_width, noise_tolerance_factor, potential_relaxation_factor, &
     & boole_adaptive_relaxation, restart_phi_file, restart_source_file, thermodiffusion_coefficient, &
     & ion_tracing_time_limit, diffusion_sigma_A_target, diffusion_max_spread_cells, thermodiffusion_table_file, &
-    & boole_measured_drift, recalibration_mode, boole_continuous_background
+    & boole_measured_drift, recalibration_mode, boole_continuous_background, source_buffer_mode, &
+    & source_buffer_bound_factor
 
     quasineutrality_tol = 0.0_dp   !optional in the .inp: no early exit unless set
     i_collision_mode = 1           !optional: full collision operator
@@ -63,6 +66,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
     boole_measured_drift = .false.        !optional: walk with the fitted ln B and the field drift only
     recalibration_mode = 0                !optional: 0 calibrate A,B once; 1 also before every later source step; 2 before every later potential update
     boole_continuous_background = .false.   !optional: collision background n,T per prism (staircase in s)
+    source_buffer_mode = 0                !optional: 0 source in the edge buffer not updated; 1 updated, |S| capped
+    source_buffer_bound_factor = 2.0_dp   !optional: cap for source_buffer_mode 1, times max |S| outside the buffer
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
     read(s_inp_unit,nml=self_consistent_ef_nml)
     close(s_inp_unit)
@@ -123,6 +128,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%boole_measured_drift = boole_measured_drift
     in%recalibration_mode = recalibration_mode
     in%boole_continuous_background = boole_continuous_background
+    in%source_buffer_mode = source_buffer_mode
+    in%source_buffer_bound_factor = source_buffer_bound_factor
 
     print *,'GORILLA_APPLETS: Loaded input data from self_consistent_ef.inp'
 

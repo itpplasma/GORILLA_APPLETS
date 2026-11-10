@@ -159,6 +159,8 @@ module gorilla_applets_types_mod
     logical  :: boole_measured_drift = .false.      !used in self consistent electric field: electron random walk with the measured calibration drift A and tabulated B (no fit), the calibration field replaced by the current one
     integer  :: recalibration_mode = 0 !used in self consistent electric field: redo the A,B calibration (boole_recompute_D species) in the current field: 0 never, 1 before every source step after the first, 2 before every potential update after the first
     logical  :: boole_continuous_background = .false. !used in self consistent electric field: collision coefficients from the target n, T at the particle s at every collision instead of the per-prism tables
+    integer  :: source_buffer_mode = 0 !used in self consistent electric field: 0 source in the outer buffer (or outer 10%) kept fixed; 1 updated like elsewhere with |S| capped
+    real(dp) :: source_buffer_bound_factor = 2.0_dp !used in self consistent electric field: cap for source_buffer_mode 1 = factor * max |S| outside the buffer
     end type input_t
 
     type(input_t) :: in

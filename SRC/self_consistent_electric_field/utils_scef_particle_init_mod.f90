@@ -220,7 +220,9 @@ subroutine update_particle_source
     !one_d%densities is projected to vertices by midpoint averaging (nearest-shell
     !at the two boundaries). The outer 10% of the domain (or the outer buffer) keeps its source, because
     !particles only leave there and none enter, so n stays below n_target whatever
-    !the source. Logs the |n - n_target| / |n_target| residual over the tuned shells
+    !the source (source_buffer_mode = 1: the buffer is updated too, with |S| capped at
+    !source_buffer_bound_factor times max |S| of the tuned region). Logs the |n - n_target| / |n_target|
+    !residual over the tuned shells (never the buffer)
     !(the electron/ion mismatch is logged after every electric potential update).
 
     use gorilla_applets_types_mod, only: in, g, one_d, desired_density, particle_source
@@ -228,7 +230,7 @@ subroutine update_particle_source
     use constants, only: pi
 
     integer :: k, ns_g
-    real(dp) :: alpha, target_mismatch, denom, s_cutoff_high
+    real(dp) :: alpha, target_mismatch, denom, s_cutoff_high, s_bound
     real(dp), dimension(:), allocatable :: n_shell, n_vert, target_shell
     logical,  dimension(:), allocatable :: tuned_shell
 
@@ -247,9 +249,21 @@ subroutine update_particle_source
     enddo
     n_vert(ns_g+1) = n_shell(ns_g)
 
-    where (g%s_vertices < s_cutoff_high)
+    if (in%source_buffer_mode.eq.1) then
+        !Buffer updated like the rest, but |S| there is capped at source_buffer_bound_factor times the
+        !largest |S| of the tuned region (n stays below the target in the buffer, so the plain update
+        !would let the source grow without bound)
         particle_source%value = particle_source%value - alpha*(n_vert - desired_density%value)
-    end where
+        s_bound = in%source_buffer_bound_factor &
+                  *maxval(abs(particle_source%value), mask=(g%s_vertices < s_cutoff_high))
+        where (g%s_vertices >= s_cutoff_high)
+            particle_source%value = sign(min(abs(particle_source%value), s_bound), particle_source%value)
+        end where
+    else
+        where (g%s_vertices < s_cutoff_high)
+            particle_source%value = particle_source%value - alpha*(n_vert - desired_density%value)
+        end where
+    endif
 
 
     do k = 1, ns_g
