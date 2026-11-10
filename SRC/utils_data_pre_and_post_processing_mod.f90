@@ -501,6 +501,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     use gorilla_settings_mod, only: coord_system
     use gorilla_applets_settings_mod, only: i_option
     use marker_distribution_mod, only: linear_profile_factor
+    use vertex_data_mod, only: vertex_data_profiles
 
     integer, intent(in), optional :: species_in
     real(dp), dimension(:), allocatable :: efcolf,velrat,enrat
@@ -509,6 +510,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     integer :: i, j
     integer :: species
     real(dp) :: m0, z0, n0, s_value, v0, v_box
+    real(dp) :: r_centroid, z_centroid, n_vertex, T_i_vertex, T_e_vertex
     logical :: boole_T_and_n_from_files = .false.
     logical :: boole_analytic_temperature_profile
 
@@ -586,6 +588,20 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
         c%temp_mat(:,1+i:ntetr:3) = c%temp_mat(:,1:ntetr:3)
         c%dens_mat(:,1+i:ntetr:3) = c%dens_mat(:,1:ntetr:3)
     enddo
+
+    !Density and temperatures from the vertex data (grid_kind = 7), evaluated at the tetrahedron centroids
+    if (in%boole_profiles_from_vertex_data) then
+        if (c%n /= 2 .or. abs(c%charge_num(1) - 1.0_dp) > 1.0e-12_dp) error stop &
+            'boole_profiles_from_vertex_data requires one ion species with Z = 1 (plus electrons)'
+        do i = 1, ntetr
+            r_centroid = sum(verts_rphiz(1, tetra_grid(i)%ind_knot))/4.0_dp
+            z_centroid = sum(verts_rphiz(3, tetra_grid(i)%ind_knot))/4.0_dp
+            call vertex_data_profiles(i, r_centroid, z_centroid, n_vertex, T_i_vertex, T_e_vertex)
+            c%dens_mat(1, i) = n_vertex
+            c%temp_mat(1, i) = T_i_vertex
+            c%temp_mat(c%n, i) = T_e_vertex
+        enddo
+    endif
 
     ! Enforce quasi-neutrality: electron density = sum of Z_i * n_i over ion species.
     c%dens_mat(c%n, :) = matmul(c%charge_num(1:c%n-1), c%dens_mat(1:c%n-1, :))

@@ -219,6 +219,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     use gorilla_settings_mod, only: coord_system
     use marker_distribution_mod, only: evaluate_distribution_3d, evaluate_distribution_1d, pdf_boltzmann, &
                                        linear_profile_factor
+    use vertex_data_mod, only: vertex_data_profiles
 
     real(dp), intent(in) :: vpar, vperp
     real(dp), dimension(3), intent(in) :: z_save
@@ -230,6 +231,7 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     real(dp) :: r, z, s_value, x_global(3)
     real(dp) :: density, T, m, q, energy_erg, Phi_elec, omega_c, f, J_x, J_y
     real(dp) :: pdf_position, pdf_lambda, pdf_energy_erg, pdf_gyroangle, pdf_velocity_space
+    real(dp) :: n_vertex, T_i_vertex, T_e_vertex
 
     species = 1
     if (present(species_in)) species = species_in
@@ -250,6 +252,16 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
         s_value = calc_radial_coordinate(ind_tetr, z_save)
         if (in%boole_linear_density_simulation.and.(.not.in%boole_delta_f)) density = density*linear_profile_factor(s_value)
         if (in%boole_linear_temperature_simulation) T = T*linear_profile_factor(s_value)
+    endif
+    !Local density and temperature from the vertex data (grid_kind = 7), same delta-f convention as above
+    if (in%boole_profiles_from_vertex_data) then
+        call vertex_data_profiles(ind_tetr, x_global(1), x_global(3), n_vertex, T_i_vertex, T_e_vertex)
+        if (.not.in%boole_delta_f) density = n_vertex
+        if (start%particle_charge(species) > 0.0_dp) then
+            T = T_i_vertex*ev2erg
+        else
+            T = T_e_vertex*ev2erg
+        endif
     endif
 
     !Spatial Jacobian

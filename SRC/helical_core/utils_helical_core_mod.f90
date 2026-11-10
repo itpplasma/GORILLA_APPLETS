@@ -31,6 +31,7 @@ subroutine read_helical_core_inp_into_type
                boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, &
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
                boole_eliminate_particles_outside_flux, boole_delta_f
+    logical :: boole_profiles_from_vertex_data = .false.
     integer :: i_integrator_type, seed_option, n_species !i_integrator_type, seed_option: read for compatibility with existing input files, unused
     real(dp) :: flux_threshold_for_elimination
 
@@ -42,7 +43,8 @@ subroutine read_helical_core_inp_into_type
     & seed_option, boole_write_vertex_indices, boole_write_vertex_coordinates, boole_write_prism_volumes, &
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, &
-    & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f
+    & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f, &
+    & boole_profiles_from_vertex_data
 
     open(newunit = s_inp_unit, file='helical_core.inp', status='unknown')
     read(s_inp_unit,nml=helical_core_nml)
@@ -75,6 +77,7 @@ subroutine read_helical_core_inp_into_type
     in%boole_eliminate_particles_outside_flux = boole_eliminate_particles_outside_flux
     in%flux_threshold_for_elimination = flux_threshold_for_elimination
     in%boole_delta_f = boole_delta_f
+    in%boole_profiles_from_vertex_data = boole_profiles_from_vertex_data
 
     ! Set defaults for anomalous transport-specific parameters (disabled)
     in%boole_calc_diffusion_coefficient = .false.
