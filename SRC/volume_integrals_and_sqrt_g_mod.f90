@@ -105,12 +105,11 @@ subroutine calc_volume_integrals
     ! Temporarily disable the halt-on-FPE traps for the parallel region. The
     ! prism-volume / refined-volume formulae divide by vertex R-differences and
     ! take logs of their ratios; for the straight-cylinder limit (grid_kind=5,
-    ! R0>>a) a few of these terms overflow / divide-by-zero. On rectangular
-    ! grids (grid_kind=1), the row of regular prisms touching the midplane Z=0
-    ! has b_dash = 0 together with a horizontal edge, so gamma or beta of the
-    ! refined volume vanishes and the closed form gives 0/0 although its limit
-    ! is finite (g26884 divertor grid: 0.5 % of the prisms); these prisms use
-    ! refined_volume_by_quadrature instead. prism_volumes is computed robustly via the
+    ! R0>>a) a few of these terms overflow / divide-by-zero. The closed form of
+    ! the refined volume gives 0/0 where gamma or beta vanishes (b_dash +
+    ! c_dash*gradient = 0, e.g. a horizontal edge where dB/dR = 0) although
+    ! its limit is finite; such prisms use refined_volume_by_quadrature
+    ! instead. prism_volumes is computed robustly via the
     ! exact Pappus form below (so the integrated moments stay clean); the trap
     ! disable only stops those transient FPEs in the auxiliary refined integrals
     ! from killing the run. The halting mode belongs to each thread, so every
