@@ -61,7 +61,7 @@ subroutine calc_volume_integrals
     use tetra_grid_settings_mod, only: grid_size, n_field_periods
     use tetra_physics_mod, only: particle_mass,particle_charge, tetra_physics
     use gorilla_applets_types_mod, only: output, in
-    use, intrinsic :: ieee_arithmetic, only: ieee_set_halting_mode, ieee_set_flag, &
+    use, intrinsic :: ieee_arithmetic, only: ieee_set_halting_mode, ieee_get_halting_mode, ieee_set_flag, &
                                            & ieee_invalid, ieee_overflow, ieee_divide_by_zero, &
                                            & ieee_is_finite
 
@@ -75,6 +75,7 @@ subroutine calc_volume_integrals
                                                         a, a_dash, b, b_dash, c, c_dash, rmin, delta_r, delta_z, phi_0, eta
     integer, dimension(:,:), allocatable             :: tetra_indices_per_prism
     real(dp), dimension(:,:), allocatable            :: r_integrand_constants
+    logical, dimension(3)                            :: halting_saved
 
     print*, 'calc_volume_integrals started'
     n_prisms = ntetr/3
@@ -104,22 +105,29 @@ subroutine calc_volume_integrals
     ! Temporarily disable the halt-on-FPE traps for the parallel region. The
     ! prism-volume / refined-volume formulae divide by vertex R-differences and
     ! take logs of their ratios; for the straight-cylinder limit (grid_kind=5,
-    ! R0>>a) near-theta=90deg prisms have a near-zero R-spread, so a few of these
-    ! terms overflow / divide-by-zero. prism_volumes is computed robustly via the
+    ! R0>>a) a few of these terms overflow / divide-by-zero. The closed form of
+    ! the refined volume gives 0/0 where gamma or beta vanishes (b_dash +
+    ! c_dash*gradient = 0, e.g. a horizontal edge where dB/dR = 0) although
+    ! its limit is finite; such prisms use refined_volume_by_quadrature
+    ! instead. prism_volumes is computed robustly via the
     ! exact Pappus form below (so the integrated moments stay clean); the trap
     ! disable only stops those transient FPEs in the auxiliary refined integrals
-    ! from killing the run. N<=10 (R0<=1691) never trips this, so they are
-    ! bit-unchanged.
-    call ieee_set_halting_mode(ieee_invalid,        .false.)
-    call ieee_set_halting_mode(ieee_overflow,       .false.)
-    call ieee_set_halting_mode(ieee_divide_by_zero, .false.)
+    ! from killing the run. The halting mode belongs to each thread, so every
+    ! thread of the team switches its traps off and restores its own state.
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(n_prisms,verts_rphiz,tetra_grid,grid_size,tetra_indices_per_prism,prism_volumes, particle_charge, in, &
     !$OMP& refined_prism_volumes,sqrt_g,r_integrand_constants, elec_pot_vec,n_b,tetra_physics, &
     !$OMP& n_field_periods) &
     !$OMP& PRIVATE(r_values,z_values,rmin,triangle_indices,r_values_intermediate,z_values_intermediate, delta_r, delta_z, eta, &
-    !$OMP& r,z,gradient,z_star,alpha,beta,gamma,delta,epsilon,capital_gamma,capital_delta, limits,a,a_dash,b,b_dash,c,c_dash,phi_0)
+    !$OMP& r,z,gradient,z_star,alpha,beta,gamma,delta,epsilon,capital_gamma,capital_delta, limits,a,a_dash,b,b_dash,c,c_dash,phi_0, &
+    !$OMP& halting_saved)
+    call ieee_get_halting_mode(ieee_invalid,        halting_saved(1))
+    call ieee_get_halting_mode(ieee_overflow,       halting_saved(2))
+    call ieee_get_halting_mode(ieee_divide_by_zero, halting_saved(3))
+    call ieee_set_halting_mode(ieee_invalid,        .false.)
+    call ieee_set_halting_mode(ieee_overflow,       .false.)
+    call ieee_set_halting_mode(ieee_divide_by_zero, .false.)
     !$OMP DO
     do i = 1,n_prisms
         !calculate prism volumes using the basic approach (compare with chapter 4.2 of master thesis from Jonatan Schatzlmayr)
@@ -246,6 +254,16 @@ subroutine calc_volume_integrals
                                                                     & (delta/beta*(capital_delta+beta*r(2))+epsilon/2*r(2)**2) + &
                     & log((capital_delta+beta*r(1))/(a_dash+gamma*r(1)))*(delta*(r(2)-r(1))+epsilon/2*(r(2)**2-r(1)**2)) - &
                     & log((capital_delta+beta*r(2))/(capital_delta+beta*r(1)))*epsilon*capital_delta**2/(2*beta**2)
+
+            ! The closed form subtracts terms of order (a_dash/(beta*r))**2 * log(1 + beta*r/a_dash)
+            ! (same for gamma) that cancel to the integral; for small beta*r/a_dash (small prisms
+            ! or nearly constant |B|) this loses all digits and at beta or gamma = 0 it is 0/0
+            ! (row of prisms at the midplane Z=0 of rectangular grids, where b_dash = 0). Such
+            ! prisms use the quadrature of the same integrand instead.
+            if (minval(abs(b_dash + c_dash*gradient))*r(2) < 1.0e-2_dp*abs(a_dash) .or. &
+                & .not. ieee_is_finite(refined_prism_volumes(i))) then
+                refined_prism_volumes(i) = refined_volume_by_quadrature(r, z, a, b, c, a_dash, b_dash, c_dash)
+            endif
         endif
 
         if (.not. in%boole_monoenergetic) then
@@ -311,14 +329,14 @@ subroutine calc_volume_integrals
         endif
     enddo
     !$OMP END DO
-    !$OMP END PARALLEL
-    ! Re-enable the halt-on-FPE traps after the OMP region
-    call ieee_set_halting_mode(ieee_invalid,        .true.)
-    call ieee_set_halting_mode(ieee_overflow,       .true.)
-    call ieee_set_halting_mode(ieee_divide_by_zero, .true.)
+    ! Clear the flags raised in the loop, then restore this thread's traps
     call ieee_set_flag(ieee_invalid,        .false.)
     call ieee_set_flag(ieee_overflow,       .false.)
     call ieee_set_flag(ieee_divide_by_zero, .false.)
+    call ieee_set_halting_mode(ieee_invalid,        halting_saved(1))
+    call ieee_set_halting_mode(ieee_overflow,       halting_saved(2))
+    call ieee_set_halting_mode(ieee_divide_by_zero, halting_saved(3))
+    !$OMP END PARALLEL
 
     refined_prism_volumes = abs(refined_prism_volumes)*2*pi/(grid_size(2)*n_field_periods)
     elec_pot_vec = abs(elec_pot_vec)*2*pi/(grid_size(2)*n_field_periods*prism_volumes)
@@ -415,5 +433,45 @@ subroutine calc_volume_integrals_in_flux_coordinates
     print*, 'calc_volume_integrals finished'
 
 end subroutine calc_volume_integrals_in_flux_coordinates
+
+pure function refined_volume_by_quadrature(r, z, a, b, c, a_dash, b_dash, c_dash) result(integral)
+!
+! Integral of (a + b*x + c*y)/(a_dash + b_dash*x + c_dash*y) over the triangle with
+! vertices (0,0), (r(1),z(1)), (r(2),z(2)), i.e. the poloidal integral of the refined
+! prism volume (appendix B of the master thesis of Jonatan Schatzlmayr) without its
+! closed form. Used where the closed form is 0/0 (beta, gamma or c_dash = 0) although
+! the integral is finite. The integrand is smooth (the denominator is |B| > 0), so an
+! 8x8 Gauss-Legendre rule on the collapsed square (Duffy transformation) is exact to
+! round-off. Returns the absolute value, like the closed form after abs().
+!
+    real(dp), dimension(2), intent(in) :: r, z
+    real(dp), intent(in)               :: a, b, c, a_dash, b_dash, c_dash
+    real(dp)                           :: integral
+    real(dp), dimension(4), parameter  :: t = (/0.1834346424956498_dp, 0.5255324099163290_dp, &
+                                                & 0.7966664774136267_dp, 0.9602898564975363_dp/)
+    real(dp), dimension(4), parameter  :: w = (/0.3626837833783620_dp, 0.3137066458778873_dp, &
+                                                & 0.2223810344533745_dp, 0.1012285362903763_dp/)
+    real(dp), dimension(8)             :: nodes, weights
+    real(dp)                           :: u, v, x, y
+    integer                            :: i, j
+
+    ! Gauss-Legendre nodes and weights mapped from [-1,1] to [0,1]
+    nodes = 0.5_dp*(/1-t(4:1:-1), 1+t/)
+    weights = 0.5_dp*(/w(4:1:-1), w/)
+
+    ! (u,v) in [0,1]^2 -> u*((r1,z1) + v*((r2,z2)-(r1,z1))), Jacobian u*|r1*z2 - z1*r2|
+    integral = 0.0_dp
+    do i = 1,8
+        u = nodes(i)
+        do j = 1,8
+            v = nodes(j)
+            x = u*(r(1) + v*(r(2)-r(1)))
+            y = u*(z(1) + v*(z(2)-z(1)))
+            integral = integral + weights(i)*weights(j)*u*(a + b*x + c*y)/(a_dash + b_dash*x + c_dash*y)
+        enddo
+    enddo
+    integral = abs(integral*(r(1)*z(2) - z(1)*r(2)))
+
+end function refined_volume_by_quadrature
 
 end module volume_integrals_and_sqrt_g_mod
