@@ -134,6 +134,11 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
 
+    !Without squared moments the moments are accumulated per thread and added to the output once at the end
+    !(clearing and adding the full per-thread array for every marker pair dominated the run time). Squared
+    !moments need the sum of each marker pair separately, so they keep the per-pair accumulation.
+    if (.not.in%boole_squared_moments) local_tetr_moments = 0.0_dp
+
     !$OMP DO SCHEDULE(static)
     do p = 1, n_particles/iantithetic
 
@@ -155,7 +160,8 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
                 cycle
             endif
 
-            call initialise_loop_variables(l, n, local_counter, particle_status, t, local_tetr_moments, x, vpar, vperp, species)
+            call initialise_loop_variables(l, n, local_counter, particle_status, t, local_tetr_moments, x, vpar, vperp, species, &
+                                           boole_keep_moments_in=.not.in%boole_squared_moments)
 
             i = 0
 
@@ -193,11 +199,19 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
             call update_start_type(x, vpar, vperp, n, species, ind_tetr)
         enddo
 
+        if (in%boole_squared_moments) then
+            !$omp critical
+            call add_local_tetr_moments_to_output(local_tetr_moments, species)
+            !$omp end critical
+        endif
+    enddo
+    !$OMP END DO
+
+    if (.not.in%boole_squared_moments) then
         !$omp critical
         call add_local_tetr_moments_to_output(local_tetr_moments, species)
         !$omp end critical
-    enddo
-    !$OMP END DO
+    endif
     !$OMP END PARALLEL
 
     print*, 'Total tracing time / number of particles: ', t_tot/n_particles, 's'

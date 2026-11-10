@@ -40,7 +40,8 @@ subroutine handle_lost_particles(local_counter, boole_particle_lost)
 
 end subroutine handle_lost_particles
 
-subroutine initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp,species_in)
+subroutine initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp,species_in, &
+                                     boole_keep_moments_in)
 
 use gorilla_applets_types_mod, only: in, counter_t, start, time_t, particle_status_t
 use constants, only: ev2erg
@@ -48,6 +49,7 @@ use gorilla_applets_settings_mod, only: i_option
 
 integer, intent(in) :: l, n
 integer, intent(in), optional :: species_in
+logical, intent(in), optional :: boole_keep_moments_in   !.true.: caller zeroes local_tetr_moments itself
 type(counter_t) :: local_counter
 type(particle_status_t) :: particle_status
 type(time_t) :: t
@@ -65,7 +67,13 @@ particle_status%exit = .false.
 t%step = in%time_step
 if (present(species_in)) t%step = start%t(species)
 t%confined = 0.0_dp
-if (l.eq.1) local_tetr_moments = 0.0_dp
+if (l.eq.1) then
+    if (present(boole_keep_moments_in)) then
+        if (.not.boole_keep_moments_in) local_tetr_moments = 0.0_dp
+    else
+        local_tetr_moments = 0.0_dp
+    endif
+endif
 pitchpar = start%pitch(n,species)
 x = start%x(:,n,species)
 v = sqrt(start%energy(n,species)*ev2erg*2/start%particle_mass(species))
