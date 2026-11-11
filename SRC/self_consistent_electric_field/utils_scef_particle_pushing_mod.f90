@@ -15,7 +15,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_marker_moments_to_thread_sums, &
     add_thread_moments_to_output, &
     add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
-    initialise_seed_for_random_numbers_for_each_thread
+    initialise_seed_for_marker
     use utils_orbit_timestep_mod, only: start_touched_tetr_tracking, stop_touched_tetr_tracking
     use russian_roulette_mod, only: play_russian_roulette, rr, local_rr_t, initiate_local_rr
     use constants, only: ev2erg
@@ -32,7 +32,6 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
     complex(dp), dimension(:,:), allocatable          :: local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared
-    logical                                           :: thread_flag = .true.
     type(local_rr_t)                                  :: local_rr
     real(dp), dimension(10)                           :: particle_state_for_rr
 
@@ -65,7 +64,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p,l,n,i,x,v_save,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
     !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init, thread_tetr_moments, thread_prism_moments_squared) &
-    !$OMP& FIRSTPRIVATE(thread_flag,local_rr)
+    !$OMP& FIRSTPRIVATE(local_rr)
     if (omp_get_thread_num().eq.0) print*, 'get number of threads', omp_get_num_threads()
     !moments are summed per thread and added to the output once per thread
     allocate(thread_tetr_moments(moment_specs%n_moments,ntetr))
@@ -83,13 +82,9 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !Loop over particles
     do p = 1,n_particles/iantithetic
 
-        if ((.not.in%boole_precalc_collisions).and.thread_flag) then
-            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num(), j)
-            thread_flag = .false.
-        endif
-
         do l = 1,iantithetic
             n = (p-1)*iantithetic+l
+            call initialise_seed_for_marker(n, j) !random stream of this marker and iteration
             !$omp atomic update
             kpart = kpart + 1 !in general not equal to n because of parallelisation
             call print_progress(n_particles,kpart,n)
@@ -166,7 +161,6 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
 
             !$omp critical
             counter%integration_steps = counter%integration_steps + i
-            c%maxcol = max(dble(i)/dble(c%randcoli),c%maxcol)
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
             call update_exit_data(particle_status%lost,t%confined,x,vpar,vperp,i,n,species_in=species)

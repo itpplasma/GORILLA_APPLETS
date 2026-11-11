@@ -5,9 +5,9 @@ CTest driver for the energy and momentum conserving collisions of helical core.
 A cold deuterium beam (pitch +1, density 0.05 of the background) is pushed in four
 time slices through a field-aligned grid of the shared EFIT test equilibrium, with
 the background reservoir taking up the momentum and energy the markers lose in
-collisions. The per-thread random streams depend on the number of threads, so the
-test checks physics properties of collision_relaxation.dat instead of reference
-files:
+collisions. The background exchange is summed in thread order, so its rounding
+depends on the number of threads; the test therefore checks physics properties
+of collision_relaxation.dat instead of reference files:
 
 - every slice writes a row, no background update is rejected (T <= 0) and no marker
   is reflected across the axis hole;
@@ -88,7 +88,6 @@ h["density"] = 3.0e14
 h["boole_squared_moments"] = False
 h["boole_point_source"] = False
 h["boole_collisions"] = True
-h["boole_precalc_collisions"] = False
 h["boole_preserve_energy_and_momentum_during_collisions"] = True
 h["boole_refined_sqrt_g"] = True
 h["boole_monoenergetic"] = True

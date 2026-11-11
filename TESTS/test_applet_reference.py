@@ -9,8 +9,8 @@ is checked to parse and run, and overrides only what is needed for a short CI
 run: the shared EFIT test equilibrium without perturbation field (ipert = 0),
 a small grid, few particles and a short tracing time. The outputs are
 compared against TESTS/REFERENCE/<mode>/. The run is pinned to one OpenMP
-thread, because the random numbers a particle draws depend on the thread that
-traces it. After an intended change of the results, run the test with
+thread. Each marker has its own random stream, so the marker histories do not
+depend on the thread count, but sums over markers can differ by rounding. After an intended change of the results, run the test with
 UPDATE_REFERENCE=1 in the environment to copy the files listed in the mode's
 "reference_files" from the work dir into the reference dir, and commit them.
 

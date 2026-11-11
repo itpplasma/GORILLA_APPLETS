@@ -249,7 +249,6 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     integer :: ind_tetr
 
     real(dp), dimension(5) :: zet
-    real(dp), dimension(3) :: randnum
     real(dp), dimension(c%n) :: efcolf, velrat, enrat, dpp_vec, dhh_vec, fpeff_vec
     real(dp) :: vpar_background
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar
@@ -273,8 +272,6 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     call coleff(efcolf, velrat, enrat, zet(4), dpp_vec, dhh_vec, fpeff_vec)
     t%step = collision_step(sum(dhh_vec)*nu_scale_factor, zet(4), t_max)
 
-    if (in%boole_precalc_collisions) randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species)
-
     do j = 1,c%n
 
         vpar_save = vpar
@@ -286,12 +283,7 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         zet(4) = sqrt(vpar**2+vperp**2)/start%v0(species) !normalized velocity module
         zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
 
-        !with precalculated random numbers all species use the same three numbers (correlated kicks)
-        if (in%boole_precalc_collisions) then
-            call stost(efcolf(j:j),velrat(j:j),enrat(j:j),zet,t%step,iswmode,err,randnum=randnum)
-        else
-            call stost(efcolf(j:j),velrat(j:j),enrat(j:j),zet,t%step,iswmode,err)
-        endif
+        call stost(efcolf(j:j),velrat(j:j),enrat(j:j),zet,t%step,iswmode,err)
 
         vpar = zet(5)*zet(4)*start%v0(species)+vpar_background
         vperp = sqrt(1-zet(5)**2)*zet(4)*start%v0(species)
@@ -491,7 +483,6 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     integer :: ind_tetr
 
     real(dp), dimension(5) :: zet
-    real(dp), dimension(3) :: randnum
     real(dp), dimension(c%n) :: efcolf,velrat,enrat,vpar_background
     integer :: err
     real(dp) :: t_max
@@ -528,20 +519,11 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
         nu_kim_code = nu_kim_phys / start%v0(species)
     end if
 
-    if (in%boole_precalc_collisions) then
-        randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species)
-        if (use_kim_nu_now) then
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum,nu_override=nu_kim_code)
-        else
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum)
-        end if
+    if (use_kim_nu_now) then
+        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,nu_override=nu_kim_code)
     else
-        if (use_kim_nu_now) then
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,nu_override=nu_kim_code)
-        else
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max)
-        end if
-    endif
+        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max)
+    end if
 
     vpar = zet(5)*zet(4)*start%v0(species)+vpar_background(1)
     vperp = sqrt(1-zet(5)**2)*zet(4)*start%v0(species)
@@ -647,19 +629,21 @@ function linspace(start, stop, n) result(x)
     end do
 end function linspace
 
-subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num, second_factor)
-    !Sets an individual, reproducible RNG state for each OpenMP thread. The state
-    !is derived from the master seed loaded from seed.inp (via
-    !set_seed_for_random_numbers) by combining it with thread_num and an optional
-    !second_factor through the SplitMix64 bit mixer, which produces
-    !well-decorrelated 64-bit words for neighbouring inputs. Same seed.inp +
-    !same thread partition => bit-identical per-thread streams. If no master
-    !seed was loaded, we fall back to a hardcoded constant so callers that
-    !skipped set_seed_for_random_numbers keep working.
+subroutine initialise_seed_for_marker(marker, second_factor)
+    !Sets the RNG state of the calling thread to the random stream of one marker. Called before a
+    !marker is pushed, so everything random in its push (collisions, axis-hole kicks, Russian roulette)
+    !depends only on seed.inp, the marker index and second_factor (e.g. the time slice or iteration),
+    !and not on the thread that pushes it: marker histories are the same for any number of threads (sums
+    !over markers can still differ by rounding, and immediate background updates by their order). The state
+    !is derived from the master seed loaded from seed.inp (via set_seed_for_random_numbers) by combining
+    !it with marker and second_factor through the SplitMix64 bit mixer, which produces well-decorrelated
+    !64-bit words for neighbouring inputs. Use a different second_factor for each call that continues
+    !the same markers (time slices), otherwise every call replays the same random numbers. If no master
+    !seed was loaded, a hardcoded constant is used instead.
 
     use utils_data_pre_and_post_processing_mod, only: master_seed_u64, master_seed_loaded, splitmix64_next
 
-    integer, intent(in) :: thread_num
+    integer, intent(in) :: marker
     integer, intent(in), optional :: second_factor
     integer(int64), parameter :: gamma        = -7046029254386353131_int64  ! 0x9E3779B97F4A7C15
     integer(int64), parameter :: second_salt  = -6534898150910275811_int64  ! arbitrary large odd
@@ -672,10 +656,10 @@ subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num, second
     if (present(second_factor)) sf = second_factor
 
     if (master_seed_loaded) then
-        key = ieor(master_seed_u64, int(thread_num, int64) * gamma)
+        key = ieor(master_seed_u64, int(marker, int64) * gamma)
         key = ieor(key,             int(sf,         int64) * second_salt)
     else
-        key = int(20180815, int64) + int(thread_num, int64) + int(sf, int64) * gamma
+        key = int(20180815, int64) + int(marker, int64) + int(sf, int64) * gamma
     endif
 
     sm_state = key
@@ -690,6 +674,6 @@ subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num, second
     call random_seed(put=state)
     deallocate(state)
 
-end subroutine initialise_seed_for_random_numbers_for_each_thread
+end subroutine initialise_seed_for_marker
 
 end module utils_parallelised_particle_pushing_mod
