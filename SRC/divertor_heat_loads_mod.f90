@@ -36,6 +36,7 @@ subroutine read_divertor_heat_loads_inp_into_type
     & boole_write_vertex_coordinates, boole_write_prism_volumes, boole_write_refined_prism_volumes, boole_write_boltzmann_density, &
     & boole_write_electric_potential, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data
 
+    boole_precalc_collisions = .false. !obsolete key, still accepted in input files
     open(newunit = dhl_inp_unit, file='divertor_heat_loads.inp', status='unknown')
     read(dhl_inp_unit,nml=divertor_heat_loads_nml)
     close(dhl_inp_unit)
@@ -47,7 +48,8 @@ subroutine read_divertor_heat_loads_inp_into_type
     in%boole_squared_moments = boole_squared_moments
     in%boole_point_source = boole_point_source
     in%boole_collisions = boole_collisions
-    in%boole_precalc_collisions = boole_precalc_collisions
+    if (boole_precalc_collisions) print*, 'Note: boole_precalc_collisions is obsolete and ignored; ' // &
+        'collisions use one random stream per marker (initialise_seed_for_marker)'
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
     in%boole_monoenergetic = boole_monoenergetic
     in%boole_linear_density_simulation = boole_linear_density_simulation
@@ -89,7 +91,7 @@ subroutine calc_divertor_heat_loads
     normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, initialise_loop_variables, &
     add_marker_moments_to_thread_sums, add_thread_moments_to_output, add_local_counter_to_counter, carry_out_collisions, &
-    update_exit_data, initialise_seed_for_random_numbers_for_each_thread
+    update_exit_data, initialise_seed_for_marker
     use utils_orbit_timestep_mod, only: start_touched_tetr_tracking, stop_touched_tetr_tracking
 
     integer :: kpart,i,n,l,p,ind_tetr,iface,iantithetic
@@ -152,9 +154,7 @@ subroutine calc_divertor_heat_loads
             call print_progress(in%num_particles,kpart,n)
             !$omp end critical
 
-            if (.not.in%boole_precalc_collisions) then
-                call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num())
-            endif
+            call initialise_seed_for_marker(n) !random stream of this marker
 
             call initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp)
 
@@ -184,7 +184,6 @@ subroutine calc_divertor_heat_loads
 
             !$omp critical
             counter%integration_steps = counter%integration_steps + i
-            c%maxcol = max(dble(i)/dble(c%randcoli),c%maxcol)
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
             call update_exit_data(particle_status%lost,t%confined,x,vpar,vperp,i,n,local_counter%phi_0_mappings)

@@ -26,7 +26,7 @@ subroutine set_seed_for_random_numbers
 
     ! Retain the loaded seed and derive a 64-bit master key from it, so that
     ! per-thread seeding inside parallel loops can be a deterministic function
-    ! of seed.inp (see initialise_seed_for_random_numbers_for_each_thread).
+    ! of seed.inp (see initialise_seed_for_marker).
     if (allocated(master_seed)) deallocate(master_seed)
     allocate(master_seed(n))
     master_seed = seed
@@ -163,7 +163,6 @@ subroutine print_applet_summary(particle_name, particle_mass, v0, particle_charg
     character(len=*), intent(in) :: particle_name
     real(dp), intent(in)         :: particle_mass, v0, particle_charge
 
-    if (in%boole_precalc_collisions) print*, "maxcol = ", c%maxcol
     print*, 'Number of lost '//particle_name//'s', counter%lost_particles
     print*, 'average number of pushings = ', counter%tetr_pushings/in%n_particles
     print*, 'average number of toroidal revolutions = ', counter%phi_0_mappings/in%n_particles
@@ -603,12 +602,6 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
         !$OMP END PARALLEL
     endif
     
-    if (in%boole_precalc_collisions) then
-        if (.not.allocated(c%randcol)) allocate(c%randcol(in%num_particles,c%randcoli,3,in%n_species))
-        call RANDOM_NUMBER(c%randcol)
-        !3.464102_dp = sqrt(12), this creates a random number with zero average and unit variance
-        c%randcol(:,:,1:3:2,:) =  3.464102_dp*(c%randcol(:,:,1:3:2,:)-0.5_dp)
-    endif
 
 end subroutine calc_collision_coefficients_for_all_tetrahedra
 
@@ -971,7 +964,6 @@ subroutine deallocate_collision_arrays
     if (allocated(c%charge_num)) deallocate(c%charge_num)
     if (allocated(c%dens))       deallocate(c%dens)
     if (allocated(c%temp))       deallocate(c%temp)
-    if (allocated(c%randcol))    deallocate(c%randcol)
     if (allocated(c%tetr_volume)) deallocate(c%tetr_volume)
     if (allocated(c%cell_of_tetr)) deallocate(c%cell_of_tetr)
     if (allocated(c%cell_start)) deallocate(c%cell_start)

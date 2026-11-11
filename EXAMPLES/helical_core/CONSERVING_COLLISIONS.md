@@ -127,8 +127,10 @@ The noise can no longer be reduced with a free coupling factor. Only these help:
 
 ## Parallelisation and common time (`n_time_slices`)
 
-Markers are traced in parallel with OpenMP over markers, with a static schedule and
-per-thread seeds (dissertation section 4.3.2.3). Each thread traces its markers one after
+Markers are traced in parallel with OpenMP over markers, with a static schedule
+(dissertation section 4.3.2.3). Since November 2026 each marker has its own random stream
+(`initialise_seed_for_marker`, from seed.inp, the marker index and the slice).
+Before, each thread had its own seed. Each thread traces its markers one after
 another, each over the full `time_step`. At any moment only one marker per thread is
 being traced, and these markers are at unrelated physical times. A thread's 1000th marker
 starts at t = 0 against a background that has already absorbed the full histories of all
@@ -146,11 +148,12 @@ parallelisation over markers is unchanged, and markers and background stay in st
 within one slice. Within a run, the weights are computed once and kept fixed. A
 zero-length step sets each marker's weight before its first collision.
 
-**Random numbers.** The per-thread seeding runs at the start of every parallel region. With
-several slices, every marker therefore got the same random numbers in every slice. That
-noise adds up coherently and heated a beam relaxing in a fixed 1000 eV background to about
-1130 eV. Each slice now uses its own seed factor (the slice index). A single slice keeps
-factor 1, so results are unchanged.
+**Random numbers.** The seed must differ between slices. The per-thread seeding first ran at
+the start of every parallel region with the same factor, so with several slices every
+marker got the same random numbers in every slice. That noise adds up coherently and heated
+a beam relaxing in a fixed 1000 eV background to about 1130 eV. Each slice therefore uses
+its own seed factor (the slice index). The per-marker streams keep this: the stream of a
+marker depends on the marker index and the slice.
 
 **Deferred background updates.** In helical_core the background is frozen during a slice.
 Each thread adds the momentum and energy its markers gain in each tetrahedron into its own
@@ -158,8 +161,9 @@ slot of `background_exchange` (`start_deferred_background_updates`). After the s
 `apply_deferred_background_updates` sums the slots in thread order and updates every
 reservoir once with the totals.
 
-- Runs are reproducible for a fixed number of threads; two runs with 16 threads gave
-  bit-identical output.
+- Runs are reproducible. The marker histories do not depend on the number of threads.
+  The background exchange is summed in thread order, so with several slices its rounding
+  can differ between thread counts. Two runs with 16 threads gave bit-identical output.
 - There is no critical section per collision.
 - There is no race between reading and updating the background.
 - The same structure works for MPI: one `MPI_Allreduce` of the exchange per slice, then
@@ -229,8 +233,8 @@ test, T_m reached only 703 eV instead of 900 eV. The step is now chosen once fro
 pitch-angle diffusion summed over all species (`collision_step`, the same rule as in
 `stost`), and each species is applied with that step.
 
-With `boole_precalc_collisions`, all species use the same three precalculated random
-numbers, so their kicks are correlated. helical_core runs without precalculated numbers.
+(The precalculated random numbers, `boole_precalc_collisions`, which would have given all
+species the same three numbers, have been removed in favour of per-marker streams.)
 
 **Checks** (binary of branch `conserving_electrons`, small hole, cells threshold 0.5, 24 threads):
 

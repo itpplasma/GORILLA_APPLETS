@@ -71,7 +71,6 @@ module gorilla_applets_types_mod
     type(flux_t) :: flux
 
     type collisions_t
-    real(dp), dimension(:,:,:,:), allocatable :: randcol
     real(dp), dimension(:,:), allocatable :: dens_mat
     real(dp), dimension(:,:), allocatable :: temp_mat
     real(dp), dimension(:,:), allocatable :: vpar_mat
@@ -86,9 +85,7 @@ module gorilla_applets_types_mod
     integer, dimension(:), allocatable :: cell_start   !reservoir cell k consists of the tetrahedra
     integer, dimension(:), allocatable :: cell_members !cell_members(cell_start(k):cell_start(k+1)-1)
     integer, dimension(:), allocatable :: cell_of_tetr !reservoir cell of each tetrahedron
-    integer :: randcoli = int(1.0d5)
     integer :: n !number of background species
-    real(dp) :: maxcol = 0
     end type collisions_t
 
     type(collisions_t) :: c
@@ -101,7 +98,6 @@ module gorilla_applets_types_mod
     logical  :: boole_squared_moments = .false.
     logical  :: boole_point_source = .false.
     logical  :: boole_collisions = .false.
-    logical  :: boole_precalc_collisions = .false.
     logical  :: boole_refined_sqrt_g = .false.
     logical  :: boole_monoenergetic = .false.
     logical  :: boole_linear_density_simulation = .false.

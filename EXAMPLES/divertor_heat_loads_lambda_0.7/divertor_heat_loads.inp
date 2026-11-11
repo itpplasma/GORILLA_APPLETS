@@ -37,7 +37,6 @@
   boole_collisions = .false.,
 !
   !precalcualte random numbers for collisions
-  boole_precalc_collisions = .false.,
 !
   !Simulated density of particles
   density = 1,

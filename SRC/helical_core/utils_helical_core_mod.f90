@@ -54,6 +54,7 @@ subroutine read_helical_core_inp_into_type
     reservoir_min_volume_fraction = in%reservoir_min_volume_fraction
     background_temperature_eV = in%background_temperature_eV
 
+    boole_precalc_collisions = .false. !obsolete key, still accepted in input files
     open(newunit = s_inp_unit, file='helical_core.inp', status='unknown')
     read(s_inp_unit,nml=helical_core_nml)
     close(s_inp_unit)
@@ -65,7 +66,8 @@ subroutine read_helical_core_inp_into_type
     in%boole_squared_moments = boole_squared_moments
     in%boole_point_source = boole_point_source
     in%boole_collisions = boole_collisions
-    in%boole_precalc_collisions = boole_precalc_collisions
+    if (boole_precalc_collisions) print*, 'Note: boole_precalc_collisions is obsolete and ignored; ' // &
+        'collisions use one random stream per marker (initialise_seed_for_marker)'
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
     in%boole_monoenergetic = boole_monoenergetic
     in%boole_linear_density_simulation = boole_linear_density_simulation
@@ -116,7 +118,7 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_marker_moments_to_thread_sums, &
         add_thread_moments_to_output, &
         add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
-        initialise_seed_for_random_numbers_for_each_thread
+        initialise_seed_for_marker
     use utils_orbit_timestep_mod, only: start_touched_tetr_tracking, stop_touched_tetr_tracking
 
     integer, intent(in)                               :: species
@@ -133,7 +135,6 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
     complex(dp), dimension(:,:), allocatable          :: local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared
-    logical                                           :: thread_flag = .true.
 
     if (present(n_particles_in)) then
         n_particles = n_particles_in
@@ -157,8 +158,7 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
     !$OMP& moment_specs, ntetr) &
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p, l, n, i, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, &
-    !$OMP& thread_tetr_moments, thread_prism_moments_squared) &
-    !$OMP& FIRSTPRIVATE(thread_flag)
+    !$OMP& thread_tetr_moments, thread_prism_moments_squared)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
 
@@ -174,13 +174,9 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
     !$OMP DO SCHEDULE(static)
     do p = 1, n_particles/iantithetic
 
-        if ((.not.in%boole_precalc_collisions).and.thread_flag) then
-            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num(), i_slice)
-            thread_flag = .false.
-        endif
-
         do l = 1, iantithetic
             n = (p-1)*iantithetic + l
+            call initialise_seed_for_marker(n, i_slice) !random stream of this marker and slice
 
             !$omp atomic update
             kpart = kpart + 1
@@ -230,7 +226,6 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
 
             !$omp critical
             counter%integration_steps = counter%integration_steps + i
-            c%maxcol = max(dble(i)/dble(c%randcoli), c%maxcol)
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
 

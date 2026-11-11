@@ -11,8 +11,9 @@ the field-aligned or rectangular mesh. It covers the option-14 execution path,
 not helical-core physics: the perturbation stays off, matching the shipped
 example. The exit data are compared against
 TESTS/REFERENCE/helical_core_grid_kind_<HELICAL_CORE_GRID_KIND>/. The run is
-pinned to one OpenMP thread, because the random numbers a particle draws depend
-on the thread that traces it. After an intended change of the results, run the
+pinned to one OpenMP thread. Each marker has its own random stream, so the
+marker histories do not depend on the thread count, but sums can differ by
+rounding. After an intended change of the results, run the
 test with UPDATE_REFERENCE=1 in the environment to copy the new exit data into
 the reference dir, and commit it.
 
@@ -91,7 +92,6 @@ helical_core["helical_core_nml"]["n_particles"] = 4
 helical_core["helical_core_nml"]["boole_squared_moments"] = False
 helical_core["helical_core_nml"]["boole_point_source"] = False
 helical_core["helical_core_nml"]["boole_collisions"] = True
-helical_core["helical_core_nml"]["boole_precalc_collisions"] = False
 helical_core["helical_core_nml"]["boole_refined_sqrt_g"] = True
 helical_core["helical_core_nml"]["boole_monoenergetic"] = True
 helical_core["helical_core_nml"]["boole_linear_density_simulation"] = False
@@ -156,4 +156,21 @@ if os.environ.get("UPDATE_REFERENCE") == "1":
 
 compare_numeric_file(WORK_DIR / "exit_data.dat", REFERENCE_DIR / "exit_data.dat", rtol=1.0e-10, atol=1.0e-14)
 
-print("PASS: helical core tracing completed and exit data match the reference")
+# Each marker has its own random stream, so the exit data must not depend on the thread count
+print("=== helical core with 4 OpenMP threads ===", flush=True)
+result = subprocess.run(
+    [str(BINARY)],
+    cwd=WORK_DIR,
+    env={**os.environ, "OMP_NUM_THREADS": "4"},
+    capture_output=True,
+    text=True,
+    check=False,
+    timeout=120,
+)
+if result.returncode != 0:
+    print(result.stdout)
+    print(result.stderr, file=sys.stderr)
+    sys.exit(f"FAIL: gorilla_applets_main.x with 4 threads exited with code {result.returncode}")
+compare_numeric_file(WORK_DIR / "exit_data.dat", REFERENCE_DIR / "exit_data.dat", rtol=1.0e-10, atol=1.0e-14)
+
+print("PASS: helical core tracing completed and exit data match the reference with 1 and 4 threads")
