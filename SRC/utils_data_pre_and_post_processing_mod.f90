@@ -861,7 +861,7 @@ subroutine build_reservoir_cells(min_volume_fraction)
     do k = 1, n_cells
         if (c%cell_start(k+1) - c%cell_start(k).le.1) cycle
         n_merged_tetr = n_merged_tetr + c%cell_start(k+1) - c%cell_start(k)
-        do j = 1, c%n-1
+        do j = 1, c%n
             associate(members => c%cell_members(c%cell_start(k):c%cell_start(k+1)-1))
                 particles = c%dens_mat(j,members)*c%tetr_volume(members)
                 u_mean = sum(particles*c%vpar_mat(j,members))/sum(particles)

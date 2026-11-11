@@ -184,6 +184,22 @@ end subroutine lambda_alpha_beta
 !
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
+function collision_step(dhh,p,tau) result(dtau)
+!  Step of stost (modes 1-4) in units of the free path: pitch-angle change of about epsilon per
+!  step from the total (summed over species) pitch-angle diffusion coefficient dhh, longer for
+!  slow particles (p < q), at most tau and upper_limit.
+  real(dp), intent(in) :: dhh,p,tau
+  real(dp) :: dtau
+  real(dp), parameter :: epsilon = 0.1, q = 0.3, upper_limit = 30 !default-real literals as in the original stost (bitwise)
+
+  dtau = min(epsilon**2/(2*dhh),tau,upper_limit)
+  if (p.lt.q) then
+    dtau = min(dtau*(q/p)**2,tau,upper_limit)
+  endif
+end function collision_step
+!
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!
 subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override)
 !
 !  z(1:5)   - phase space coordinates: z(1:3) - spatial position,
@@ -210,7 +226,7 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override
   real(dp), parameter :: pmin=5.e-2
   real(dp) :: dtau,p,dpp,dhh,fpeff,alam,dalam,coala, upper_limit
   real(dp), dimension(5) :: z
-  real(dp) :: ur, epsilon, q
+  real(dp) :: ur, epsilon
   real(dp), dimension(:), intent(in) :: efcolf,velrat,enrat
   real(dp), dimension(size(efcolf)) :: dpp_vec,dhh_vec,fpeff_vec
   real(dp), optional :: tau
@@ -223,7 +239,6 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override
   real(dp) :: z4_save
 
   epsilon = 0.1
-  q = 0.3
   upper_limit = 30
   n = size(efcolf)
 
@@ -236,12 +251,7 @@ subroutine stost(efcolf,velrat,enrat,z,dtau,iswmode,ierr,tau,randnum,nu_override
 
   ierr=0
 
-  if (present(tau)) then
-    dtau = min(epsilon**2/(2*dhh),tau,upper_limit)
-    if (z(4).lt.q) then
-      dtau = min(dtau*(q/z(4))**2,tau,upper_limit)
-    endif
-  endif
+  if (present(tau)) dtau = collision_step(dhh,z(4),tau)
 
   ! iswmode = 5: Euler-Maruyama Ornstein-Uhlenbeck step on the parallel
   ! velocity only.  v_perp_norm = z(4)*sqrt(1-z(5)^2) stays untouched.

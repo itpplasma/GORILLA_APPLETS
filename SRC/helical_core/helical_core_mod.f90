@@ -38,7 +38,7 @@ subroutine calc_helical_core
     real(dp), dimension(:), allocatable :: pitch_0, energy_0
     real(dp), dimension(:,:), allocatable :: x_0
     logical, dimension(:), allocatable :: lost_0
-    real(dp), dimension(:), allocatable :: u_b_0, temp_b_0
+    real(dp), dimension(:,:), allocatable :: u_b_0, temp_b_0
 
     call set_seed_for_random_numbers
     call read_helical_core_inp_into_type
@@ -53,6 +53,14 @@ subroutine calc_helical_core
     call unlink_files
 
     if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra
+    if (in%background_temperature_eV.gt.0.0_dp) then
+        !the conserving collisions read temp_mat at every collision; the other operator uses precomputed coefficients
+        if (.not.(in%boole_collisions.and.in%boole_preserve_energy_and_momentum_during_collisions)) then
+            print*, 'Error: background_temperature_eV requires boole_preserve_energy_and_momentum_during_collisions'
+            stop
+        endif
+        c%temp_mat = in%background_temperature_eV
+    endif
 
     call calc_starting_conditions
     call eliminate_particles_outside_flux_threshold
@@ -69,11 +77,11 @@ subroutine calc_helical_core
         call build_reservoir_cells(in%reservoir_min_volume_fraction)
         call start_deferred_background_updates
         lost_0 = start%lost(:,1)
-        u_b_0 = c%vpar_mat(1,:)
-        temp_b_0 = c%temp_mat(1,:)
+        u_b_0 = c%vpar_mat
+        temp_b_0 = c%temp_mat
         open(newunit=relaxation_unit, file='collision_relaxation.dat', status='replace')
         write(relaxation_unit,'(A)') '#time <v_par>_m/v0 <u_par>_b/v0 P_m P_b P_lost E_m E_b E_lost E_tot ' // &
-                                     'L_m L_b L_lost L_tot <T>_b T_m min_T_b max|u_b|/v0 n_confined'
+                                     'L_m L_b L_lost L_tot <T>_b T_m min_T_b max|u_b|/v0 n_confined <T>_e min_T_e'
     endif
     start%t = in%time_step/in%n_time_slices
     do i_slice = 1, in%n_time_slices
@@ -86,7 +94,7 @@ subroutine calc_helical_core
             if (i_slice.eq.1) call write_collision_relaxation_diagnostics(relaxation_unit, 0.0_dp, x_0, pitch_0, energy_0, &
                                                                           lost_0, u_b_0, temp_b_0)
             call write_collision_relaxation_diagnostics(relaxation_unit, i_slice*start%t(1), start%x(:,:,1), start%pitch(:,1), &
-                                                        start%energy(:,1), start%lost(:,1), c%vpar_mat(1,:), c%temp_mat(1,:))
+                                                        start%energy(:,1), start%lost(:,1), c%vpar_mat, c%temp_mat)
         endif
     enddo
     start%t = in%time_step

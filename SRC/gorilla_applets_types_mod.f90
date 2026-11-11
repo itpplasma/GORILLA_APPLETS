@@ -135,6 +135,8 @@ module gorilla_applets_types_mod
     integer  :: n_time_slices = 1 !Used in helical_core: all markers are pushed together in slices of time_step/n_time_slices
     logical  :: boole_unidirectional_beam = .false. !Used in helical_core: all markers start with pitch +1
     real(dp) :: beam_density_fraction = 1.0_dp !Used in helical_core: marker density / background density
+    real(dp) :: background_temperature_eV = 0.0_dp !Used in helical_core with conserving collisions: background
+                                                  !temperature of all species [eV] if > 0, else energy_eV
     real(dp) :: reservoir_min_volume_fraction = 0.5_dp !Used in helical_core: merge small tetrahedra near the axis poloidally into
                                                        !reservoir cells of at least this fraction of the median volume (0 = off)
     integer  :: n_poincare_mappings = 0 !Used in divertor_heat_loads
