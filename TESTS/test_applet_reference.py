@@ -133,6 +133,7 @@ for key, value in MODE["grid"].items():
     tetra_grid["tetra_grid_nml"][key] = value
 tetra_grid["tetra_grid_nml"]["boole_n_field_periods"] = True
 tetra_grid["tetra_grid_nml"]["g_file_filename"] = "MHD_EQUILIBRIA/g_file_for_test"
+tetra_grid["tetra_grid_nml"]["theta_geom_flux"] = 2  # cylindrical coordinates: theta_geom_flux = 1 folds near the separatrix
 tetra_grid["tetra_grid_nml"]["convex_wall_filename"] = "MHD_EQUILIBRIA/convex_wall_for_test.dat"
 
 # Fourier moments instead of the much larger per-prism moments

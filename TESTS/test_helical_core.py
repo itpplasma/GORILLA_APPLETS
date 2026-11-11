@@ -79,6 +79,7 @@ tetra_grid["tetra_grid_nml"]["n2"] = 30
 tetra_grid["tetra_grid_nml"]["n3"] = 50
 tetra_grid["tetra_grid_nml"]["boole_n_field_periods"] = True
 tetra_grid["tetra_grid_nml"]["g_file_filename"] = "MHD_EQUILIBRIA/g_file_for_test"
+tetra_grid["tetra_grid_nml"]["theta_geom_flux"] = 2  # cylindrical coordinates: theta_geom_flux = 1 folds near the separatrix
 tetra_grid["tetra_grid_nml"]["convex_wall_filename"] = "MHD_EQUILIBRIA/convex_wall_for_test.dat"
 
 # Applets dispatcher

@@ -75,6 +75,7 @@ tg["i_radial_spacing"] = 2
 tg["sfc_s_min"] = 1.0e-7
 tg["boole_n_field_periods"] = True
 tg["g_file_filename"] = "MHD_EQUILIBRIA/g_file_for_test"
+tg["theta_geom_flux"] = 2  # cylindrical coordinates: theta_geom_flux = 1 folds near the separatrix
 tg["convex_wall_filename"] = "MHD_EQUILIBRIA/convex_wall_for_test.dat"
 
 gorilla_applets["gorilla_applets_nml"]["i_option"] = 14
