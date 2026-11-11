@@ -243,7 +243,10 @@ for name in MODE["reference_files"]:
     check_rows(name)   # compare_numeric_file would let NaN through
     if name == "fourier_moments_summary.dat":
         n_rows = sum(1 for ln in (WORK_DIR / "fourier_moments.dat").read_text().splitlines() if ln.strip())
-        compare_moments_summary(name, n_rows, rtol=1.0e-10)
+        # Moment sums accumulate over all markers and steps; the system math library (exp, log, ...)
+        # of the platform changes them at the 1e-9 level (AlmaLinux 8 cluster vs Debian 12 CI container),
+        # while the per-marker exit data agree to 1e-10.
+        compare_moments_summary(name, n_rows, rtol=1.0e-8)
     else:
         compare_numeric_file(WORK_DIR / name, REFERENCE_DIR / name, rtol=1.0e-10, atol=1.0e-14)
 
