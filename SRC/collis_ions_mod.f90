@@ -153,7 +153,7 @@ subroutine lambda_alpha_beta(z1, z2, m1, m2, T1, T2, n1, n2, lambda_ab)
 
   if ((species1.eq.1).and.(species2.eq.1)) then
     lambda_ab = 23.d0-log(max(epsilon(1.d0), z1*z2*(m1+m2)  /  (m1*T2+m2*T1) * sqrt(n1*z1**2/T1 + n2*z2**2/T2)))
-  elseif ((species1.eq.2).and.(species2.eq.2)) then
+  elseif ((species1.eq.-1).and.(species2.eq.-1)) then !electron-electron (sign() gives -1 for electrons, never 2)
     lambda_ab = 23.5d0 - log(max(epsilon(1.d0), sqrt(n2)*T2**(-5.d0/4.d0))) - sqrt(1.d-5 + (log(T2)-2.d0)**2/16.d0)
   else
     if (species1.eq.1) then
