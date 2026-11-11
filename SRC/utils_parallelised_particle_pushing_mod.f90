@@ -9,6 +9,12 @@ module utils_parallelised_particle_pushing_mod
     !adds the parallel momentum and energy [erg] its markers gain into its own slot
     !background_exchange(1:2, species, tetrahedron, thread). apply_deferred_background_updates sums the
     !slots in thread order (reproducible for a fixed thread count) and updates each reservoir once.
+    !
+    !Electrons (background species c%n) take part in the conserving collisions with instantaneous e-i
+    !friction: the electron flow is locked to the mass-weighted mean ion flow, so the momentum markers
+    !exchange with electrons goes into the common flow of all background species, and the rest of the
+    !exchanged energy into the electron temperature (update_electron_reservoir). There is no finite
+    !e-i friction and no T_e-T_i equipartition (see EXAMPLES/helical_core/CONSERVING_COLLISIONS.md).
     logical :: boole_deferred_background_updates = .false.
     real(dp), dimension(:,:,:,:), allocatable :: background_exchange
 
@@ -230,8 +236,7 @@ end subroutine carry_out_collisions
 subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
 
     use gorilla_applets_types_mod, only: in, c, time_t, start, weights
-    use collis_ions, only: stost
-    use collis_ions, only: collis_init
+    use collis_ions, only: stost, collis_init, coleff, collision_step, nu_scale_factor
     use tetra_physics_mod, only: particle_mass,particle_charge
     use constants, only: echarge,amp
     use gorilla_applets_settings_mod, only: i_option
@@ -245,21 +250,32 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
 
     real(dp), dimension(5) :: zet
     real(dp), dimension(3) :: randnum
-    real(dp), dimension(1) :: m, z, dens, temp, efcolf,velrat,enrat
+    real(dp), dimension(c%n) :: efcolf, velrat, enrat, dpp_vec, dhh_vec, fpeff_vec
     real(dp) :: vpar_background
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar
-    integer :: err, j, p, thread
+    integer :: err, j, thread
     real(dp) :: marker_to_background_ratio, t_max, w_phys
+    logical :: rejected
 
-    do j = 1,c%n-1
-        
-        m0 = particle_mass
-        z0 = particle_charge/echarge
-        m = c%mass(j)
-        z = c%charge_num(j)
-        dens = c%dens_mat(j,ind_tetr)
-        temp = c%temp_mat(j,ind_tetr)
-        call collis_init(m0,z0, m,z, dens, temp, in%energy_eV, start%v0(species), efcolf, velrat, enrat)
+    m0 = particle_mass
+    z0 = particle_charge/echarge
+    call collis_init(m0, z0, c%mass, c%charge_num, c%dens_mat(:,ind_tetr), c%temp_mat(:,ind_tetr), in%energy_eV, &
+                     start%v0(species), efcolf, velrat, enrat)
+
+    t_max = (start%t(species)-t%confined)*start%v0(species)
+    if (i_option.eq.13) t_max = min(t_max, t%step_anomalous_transport*start%v0(species))
+
+    !One step for all species, chosen by stost's rule from the summed pitch-angle diffusion (in the frame
+    !of the first background species); the species are then applied one after another with this step
+    !(stost without tau keeps dtau). Choosing the step per species instead would let the last species
+    !overwrite t%step, so the marker time would advance by a step the other species were not applied for.
+    zet(4) = sqrt((vpar - c%vpar_mat(1,ind_tetr))**2 + vperp**2)/start%v0(species)
+    call coleff(efcolf, velrat, enrat, zet(4), dpp_vec, dhh_vec, fpeff_vec)
+    t%step = collision_step(sum(dhh_vec)*nu_scale_factor, zet(4), t_max)
+
+    if (in%boole_precalc_collisions) randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species)
+
+    do j = 1,c%n
 
         vpar_save = vpar
         vperp_save = vperp
@@ -267,19 +283,16 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         vpar = vpar - vpar_background
 
         zet(1:3) = x !spatial position
-        zet(4) = sqrt(vpar**2+vperp**2)/start%v0(species) !normalized velocity module 
+        zet(4) = sqrt(vpar**2+vperp**2)/start%v0(species) !normalized velocity module
         zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
 
-        t_max = (start%t(species)-t%confined)*start%v0(species)
-        if (i_option.eq.13) t_max = min(t_max, t%step_anomalous_transport*start%v0(species))
-        
+        !with precalculated random numbers all species use the same three numbers (correlated kicks)
         if (in%boole_precalc_collisions) then
-            randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species) 
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum)
+            call stost(efcolf(j:j),velrat(j:j),enrat(j:j),zet,t%step,iswmode,err,randnum=randnum)
         else
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max)
+            call stost(efcolf(j:j),velrat(j:j),enrat(j:j),zet,t%step,iswmode,err)
         endif
-        
+
         vpar = zet(5)*zet(4)*start%v0(species)+vpar_background
         vperp = sqrt(1-zet(5)**2)*zet(4)*start%v0(species)
         
@@ -300,6 +313,12 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
             background_exchange(1,j,ind_tetr,thread) = background_exchange(1,j,ind_tetr,thread) + &
                                                        w_phys*particle_mass*delta_vpar
             background_exchange(2,j,ind_tetr,thread) = background_exchange(2,j,ind_tetr,thread) + w_phys*delta_epsilon
+        elseif (j.eq.c%n) then
+            !$omp critical
+            call update_electron_reservoir(c%mass, c%dens_mat(:,ind_tetr)*c%tetr_volume(ind_tetr), &
+                -w_phys*particle_mass*delta_vpar, -w_phys*delta_epsilon, c%vpar_mat(:,ind_tetr), &
+                c%temp_mat(c%n,ind_tetr), rejected)
+            !$omp end critical
         else
             marker_to_background_ratio = w_phys/(c%dens_mat(j,ind_tetr)*c%tetr_volume(ind_tetr))
             !$omp critical
@@ -338,7 +357,9 @@ subroutine apply_deferred_background_updates(n_rejected)
 
     integer, intent(out) :: n_rejected
     real(dp) :: momentum, energy, particles, u, temp, u_old, temp_old
+    real(dp), dimension(c%n) :: species_particles, u_species
     integer :: j, k, m, i, thread
+    logical :: rejected
 
     n_rejected = 0
     do k = 1, size(c%cell_start) - 1
@@ -366,6 +387,30 @@ subroutine apply_deferred_background_updates(n_rejected)
             if ((u.eq.u_old).and.(temp.eq.temp_old)) n_rejected = n_rejected + 1
             c%vpar_mat(j,c%cell_members(c%cell_start(k):c%cell_start(k+1)-1)) = u
             c%temp_mat(j,c%cell_members(c%cell_start(k):c%cell_start(k+1)-1)) = temp
+        enddo
+
+        !electrons, after the ions: common flow shift of all species, rest of the energy into T_e
+        momentum = 0.0_dp
+        energy = 0.0_dp
+        species_particles = 0.0_dp
+        do m = c%cell_start(k), c%cell_start(k+1) - 1
+            i = c%cell_members(m)
+            do thread = 0, size(background_exchange, 4) - 1
+                momentum = momentum + background_exchange(1,c%n,i,thread)
+                energy = energy + background_exchange(2,c%n,i,thread)
+            enddo
+            species_particles = species_particles + c%dens_mat(:,i)*c%tetr_volume(i)
+        enddo
+        !also without electron exchange, so that u_e follows an ion flow changed above
+        i = c%cell_members(c%cell_start(k))
+        if ((momentum.eq.0.0_dp).and.(energy.eq.0.0_dp).and.(c%vpar_mat(c%n,i).eq.c%vpar_mat(1,i))) cycle
+        u_species = c%vpar_mat(:,i)
+        temp = c%temp_mat(c%n,i)
+        call update_electron_reservoir(c%mass, species_particles, -momentum, -energy, u_species, temp, rejected)
+        if (rejected) n_rejected = n_rejected + 1
+        do m = c%cell_start(k), c%cell_start(k+1) - 1
+            c%vpar_mat(:,c%cell_members(m)) = u_species
+            c%temp_mat(c%n,c%cell_members(m)) = temp
         enddo
     enddo
     background_exchange = 0.0_dp
@@ -395,6 +440,41 @@ pure subroutine update_background_reservoir(m_t, m_b, r, delta_vpar, delta_epsil
     end if
 
 end subroutine update_background_reservoir
+
+pure subroutine update_electron_reservoir(mass, particles, momentum, energy, u, temp_e, rejected)
+    !Instantaneous e-i friction: the background of a cell (species 1..n-1 ions, n electrons with masses
+    !mass and particle numbers particles) gains the parallel momentum and energy [erg] that markers lost
+    !to the electrons. All flows u shift by the same amount so that the electron flow ends at the
+    !mass-weighted mean ion flow and the total momentum (with the electron flow) is conserved; the
+    !energy minus the change of the flow kinetic energy goes into the electron temperature temp_e [eV].
+    !An update that would drive temp_e <= 0 is rejected (state unchanged, rejected = .true.).
+
+    use constants, only: ev2erg
+
+    real(dp), dimension(:), intent(in) :: mass, particles
+    real(dp), intent(in) :: momentum, energy
+    real(dp), dimension(:), intent(inout) :: u
+    real(dp), intent(inout) :: temp_e
+    logical, intent(out) :: rejected
+    real(dp), dimension(size(u)) :: u_new
+    real(dp) :: inertia_ions, flow_ions, shift, temp_new
+    integer :: n
+
+    n = size(u)
+    inertia_ions = sum(particles(1:n-1)*mass(1:n-1))
+    flow_ions = sum(particles(1:n-1)*mass(1:n-1)*u(1:n-1))/inertia_ions
+    shift = (sum(particles*mass*u) + momentum)/sum(particles*mass) - flow_ions
+    u_new(1:n-1) = u(1:n-1) + shift
+    u_new(n) = flow_ions + shift
+    temp_new = temp_e + (energy - 0.5_dp*sum(particles*mass*(u_new**2 - u**2)))/(1.5_dp*particles(n)*ev2erg)
+
+    rejected = (temp_new <= 0.0_dp)
+    if (.not.rejected) then
+        u = u_new
+        temp_e = temp_new
+    endif
+
+end subroutine update_electron_reservoir
 
 subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
 

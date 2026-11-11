@@ -32,7 +32,8 @@ subroutine read_helical_core_inp_into_type
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
                boole_eliminate_particles_outside_flux, boole_delta_f, boole_unidirectional_beam
     integer :: i_integrator_type, seed_option, n_species, n_time_slices !i_integrator_type, seed_option: read for compatibility with existing input files, unused
-    real(dp) :: flux_threshold_for_elimination, beam_density_fraction, reservoir_min_volume_fraction
+    real(dp) :: flux_threshold_for_elimination, beam_density_fraction, reservoir_min_volume_fraction, &
+                background_temperature_eV
 
     integer :: s_inp_unit
 
@@ -43,13 +44,15 @@ subroutine read_helical_core_inp_into_type
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, &
     & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f, &
-    & n_time_slices, boole_unidirectional_beam, beam_density_fraction, reservoir_min_volume_fraction
+    & n_time_slices, boole_unidirectional_beam, beam_density_fraction, reservoir_min_volume_fraction, &
+    & background_temperature_eV
 
     !optional keys keep their input_t defaults when absent from the file
     n_time_slices = in%n_time_slices
     boole_unidirectional_beam = in%boole_unidirectional_beam
     beam_density_fraction = in%beam_density_fraction
     reservoir_min_volume_fraction = in%reservoir_min_volume_fraction
+    background_temperature_eV = in%background_temperature_eV
 
     open(newunit = s_inp_unit, file='helical_core.inp', status='unknown')
     read(s_inp_unit,nml=helical_core_nml)
@@ -86,6 +89,7 @@ subroutine read_helical_core_inp_into_type
     in%boole_unidirectional_beam = boole_unidirectional_beam
     in%beam_density_fraction = beam_density_fraction
     in%reservoir_min_volume_fraction = reservoir_min_volume_fraction
+    in%background_temperature_eV = background_temperature_eV
 
     ! Set defaults for anomalous transport-specific parameters (disabled)
     in%boole_calc_diffusion_coefficient = .false.
@@ -568,9 +572,11 @@ end subroutine set_unidirectional_beam
 subroutine write_collision_relaxation_diagnostics(file_unit, time, x, pitch, energy_eV, lost, u_b, temp_b)
 !
 ! Writes one row of marker and background reservoir totals for the energy and momentum conserving
-! collisions (species 1, first background ion species, cylindrical coordinates). Markers carry
+! collisions (marker species 1, cylindrical coordinates). Markers carry
 ! weights%w/n_particles physical particles, the reservoir of a tetrahedron dens_mat*tetr_volume
-! particles; sums are in cgs, velocities are normalised by v0. Lost markers keep their state at the
+! particles of each background species (u_b, temp_b: species x tetrahedron); P_b, E_b and L_b sum
+! over all background species including the electrons, <u_par>_b, <T>_b, min T_b, max|u_par|_b are
+! for the first ion species; sums are in cgs, velocities are normalised by v0. Lost markers keep their state at the
 ! boundary (update_start_type), so the _lost columns are what left the domain.
 ! Parallel momentum P = sum m v_par is not an invariant in a torus (mirror force, varying b); the
 ! canonical toroidal angular momentum L = sum (m v_par h_phi + q/c A_phi) of the markers plus
@@ -580,7 +586,8 @@ subroutine write_collision_relaxation_diagnostics(file_unit, time, x, pitch, ene
 !
 ! Columns: time [s], <v_par>_m/v0, <u_par>_b/v0, P_m, P_b, P_lost, E_m, E_b, E_lost, E_total,
 !          L_m, L_b, L_lost, L_total, <T>_b [eV], T_m [eV] (kinetic energy in the frame moving
-!          with <v_par>_m), min T_b [eV], max |u_par|_b/v0, number of confined markers
+!          with <v_par>_m), min T_b [eV], max |u_par|_b/v0, number of confined markers,
+!          <T>_e [eV], min T_e [eV] (electrons, last background species)
 !
     use gorilla_applets_types_mod, only: in, c, start, weights
     use constants, only: ev2erg, clight, pi
@@ -594,20 +601,19 @@ subroutine write_collision_relaxation_diagnostics(file_unit, time, x, pitch, ene
     real(dp), dimension(:,:), intent(in) :: x
     real(dp), dimension(:), intent(in)   :: pitch, energy_eV
     logical, dimension(:), intent(in)    :: lost
-    real(dp), dimension(:), intent(in)   :: u_b, temp_b
+    real(dp), dimension(:,:), intent(in) :: u_b, temp_b
 
     real(dp), dimension(size(pitch))     :: w_phys, w_lost, v, vpar, p_phi
-    real(dp), dimension(size(c%tetr_volume)) :: n_b, h_phi_b
+    real(dp), dimension(size(c%tetr_volume)) :: n_b, n_e, h_phi_b
     logical, dimension(size(c%tetr_volume))  :: region
     real(dp), dimension(3) :: x_n, z, centroid
     real(dp), dimension(3,4) :: verts
-    real(dp) :: m_t, q_t, m_b, n_m, p_m, e_m, n_bt, p_b, e_b, p_lost, e_lost, l_m, l_b, l_lost, &
+    real(dp) :: m_t, q_t, n_m, p_m, e_m, n_bt, p_b, e_b, p_lost, e_lost, l_m, l_b, l_lost, &
                 vpar_mean, temp_m, vpar_n, vperp_n
-    integer :: n, i, k, ind_tetr, iface
+    integer :: n, i, k, j, ind_tetr, iface
 
     m_t = start%particle_mass(1)
     q_t = start%particle_charge(1)
-    m_b = c%mass(1)
 
     w_phys = merge(0.0_dp, real(weights%w(:,1), dp)/in%n_particles, lost)
     w_lost = merge(real(weights%w(:,1), dp)/in%n_particles, 0.0_dp, lost)
@@ -651,16 +657,24 @@ subroutine write_collision_relaxation_diagnostics(file_unit, time, x, pitch, ene
             tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi*z)).le.in%flux_threshold_for_elimination
     enddo
 
+    p_b = 0.0_dp
+    e_b = 0.0_dp
+    l_b = 0.0_dp
+    do j = 1, c%n
+        n_b = c%dens_mat(j,:)*c%tetr_volume
+        p_b = p_b + c%mass(j)*sum(n_b*u_b(j,:))
+        e_b = e_b + sum(n_b*(1.5_dp*temp_b(j,:)*ev2erg + 0.5_dp*c%mass(j)*u_b(j,:)**2))
+        l_b = l_b + c%mass(j)*sum(n_b*u_b(j,:)*h_phi_b)
+    enddo
+    n_e = c%dens_mat(c%n,:)*c%tetr_volume
     n_b = c%dens_mat(1,:)*c%tetr_volume
-    p_b = m_b*sum(n_b*u_b)
-    e_b = sum(n_b*(1.5_dp*temp_b*ev2erg + 0.5_dp*m_b*u_b**2))
-    l_b = m_b*sum(n_b*u_b*h_phi_b)
     n_bt = sum(n_b, mask=region)
 
-    write(file_unit,'(18ES17.9,I10)') time, vpar_mean/start%v0(1), &
-        sum(n_b*u_b, mask=region)/n_bt/start%v0(1), p_m, p_b, p_lost, e_m, e_b, e_lost, e_m + e_b + e_lost, &
-        l_m, l_b, l_lost, l_m + l_b + l_lost, sum(n_b*temp_b, mask=region)/n_bt, temp_m, &
-        minval(temp_b), maxval(abs(u_b))/start%v0(1), count((.not.lost).and.(real(weights%w(:,1), dp).ne.0.0_dp))
+    write(file_unit,'(18ES17.9,I10,2ES17.9)') time, vpar_mean/start%v0(1), &
+        sum(n_b*u_b(1,:), mask=region)/n_bt/start%v0(1), p_m, p_b, p_lost, e_m, e_b, e_lost, e_m + e_b + e_lost, &
+        l_m, l_b, l_lost, l_m + l_b + l_lost, sum(n_b*temp_b(1,:), mask=region)/n_bt, temp_m, &
+        minval(temp_b(1,:)), maxval(abs(u_b(1,:)))/start%v0(1), count((.not.lost).and.(real(weights%w(:,1), dp).ne.0.0_dp)), &
+        sum(n_e*temp_b(c%n,:), mask=region)/sum(n_e, mask=region), minval(temp_b(c%n,:))
     flush(file_unit)
 
 end subroutine write_collision_relaxation_diagnostics
@@ -669,8 +683,9 @@ end subroutine write_collision_relaxation_diagnostics
 subroutine write_collision_relaxation_profiles
 !
 ! Final state of the conserving collisions for radial profiles (cylindrical coordinates):
-! background_reservoir.dat: per tetrahedron s, R, Z, physical volume [cm^3], density, u_par/v0, T [eV],
-!                          reservoir cell (s, R, Z at the centroid, s = normalised poloidal flux)
+! background_reservoir.dat: per tetrahedron s, R, Z, physical volume [cm^3], density, u_par/v0, T [eV]
+!                          (first ion species), reservoir cell, T_e [eV]
+!                          (s, R, Z at the centroid, s = normalised poloidal flux)
 ! markers_final.dat:       per marker s, R, Z, v_par/v0, energy [eV], physical weight, lost flag
 !
     use gorilla_applets_types_mod, only: in, c, start, weights
@@ -686,7 +701,7 @@ subroutine write_collision_relaxation_profiles
     integer :: i, k, n, ind_tetr, iface, file_unit
 
     open(newunit=file_unit, file='background_reservoir.dat', status='replace')
-    write(file_unit,'(A)') '#s R Z volume density u_par/v0 T cell'
+    write(file_unit,'(A)') '#s R Z volume density u_par/v0 T cell T_e'
     do i = 1, size(c%tetr_volume)
         do k = 1, 4
             verts(:,k) = verts_rphiz(:,tetra_grid(i)%ind_knot(k))
@@ -695,8 +710,8 @@ subroutine write_collision_relaxation_profiles
         centroid = sum(verts, dim=2)/4.0_dp
         z = centroid - tetra_physics(i)%x1
         s_n = normalised_poloidal_flux(tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi*z))
-        write(file_unit,'(7ES17.9,I10)') s_n, centroid(1), centroid(3), c%tetr_volume(i), c%dens_mat(1,i), &
-            c%vpar_mat(1,i)/start%v0(1), c%temp_mat(1,i), c%cell_of_tetr(i)
+        write(file_unit,'(7ES17.9,I10,ES17.9)') s_n, centroid(1), centroid(3), c%tetr_volume(i), c%dens_mat(1,i), &
+            c%vpar_mat(1,i)/start%v0(1), c%temp_mat(1,i), c%cell_of_tetr(i), c%temp_mat(c%n,i)
     enddo
     close(file_unit)
 

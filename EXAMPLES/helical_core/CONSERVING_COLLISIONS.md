@@ -177,8 +177,9 @@ run time: 1 slice took 40 s, 20 slices took 7 min.
 
 ## Other observations
 
-- Only ion background species exchange momentum and energy (`j = 1 .. c%n-1`). Electrons
-  are left out in conserving mode, while the non-conserving operator includes them.
+- Electrons are included since November 2026; see "Electrons" below. Before that, the
+  conserving loop ran over the ion species only (`j = 1 .. c%n-1`), so markers felt no
+  electron drag or scattering at all.
 - With immediate updates (Boltzmann, SCEF), the background flow and temperature are read
   outside the critical section and updated inside it. Other threads can change them in
   between, as noted in section 4.3.2.3. This does not affect conservation, because the
@@ -193,6 +194,56 @@ run time: 1 slice took 40 s, 20 slices took 7 min.
   momentum, m v_∥ h_φ + (q/c) A_φ for the markers plus m_b u h_φ for the background.
   Orbits alone keep it to 1e-4 over 500 µs.
 
+## Electrons (instantaneous e-i friction)
+
+The marker collides with every background species, electrons included (species `c%n`).
+The electrons get a reservoir temperature `T_e`. They do not get an independent flow:
+e-i friction (microseconds) is much faster than the slowing-down, so the electron flow is
+locked to the mass-weighted mean ion flow. `update_electron_reservoir` handles the
+exchange with the electrons:
+
+- **Momentum:** all background flows (ions and electrons) shift by the same amount, so that
+  the electron flow ends at the mean ion flow and the total momentum, including the
+  electron flow, is conserved.
+- **Energy:** the exchanged energy minus the change of the flow kinetic energy goes into `T_e`.
+- **Rejection:** an update that would make `T_e <= 0` is rejected, as for the ions.
+
+With deferred updates, this runs once per reservoir cell and slice, after the ion
+updates. The momentum the markers lose to electrons therefore ends up in the ion
+rotation.
+
+**Not modelled (possible later switch, "option A"):** a finite e-i friction time and
+T_e-T_i equipartition. Option A would give the electrons their own flow `u_e` and, in
+`apply_deferred_background_updates`, exchange momentum between `u_e` and `u_i` (time τ_ei)
+and energy between `T_e` and `T_i` (equipartition time). Both exchanges can be made exactly
+conservative. Option A matters when T_e ≠ T_i must relax, or when the slice length is
+not long compared with τ_ei. An independent `u_e` would be very noisy: Δu = Δp/(n m_e) is
+m_i/m_e larger than for ions. Option A therefore needs the friction step, and a free `u_e`
+alone is not enough.
+
+**Common collision step.** `stost` chooses the step `dtau` itself when it is given `tau`,
+and overwrites the caller's `t%step`. Calling it once per species therefore let the last
+species (electrons, weak pitch-angle scattering, long step) set the time step for all of
+them. Ion collisions were then applied for a shorter time than the marker advanced; in a
+test, T_m reached only 703 eV instead of 900 eV. The step is now chosen once from the
+pitch-angle diffusion summed over all species (`collision_step`, the same rule as in
+`stost`), and each species is applied with that step.
+
+With `boole_precalc_collisions`, all species use the same three precalculated random
+numbers, so their kicks are correlated. helical_core runs without precalculated numbers.
+
+**Checks** (binary of branch `conserving_electrons`, small hole, cells threshold 0.5, 24 threads):
+
+| run | result |
+|---|---|
+| 1 keV beam, α = 0.2, 6e4 markers, 500 µs (as the threshold-0.5 run above) | meet 0.143 / 0.147 v0, T_m 900 eV, T_b 926 eV, T_e 1000 → 996 eV; same as without electrons within noise (expected: E_c ≈ 19 keV, so electrons take about 1 % of the drag); E_tot conserved to 1e-10, 0 rejections |
+| 30 keV beam on a 1 keV background (`background_temperature_eV = 1000`), 3e4 markers, 4 slices of 50 µs | electrons take 64 % of the beam's energy loss in the first slice (estimate 1/(1+(E_c/E)^1.5) = 0.665 with E_c = 18.7 keV); loss rate 324/s against 2(1+(E_c/E)^1.5)/τ_s ≈ 376/s (lnΛ approximated); E_tot conserved to 1e-10, 0 rejections |
+
+`background_temperature_eV` (helical_core.inp, default 0 = use `energy_eV`) sets the
+background temperature of all species independently of the marker energy. It needs the
+conserving collisions, because the other operator precomputes its coefficients from
+`energy_eV`.
+
 ## Beam relaxation test
 
 Input keys (helical_core.inp):
@@ -203,13 +254,15 @@ Input keys (helical_core.inp):
 | `boole_unidirectional_beam` | false | all markers start with pitch +1; needs `boole_antithetic_variate = .false.` |
 | `beam_density_fraction` | 1 | marker density / background density |
 | `reservoir_min_volume_fraction` | 0.5 | merge small tetrahedra near the axis into reservoir cells of at least this fraction of the median volume |
+| `background_temperature_eV` | 0 | background temperature of all species if > 0, else `energy_eV` (conserving collisions only) |
 
 Output with conserving collisions:
 
 - `collision_relaxation.dat`, one row per slice: mean marker v_∥, mean background flow,
   momentum, energy and canonical angular momentum of markers, background and lost
-  markers, and temperatures.
-- `background_reservoir.dat`: the reservoir state per tetrahedron at the end.
+  markers, and temperatures. P_b, E_b and L_b include all background species. The last two
+  columns are the mean and minimum electron temperature.
+- `background_reservoir.dat`: the reservoir state per tetrahedron at the end (last column T_e).
 - `markers_final.dat`: the marker states at the end.
 
 Expected result for a cold beam (density α n, energy E0) in a background at rest at
