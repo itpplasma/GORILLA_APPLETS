@@ -18,6 +18,11 @@ module utils_helical_core_mod
 
     implicit none
 
+    !per-marker diagnostic (delta-f weight analysis): birth point, birth weight and the marker's summed
+    !contribution sum(w*int vpar dt) to the parallel-flow moment, written to marker_weights.dat
+    logical, public :: boole_marker_weights_output = .false.
+    real(dp), dimension(:,:), allocatable, public :: marker_diag
+
 contains
 
 subroutine read_helical_core_inp_into_type
@@ -32,6 +37,7 @@ subroutine read_helical_core_inp_into_type
                boole_write_exit_data, boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, &
                boole_eliminate_particles_outside_flux, boole_delta_f
     logical :: boole_profiles_from_vertex_data = .false.
+    logical :: boole_write_marker_weights = .false.
     integer :: i_integrator_type, seed_option, n_species !i_integrator_type, seed_option: read for compatibility with existing input files, unused
     real(dp) :: flux_threshold_for_elimination
 
@@ -44,7 +50,7 @@ subroutine read_helical_core_inp_into_type
     & boole_write_refined_prism_volumes, boole_write_moments, boole_write_fourier_moments, boole_write_exit_data, &
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, &
     & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f, &
-    & boole_profiles_from_vertex_data
+    & boole_profiles_from_vertex_data, boole_write_marker_weights
 
     open(newunit = s_inp_unit, file='helical_core.inp', status='unknown')
     read(s_inp_unit,nml=helical_core_nml)
@@ -78,6 +84,7 @@ subroutine read_helical_core_inp_into_type
     in%flux_threshold_for_elimination = flux_threshold_for_elimination
     in%boole_delta_f = boole_delta_f
     in%boole_profiles_from_vertex_data = boole_profiles_from_vertex_data
+    boole_marker_weights_output = boole_write_marker_weights
 
     ! Set defaults for anomalous transport-specific parameters (disabled)
     in%boole_calc_diffusion_coefficient = .false.
@@ -120,6 +127,11 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
     endif
 
     allocate(local_tetr_moments(moment_specs%n_moments,ntetr))
+    if (boole_marker_weights_output) then
+        if (allocated(marker_diag)) deallocate(marker_diag)
+        allocate(marker_diag(8, n_particles))
+        marker_diag = 0.0_dp
+    endif
     kpart = 0
     iantithetic = 1
     if (in%boole_antithetic_variate) iantithetic = 2
@@ -233,6 +245,7 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
     use utils_orbit_timestep_mod, only: initialize_constants_of_motion, compute_radial_fluxes, &
                                         update_local_tetr_moments, calc_particle_weights_and_jperp, &
                                         place_particle_on_grid, push_within_tetrahedron, push_across_axis_hole
+    use utils_data_pre_and_post_processing_mod, only: normalised_poloidal_flux
 
     real(dp), dimension(3), intent(inout)        :: x
     real(dp), intent(inout)                      :: vpar, vperp
@@ -260,6 +273,14 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
         if (in%boole_delta_f) then
             call adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
             weights%original(n, species) = weights%w(n, species)
+        endif
+        if (boole_marker_weights_output) then
+            marker_diag(1:3, n) = x
+            marker_diag(4, n) = normalised_poloidal_flux(tetra_physics(ind_tetr)%Aphi1 + &
+                                                         sum(tetra_physics(ind_tetr)%gAphi*z_save))
+            marker_diag(5, n) = vpar
+            marker_diag(6, n) = vperp
+            marker_diag(7, n) = real(weights%w(n, species), dp)
         endif
         particle_status%initialized = .true.
     endif
@@ -303,12 +324,33 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
         if (in%boole_delta_f) call apply_weight_fading(n, species, t, t_tot)
 
         call update_local_tetr_moments(local_tetr_moments, ind_tetr_save, n, optional_quantities, species)
+        if (boole_marker_weights_output) marker_diag(8, n) = marker_diag(8, n) + &
+                                        real(weights%w(n, species), dp)*optional_quantities%vpar_int
         if ((grid_kind.eq.2).or.(grid_kind.eq.3)) call compute_radial_fluxes(ind_tetr_save, ind_tetr, x)
 
         if (boole_t_finished) exit
     enddo
 
 end subroutine orbit_timestep_helical_core
+
+! ====================================================================
+subroutine write_marker_weights
+!
+! Writes marker_weights.dat: marker index, birth R, phi, Z, psi_N, vpar, vperp, birth weight and the
+! marker's summed contribution sum(w * int vpar dt) to the parallel-flow moment (not normalised).
+! Markers that were never placed have zeros.
+!
+    integer :: n, mw_unit
+
+    if (.not.boole_marker_weights_output) return
+    open(newunit = mw_unit, file = 'marker_weights.dat', status = 'replace')
+    write(mw_unit, '(a)') '# n  R  phi  Z  psi_N  vpar  vperp  w_birth  sum_w_vpar_dt'
+    do n = 1, size(marker_diag, 2)
+        write(mw_unit, '(i10, 8es24.15)') n, marker_diag(:, n)
+    enddo
+    close(mw_unit)
+
+end subroutine write_marker_weights
 
 ! ====================================================================
 subroutine eliminate_particles_outside_flux_threshold

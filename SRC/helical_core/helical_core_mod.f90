@@ -28,7 +28,7 @@ subroutine calc_helical_core
     calc_poloidal_flux, calc_collision_coefficients_for_all_tetrahedra, &
     normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, calc_starting_conditions
     use utils_helical_core_mod, only: read_helical_core_inp_into_type, &
-        parallelised_particle_pushing_helical_core, eliminate_particles_outside_flux_threshold
+        parallelised_particle_pushing_helical_core, eliminate_particles_outside_flux_threshold, write_marker_weights
 
     call set_seed_for_random_numbers
     call read_helical_core_inp_into_type
@@ -49,6 +49,7 @@ subroutine calc_helical_core
 
     ! Standard particle tracing (no scan, no diffusion coefficient calculation)
     call parallelised_particle_pushing_helical_core(species=1)
+    call write_marker_weights
 
     call normalise_prism_moments_and_prism_moments_squared(boole_skip_time_normalisation_in=in%boole_delta_f)
 
