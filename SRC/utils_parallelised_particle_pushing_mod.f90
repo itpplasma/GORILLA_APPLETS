@@ -297,15 +297,19 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     real(dp) :: z_cell(3), psi_pol_loc, s_loc, nu_kim_phys, nu_kim_code
     logical  :: use_kim_nu_now
 
-    if (in%boole_continuous_background) then
+    select case (in%collision_background_mode)
+    case (1)
         !SCEF target profiles evaluated at the particle's own flux label (coord_system 2: x(1) = s)
         !instead of the per-prism value stored in c%efcolf_mat etc. (a staircase in s)
         call collision_coefficients_at_position(x(1), efcolf, velrat, enrat)
-    else
+    case (2)
+        !linear interpolation inside the tetrahedron from the coefficients at its 4 vertices
+        call collision_coefficients_interpolated(ind_tetr, x, efcolf, velrat, enrat)
+    case default
         efcolf = c%efcolf_mat(:,ind_tetr)
         velrat = c%velrat_mat(:,ind_tetr)
         enrat = c%enrat_mat(:,ind_tetr)
-    endif
+    end select
 
     vpar_background = c%vpar_mat(:,ind_tetr)
 
@@ -384,6 +388,41 @@ subroutine collision_coefficients_at_position(s_value, efcolf, velrat, enrat)
                      in%energy_eV, v0_l, efcolf, velrat, enrat)
 
 end subroutine collision_coefficients_at_position
+
+subroutine collision_coefficients_interpolated(ind_tetr, x, efcolf, velrat, enrat)
+
+    !Collision coefficients linearly interpolated inside tetrahedron ind_tetr from the values at its
+    !4 vertices (c%efcolf_vert etc., filled by calc_collision_coefficients_for_all_tetrahedra).
+    !The barycentric weight of vertex i is the scaled distance of x to the opposite face i, from the
+    !face normals GORILLA stores for every tetrahedron (same frame as x, periodic shifts included).
+    !Nothing here assumes the background depends on s only: a 3D background needs only other vertex values.
+
+    use gorilla_applets_types_mod, only: c
+    use tetra_physics_mod, only: tetra_physics
+    use tetra_grid_mod, only: tetra_grid
+
+    integer, intent(in) :: ind_tetr
+    real(dp), dimension(3), intent(in) :: x
+    real(dp), dimension(:), intent(out) :: efcolf, velrat, enrat
+    real(dp), dimension(3) :: z
+    real(dp) :: w
+    integer :: i, iv
+
+    z = x - tetra_physics(ind_tetr)%x1
+    efcolf = 0.0_dp
+    velrat = 0.0_dp
+    enrat = 0.0_dp
+    do i = 1, 4
+        w = sum(tetra_physics(ind_tetr)%anorm(:,i)*z)
+        if (i.eq.1) w = w + tetra_physics(ind_tetr)%dist_ref
+        w = w/tetra_physics(ind_tetr)%dist_ref_vec(i)
+        iv = tetra_grid(ind_tetr)%ind_knot(i)
+        efcolf = efcolf + w*c%efcolf_vert(:,iv)
+        velrat = velrat + w*c%velrat_vert(:,iv)
+        enrat = enrat + w*c%enrat_vert(:,iv)
+    enddo
+
+end subroutine collision_coefficients_interpolated
 
 subroutine update_exit_data(boole_particle_lost,t_confined,x,vpar,vperp,i,n,phi_0_mappings,species_in,ind_tetr)
 

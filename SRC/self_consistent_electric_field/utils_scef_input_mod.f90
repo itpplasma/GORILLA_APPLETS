@@ -14,7 +14,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
                 diffusion_tau_collisions, edge_buffer_width, noise_tolerance_factor, potential_relaxation_factor
     character(len=256) :: restart_phi_file, restart_source_file
     logical :: boole_adaptive_relaxation, boole_measured_drift, boole_continuous_background
-    integer :: source_buffer_mode
+    integer :: source_buffer_mode, collision_background_mode
     real(dp) :: source_buffer_bound_factor
     integer :: recalibration_mode
     real(dp) :: thermodiffusion_coefficient, ion_tracing_time_limit, diffusion_sigma_A_target, diffusion_max_spread_cells
@@ -44,7 +44,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & boole_adaptive_relaxation, restart_phi_file, restart_source_file, thermodiffusion_coefficient, &
     & ion_tracing_time_limit, diffusion_sigma_A_target, diffusion_max_spread_cells, thermodiffusion_table_file, &
     & boole_measured_drift, recalibration_mode, boole_continuous_background, source_buffer_mode, &
-    & source_buffer_bound_factor
+    & source_buffer_bound_factor, collision_background_mode
 
     quasineutrality_tol = 0.0_dp   !optional in the .inp: no early exit unless set
     i_collision_mode = 1           !optional: full collision operator
@@ -65,7 +65,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
     thermodiffusion_table_file = ''       !optional: constant thermodiffusion_coefficient
     boole_measured_drift = .false.        !optional: walk with the fitted ln B and the field drift only
     recalibration_mode = 0                !optional: 0 calibrate A,B once; 1 also before every later source step; 2 before every later potential update
-    boole_continuous_background = .false.   !optional: collision background n,T per prism (staircase in s)
+    boole_continuous_background = .false.   !optional, legacy: .true. = collision_background_mode 1
+    collision_background_mode = 0           !optional: 0 per prism (staircase), 1 exact at the particle, 2 linear in the tetrahedron
     source_buffer_mode = 0                !optional: 0 source in the edge buffer not updated; 1 updated, |S| capped
     source_buffer_bound_factor = 2.0_dp   !optional: cap for source_buffer_mode 1, times max |S| outside the buffer
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
@@ -127,7 +128,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%thermodiffusion_table_file = thermodiffusion_table_file
     in%boole_measured_drift = boole_measured_drift
     in%recalibration_mode = recalibration_mode
-    in%boole_continuous_background = boole_continuous_background
+    in%collision_background_mode = collision_background_mode
+    if (boole_continuous_background .and. (collision_background_mode.eq.0)) in%collision_background_mode = 1
     in%source_buffer_mode = source_buffer_mode
     in%source_buffer_bound_factor = source_buffer_bound_factor
 
@@ -248,10 +250,15 @@ subroutine print_errors_for_bad_inputs
         stop
     endif
 
-    if (in%boole_continuous_background .and. ((coord_system.ne.2) .or. &
+    if ((in%collision_background_mode.lt.0) .or. (in%collision_background_mode.gt.2)) then
+        print*, 'Error: collision_background_mode must be 0, 1 or 2'
+        stop
+    endif
+
+    if ((in%collision_background_mode.gt.0) .and. ((coord_system.ne.2) .or. &
         in%boole_preserve_energy_and_momentum_during_collisions)) then
-        print*, 'Error: boole_continuous_background needs coord_system = 2 (s = x(1)) and &
-                &boole_preserve_energy_and_momentum_during_collisions = .false.'
+        print*, 'Error: collision_background_mode 1 and 2 (and boole_continuous_background) need coord_system = 2 &
+                &(s = x(1)) and boole_preserve_energy_and_momentum_during_collisions = .false.'
         stop
     endif
 

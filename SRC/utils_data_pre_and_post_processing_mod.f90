@@ -563,6 +563,7 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
         !$OMP END DO
         deallocate(efcolf_l, velrat_l, enrat_l, dens_l, temp_l)
         !$OMP END PARALLEL
+        if (boole_target_profiles .and. (in%collision_background_mode.eq.2)) call calc_collision_coefficients_at_vertices(m0, z0)
     endif
     
     if (in%boole_precalc_collisions) then
@@ -573,6 +574,44 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     endif
 
 end subroutine calc_collision_coefficients_for_all_tetrahedra
+
+subroutine calc_collision_coefficients_at_vertices(m0, z0)
+!
+! Collision coefficients of the SCEF target background at every mesh vertex, for the linear
+! interpolation inside the tetrahedra (collision_background_mode = 2). The background (n, T_i, T_e,
+! electrons quasineutral) is evaluated at the vertex position. The target profiles depend on s only;
+! a 3D background only has to replace the vertex evaluation below, the interpolation is already 3D.
+!
+    use gorilla_applets_types_mod, only: in, c
+    use tetra_grid_mod, only: nvert, verts_sthetaphi
+    use collis_ions, only: collis_init
+    use scef_target_profiles_mod, only: target_density, target_ion_temperature, target_electron_temperature, &
+                                        rad_from_s
+
+    real(dp), intent(in) :: m0, z0
+    real(dp), dimension(c%n) :: efcolf_l, velrat_l, enrat_l, dens_l, temp_l
+    real(dp) :: rad, v0_l
+    integer :: iv
+
+    if (allocated(c%efcolf_vert)) deallocate(c%efcolf_vert, c%velrat_vert, c%enrat_vert)
+    allocate(c%efcolf_vert(c%n,nvert), c%velrat_vert(c%n,nvert), c%enrat_vert(c%n,nvert))
+
+    !$OMP PARALLEL DO DEFAULT(SHARED) PRIVATE(iv,rad,efcolf_l,velrat_l,enrat_l,dens_l,temp_l,v0_l)
+    do iv = 1, nvert
+        rad = rad_from_s(min(max(verts_sthetaphi(1,iv), 0.0_dp), 1.0_dp))
+        dens_l(1:c%n-1) = target_density(rad)
+        temp_l(1:c%n-1) = target_ion_temperature(rad)
+        temp_l(c%n)     = target_electron_temperature(rad)
+        dens_l(c%n)     = sum(c%charge_num(1:c%n-1)*dens_l(1:c%n-1))
+        call collis_init(m0, z0, c%mass, c%charge_num, dens_l, temp_l, in%energy_eV, v0_l, &
+                         efcolf_l, velrat_l, enrat_l)
+        c%efcolf_vert(:,iv) = efcolf_l
+        c%velrat_vert(:,iv) = velrat_l
+        c%enrat_vert(:,iv) = enrat_l
+    enddo
+    !$OMP END PARALLEL DO
+
+end subroutine calc_collision_coefficients_at_vertices
 
 subroutine deallocate_collision_arrays
 !
@@ -586,6 +625,7 @@ subroutine deallocate_collision_arrays
     if (allocated(c%efcolf_mat)) deallocate(c%efcolf_mat)
     if (allocated(c%velrat_mat)) deallocate(c%velrat_mat)
     if (allocated(c%enrat_mat))  deallocate(c%enrat_mat)
+    if (allocated(c%efcolf_vert)) deallocate(c%efcolf_vert, c%velrat_vert, c%enrat_vert)
     if (allocated(c%mass))       deallocate(c%mass)
     if (allocated(c%charge_num)) deallocate(c%charge_num)
     if (allocated(c%dens))       deallocate(c%dens)

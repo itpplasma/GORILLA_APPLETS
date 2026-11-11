@@ -77,6 +77,9 @@ module gorilla_applets_types_mod
     real(dp), dimension(:,:), allocatable :: efcolf_mat
     real(dp), dimension(:,:), allocatable :: velrat_mat
     real(dp), dimension(:,:), allocatable :: enrat_mat
+    real(dp), dimension(:,:), allocatable :: efcolf_vert !collision coefficients at the mesh vertices (c%n, nvert),
+    real(dp), dimension(:,:), allocatable :: velrat_vert !only for collision_background_mode = 2 (linear interpolation
+    real(dp), dimension(:,:), allocatable :: enrat_vert  !inside the tetrahedron)
     real(dp), dimension(:), allocatable :: mass
     real(dp), dimension(:), allocatable :: charge_num
     real(dp), dimension(:), allocatable :: dens
@@ -158,7 +161,7 @@ module gorilla_applets_types_mod
     character(len=256) :: thermodiffusion_table_file = '' !used in self consistent electric field: table of c(s, -dPhi/ds) for the electron random walk, overrides thermodiffusion_coefficient ('' = off)
     logical  :: boole_measured_drift = .false.      !used in self consistent electric field: electron random walk with the measured calibration drift A and tabulated B (no fit), the calibration field replaced by the current one
     integer  :: recalibration_mode = 0 !used in self consistent electric field: redo the A,B calibration (boole_recompute_D species) in the current field: 0 never, 1 before every source step after the first, 2 before every potential update after the first
-    logical  :: boole_continuous_background = .false. !used in self consistent electric field: collision coefficients from the target n, T at the particle s at every collision instead of the per-prism tables
+    integer  :: collision_background_mode = 0 !used in self consistent electric field: collision coefficients of the target background 0 per prism (staircase), 1 evaluated exactly at the particle position at every collision, 2 linearly interpolated inside the tetrahedron from the values at its 4 vertices
     integer  :: source_buffer_mode = 0 !used in self consistent electric field: 0 source in the outer buffer (or outer 10%) kept fixed; 1 updated like elsewhere with |S| capped
     real(dp) :: source_buffer_bound_factor = 2.0_dp !used in self consistent electric field: cap for source_buffer_mode 1 = factor * max |S| outside the buffer
     end type input_t
