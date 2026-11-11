@@ -117,7 +117,7 @@ subroutine collis_init(m1,Z1,m,Z,dens,temp,e0,v0,efcolf,velrat,enrat)
 
   use constants, only: ev2erg, pi, echarge
 
-  integer :: n,i, i_end
+  integer :: n,i, i_end, i_e
   real(dp), dimension(:) :: m,Z,dens,temp,efcolf,velrat,enrat
   real(dp) :: lambda   !scalar per species (was an allocatable array: one malloc per call)
   real(dp) :: m1,Z1,e0, v0, frecol_base
@@ -127,8 +127,20 @@ subroutine collis_init(m1,Z1,m,Z,dens,temp,e0,v0,efcolf,velrat,enrat)
   v0=sqrt(2.d0*e0*ev2erg/m1)
   frecol_base = 2.d0*pi*echarge**4*Z1**2/(m1**2*v0**3)
 
+  !background electrons (first species with negative charge), 0 if there are none
+  i_e = 0
+  do i = n,1,-1
+    if (Z(i).lt.0.d0) i_e = i
+  enddo
+
   do i = 1,n
-    call lambda_alpha_beta(Z1, Z(i), m1, m(i), temp(i), temp(i), dens(i), dens(i), lambda)
+    if ((Z1.lt.0.d0) .and. (Z(i).gt.0.d0) .and. (i_e.gt.0)) then
+      !electron test particle on background ions: the e-i Coulomb logarithm needs the electron
+      !temperature and density (the ion species' own temp(i) was used for both before)
+      call lambda_alpha_beta(Z1, Z(i), m1, m(i), temp(i_e), temp(i), dens(i_e), dens(i), lambda)
+    else
+      call lambda_alpha_beta(Z1, Z(i), m1, m(i), temp(i), temp(i), dens(i), dens(i), lambda)
+    endif
     enrat(i)=e0/temp(i)
     velrat(i)=v0/sqrt(2.d0*temp(i)*ev2erg/m(i))
     efcolf(i)=frecol_base*Z(i)**2*lambda*dens(i)*velrat(i)/v0
