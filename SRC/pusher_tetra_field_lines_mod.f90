@@ -337,14 +337,35 @@ if(diag_pusher_tetry_poly) print *, 'Error: distance'
 !
         enddo faces_loop
 !
-        boole_valid_dtau = (dtau_vec.lt.huge(0.d0)).and.(dtau_vec.gt.0.d0)
+        !Field lines are straight lines inside the tetrahedron: the exit face is the first face
+        !approached (normal distance decreasing, lin_a < 0; normals point inwards).
+        !A position on (or within round-off outside of) such a face gives dtau <= 0 and
+        !means immediate exit (dtau = 0), e.g. for a field line started on a mesh edge.
+        !Receding faces (lin_a > 0) are never exit faces; before, a slightly negative normal
+        !distance of a receding face could be taken as exit (dtau > 0 tiny), and no exit at all
+        !left dtau undefined.
+        boole_valid_dtau = (dtau_vec.lt.huge(0.d0)).and.(dtau_vec.gt.0.d0).and.(coef_mat(:,2).lt.0.d0)
         if( any( boole_valid_dtau) ) then
             boole_approx = .true.
 !
             iface_inout = minloc(dtau_vec,1,boole_valid_dtau)
             dtau = dtau_vec(iface_inout)
         else
-            boole_approx = .false.
+            boole_valid_dtau = boole_faces .and. (coef_mat(:,2).lt.0.d0)
+            if (iface.ge.1 .and. iface.le.4) boole_valid_dtau(iface) = .false.
+            if( any( boole_valid_dtau) ) then
+                boole_approx = .true.
+                !Face with the most negative root -b/a (furthest outside per speed)
+                dtau_vec = -huge(0.d0)
+                do i = 1,4
+                    if (boole_valid_dtau(i)) dtau_vec(i) = coef_mat(i,1)/coef_mat(i,2)
+                enddo
+                iface_inout = maxloc(dtau_vec,1,boole_valid_dtau)
+                dtau = 0.d0
+            else
+                boole_approx = .false.
+                dtau = 0.d0
+            endif
         endif
 ! 
     end subroutine analytic_approx

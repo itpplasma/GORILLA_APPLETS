@@ -45,5 +45,25 @@
   ! 1 ... compute seed with a random number
   ! 2 ... load seed from file 'seed.inp'
   seed_option = 2 ,
+!
+  !Read start points from file (R in cm, phi in rad, Z in cm; one per line, '#'/'!' comments) and trace each
+  !start point in both directions (+1 along B, -1 against B) until it leaves the mesh. Replaces the built-in
+  !start positions and n_particles; boole_monoenergetic is forced to .true.
+  boole_start_points_file = .false. ,
+  filename_start_points = 'field_line_start_points.dat' ,
+!
+  !Output: one line per (start point, direction): index, direction, status (1 left mesh, 0 not left within
+  !max_arc_length, -1 start point not in mesh, -2 stopped: no progress), arc length s (m, geometric and v*t),
+  !end point R (cm), phi (rad), Z (cm), number of tetrahedron pushings
+  filename_exit_points = 'field_line_exits.dat' ,
+!
+  !Maximum arc length per direction in m (sets the tracing time; time_step is ignored in this mode)
+  max_arc_length = 1.0d4 ,
+!
+  !Write trajectories (start index, direction, s (m), R (cm), phi (rad), Z (cm), |B| (G)) at every tetrahedron
+  !face crossing for the start indices listed in traj_start_indices (up to 1000)
+  boole_write_trajectories = .false. ,
+  filename_trajectories = 'field_line_trajectories.dat' ,
+  traj_start_indices = 0 ,
 /
 
