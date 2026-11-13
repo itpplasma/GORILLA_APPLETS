@@ -127,7 +127,7 @@ subroutine run_scef_iterations(source_step)
     !times and update the electric potential each time. source_step is the source-update
     !iteration index, passed to perform_electric_potential_update for file naming.
 
-    use gorilla_applets_types_mod, only: in, ep, output, exit_data, one_d, start
+    use gorilla_applets_types_mod, only: in, ep, output, exit_data, one_d, start, dc
     use utils_data_pre_and_post_processing_mod, only: prepare_next_round_of_parallelised_particle_pushing, &
     calc_collision_coefficients_for_all_tetrahedra, normalise_prism_moments_and_prism_moments_squared, &
     initialize_exit_data
@@ -160,6 +160,8 @@ subroutine run_scef_iterations(source_step)
                     print*, 'recalibrating A,B of species ', species, ' before update ', i, ' of source step ', source_step
                     call calc_diffusion_coefficients(species)
                     call save_calibration_files(species, source_step, i)
+                    !the walk caches the drift rest r and dB/ds of the file it read first; reread the new one
+                    dc%boole_cached_data_loaded(species) = .false.
                 endif
             enddo
             call initialize_exit_data
