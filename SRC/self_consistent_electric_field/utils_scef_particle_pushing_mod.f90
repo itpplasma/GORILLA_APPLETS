@@ -310,6 +310,8 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
             mirror_condition = .not.(x(1).gt.1.01_dp*sfc_s_min)
             if (in%boole_static_ne) mirror_condition = (.not.(x(1).gt.1.01_dp*sfc_s_min)).or.(.not.(x(1).lt.0.99_dp))
             if(mirror_condition) then !.or.(.not.(x(1).lt.0.99_dp)) <-- include this if you also want a mirror term at s=1
+                !calibration: a test particle mirrored at the axis biases A, B of its surface
+                if (boole_diffusion_coefficient .and. (.not.(x(1).gt.1.01_dp*sfc_s_min))) s%boole_hit_axis(n) = .true.
                 call mirror_particles_on_domain_boundaries(x,vpar,n,ind_tetr,iface,z_save,perpinv,ind_tetr_save)
                 if (ind_tetr.eq.-1) exit
             elseif (x(1).lt.0.99_dp) then

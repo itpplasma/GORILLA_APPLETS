@@ -164,6 +164,8 @@ module gorilla_applets_types_mod
     integer  :: collision_background_mode = 0 !used in self consistent electric field: collision coefficients of the target background 0 per prism (staircase), 1 evaluated exactly at the particle position at every collision, 2 linearly interpolated inside the tetrahedron from the values at its 4 vertices
     integer  :: source_buffer_mode = 0 !used in self consistent electric field: 0 source in the outer buffer (or outer 10%) kept fixed; 1 updated like elsewhere with |S| capped
     real(dp) :: source_buffer_bound_factor = 2.0_dp !used in self consistent electric field: cap for source_buffer_mode 1 = factor * max |S| outside the buffer
+    real(dp) :: drift_smoothing_width = 0.0_dp !used in self consistent electric field: >0 Gaussian width in s of the local linear smoothing of the measured B and drift rest r over the unbiased surfaces (boole_measured_drift; 0 = off)
+    real(dp) :: calibration_bias_tolerance = 0.02_dp !used in self consistent electric field: a calibrated surface counts as biased if more than this fraction of its test particles was mirrored at the axis or lost at the edge
     end type input_t
 
     type(input_t) :: in
@@ -248,6 +250,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable    :: delta_s
     real(dp), dimension(:), allocatable    :: delta_s_squared
     logical, dimension(:), allocatable     :: boole_large_distance
+    logical, dimension(:), allocatable     :: boole_hit_axis   ! calibration test particle was mirrored at the inner boundary (axis)
     real(dp), dimension(:), allocatable    :: time
     real(dp), dimension(:,:), allocatable  :: f_v
     integer                                :: k, j
@@ -274,6 +277,7 @@ module gorilla_applets_types_mod
     real(dp), dimension(:,:), allocatable :: tab_E, tab_c     ! (n_E, n_s): -dPhi/ds [statV] (ascending) and c
     logical                               :: boole_thermo_table = .false.
     real(dp), dimension(:,:), allocatable :: E_cal, dB_meas, r_rest, qE_T ! (grid_size+1, species): calibration field -dPhi/ds, B' of the table, (A-B')/B - qE_cal/T, current qE/T
+    real(dp), dimension(:,:), allocatable :: frac_axis, frac_edge ! (grid_size+1, species): fraction of calibration test particles mirrored at the axis / lost at the edge (1 = not calibrated)
     end type diffusion_coefficients
 
     type(diffusion_coefficients) dc

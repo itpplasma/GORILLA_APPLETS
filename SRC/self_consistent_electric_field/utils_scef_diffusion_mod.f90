@@ -74,6 +74,11 @@ subroutine calc_diffusion_coefficients(species)
     if (.not.allocated(energy_start)) allocate(energy_start(s%n_particles))
     if (.not.allocated(s%boole_large_distance)) allocate(s%boole_large_distance(s%n_particles))
     s%boole_large_distance = .false.
+    if (allocated(s%boole_hit_axis)) deallocate(s%boole_hit_axis)
+    allocate(s%boole_hit_axis(s%n_particles))
+    if (.not.allocated(dc%frac_axis)) allocate(dc%frac_axis(grid_size(1)+1, 2), dc%frac_edge(grid_size(1)+1, 2))
+    dc%frac_axis(:, species) = 1.0_dp   !boundary vertices are extrapolated, not calibrated
+    dc%frac_edge(:, species) = 1.0_dp
 
     call allocate_start_type(s%n_particles)
     call allocate_weights(s%n_particles)
@@ -99,7 +104,8 @@ subroutine calc_diffusion_coefficients(species)
     open(newunit=quality_unit, file='calibration_quality_species'//trim(species_str)//'.dat', status='replace')
     write(quality_unit,'(a)') '# ns s0 tau[s] tau/local_collision_time N lost_fraction mean_ds std_ds sqrt(2*B_fit*tau) '// &
         'std_ds/cell_width skewness excess_kurtosis q01 q05 q50 q95 q99 (quantiles of (ds-mean)/std) A_fit A_end sigma_A_end '// &
-        'A_fit_first_half A_fit_second_half rms_residual_of_<ds>(t)_fit B_fit B_end sigma_B_end n_passes'
+        'A_fit_first_half A_fit_second_half rms_residual_of_<ds>(t)_fit B_fit B_end sigma_B_end n_passes '// &
+        'fraction_mirrored_at_axis fraction_lost_at_edge (bias of A, B if either exceeds calibration_bias_tolerance)'
     close(quality_unit)
 
     do ns = ns_first,ns_last
@@ -128,6 +134,7 @@ subroutine calc_diffusion_coefficients(species)
 
 
         call prepare_next_round_of_parallelised_particle_pushing(species)
+        s%boole_hit_axis = .false.
 
         if ((ns.eq.ns_first).and.(pass.eq.1)) then
             call calc_collision_coefficients_for_all_tetrahedra(species)
@@ -219,6 +226,11 @@ subroutine calc_diffusion_coefficients(species)
     skewness = sum(z_sorted**3)/s%n_particles
     kurtosis = sum(z_sorted**4)/s%n_particles - 3.0_dp
     n_lost = count(exit_data%lost(1:s%n_particles,species).ne.0)
+    dc%frac_axis(ns, species) = dble(count(s%boole_hit_axis(1:s%n_particles)))/s%n_particles
+    dc%frac_edge(ns, species) = dble(n_lost)/s%n_particles
+    if (dc%frac_axis(ns, species)+dc%frac_edge(ns, species).gt.in%calibration_bias_tolerance) &
+        print*, 'calibration of surface ', ns, ' biased: fraction mirrored at the axis ', dc%frac_axis(ns, species), &
+                ', lost at the edge ', dc%frac_edge(ns, species)
     A_end = (mean_x - s%s0)/start%t(species)
     B_end = sum((x_end-mean_x)**2)/s%n_particles/(2.0_dp*start%t(species))
     sigma_B_end = B_end*sqrt(sum(((x_end-mean_x)**2 - 2.0_dp*B_end*start%t(species))**2)/(s%n_particles-1)) &
@@ -230,9 +242,10 @@ subroutine calc_diffusion_coefficients(species)
     call llsq ( int(s%k - mid, kind=8), s%time(mid+1:s%k), s%delta_s(mid+1:s%k), A_half2, offset)
     n_coll = start%t(species)/local_collision_time(s%s0, species)
     open(newunit=quality_unit, file='calibration_quality_species'//trim(species_str)//'.dat', position='append')
-        write(quality_unit,'(i4,25es14.5,i3)') ns, s%s0, start%t(species), n_coll, dble(s%n_particles), &
+        write(quality_unit,'(i4,25es14.5,i3,2es14.5)') ns, s%s0, start%t(species), n_coll, dble(s%n_particles), &
             dble(n_lost)/s%n_particles, mean_x - s%s0, std_x, sqrt(2.0_dp*max(B,0.0_dp)*start%t(species)), std_x/cell_size, &
-            skewness, kurtosis, q, A, A_end, sigma_A_end, A_half1, A_half2, rms_residual, B, B_end, sigma_B_end, pass
+            skewness, kurtosis, q, A, A_end, sigma_A_end, A_half1, A_half2, rms_residual, B, B_end, sigma_B_end, pass, &
+            dc%frac_axis(ns, species), dc%frac_edge(ns, species)
     close(quality_unit)
 
     !<ds>(t), <ds^2>(t) and the number of contributions per time sample, for checking the fits afterwards
@@ -302,7 +315,9 @@ subroutine calc_diffusion_coefficients(species)
     filename = 'A_and_B_species' // trim(species_str) // '.dat'
     open(newunit=file_id,file = filename)
     do i = 1,grid_size(1)+1
-        write(file_id,*) dc%A(i, species), dc%B(i, species), vertex_electric_field(i) !3rd: field -dPhi/ds [statV] of the calibration
+        !3rd: field -dPhi/ds [statV] of the calibration; 4th, 5th: fractions of test particles mirrored at the axis / lost at the edge
+        write(file_id,*) dc%A(i, species), dc%B(i, species), vertex_electric_field(i), &
+                         dc%frac_axis(i, species), dc%frac_edge(i, species)
     enddo
     close(file_id)
 
@@ -590,12 +605,19 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
     filename = 'A_and_B_species' // trim(species_str) // '.dat'
     if (.not.allocated(dc%E_cal)) allocate(dc%E_cal(grid_size(1)+1, 2), dc%dB_meas(grid_size(1)+1, 2), &
                                             dc%r_rest(grid_size(1)+1, 2), dc%qE_T(grid_size(1)+1, 2))
+    if (.not.allocated(dc%frac_axis)) allocate(dc%frac_axis(grid_size(1)+1, 2), dc%frac_edge(grid_size(1)+1, 2))
     dc%E_cal(:, species) = 0.0_dp
     boole_field_column = .true.
     open(newunit=id,file = filename,action='read')
     do ns = 1,grid_size(1)+1
         read(id,'(a)') line
-        read(line,*,iostat=ios) dc%A(ns, species), dc%B(ns, species), dc%E_cal(ns, species)
+        read(line,*,iostat=ios) dc%A(ns, species), dc%B(ns, species), dc%E_cal(ns, species), &
+                                dc%frac_axis(ns, species), dc%frac_edge(ns, species)
+        if (ios.ne.0) then   !files without the bias columns: bias unknown, taken as none
+            dc%frac_axis(ns, species) = 0.0_dp
+            dc%frac_edge(ns, species) = 0.0_dp
+            read(line,*,iostat=ios) dc%A(ns, species), dc%B(ns, species), dc%E_cal(ns, species)
+        endif
         if (ios.ne.0) then   !files of older versions: A and B only
             read(line,*) dc%A(ns, species), dc%B(ns, species)
             dc%E_cal(ns, species) = 0.0_dp
@@ -603,6 +625,9 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
         endif
     enddo
     close(id)
+    !the boundary vertices are always extrapolated
+    dc%frac_axis(1, species) = 1.0_dp
+    dc%frac_edge(grid_size(1)+1, species) = 1.0_dp
     if (in%boole_measured_drift.and.(.not.boole_field_column)) print*, 'Warning: ', trim(filename), &
         ' has no calibration-field column; the calibration is assumed to be field-free'
 
@@ -630,6 +655,7 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
         enddo
         if (dc%B(n_v, species).le.0.0_dp) dc%r_rest(n_v, species) = dc%r_rest(n_v-1, species)
         print*, 'measured drift: r = (A-dB/ds)/B - qE_cal/T at the vertices: ', dc%r_rest(:, species)
+        if (in%drift_smoothing_width.gt.0.0_dp) call smooth_measured_drift(species)
     endif
 
     dc%A_from_first_run(:, species) = dc%A(:, species)
@@ -660,6 +686,61 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
     dc%polynomial_coefficients_for_A(:, species) = (/a1,2*a2,0.0_dp/)    !of d(ln B)/ds
 
 end subroutine get_diffusion_coefficient_data
+
+subroutine smooth_measured_drift(species)
+
+    !Replaces the measured B, its derivative dB/ds and the drift rest r at every vertex by a local linear
+    !least-squares fit with Gaussian weights of width in%drift_smoothing_width in s. Only unbiased
+    !surfaces enter the fit: calibrated (not the extrapolated boundary vertices), B > 0, and at most
+    !in%calibration_bias_tolerance of the test particles mirrored at the axis or lost at the edge. Biased
+    !vertices get the value extrapolated from their unbiased neighbours. dB/ds is the slope of the fit of B.
+
+    use gorilla_applets_types_mod, only: dc, g, in
+    use tetra_grid_settings_mod, only: grid_size
+
+    integer, intent(in) :: species
+    integer :: n_v, ns
+    logical, dimension(:), allocatable :: good
+    real(dp), dimension(:), allocatable :: w, d, B_new, dB_new, r_new
+    real(dp) :: S0, S1, S2, det
+
+    n_v = grid_size(1)+1
+    allocate(good(n_v), w(n_v), d(n_v), B_new(n_v), dB_new(n_v), r_new(n_v))
+    good = (dc%frac_axis(:, species) + dc%frac_edge(:, species).le.in%calibration_bias_tolerance) &
+           .and.(dc%B(:, species).gt.0.0_dp)
+    good(1) = .false.
+    good(n_v) = .false.
+    if (count(good).lt.3) then
+        print*, 'Warning: fewer than 3 unbiased calibrated surfaces, no smoothing of the measured drift'
+        return
+    endif
+
+    do ns = 1,n_v
+        d = g%s_vertices - g%s_vertices(ns)
+        w = merge(exp(-0.5_dp*(d/in%drift_smoothing_width)**2), 0.0_dp, good)
+        S0 = sum(w)
+        S1 = sum(w*d)
+        S2 = sum(w*d**2)
+        det = S0*S2 - S1**2
+        if (det.gt.1.0d-12*S0*S2) then
+            B_new(ns)  = (S2*sum(w*dc%B(:, species)) - S1*sum(w*d*dc%B(:, species)))/det
+            dB_new(ns) = (S0*sum(w*d*dc%B(:, species)) - S1*sum(w*dc%B(:, species)))/det
+            r_new(ns)  = (S2*sum(w*dc%r_rest(:, species)) - S1*sum(w*d*dc%r_rest(:, species)))/det
+        else   !only one surface with noticeable weight: its values, no slope
+            B_new(ns)  = sum(w*dc%B(:, species))/S0
+            dB_new(ns) = 0.0_dp
+            r_new(ns)  = sum(w*dc%r_rest(:, species))/S0
+        endif
+    enddo
+
+    dc%B(:, species) = max(B_new, 0.0_dp)
+    dc%dB_meas(:, species) = dB_new
+    dc%r_rest(:, species) = r_new
+    print*, 'drift smoothing (width ', in%drift_smoothing_width, ' in s): ', count(good), ' of ', n_v, &
+            ' vertices unbiased; biased: ', pack([(ns, ns=1,n_v)], .not.good)
+    print*, 'smoothed drift r at the vertices: ', dc%r_rest(:, species)
+
+end subroutine smooth_measured_drift
 
 subroutine calc_convection_coefficient_from_electric_field(species, boole_use_fit_function)
 
