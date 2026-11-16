@@ -63,10 +63,16 @@ module orbit_ion_response_driver_mod
     real(dp) :: reentry_vertex(2)=0,reentry_flux(2)=0
     real(dp) :: reentry_max_flux_error=0,reentry_max_angle_error=0,reentry_max_phase_error=0
     integer :: radial_reentries=0,reentry_histories=0,reentry_unit=0
+    ! Opt-in edge loss: an ion that really leaves through a radial mesh boundary ends its
+    ! actual path there (zero source afterwards); the virtual cylinder path continues.
+    ! Writes one line per history to ion_edge_histories.dat. Default runs are unchanged.
+    logical :: edge_loss=.false.
+    integer :: edge_lost(2)=0,edge_unit=0
     namelist /ion_orbit_response/ radial_samples,markers,batches,n_mu,seed,lag_nu,nu_dt,phase_step, &
         mu_reference_scale,cylinder_only,prefix_lag_nu,radial_sample_shift_cm, &
         anomalous_diffusion_coefficient,diffusion_step_cm,diffusion_reference_check,paired_diffusion, &
-        radial_sample_first,radial_sample_last,sample_streams,raw_binary,debug_marker,radial_reentry
+        radial_sample_first,radial_sample_last,sample_streams,raw_binary,debug_marker,radial_reentry, &
+        edge_loss
     complex(dp),allocatable :: exact0(:,:,:),bare0(:,:,:),cylinder_closed0(:,:,:)
     complex(dp),allocatable :: corrections0(:,:,:,:),mean0(:,:,:),batches0(:,:,:,:),integrated_exact0(:,:,:)
     complex(dp),allocatable :: prefix_corrections0(:,:,:,:),prefix_mean0(:,:,:),prefix_batches0(:,:,:,:)
@@ -126,6 +132,8 @@ contains
         error stop 'paired diffusion requires D>0, a prefix window and no reference check'
     if(radial_reentry.and.(cylinder_only.or.anomalous_diffusion_coefficient>0.or.paired_diffusion)) &
         error stop 'radial re-entry requires actual orbits without anomalous diffusion'
+    if(edge_loss.and.(cylinder_only.or.anomalous_diffusion_coefficient>0.or.paired_diffusion.or.radial_reentry)) &
+        error stop 'edge loss requires actual orbits without anomalous diffusion or re-entry'
     if(radial_sample_last==0) radial_sample_last=radial_samples
     if(radial_sample_first<1.or.radial_sample_last>radial_samples.or.radial_sample_first>radial_sample_last) &
         error stop 'invalid radial sample subset'
@@ -170,6 +178,15 @@ contains
                 -sqrt(R0_analytic_circ**2-a_analytic_circ**2))))
             diffusion_bounds(2)=diffusion_bounds(2)*cos(pi/n3)
             if(diffusion_bounds(1)>=diffusion_bounds(2)) error stop 'mesh-contained reflecting annulus is empty'
+        end if
+        if(edge_loss) then
+            ! Radial boundary vertex circles, used to tell the inner from the outer exit.
+            reentry_vertex=sqrt([sfc_s_min,sfc_s_max]*(R0_analytic_circ-sqrt(R0_analytic_circ**2 &
+                -a_analytic_circ**2))*(2*R0_analytic_circ-[sfc_s_min,sfc_s_max]*(R0_analytic_circ &
+                -sqrt(R0_analytic_circ**2-a_analytic_circ**2))))
+            open(newunit=edge_unit,file='ion_edge_histories.dat',status='new')
+            write(edge_unit,'(a)') '# mu_node radial_sample marker r0_cm lambda u0_over_vT theta0 '// &
+                'dr_at_lag/8 dr_at_lag/4 dr_at_lag/2 dr_at_lag r_min r_max loss_time_nu(-1:none) loss_side(1 inner,2 outer)'
         end if
         if(radial_reentry) then
             ! Radial boundary vertex circles; their flux labels use the same table as flux_radius.
@@ -404,6 +421,11 @@ contains
         write(diagnostics,'(a,es24.16)') 'reentry_max_angle_error_rad ',reentry_max_angle_error
         write(diagnostics,'(a,es24.16)') 'reentry_max_source_phase_error_rad ',reentry_max_phase_error
     end if
+    if(edge_loss) then
+        close(edge_unit)
+        write(diagnostics,'(a,i12)') 'edge_lost_inner ',edge_lost(1)
+        write(diagnostics,'(a,i12)') 'edge_lost_outer ',edge_lost(2)
+    end if
     if(anomalous_diffusion_coefficient>0) write(diagnostics,'(a,i12)') 'diffusion_relocations ',diffusion_relocations
     if(radial_sample_first/=1.or.radial_sample_last/=radial_samples) then
         write(diagnostics,'(a,i12)') 'radial_sample_first ',radial_sample_first
@@ -500,6 +522,10 @@ contains
         real(dp) :: reentry_offset
         logical :: wrapped
         integer :: wraps
+        logical :: lost
+        integer :: loss_side,next_mark
+        real(dp) :: loss_time,r_range(2),mark_dr(4)
+        lost=.false.;loss_side=0;loss_time=-1;next_mark=1;mark_dr=0;r_range=r0;theta0=0
         debugging=all([imu,radial_index,marker_index]==debug_marker)
         if(debugging.and.debug_unit==0) open(newunit=debug_unit,file='ion_debug_marker.dat',status='new')
         reentry_offset=0;wrapped=.false.;wraps=0
@@ -582,6 +608,13 @@ contains
             real_integral=real_integral+dt/2*(old_actual+actual_source)
             ref_integral=ref_integral+dt/2*(old_ref+ref_source)
             old_actual=actual_source;old_ref=ref_source
+            if(edge_loss) then
+                ! Net displacement of the last position inside the mesh at lag/8, /4, /2 and the full lag.
+                do while(next_mark<=4)
+                    if(t<end_time*2.0_dp**(next_mark-4)) exit
+                    mark_dr(next_mark)=rnow-r0;next_mark=next_mark+1
+                end do
+            end if
             if(.not.prefix_saved.and.t==prefix_time) then
                 call ion_mu_deposit(bg0,wave,lambda,mu_ref,field0,v0,clight,real_integral,real_deposit)
                 call ion_mu_deposit(bg0,wave,lambda,mu_ref,bg0(13),v0,clight,ref_integral,ref_deposit)
@@ -594,6 +627,8 @@ contains
         call ion_mu_deposit(bg0,wave,lambda,mu_ref,bg0(13),v0,clight,ref_integral,ref_deposit)
         result=real_deposit-ref_deposit
         if(wrapped) reentry_histories=reentry_histories+1
+        if(edge_loss) write(edge_unit,'(3i8,10es16.8,es16.8,i3)') imu,radial_index,marker_index,r0,lambda, &
+            v0/bg0(7),theta0,mark_dr,r_range,merge(loss_time*bg0(6),-1.0_dp,lost),loss_side
         ! Per-history wrap diagnostic: net unwrapped radial displacement over the lag.
         if(radial_reentry) write(reentry_unit,'(3i8,4es24.16,i8)') imu,radial_index,marker_index,r0, &
             rnow+reentry_offset-r0,lambda,v0/bg0(7),wraps
@@ -643,12 +678,21 @@ contains
             real(dp),intent(in) :: step
             real(dp) :: saved_x(3),saved_vpar,saved_vperp,remaining
             integer :: saved_cell,saved_face,failure_unit,last_cell
-            if(cylinder_only) return
+            if(cylinder_only.or.lost) return
             saved_x=x;saved_vpar=vpar;saved_vperp=vperp;saved_cell=cell;saved_face=face
             if(debugging) call debug_state('step_in',t,x,vpar,cell,face)
             call orbit_timestep_gorilla(x,vpar,vperp,step,initialized,cell,face,remaining,last_cell)
             if(debugging) call debug_state('step_out',t,x,vpar,cell,face)
             if(radial_reentry) call continue_after_reentry(remaining,step,last_cell)
+            if(edge_loss.and.cell==-1) then
+                ! Only a real exit through a radial boundary face ends the path; any other
+                ! pusher failure still aborts below with the saved state.
+                loss_side=radial_exit_side(x,last_cell,remaining,step)
+                if(loss_side/=0) then
+                    lost=.true.;loss_time=t;edge_lost(loss_side)=edge_lost(loss_side)+1
+                    return
+                end if
+            end if
             if(cell==-1) then
                 open(newunit=failure_unit,file='ion_orbit_failure.dat',status='new')
                 write(failure_unit,'(a)') 'GK_ION_ORBIT_FAILURE_V1'
@@ -665,6 +709,7 @@ contains
             max_mu_error=max(max_mu_error,abs(vperp*vperp/(2*field*mu)-1))
             ! Unwrapped radial excursion; the offset is zero without re-entry.
             max_excursion=max(max_excursion,abs(rnow+reentry_offset-r0))
+            if(edge_loss) r_range=[min(r_range(1),rnow),max(r_range(2),rnow)]
         end subroutine
         subroutine continue_after_reentry(remaining,step,last_cell)
             ! A loss through a radial boundary continues from the periodic image for the
@@ -696,6 +741,10 @@ contains
                 actual_source=ref_source
                 ! Check mode deposits the diffused virtual path without subtraction.
                 if(diffusion_reference_check) ref_source=0
+                return
+            end if
+            if(lost) then
+                actual_source=0
                 return
             end if
             alpha=mmode*theta_sfl(x)+nmode*n_field_periods_manual*x(2)
