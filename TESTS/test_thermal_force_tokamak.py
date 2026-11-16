@@ -11,12 +11,16 @@ the paired difference to the grad T = 0 control between Omega_a t = 300 and 700.
   collision shift on   d<R>/dt = gyro_orbit_dXdt of TESTS/REFERENCE/homma/B07_targets.csv
                        (slab mapping e_x <-> e_R), d<Z>/dt ~ 0
   collision shift off  no screening drift: d<R>/dt = 0 (velocity-only collisions)
+  field periods        collisionless (n = 1e6 cm^-3, dt = 1e-6 tau_s) to Omega_a t = 7000:
+                       the toroidal spread std(R_s dphi) = sqrt(<v_par^2>) t over about
+                       3.6 field periods, i.e. the periodic phi crossings are counted
 
 Tolerance: 4 standard errors plus 2 % (second-order effects in grad T, the
 explicit collision step, and the curvature and grad-B drift, which the control
 run subtracts to first order).
 """
 import csv
+import math
 import os
 import shutil
 import subprocess
@@ -39,7 +43,7 @@ def target(root):
     raise RuntimeError("no W3+ 100 eV/m row in B07_targets.csv")
 
 
-def run_case(root, binary, work, name, overrides):
+def run_rows(root, binary, work, name, overrides):
     case_dir = work / name
     if case_dir.exists():
         shutil.rmtree(case_dir)
@@ -60,8 +64,13 @@ def run_case(root, binary, work, name, overrides):
     with open(case_dir / "out.csv") as f:
         lines = f.readlines()
     lost = [line for line in lines if line.startswith("# lost_ions_gradient_control:")]
-    rows = [r for r in csv.DictReader(line for line in lines if not line.startswith("#"))
-            if r["run"].strip() == "difference"]
+    rows = list(csv.DictReader(line for line in lines if not line.startswith("#")))
+    return rows, (lost[0].split(":")[1].strip() if lost else "?")
+
+
+def run_case(root, binary, work, name, overrides):
+    rows, lost = run_rows(root, binary, work, name, overrides)
+    rows = [r for r in rows if r["run"].strip() == "difference"]
     a, b = rows[1], rows[2]
     dt = float(b["t_s"]) - float(a["t_s"])
     # columns: x = R - R_s, z = Z - Z_s (cm); slope between the two times in m/s
@@ -69,7 +78,7 @@ def run_case(root, binary, work, name, overrides):
             "se_R": (float(b["se_x"]) + float(a["se_x"])) / 100.0 / dt,
             "dZ": (float(b["mean_z"]) - float(a["mean_z"])) / 100.0 / dt,
             "se_Z": (float(b["se_z"]) + float(a["se_z"])) / 100.0 / dt,
-            "lost": lost[0].split(":")[1].strip() if lost else "?"}
+            "lost": lost}
 
 
 def main():
@@ -95,6 +104,21 @@ def main():
     print(f"{'ok  ' if ok else 'FAIL'} shift off: dR/dt = {d['dR']:.4f} +- {d['se_R']:.4f} m/s, expected 0")
     if not ok:
         failures.append("shift off dR/dt")
+
+    n = 4000
+    rows, _ = run_rows(root, binary, work, "field_periods", {
+        "density_cm3": 1.0e6, "dt_coll_over_tau_s": 1.0e-6, "grad_temperature_ev_cm": [0.0, 0.0, 0.0],
+        "boole_control_run": False, "n_particles": n, "output_times": [0.0, 7000.0]})
+    r = [x for x in rows if x["run"].strip() == "gradient"][-1]
+    t = float(r["t_s"])
+    spread = float(r["se_y"]) * math.sqrt(n)                               # cm
+    v_par_rms = math.sqrt(2.0 * float(r["mean_energy"]) / (183.84 * 1.66053906660e-24) / 3.0)
+    ratio = spread / t / v_par_rms
+    ok = abs(ratio - 1.0) <= 0.05
+    print(f"{'ok  ' if ok else 'FAIL'} field periods: std(R_s dphi) = {spread / 100:.2f} m over 6.29 m periods, "
+          f"/ (sqrt(<v_par^2>) t) = {ratio:.4f}")
+    if not ok:
+        failures.append("field periods")
 
     if failures:
         print(f"FAIL: {len(failures)} checks failed")
