@@ -1,0 +1,30 @@
+! Thermal-force applet (i_option = 16), driver 'tokamak' with flux-surface
+! profiles: W3+ in H+ in GORILLA's analytic circular tokamak of example 8
+! (R0 = 1.7 m, a = 0.5 m, B0 = 2 T, q = 1.1 ... 3.1). Profiles in profiles/
+! against the minor radius: T_i = T_e = 50 eV + 100 eV/m (r - 25 cm),
+! n = 1e14 cm^-3, E_r = 0. Ions start at r = 25 cm on the outboard midplane.
+! CGS units, temperatures in eV, masses in amu.
+&thermal_force_nml
+ driver = 'tokamak' ,
+ background_profile = 'flux' ,
+ profile_dir = 'profiles' ,
+ orbit_model = 'guiding_centre' ,
+ boole_collision_shift = .true. ,
+ collision_background_at = 'gyro_orbit' ,
+ test_mass_amu = 183.84d0 ,
+ test_charge_number = 3.d0 ,
+ background_mass_amu = 1.007276466621d0 ,
+ background_charge_number = 1.d0 ,
+ coulomb_log = 15.d0 ,
+ heat_flux_model = 'homma2014' ,
+ test_distribution = 'maxwellian' ,
+ test_temperature_ev = 50.d0 ,
+ start_x_cm = 195.d0, 0.1d0, 0.d0 ,      ! (R [cm], phi [rad], Z [cm]): r = 25 cm
+ dt_coll_over_tau_s = 0.01d0 ,
+ output_time_unit = 'tau_s' ,
+ output_times = 0.d0, 1.d0, 2.d0, 3.d0, 4.d0, 5.d0 ,
+ boole_control_run = .true. ,
+ n_particles = 2000 ,
+ seed = 1 ,
+ output_file = 'thermal_force_tokamak_flux.csv' ,
+/

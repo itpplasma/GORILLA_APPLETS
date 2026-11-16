@@ -24,7 +24,9 @@ module thermal_force_mod
 ! the field direction and |B| of the mesh; the guiding-centre shift moves the
 ! ion through the mesh with displace_by_straight_line; between collisions
 ! GORILLA's pusher integrates the orbit. The background temperature is linear
-! in R and Z, T = T_0 + grad T . (x - start_x_cm).
+! in R and Z, T = T_0 + grad T . (x - start_x_cm) ('linear'), or given on
+! flux surfaces, T_i(s), n_i(s) ('flux', profile_data_mod); at a collision the
+! flux profiles are expanded linearly about the guiding centre.
 !
 ! With boole_control_run the same ions are also followed with grad T = 0 and
 ! the same random numbers; the paired difference isolates the thermal force.
@@ -54,8 +56,8 @@ module thermal_force_mod
     integer, parameter :: n_q = 7
     integer, parameter :: run_gradient = 1, run_control = 2, run_difference = 3
     ! Slab moments: position relative to start_x_cm, kinetic energy
-    integer, parameter :: s_x = 1, s_y = 2, s_z = 3, s_energy = 4
-    integer, parameter :: n_s = 4
+    integer, parameter :: s_x = 1, s_y = 2, s_z = 3, s_energy = 4, s_flux = 5
+    integer, parameter :: n_s = 5
 
     type :: setup_t
         type(homma_units_t) :: units
@@ -124,9 +126,12 @@ subroutine build_setup(inp, su)
 
     su%b_field = inp%b_gauss
     if (trim(inp%driver) == 'tokamak') then
-        call tokamak_start_field(inp, su%b_field)
+        call tokamak_start(inp, su%prof_gradient, su%b_field)
         ! the profile lives in the local physical frame (R, 0, Z), see tokamak_ion
         su%prof_gradient%x0 = [inp%start_x_cm(1), 0.0_dp, inp%start_x_cm(3)]
+        su%prof_control = su%prof_gradient
+        su%prof_control%grad_t = 0.0_dp
+        t_b = su%prof_gradient%bg0%temperature
     end if
     su%b_hat = su%b_field/norm2(su%b_field)
     call homma_perp_basis(su%b_hat, su%e1, su%e2)
@@ -139,7 +144,7 @@ subroutine build_setup(inp, su)
     x = m_b*v**2/(2.0_dp*t_b)
     mu = erf(sqrt(x)) - 2.0_dp*sqrt(x/pi)*exp(-x)
     su%tau_s = su%m_a**2*v**3/(4.0_dp*pi*su%units%k_coulomb**2*(1.0_dp + su%m_a/m_b)*mu &
-             *su%q_a**2*q_b**2*inp%density_cm3*inp%coulomb_log)
+             *su%q_a**2*q_b**2*su%prof_gradient%bg0%density*inp%coulomb_log)
     su%dt = inp%dt_coll_over_tau_s*su%tau_s
 
     n_out = count(inp%output_times >= 0.0_dp)
@@ -388,11 +393,11 @@ contains
         real(dp) :: q_grad(n_s), q_ctrl(n_s)
 
         if (full_orbit) then
-            q_grad = [x_grad - inp%start_x_cm, 0.5_dp*su%m_a*dot_product(v_grad, v_grad)]
-            q_ctrl = [x_ctrl - inp%start_x_cm, 0.5_dp*su%m_a*dot_product(v_ctrl, v_ctrl)]
+            q_grad = [x_grad - inp%start_x_cm, 0.5_dp*su%m_a*dot_product(v_grad, v_grad), 0.0_dp]
+            q_ctrl = [x_ctrl - inp%start_x_cm, 0.5_dp*su%m_a*dot_product(v_ctrl, v_ctrl), 0.0_dp]
         else
-            q_grad = [x_grad - inp%start_x_cm, 0.5_dp*su%m_a*(vpar_grad**2 + vperp_grad**2)]
-            q_ctrl = [x_ctrl - inp%start_x_cm, 0.5_dp*su%m_a*(vpar_ctrl**2 + vperp_ctrl**2)]
+            q_grad = [x_grad - inp%start_x_cm, 0.5_dp*su%m_a*(vpar_grad**2 + vperp_grad**2), 0.0_dp]
+            q_ctrl = [x_ctrl - inp%start_x_cm, 0.5_dp*su%m_a*(vpar_ctrl**2 + vperp_ctrl**2), 0.0_dp]
         end if
         sums(1,:,run_gradient,k) = sums(1,:,run_gradient,k) + q_grad
         sums(2,:,run_gradient,k) = sums(2,:,run_gradient,k) + q_grad**2
@@ -416,6 +421,7 @@ subroutine initialize_gorilla_for_test_ion(inp)
     use tetra_physics_mod, only: particle_mass, particle_charge, cm_over_e
     use tetra_physics_poly_precomp_mod, only: make_precomp_poly
     use gorilla_settings_mod, only: coord_system
+    use profile_data_mod, only: load_profiles
 
     type(thermal_force_input_t), intent(in) :: inp
 
@@ -425,6 +431,8 @@ subroutine initialize_gorilla_for_test_ion(inp)
     particle_charge = inp%test_charge_number*echarge
     cm_over_e = clight*particle_mass/particle_charge
     call make_precomp_poly()
+    ! flux-surface profiles on GORILLA's own flux mapping (written by the field)
+    if (trim(inp%background_profile) == 'flux') call load_profiles(trim(inp%profile_dir), 'flux_functions.dat')
 
 end subroutine initialize_gorilla_for_test_ion
 
@@ -450,13 +458,18 @@ subroutine tokamak_field(x, ind_tetr, b_field)
 
 end subroutine tokamak_field
 
-subroutine tokamak_start_field(inp, b_field)
+subroutine tokamak_start(inp, prof, b_field)
+
+    ! Field at start_x_cm and, for flux-surface profiles, the background there
+    ! (prof%bg0 and gradients; used for the time units and tau_s).
 
     use utils_orbit_timestep_mod, only: place_particle_on_grid
 
     type(thermal_force_input_t), intent(in) :: inp
+    type(homma_linear_profile_t), intent(inout) :: prof
     real(dp), intent(out) :: b_field(3)
-    real(dp) :: x(3), z_save(3)
+    type(homma_linear_profile_t) :: base
+    real(dp) :: x(3), z_save(3), s_val
     integer :: ind_tetr, iface
 
     x = inp%start_x_cm          ! mapped into the periodic domain by place_particle_on_grid
@@ -464,8 +477,51 @@ subroutine tokamak_start_field(inp, b_field)
     call place_particle_on_grid(x, 1.0_dp, 1.0_dp, ind_tetr, iface, z_save)
     if (ind_tetr == -1) error stop 'thermal force: start_x_cm lies outside the GORILLA mesh'
     call tokamak_field(x, ind_tetr, b_field)
+    if (trim(inp%background_profile) == 'flux') then
+        base = prof
+        call flux_profile_at(inp, x, ind_tetr, base, prof, s_val)
+    end if
 
-end subroutine tokamak_start_field
+end subroutine tokamak_start
+
+subroutine flux_profile_at(inp, x, ind_tetr, base, prof, s_val)
+
+    ! Local linear expansion of the flux-surface profiles T_i(s), n_i(s) about
+    ! x = (R, phi, Z): s from the poloidal flux psi = A_phi of the mesh (linear
+    ! per tetrahedron), gradients (dT/ds)(ds/dpsi) grad psi in physical (R, phi,
+    ! Z) components, in the local frame (R, 0, Z) of homma_gc_step. The ion
+    ! density is n_e/Z_b (one ion species). base supplies mass, charge,
+    ! Coulomb logarithm, flow and heat-flux model.
+
+    use constants, only: ev2erg
+    use tetra_physics_mod, only: tetra_physics
+    use profile_data_mod, only: eval_profiles, eval_s_from_psi_pol, profile_values_t
+
+    type(thermal_force_input_t), intent(in) :: inp
+    real(dp), intent(in) :: x(3)
+    integer, intent(in) :: ind_tetr
+    type(homma_linear_profile_t), intent(in) :: base
+    type(homma_linear_profile_t), intent(out) :: prof
+    real(dp), intent(out) :: s_val
+    type(profile_values_t) :: pv
+    real(dp) :: psi, h, ds_dpsi, grad_psi(3)
+
+    psi = tetra_physics(ind_tetr)%Aphi1 + sum(tetra_physics(ind_tetr)%gAphi*(x - tetra_physics(ind_tetr)%x1))
+    s_val = eval_s_from_psi_pol(psi)
+    h = 1.0e-6_dp*max(abs(psi), 1.0_dp)
+    ds_dpsi = (eval_s_from_psi_pol(psi + h) - eval_s_from_psi_pol(psi - h))/(2.0_dp*h)
+    grad_psi = [tetra_physics(ind_tetr)%gAphi(1), tetra_physics(ind_tetr)%gAphi(2)/x(1), &
+                tetra_physics(ind_tetr)%gAphi(3)]
+    call eval_profiles(s_val, pv)
+
+    prof = base
+    prof%bg0%density = pv%n_e/inp%background_charge_number
+    prof%bg0%temperature = pv%Ti*ev2erg
+    prof%x0 = [x(1), 0.0_dp, x(3)]
+    prof%grad_t = pv%dTi_ds*ds_dpsi*grad_psi*ev2erg
+    prof%grad_n = pv%dn_ds*ds_dpsi*grad_psi/inp%background_charge_number
+
+end subroutine flux_profile_at
 
 subroutine run_tokamak_driver(inp, su)
 
@@ -557,8 +613,8 @@ subroutine tokamak_ion(inp, su, ip, sums, fails, n_lost)
         ! collision at t, same random numbers for both runs
         call random_number(phase_u)
         call collision_numbers(xi)
-        call collide(st(1), su%prof_gradient, 1)
-        if (n_runs == 2) call collide(st(2), su%prof_control, 2)
+        call collide(st(1), 1)
+        if (n_runs == 2) call collide(st(2), 2)
 
         ! GORILLA orbit to the next collision, sampled at the output times
         n_step = n_step + 1
@@ -577,15 +633,23 @@ subroutine tokamak_ion(inp, su, ip, sums, fails, n_lost)
 
 contains
 
-    subroutine collide(s, prof, r)
+    subroutine collide(s, r)
+
+        ! r = 1: gradient run, r = 2: control run (grad T = 0)
 
         type(state_t), intent(inout) :: s
-        type(homma_linear_profile_t), intent(in) :: prof
         integer, intent(in) :: r
-        real(dp) :: b_field(3), dx(3), x_local(3)
+        type(homma_linear_profile_t) :: prof
+        real(dp) :: b_field(3), dx(3), x_local(3), s_val
 
         if (s%lost) return
         call tokamak_field(s%x, s%ind_tetr, b_field)
+        if (trim(inp%background_profile) == 'flux') then
+            call flux_profile_at(inp, s%x, s%ind_tetr, su%prof_gradient, prof, s_val)
+        else
+            prof = su%prof_gradient
+        end if
+        if (r == 2) prof%grad_t = 0.0_dp
         ! local physical frame (R, 0, Z): the profile depends on R and Z only
         x_local = [s%x(1), 0.0_dp, s%x(3)]
         call homma_gc_step(su%units, su%m_a, su%q_a, prof, b_field, background_at, x_local, s%vpar, s%vperp, &
@@ -662,7 +726,8 @@ contains
         do r = 1, 2
             phi = st(r)%x(2) + st(r)%turns*2.0_dp*pi/n_field_periods
             q(:, r) = [st(r)%x(1) - inp%start_x_cm(1), inp%start_x_cm(1)*(phi - inp%start_x_cm(2)), &
-                       st(r)%x(3) - inp%start_x_cm(3), 0.5_dp*su%m_a*(st(r)%vpar**2 + st(r)%vperp**2)]
+                       st(r)%x(3) - inp%start_x_cm(3), 0.5_dp*su%m_a*(st(r)%vpar**2 + st(r)%vperp**2), &
+                       flux_label(st(r))]
         end do
         sums(1,:,run_gradient,k) = sums(1,:,run_gradient,k) + q(:,1)
         sums(2,:,run_gradient,k) = sums(2,:,run_gradient,k) + q(:,1)**2
@@ -672,6 +737,24 @@ contains
         sums(2,:,run_difference,k) = sums(2,:,run_difference,k) + (q(:,1) - q(:,2))**2
 
     end subroutine accumulate
+
+    function flux_label(s) result(s_val)
+
+        ! normalised flux label s of the guiding centre (profile_data_mod), 0 for
+        ! the linear background
+
+        use tetra_physics_mod, only: tetra_physics
+        use profile_data_mod, only: eval_s_from_psi_pol
+
+        type(state_t), intent(in) :: s
+        real(dp) :: s_val
+
+        s_val = 0.0_dp
+        if (trim(inp%background_profile) /= 'flux' .or. s%ind_tetr == -1) return
+        s_val = eval_s_from_psi_pol(tetra_physics(s%ind_tetr)%Aphi1 &
+                + sum(tetra_physics(s%ind_tetr)%gAphi*(s%x - tetra_physics(s%ind_tetr)%x1)))
+
+    end function flux_label
 
 end subroutine tokamak_ion
 
@@ -802,15 +885,17 @@ subroutine write_slab_output(inp, su, sums, fails, n_lost)
     write(unit, '(a,i0,a,i0)') '# n_particles: ', inp%n_particles, ', seed: ', inp%seed
     write(unit, '(a,i0,", ",i0)') '# kernel_failures_gradient_control: ', fails
     write(unit, '(a)') '# units: CGS; positions in cm relative to start_x_cm, energy in erg'
-    write(unit, '(a)') 'run,t_s,t_over_tau_s,omega_t,mean_x,se_x,mean_y,se_y,mean_z,se_z,mean_energy,se_energy'
+    write(unit, '(a)') '# s: normalised toroidal flux of the guiding centre (tokamak, flux profiles), else 0'
+    write(unit, '(a)') 'run,t_s,t_over_tau_s,omega_t,mean_x,se_x,mean_y,se_y,mean_z,se_z,mean_energy,se_energy,' // &
+        'mean_s,se_s'
 
     do k = 1, size(su%t_out)
         do r = 1, n_runs
             mean = sums(1,:,r,k)/n
             se = sqrt(max(sums(2,:,r,k)/n - mean**2, 0.0_dp)/(n - 1.0_dp))
-            write(unit, '(a,",",11(es24.16,:,","))') trim(run_names(r)), su%t_out(k), su%t_out(k)/su%tau_s, &
+            write(unit, '(a,",",13(es24.16,:,","))') trim(run_names(r)), su%t_out(k), su%t_out(k)/su%tau_s, &
                 su%t_out(k)*abs(su%omega_a), mean(s_x), se(s_x), mean(s_y), se(s_y), mean(s_z), se(s_z), &
-                mean(s_energy), se(s_energy)
+                mean(s_energy), se(s_energy), mean(s_flux), se(s_flux)
         end do
     end do
     close(unit)

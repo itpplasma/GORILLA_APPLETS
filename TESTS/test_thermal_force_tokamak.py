@@ -11,6 +11,11 @@ the paired difference to the grad T = 0 control between Omega_a t = 300 and 700.
   collision shift on   d<R>/dt = gyro_orbit_dXdt of TESTS/REFERENCE/homma/B07_targets.csv
                        (slab mapping e_x <-> e_R), d<Z>/dt ~ 0
   collision shift off  no screening drift: d<R>/dt = 0 (velocity-only collisions)
+  flux profiles        EXAMPLES/thermal_force_tokamak_flux (GORILLA example 8, R0 = 1.7 m,
+                       B0 = 2 T, T_i(r) = 50 eV + 100 eV/m (r - 25 cm)): screening drift
+                       dr/dt = (d<s>/dt)/(ds/dr) over 0..2 tau_s, ds/dr from GORILLA's
+                       flux_functions.dat, against the target times (1 T/B)^2 at the start
+                       (tolerance 4 standard errors plus 3 %)
   field periods        collisionless (n = 1e6 cm^-3, dt = 1e-6 tau_s) to Omega_a t = 7000:
                        the toroidal spread std(R_s dphi) = sqrt(<v_par^2>) t over about
                        3.6 field periods, i.e. the periodic phi crossings are counted
@@ -43,15 +48,17 @@ def target(root):
     raise RuntimeError("no W3+ 100 eV/m row in B07_targets.csv")
 
 
-def run_rows(root, binary, work, name, overrides):
+def run_rows(root, binary, work, name, overrides, example_name="thermal_force_tokamak"):
     case_dir = work / name
     if case_dir.exists():
         shutil.rmtree(case_dir)
-    example = root / "EXAMPLES" / "thermal_force_tokamak"
+    example = root / "EXAMPLES" / example_name
     case_dir.mkdir(parents=True)
     for f in EXAMPLE_FILES:
         if (example / f).exists():
             shutil.copy(example / f, case_dir / f)
+    if (example / "profiles").is_dir():
+        shutil.copytree(example / "profiles", case_dir / "profiles")
     nml = f90nml.read(example / "thermal_force.inp")
     nml["thermal_force_nml"].update({"output_times": [0.0, 300.0, 700.0], "n_particles": 1500,
                                      "output_file": "out.csv"})
@@ -104,6 +111,32 @@ def main():
     print(f"{'ok  ' if ok else 'FAIL'} shift off: dR/dt = {d['dR']:.4f} +- {d['se_R']:.4f} m/s, expected 0")
     if not ok:
         failures.append("shift off dR/dt")
+
+    # flux-surface profiles in a realistic circular tokamak
+    rows, lost = run_rows(root, binary, work, "flux_profiles", {
+        "output_time_unit": "tau_s", "output_times": [0.0, 2.0], "n_particles": 2000},
+        example_name="thermal_force_tokamak_flux")
+    d = [x for x in rows if x["run"].strip() == "difference"][-1]
+    t = float(d["t_s"])
+    r_grid, psi_tor = [], []
+    with open(work / "flux_profiles" / "flux_functions.dat") as f:
+        for line in f:
+            if line.strip().startswith("#") or not line.strip():
+                continue
+            cols = [float(c) for c in line.split()]
+            r_grid.append(cols[1]); psi_tor.append(cols[4])
+    r_s = 25.0
+    i = min(range(len(r_grid)), key=lambda k: abs(r_grid[k] - r_s))
+    ds_dr = (psi_tor[i + 1] - psi_tor[i - 1]) / (r_grid[i + 1] - r_grid[i - 1]) / psi_tor[-1]   # 1/cm
+    b_start = 2.0e4 * 170.0 / 195.0                                                       # G
+    expect_flux = expect * (1.0e4 / b_start) ** 2
+    v_r = float(d["mean_s"]) / ds_dr / 100.0 / t                                          # m/s
+    se_r = float(d["se_s"]) / ds_dr / 100.0 / t
+    ok = abs(v_r - expect_flux) <= 4 * se_r + 0.03 * abs(expect_flux)
+    print(f"{'ok  ' if ok else 'FAIL'} flux profiles: dr/dt = {v_r:.4f} +- {se_r:.4f} m/s, target {expect_flux:.4f} "
+          f"(B = {b_start/1e4:.3f} T), lost ions {lost}")
+    if not ok:
+        failures.append("flux profiles")
 
     n = 4000
     rows, _ = run_rows(root, binary, work, "field_periods", {

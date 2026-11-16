@@ -1,0 +1,4 @@
+flux_functions.dat
+thermal_force_tokamak_flux.csv
+*.log
+run/

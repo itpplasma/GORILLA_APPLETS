@@ -56,6 +56,8 @@ def run(case_dir, template, files, overrides):
     for f in files:
         if (template / f).exists():
             shutil.copy(template / f, case_dir / f)
+    if (template / "profiles").is_dir():
+        shutil.copytree(template / "profiles", case_dir / "profiles")
     nml = f90nml.read(template / "thermal_force.inp")
     nml["thermal_force_nml"].update({"output_file": "out.csv", **overrides})
     nml.write(case_dir / "thermal_force.inp")

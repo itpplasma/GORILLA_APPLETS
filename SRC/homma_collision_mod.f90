@@ -59,13 +59,15 @@ module homma_collision_mod
         real(dp) :: flow(3) = 0.0_dp
     end type homma_local_t
 
-    ! Background with a constant temperature gradient (benchmark profiles):
-    ! T(x) = bg0%temperature + grad_t.(x - x0), other quantities uniform. The
-    ! heat flux is evaluated with the local T(x).
+    ! Background linear in space: T(x) = bg0%temperature + grad_t.(x - x0),
+    ! n(x) = bg0%density + grad_n.(x - x0), other quantities uniform. Used for
+    ! the benchmark profiles and as the local expansion of flux-surface
+    ! profiles about a guiding centre. The heat flux uses the local T and n.
     type, public :: homma_linear_profile_t
         type(homma_background_t) :: bg0
         real(dp) :: x0(3) = 0.0_dp
         real(dp) :: grad_t(3) = 0.0_dp          ! energy per length
+        real(dp) :: grad_n(3) = 0.0_dp          ! density per length
         logical :: heat_flux = .true.           ! .false.: Maxwellian operator only
     end type homma_linear_profile_t
 
@@ -291,8 +293,8 @@ end subroutine homma_kick
 
 pure subroutine homma_local_at(units, test_mass, test_charge, prof, x, b_field, loc, ierr)
 
-    ! Prefactors at position x for a linear temperature profile.
-    ! ierr = 2 if T(x) <= 0.
+    ! Prefactors at position x for a linear profile.
+    ! ierr = 2 if T(x) <= 0 or n(x) <= 0.
 
     type(homma_units_t), intent(in) :: units
     real(dp), intent(in) :: test_mass, test_charge
@@ -306,7 +308,8 @@ pure subroutine homma_local_at(units, test_mass, test_charge, prof, x, b_field, 
     ierr = 0
     bg = prof%bg0
     bg%temperature = prof%bg0%temperature + dot_product(prof%grad_t, x - prof%x0)
-    if (bg%temperature <= 0.0_dp) then
+    bg%density = prof%bg0%density + dot_product(prof%grad_n, x - prof%x0)
+    if (bg%temperature <= 0.0_dp .or. bg%density <= 0.0_dp) then
         ierr = 2
         return
     end if

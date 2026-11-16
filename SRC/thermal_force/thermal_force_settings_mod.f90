@@ -26,6 +26,12 @@ module thermal_force_settings_mod
         ! temperature screening); .false.: collisions change v_par, v_perp only,
         ! as GORILLA's other collision operators
         logical :: boole_collision_shift = .true.
+        ! tokamak driver: 'linear' (T linear in R and Z, uniform density) or
+        ! 'flux' (T_i(s), n_i(s) on flux surfaces from profile_dir/n.dat,
+        ! Ti.dat, Te.dat, Er.dat via profile_data_mod and the flux_functions.dat
+        ! that GORILLA writes; density_cm3 and temperature_ev are then unused)
+        character(len=32) :: background_profile = 'linear'
+        character(len=256) :: profile_dir = '.'
         ! test species
         real(dp) :: test_mass_amu = 183.84_dp
         real(dp) :: test_charge_number = 3.0_dp
@@ -82,6 +88,8 @@ subroutine load_thermal_force_inp(inp)
     real(dp) :: test_temperature_ev, test_temperature_par_ev, test_temperature_perp_ev, test_drift_cm_s(3)
     real(dp) :: start_x_cm(3), dt_coll_over_tau_s, output_times(max_output_times)
     logical :: boole_gyration, boole_control_run, boole_collision_shift
+    character(len=32) :: background_profile
+    character(len=256) :: profile_dir
     integer :: n_particles, seed, unit, n_trajectories
     character(len=256) :: output_file, trajectory_file
     real(dp) :: trajectory_dt_gyro
@@ -92,7 +100,7 @@ subroutine load_thermal_force_inp(inp)
         test_temperature_ev, test_temperature_par_ev, test_temperature_perp_ev, test_drift_cm_s, &
         start_x_cm, dt_coll_over_tau_s, output_time_unit, output_times, boole_gyration, &
         boole_control_run, n_particles, seed, output_file, orbit_model, n_trajectories, &
-        trajectory_dt_gyro, trajectory_file, boole_collision_shift
+        trajectory_dt_gyro, trajectory_file, boole_collision_shift, background_profile, profile_dir
 
     ! defaults from the type
     driver = inp%driver; test_mass_amu = inp%test_mass_amu; test_charge_number = inp%test_charge_number
@@ -110,6 +118,7 @@ subroutine load_thermal_force_inp(inp)
     orbit_model = inp%orbit_model; n_trajectories = inp%n_trajectories
     trajectory_dt_gyro = inp%trajectory_dt_gyro; trajectory_file = inp%trajectory_file
     boole_collision_shift = inp%boole_collision_shift
+    background_profile = inp%background_profile; profile_dir = inp%profile_dir
 
     open(newunit=unit, file='thermal_force.inp', status='old', action='read')
     read(unit, nml=thermal_force_nml)
@@ -130,6 +139,7 @@ subroutine load_thermal_force_inp(inp)
     inp%orbit_model = orbit_model; inp%n_trajectories = n_trajectories
     inp%trajectory_dt_gyro = trajectory_dt_gyro; inp%trajectory_file = trajectory_file
     inp%boole_collision_shift = boole_collision_shift
+    inp%background_profile = background_profile; inp%profile_dir = profile_dir
 
     call check_input(inp)
     print *, 'GORILLA_APPLETS: Loaded input data from thermal_force.inp'
@@ -149,6 +159,11 @@ subroutine check_input(inp)
         if (inp%grad_temperature_ev_cm(2) /= 0.0_dp) &
             call input_error('driver ''tokamak'': grad_temperature_ev_cm(2) (phi component) must be zero')
         if (inp%n_trajectories > 0) call input_error('driver ''tokamak'' has no trajectory output')
+        select case (trim(inp%background_profile))
+        case ('linear', 'flux')
+        case default
+            call input_error('background_profile must be ''linear'' or ''flux''')
+        end select
     case default
         call input_error('driver must be ''velocity'', ''slab'' or ''tokamak''')
     end select
