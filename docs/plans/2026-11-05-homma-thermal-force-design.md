@@ -339,6 +339,37 @@ A control run subtracts it.
   4. Classical diffusion (∇T = 0): var R, var Z of the tokamak equal var x,
      var y of the slab within the 1 % sampling error (shift conversion).
 
+- **Reuse of existing code (2026-11-16).** Random numbers as in GORILLA's
+  other collision operators: one stream per ion from
+  `initialise_seed_for_marker(ion, seed)` (results independent of the thread
+  count, checked), kicks with `getran` (uniform, zero mean, unit variance; the
+  Euler–Maruyama step needs only the first two moments), initial Maxwellians
+  from `maxwellian_from_uniforms`; our generator module was deleted. Ion
+  placement uses `place_particle_on_grid`, π comes from `constants`. Note: the
+  existing `splitmix64_next` uses the constant `0x94D049BB133113EB` where
+  SplitMix64 (and its own comment) has `…11EB`; it still mixes well, but
+  correcting it would change all applets' random streams and their reference
+  outputs, so it is left as is. Not replaceable: the tokamak push loop
+  (`push_orbit`). GORILLA's `orbit_timestep_gorilla` does the same push but
+  does not report periodic φ crossings, which the toroidal position needs when
+  one call spans several field periods (tried: the toroidal spread came out
+  24 % low); the anomalous-transport variant is tied to that applet's global
+  state. Our loop is built from the existing `push_within_tetrahedron`,
+  `initialize_constants_of_motion` and `vperp_func`.
+- **Velocity driver splitting (2026-11-16).** Kick-then-rotate over a step
+  rotated each kick a full step too long and overestimated the rotation of the
+  thermal-force velocity in B06 by about 40 % within a step (found when the new
+  seeding changed the random numbers). The driver now uses symmetric (Strang)
+  splitting: half a gyration, the kick, the other half. B04 (no gradient, an
+  isotropic operator) and the earlier B08 relaxation results are unaffected.
+
+- **Exact guiding-centre step in cylindrical coordinates (2026-11-16).** The
+  tokamak driver converted the physical shift linearly to (ΔR, ΔX_φ/R, ΔZ),
+  which drops ΔX_φ²/(2R) in R: an inward drift of about D_φφ/R (≈ 1e-7 m/s at
+  R₀ = 1 km, ≈ 0.4 % of the screening drift in a realistic tokamak).
+  `cylindrical_step` now computes the target point exactly; the test
+  `thermal_force_geometry` checks it in Cartesian space to 1e-12.
+
 ## 11. Status 2026-11-09 and open questions
 
 Done: steps 1–6 (derivation, kernel, kick, velocity, slab, tokamak drivers),
