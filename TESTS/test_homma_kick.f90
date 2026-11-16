@@ -14,6 +14,8 @@ program test_homma_kick
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use homma_collision_mod
+    use collis_ions, only: getran
+    use constants, only: pi
 
     implicit none
 
@@ -22,7 +24,6 @@ program test_homma_kick
     real(dp), parameter :: eps0 = 8.8541878128e-12_dp
     real(dp), parameter :: amu = 1.66053906660e-27_dp
     real(dp), parameter :: m_p = 1.67262192369e-27_dp
-    real(dp), parameter :: pi = 3.14159265358979323846_dp
     real(dp), parameter :: b_field(3) = [0.0_dp, 0.0_dp, 1.0_dp]
     real(dp), parameter :: m_w = 183.84_dp*amu
 
@@ -226,7 +227,7 @@ subroutine test_sampled_kick(all_passed)
 
     sum1 = 0.0_dp; sum2 = 0.0_dp; sx1 = 0.0_dp; sx2 = 0.0_dp
     do i = 1, n
-        call normal3(xi)
+        call getran(0, xi(1)); call getran(0, xi(2)); call getran(0, xi(3))
         call homma_kick(loc, v, dt, xi, dv, ierr)
         sum1 = sum1 + dv
         sum2 = sum2 + spread(dv, 2, 3)*spread(dv, 1, 3)
@@ -258,20 +259,6 @@ subroutine test_sampled_kick(all_passed)
     if (err > 1.0e-2_dp) all_passed = .false.
 
 end subroutine test_sampled_kick
-
-subroutine normal3(xi)
-
-    real(dp), intent(out) :: xi(3)
-    real(dp) :: u(4)
-
-    call random_number(u)
-    u(1) = max(u(1), tiny(1.0_dp))
-    u(3) = max(u(3), tiny(1.0_dp))
-    xi(1) = sqrt(-2.0_dp*log(u(1)))*cos(2.0_dp*pi*u(2))
-    xi(2) = sqrt(-2.0_dp*log(u(1)))*sin(2.0_dp*pi*u(2))
-    xi(3) = sqrt(-2.0_dp*log(u(3)))*cos(2.0_dp*pi*u(4))
-
-end subroutine normal3
 
 subroutine compare(label, value, reference, tol, all_passed)
 

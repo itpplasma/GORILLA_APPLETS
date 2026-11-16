@@ -11,6 +11,7 @@ program test_homma_coefficients
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use homma_collision_mod
+    use constants, only: pi
 
     implicit none
 
@@ -19,7 +20,6 @@ program test_homma_coefficients
     real(dp), parameter :: eps0 = 8.8541878128e-12_dp
     real(dp), parameter :: amu = 1.66053906660e-27_dp
     real(dp), parameter :: m_p = 1.67262192369e-27_dp
-    real(dp), parameter :: pi = 3.14159265358979323846_dp
     real(dp), parameter :: b_field(3) = [0.0_dp, 0.0_dp, 1.0_dp]
 
     real(dp), parameter :: tol_oracle = 1.0e-10_dp

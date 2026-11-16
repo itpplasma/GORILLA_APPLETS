@@ -38,14 +38,15 @@ module thermal_force_mod
                                    homma_local_at, homma_kick, homma_perp_basis, homma_gc_step, &
                                    homma_at_guiding_centre, homma_at_gyro_orbit
     use thermal_force_settings_mod, only: thermal_force_input_t, load_thermal_force_inp
-    use thermal_force_rng_mod, only: rng_t, rng_seed, rng_normal3, rng_uniform
+    use collis_ions, only: getran
+    use utils_parallelised_particle_pushing_mod, only: initialise_seed_for_marker
+    use constants, only: pi
 
     implicit none
 
     private
 
     real(dp), parameter :: amu_g = 1.66053906660e-24_dp     ! CODATA 2018
-    real(dp), parameter :: pi = 3.14159265358979323846264338327950288_dp
 
     ! Velocity moments accumulated per output time
     integer, parameter :: q_vx = 1, q_vy = 2, q_vz = 3, q_vpar = 4, q_vpar2 = 5, q_vperp2 = 6, q_v4 = 7
@@ -157,7 +158,6 @@ subroutine run_velocity_driver(inp, su)
     type(thermal_force_input_t), intent(in) :: inp
     type(setup_t), intent(in) :: su
     type(homma_local_t) :: loc_gradient(1), loc_control(1)
-    type(rng_t) :: rng
     real(dp), allocatable :: sums(:,:,:,:)
     real(dp) :: v_grad(3), v_ctrl(3), xi(3), dv(3), t, h, q_grad(n_q), q_ctrl(n_q)
     integer(int64) :: fails(2)
@@ -175,17 +175,17 @@ subroutine run_velocity_driver(inp, su)
                         loc_control(1), ierr)
 
     !$omp parallel do schedule(dynamic, 256) default(shared) &
-    !$omp private(ip, rng, v_grad, v_ctrl, xi, dv, t, h, k, ierr, q_grad, q_ctrl) &
+    !$omp private(ip, v_grad, v_ctrl, xi, dv, t, h, k, ierr, q_grad, q_ctrl) &
     !$omp reduction(+:sums, fails)
     do ip = 1, inp%n_particles
-        call rng_seed(rng, int(inp%seed, int64), int(ip, int64))
-        call sample_initial_velocity(inp, su, rng, v_grad)
+        call initialise_seed_for_marker(ip, inp%seed)
+        call sample_initial_velocity(inp, su, v_grad)
         v_ctrl = v_grad
         t = 0.0_dp
         do k = 1, n_out
             do while (t < su%t_out(k))
                 h = min(su%dt, su%t_out(k) - t)
-                call rng_normal3(rng, xi)
+                call collision_numbers(xi)
                 call homma_kick(loc_gradient, v_grad, h, xi, dv, ierr)
                 if (ierr /= 0) fails(1) = fails(1) + 1
                 v_grad = v_grad + dv
@@ -271,7 +271,6 @@ subroutine slab_ion(inp, su, ip, traj_unit, sums, fails)
     integer, intent(in) :: ip, traj_unit
     real(dp), intent(inout) :: sums(:,:,:,:)
     integer(int64), intent(inout) :: fails(2)
-    type(rng_t) :: rng
     real(dp) :: v(3), x_grad(3), x_ctrl(3), v_grad(3), v_ctrl(3)
     real(dp) :: vpar_grad, vperp_grad, vpar_ctrl, vperp_ctrl
     real(dp) :: xi(3), phase_u, t, t_next
@@ -285,8 +284,8 @@ subroutine slab_ion(inp, su, ip, traj_unit, sums, fails)
                           trim(inp%collision_background_at) == 'gyro_orbit')
     traced = ip <= inp%n_trajectories
 
-    call rng_seed(rng, int(inp%seed, int64), int(ip, int64))
-    call sample_initial_velocity(inp, su, rng, v)
+    call initialise_seed_for_marker(ip, inp%seed)
+    call sample_initial_velocity(inp, su, v)
     v_grad = v
     vpar_grad = 0.0_dp; vperp_grad = 0.0_dp
     ! all ions start with the particle at start_x_cm
@@ -315,8 +314,8 @@ subroutine slab_ion(inp, su, ip, traj_unit, sums, fails)
 
     do while (k <= n_out)
         ! collision at t
-        phase_u = rng_uniform(rng)
-        call rng_normal3(rng, xi)
+        call random_number(phase_u)
+        call collision_numbers(xi)
         if (full_orbit) then
             call full_orbit_kick(su, su%prof_gradient, su%dt, xi, x_grad, v_grad, ierr)
             if (ierr /= 0) fails(1) = fails(1) + 1
@@ -447,16 +446,16 @@ end subroutine tokamak_field
 
 subroutine tokamak_start_field(inp, b_field)
 
-    use find_tetra_mod, only: find_tetra
+    use utils_orbit_timestep_mod, only: place_particle_on_grid
 
     type(thermal_force_input_t), intent(in) :: inp
     real(dp), intent(out) :: b_field(3)
-    real(dp) :: x(3)
+    real(dp) :: x(3), z_save(3)
     integer :: ind_tetr, iface
 
-    x = inp%start_x_cm          ! find_tetra may map x into its periodic domain
+    x = inp%start_x_cm          ! mapped into the periodic domain by place_particle_on_grid
     ! test velocity only for the face disambiguation; v_par must not vanish
-    call find_tetra(x, 1.0_dp, 1.0_dp, ind_tetr, iface)
+    call place_particle_on_grid(x, 1.0_dp, 1.0_dp, ind_tetr, iface, z_save)
     if (ind_tetr == -1) error stop 'thermal force: start_x_cm lies outside the GORILLA mesh'
     call tokamak_field(x, ind_tetr, b_field)
 
@@ -497,7 +496,7 @@ subroutine tokamak_ion(inp, su, ip, sums, fails, n_lost)
     ! guiding centre at start_x_cm - rho. A lost ion (left the mesh, or the
     ! pusher gave up) keeps its last state and is counted.
 
-    use find_tetra_mod, only: find_tetra
+    use utils_orbit_timestep_mod, only: place_particle_on_grid
     use anomalous_transport_displacement_mod, only: displace_by_straight_line
     use tetra_grid_settings_mod, only: n_field_periods
 
@@ -513,9 +512,8 @@ subroutine tokamak_ion(inp, su, ip, sums, fails, n_lost)
         logical :: lost
     end type state_t
 
-    type(rng_t) :: rng
     type(state_t) :: st(2)
-    real(dp) :: v(3), b_hat(3), rho(3), xi(3), phase_u, t, t_next, q(n_s, 2)
+    real(dp) :: v(3), b_hat(3), rho(3), xi(3), phase_u, t, t_next, q(n_s, 2), z_save(3)
     integer(int64) :: n_step
     integer :: k, n_out, r, n_runs, ierr, background_at
 
@@ -524,8 +522,8 @@ subroutine tokamak_ion(inp, su, ip, sums, fails, n_lost)
     background_at = merge(homma_at_gyro_orbit, homma_at_guiding_centre, &
                           trim(inp%collision_background_at) == 'gyro_orbit')
 
-    call rng_seed(rng, int(inp%seed, int64), int(ip, int64))
-    call sample_initial_velocity(inp, su, rng, v)
+    call initialise_seed_for_marker(ip, inp%seed)
+    call sample_initial_velocity(inp, su, v)
     b_hat = su%b_hat
     rho = cross(b_hat, v)/su%omega_a
     st(1)%vpar = dot_product(v, b_hat)
@@ -533,7 +531,7 @@ subroutine tokamak_ion(inp, su, ip, sums, fails, n_lost)
     st(1)%x = inp%start_x_cm - [rho(1), rho(2)/inp%start_x_cm(1), rho(3)]
     st(1)%turns = 0
     st(1)%lost = .false.
-    call find_tetra(st(1)%x, st(1)%vpar, st(1)%vperp, st(1)%ind_tetr, st(1)%iface)
+    call place_particle_on_grid(st(1)%x, st(1)%vpar, st(1)%vperp, st(1)%ind_tetr, st(1)%iface, z_save)
     if (st(1)%ind_tetr == -1) st(1)%lost = .true.
     st(2) = st(1)
     do r = 1, 2
@@ -551,8 +549,8 @@ subroutine tokamak_ion(inp, su, ip, sums, fails, n_lost)
 
     do while (k <= n_out)
         ! collision at t, same random numbers for both runs
-        phase_u = rng_uniform(rng)
-        call rng_normal3(rng, xi)
+        call random_number(phase_u)
+        call collision_numbers(xi)
         call collide(st(1), su%prof_gradient, 1)
         if (n_runs == 2) call collide(st(2), su%prof_control, 2)
 
@@ -650,8 +648,6 @@ contains
     end subroutine push_orbit
 
     subroutine accumulate(k)
-
-        use constants, only: pi
 
         integer, intent(in) :: k
         integer :: r
@@ -798,27 +794,52 @@ subroutine write_slab_output(inp, su, sums, fails, n_lost)
 
 end subroutine write_slab_output
 
-subroutine sample_initial_velocity(inp, su, rng, v)
+subroutine sample_initial_velocity(inp, su, v)
+
+    ! Initial velocity from the test distribution (maxwellian_from_uniforms),
+    ! with a uniform gyrophase about b; the bi-Maxwellian scales the parallel
+    ! and perpendicular parts of the unit Maxwellian separately.
 
     use constants, only: ev2erg
+    use rmp_maxwellian_loading_mod, only: maxwellian_from_uniforms
 
     type(thermal_force_input_t), intent(in) :: inp
     type(setup_t), intent(in) :: su
-    type(rng_t), intent(inout) :: rng
     real(dp), intent(out) :: v(3)
-    real(dp) :: xi(3)
+    real(dp) :: u(5), energy_over_t, pitch, z_abs, z_par, z_perp, t_par, t_perp
 
-    call rng_normal3(rng, xi)
+    call random_number(u)
+    call maxwellian_from_uniforms(u(1:4), energy_over_t, pitch)
+    z_abs = sqrt(2.0_dp*energy_over_t)          ! |z| of a unit-variance Gaussian 3-vector
+    z_par = z_abs*pitch
+    z_perp = z_abs*sqrt(max(0.0_dp, 1.0_dp - pitch**2))
     select case (trim(inp%test_distribution))
     case ('maxwellian')
-        v = sqrt(inp%test_temperature_ev*ev2erg/su%m_a)*xi
+        t_par = inp%test_temperature_ev
+        t_perp = inp%test_temperature_ev
     case ('drifting_bimaxwellian')
-        v = sqrt(inp%test_temperature_par_ev*ev2erg/su%m_a)*xi(1)*su%b_hat &
-          + sqrt(inp%test_temperature_perp_ev*ev2erg/su%m_a)*(xi(2)*su%e1 + xi(3)*su%e2)
+        t_par = inp%test_temperature_par_ev
+        t_perp = inp%test_temperature_perp_ev
     end select
+    v = sqrt(t_par*ev2erg/su%m_a)*z_par*su%b_hat &
+      + sqrt(t_perp*ev2erg/su%m_a)*z_perp*(cos(2.0_dp*pi*u(5))*su%e1 + sin(2.0_dp*pi*u(5))*su%e2)
     v = v + inp%test_drift_cm_s
 
 end subroutine sample_initial_velocity
+
+subroutine collision_numbers(xi)
+
+    ! Three independent random numbers of zero mean and unit variance for a
+    ! collision kick (getran, as GORILLA's other collision operators).
+
+    real(dp), intent(out) :: xi(3)
+    integer :: k
+
+    do k = 1, 3
+        call getran(0, xi(k))
+    end do
+
+end subroutine collision_numbers
 
 pure subroutine gyrate(su, angle, v)
 

@@ -4,7 +4,6 @@ add_library(GORILLA_APPLETS STATIC
   gorilla_applets_types_mod.f90
   collis_ions_mod.f90
   homma_collision_mod.f90
-  thermal_force/thermal_force_rng_mod.f90
   thermal_force/thermal_force_settings_mod.f90
   thermal_force/thermal_force_mod.f90
   direct_vmec_integrator_mod.f90
@@ -55,7 +54,6 @@ add_library(GORILLA_APPLETS STATIC
 set_source_files_properties(
   utils_data_pre_and_post_processing_mod.f90
   utils_parallelised_particle_pushing_mod.f90
-  thermal_force/thermal_force_rng_mod.f90
   PROPERTIES COMPILE_OPTIONS "-fwrapv"
 )
 

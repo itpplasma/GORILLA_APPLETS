@@ -24,6 +24,7 @@ module homma_collision_mod
 !   d = d1(r) I + d2(r) u u + t1(r) (g u + u g + (g.u) I) + t2(r) (g.u) u u
 
     use, intrinsic :: iso_fortran_env, only: dp => real64
+    use constants, only: pi
 
     implicit none
 
@@ -31,7 +32,6 @@ module homma_collision_mod
 
     include 'homma_series_coefficients.inc'
 
-    real(dp), parameter :: pi = 3.14159265358979323846264338327950288_dp
     real(dp), parameter :: sqrt_pi = 1.77245385090551602729816748334114518_dp
     real(dp), parameter :: k_thermal = 2.0_dp/(5.0_dp*sqrt_pi)
 
@@ -268,7 +268,8 @@ end subroutine homma_cholesky
 pure subroutine homma_kick(locs, v, dt, xi, dv, ierr)
 
     ! Euler-Maruyama step of dv = A dt + L dW, L L^T = 2 D, <dW dW^T> = I dt.
-    ! xi: three independent standard normal numbers.
+    ! xi: three independent random numbers of zero mean and unit variance
+    ! (Gaussian, or e.g. getran's uniform ones, as in GORILLA's other operators).
     ! ierr = 1 if D is not positive definite; dv is then zero and nothing is
     ! repaired, the caller counts and reports it.
 
@@ -345,7 +346,7 @@ pure subroutine homma_gc_step(units, test_mass, test_charge, prof, b_field, back
     !   4. vpar, vperp from v + dv; guiding-centre shift dx_gc = -b x dv/Omega_a,
     !      the particle position stays fixed.
     ! Omega_a = k_lorentz q_a |B|/m_a carries the sign of the charge.
-    ! phase_u: uniform on [0, 1); xi: three standard normal numbers.
+    ! phase_u: uniform on [0, 1); xi: three random numbers of zero mean and unit variance.
     ! ierr /= 0 (from homma_local_at or homma_kick): vpar, vperp unchanged, dx_gc = 0.
 
     type(homma_units_t), intent(in) :: units
