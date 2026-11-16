@@ -65,7 +65,7 @@ module thermal_force_mod
         real(dp), allocatable :: t_out(:)
     end type setup_t
 
-    public :: calc_thermal_force
+    public :: calc_thermal_force, cylindrical_step
 
 contains
 
@@ -595,7 +595,7 @@ contains
             return
         end if
         if (.not. inp%boole_collision_shift) return
-        call displace_by_straight_line(s%x, s%ind_tetr, s%iface, [dx(1), dx(2)/s%x(1), dx(3)], s%vpar, s%vperp)
+        call displace_by_straight_line(s%x, s%ind_tetr, s%iface, cylindrical_step(s%x, dx), s%vpar, s%vperp)
         if (s%ind_tetr == -1) then
             s%lost = .true.
             n_lost(r) = n_lost(r) + 1
@@ -674,6 +674,24 @@ contains
     end subroutine accumulate
 
 end subroutine tokamak_ion
+
+pure function cylindrical_step(x, dx) result(dq)
+
+    ! Coordinate step (dR, dphi, dZ) that moves the point x = (R, phi, Z) by the
+    ! physical displacement dx, given in the local orthonormal frame
+    ! (e_R, e_phi, e_Z) at x. Exact, so that a step along e_phi also moves
+    ! the point outward: R' = sqrt((R + dx_R)^2 + dx_phi^2). The linearised
+    ! step (dx_R, dx_phi/R, dx_Z) drops the dx_phi^2/(2R) and gives an inward
+    ! drift of order D_phiphi/R for random displacements.
+
+    real(dp), intent(in) :: x(3), dx(3)
+    real(dp) :: dq(3)
+    real(dp) :: r_new
+
+    r_new = x(1) + dx(1)
+    dq = [hypot(r_new, dx(2)) - x(1), atan2(dx(2), r_new), dx(3)]
+
+end function cylindrical_step
 
 subroutine guiding_centre_kick(su, prof, background_at, shift, h, phase_u, xi, x, vpar, vperp, ierr)
 
