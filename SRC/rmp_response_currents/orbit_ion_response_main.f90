@@ -68,11 +68,25 @@ module orbit_ion_response_driver_mod
     ! Writes one line per history to ion_edge_histories.dat. Default runs are unchanged.
     logical :: edge_loss=.false.
     integer :: edge_lost(2)=0,edge_unit=0
+    ! Opt-in outer field: orbit corrections only for radial samples within outer_switch_cm of
+    ! the window centre (the core); samples farther out keep the cylinder response (zero
+    ! correction), i.e. KIM's periodized model. A core history uses, wherever it is farther
+    ! than outer_switch_cm from the centre, the physical (non-periodized) background of
+    ! outer_field_file and the outer potential phi_out(r) per unit Br in place of the window
+    ! Fourier modes: Phi-column sources vanish there and the k=0 Br column receives the drive
+    ! of phi_out. The GORILLA equilibrium must then be built from the physical background.
+    character(1024) :: outer_field_file=''
+    real(dp) :: outer_switch_cm=0
+    logical :: outer_active=.false.
+    integer :: outer_points=0,outer_histories=0,probe_sample=1
+    real(dp),allocatable :: outer_bg(:,:)
+    complex(dp),allocatable :: outer_phi(:)
+    real(dp) :: outer_history_time=0,outer_outside_time=0
     namelist /ion_orbit_response/ radial_samples,markers,batches,n_mu,seed,lag_nu,nu_dt,phase_step, &
         mu_reference_scale,cylinder_only,prefix_lag_nu,radial_sample_shift_cm, &
         anomalous_diffusion_coefficient,diffusion_step_cm,diffusion_reference_check,paired_diffusion, &
         radial_sample_first,radial_sample_last,sample_streams,raw_binary,debug_marker,radial_reentry, &
-        edge_loss
+        edge_loss,outer_field_file,outer_switch_cm
     complex(dp),allocatable :: exact0(:,:,:),bare0(:,:,:),cylinder_closed0(:,:,:)
     complex(dp),allocatable :: corrections0(:,:,:,:),mean0(:,:,:),batches0(:,:,:,:),integrated_exact0(:,:,:)
     complex(dp),allocatable :: prefix_corrections0(:,:,:,:),prefix_mean0(:,:,:),prefix_batches0(:,:,:,:)
@@ -134,6 +148,22 @@ contains
         error stop 'radial re-entry requires actual orbits without anomalous diffusion'
     if(edge_loss.and.(cylinder_only.or.anomalous_diffusion_coefficient>0.or.paired_diffusion.or.radial_reentry)) &
         error stop 'edge loss requires actual orbits without anomalous diffusion or re-entry'
+    if(len_trim(outer_field_file)>0) then
+        if(cylinder_only.or.anomalous_diffusion_coefficient>0.or.paired_diffusion.or.radial_reentry) &
+            error stop 'outer field requires actual orbits without anomalous diffusion or re-entry'
+        if(.not.(outer_switch_cm>0.and.outer_switch_cm<L/2)) error stop 'outer_switch_cm must lie in (0,L/2)'
+        if(.not.sample_streams) error stop 'outer field requires sample_streams (skipped samples keep other streams)'
+        call read_outer_field()
+        outer_active=.true.
+        ! The conservation/reversal probe runs on the first core sample instead of sample 1.
+        probe_sample=0
+        do j=radial_samples,1,-1
+            if(abs(bg(1,1)+(j-.5_dp)*L/radial_samples+radial_sample_shift_cm-rm)<=outer_switch_cm) probe_sample=j
+        end do
+        if(probe_sample==0) error stop 'outer field: no radial sample inside outer_switch_cm'
+    else if(outer_switch_cm/=0) then
+        error stop 'outer_switch_cm requires outer_field_file'
+    end if
     if(radial_sample_last==0) radial_sample_last=radial_samples
     if(radial_sample_first<1.or.radial_sample_last>radial_samples.or.radial_sample_first>radial_sample_last) &
         error stop 'invalid radial sample subset'
@@ -421,6 +451,11 @@ contains
         write(diagnostics,'(a,es24.16)') 'reentry_max_angle_error_rad ',reentry_max_angle_error
         write(diagnostics,'(a,es24.16)') 'reentry_max_source_phase_error_rad ',reentry_max_phase_error
     end if
+    if(outer_active) then
+        write(diagnostics,'(a,es24.16)') 'outer_switch_cm ',outer_switch_cm
+        write(diagnostics,'(a,i12)') 'outer_histories ',outer_histories
+        write(diagnostics,'(a,es24.16)') 'outer_time_fraction ',outer_outside_time/max(outer_history_time,tiny(1.0_dp))
+    end if
     if(edge_loss) then
         close(edge_unit)
         write(diagnostics,'(a,i12)') 'edge_lost_inner ',edge_lost(1)
@@ -522,10 +557,18 @@ contains
         real(dp) :: reentry_offset
         logical :: wrapped
         integer :: wraps
-        logical :: lost
+        logical :: lost,use_outer,outside
+        complex(dp) :: phi_out
         integer :: loss_side,next_mark
         real(dp) :: loss_time,r_range(2),mark_dr(4)
         lost=.false.;loss_side=0;loss_time=-1;next_mark=1;mark_dr=0;r_range=r0;theta0=0
+        use_outer=outer_active;outside=.false.;phi_out=0
+        if(outer_active.and.abs(r0-rm)>outer_switch_cm) then
+            result=0;prefix_result=0
+            if(prefix_lag_nu>0) prefix_checkpoint_count=prefix_checkpoint_count+1
+            return
+        end if
+        if(use_outer) outer_histories=outer_histories+1
         debugging=all([imu,radial_index,marker_index]==debug_marker)
         if(debugging.and.debug_unit==0) open(newunit=debug_unit,file='ion_debug_marker.dat',status='new')
         reentry_offset=0;wrapped=.false.;wraps=0
@@ -554,7 +597,7 @@ contains
             call orbit_timestep_gorilla(x,vpar,vperp,0.0_dp,initialized,cell,face)
             alpha0=mmode*theta_sfl(x)+nmode*n_field_periods_manual*x(2)
             if(anomalous_diffusion_coefficient>0) call set_reference_frame(theta0,x(1))
-            if(radial_index==1.and.marker_index==1) then
+            if(radial_index==probe_sample.and.marker_index==1) then
                 probe_x=x;probe_vpar=vpar;probe_vperp=vperp
                 probe_cell=cell;probe_face=face;probe_initialized=.true.
                 energy0=energy_tot_func([x-tetra_physics(cell)%x1,vpar],-mu,cell)
@@ -605,6 +648,10 @@ contains
                 t=t+dt
             end if
             call sources()
+            if(use_outer) then
+                outer_history_time=outer_history_time+dt
+                if(outside) outer_outside_time=outer_outside_time+dt
+            end if
             real_integral=real_integral+dt/2*(old_actual+actual_source)
             ref_integral=ref_integral+dt/2*(old_ref+ref_source)
             old_actual=actual_source;old_ref=ref_source
@@ -704,7 +751,13 @@ contains
                 close(failure_unit)
                 error stop 'ion orbit lost; state captured; no respawn boundary selected'
             end if
-            rnow=flux_radius(x,cell);call sample_background(rnow,current_bg)
+            rnow=flux_radius(x,cell)
+            if(use_outer) outside=abs(rnow-rm)>outer_switch_cm
+            if(outside) then
+                call sample_outer(rnow,current_bg,phi_out)
+            else
+                call sample_background(rnow,current_bg)
+            end if
             field=bmod_func(x-tetra_physics(cell)%x1,cell)
             max_mu_error=max(max_mu_error,abs(vperp*vperp/(2*field*mu)-1))
             ! Unwrapped radial excursion; the offset is zero without re-entry.
@@ -751,6 +804,12 @@ contains
             field=bmod_func(x-tetra_physics(cell)%x1,cell)
             phase=exp(ii*(wave*rnow+alpha-alpha0))
             call ion_mu_source(current_bg,wave,lambda,mu_ref,field,vpar,phase,clight,actual_source)
+            if(outside) then
+                ! k=0 column: phase is exp(i(alpha-alpha0)), so the Phi drive of phi_out per unit Br
+                ! is phi_out times the k=0 Phi source; window Phi modes are absent here.
+                actual_source(M+1,2)=actual_source(M+1,2)+phi_out*actual_source(M+1,1)
+                actual_source(:,1)=0
+            end if
         end subroutine
     end subroutine trace_marker
 
@@ -1092,6 +1151,50 @@ contains
         helical=helical*abs(bg0(2))*sqrt(anomalous_diffusion_coefficient/sum(helical**2))
     end subroutine
 
+    subroutine read_outer_field()
+        ! GK_ION_OUTER_FIELD_V1: count line, then rows r, 14 background columns, Re/Im phi_out per unit Br.
+        integer :: u,j
+        real(dp) :: row(17)
+        character(64) :: head
+        open(newunit=u,file=trim(outer_field_file),status='old')
+        read(u,'(a)') head
+        if(trim(head)/='GK_ION_OUTER_FIELD_V1') error stop 'wrong outer field format'
+        read(u,*) outer_points
+        if(outer_points<2) error stop 'outer field needs at least two points'
+        allocate(outer_bg(outer_points,14),outer_phi(outer_points))
+        do j=1,outer_points
+            read(u,*) row
+            outer_bg(j,:)=row(2:15);outer_phi(j)=cmplx(row(16),row(17),dp)
+            if(row(1)/=row(2)) error stop 'outer field radius column mismatch'
+        end do
+        close(u)
+        if(.not.all(ieee_is_finite(outer_bg)).or..not.all(ieee_is_finite(real(outer_phi))) &
+            .or..not.all(ieee_is_finite(aimag(outer_phi)))) error stop 'nonfinite outer field'
+        if(any(outer_bg(2:,1)<=outer_bg(:outer_points-1,1))) error stop 'outer field radii must increase'
+        if(any(outer_bg(:,5:7)<=0).or.any(outer_bg(:,8)==0).or.any(outer_bg(:,13)<=0)) &
+            error stop 'invalid outer thermal parameters'
+    end subroutine
+    subroutine sample_outer(radius,result,potential)
+        ! Linear, non-periodic interpolation; leaving the table is an error, not a clamp.
+        real(dp),intent(in) :: radius
+        real(dp),intent(out) :: result(14)
+        complex(dp),intent(out) :: potential
+        real(dp) :: f
+        integer :: lo,hi,mid
+        if(radius<outer_bg(1,1).or.radius>outer_bg(outer_points,1)) error stop 'radius outside outer field table'
+        lo=1;hi=outer_points
+        do while(hi-lo>1)
+            mid=(lo+hi)/2
+            if(outer_bg(mid,1)<=radius) then
+                lo=mid
+            else
+                hi=mid
+            end if
+        end do
+        f=(radius-outer_bg(lo,1))/(outer_bg(hi,1)-outer_bg(lo,1))
+        result=(1-f)*outer_bg(lo,:)+f*outer_bg(hi,:);result(1)=radius
+        potential=(1-f)*outer_phi(lo)+f*outer_phi(hi)
+    end subroutine
     subroutine sample_background(radius,result)
         real(dp),intent(in) :: radius
         real(dp),intent(out) :: result(14)
