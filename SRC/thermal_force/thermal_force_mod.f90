@@ -5,7 +5,8 @@ module thermal_force_mod
 !
 ! Driver 'velocity': homogeneous plasma, no spatial motion. Each test ion
 ! carries its Cartesian velocity, receives Euler-Maruyama collision kicks with
-! the background at start_x_cm and gyrates exactly between kicks. This is the
+! the background at start_x_cm and gyrates exactly in between (symmetric
+! splitting: half a step of gyration, the kick, the other half). This is the
 ! homogeneous limit of a full orbit and gives the benchmark cases B04
 ! (relaxation), B05 and B06 (initial thermal-force acceleration).
 !
@@ -185,6 +186,11 @@ subroutine run_velocity_driver(inp, su)
         do k = 1, n_out
             do while (t < su%t_out(k))
                 h = min(su%dt, su%t_out(k) - t)
+                ! symmetric (Strang) splitting: half gyration, kick, half gyration
+                if (inp%boole_gyration) then
+                    call gyrate(su, -0.5_dp*su%omega_a*h, v_grad)
+                    call gyrate(su, -0.5_dp*su%omega_a*h, v_ctrl)
+                end if
                 call collision_numbers(xi)
                 call homma_kick(loc_gradient, v_grad, h, xi, dv, ierr)
                 if (ierr /= 0) fails(1) = fails(1) + 1
@@ -195,8 +201,8 @@ subroutine run_velocity_driver(inp, su)
                     v_ctrl = v_ctrl + dv
                 end if
                 if (inp%boole_gyration) then
-                    call gyrate(su, -su%omega_a*h, v_grad)
-                    call gyrate(su, -su%omega_a*h, v_ctrl)
+                    call gyrate(su, -0.5_dp*su%omega_a*h, v_grad)
+                    call gyrate(su, -0.5_dp*su%omega_a*h, v_ctrl)
                 end if
                 if (h < su%dt) then
                     t = su%t_out(k)
