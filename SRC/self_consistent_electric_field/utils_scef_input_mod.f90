@@ -15,7 +15,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
     character(len=256) :: restart_phi_file, restart_source_file
     logical :: boole_adaptive_relaxation, boole_measured_drift, boole_continuous_background
     integer :: source_buffer_mode, collision_background_mode
-    real(dp) :: source_buffer_bound_factor, drift_smoothing_width, calibration_bias_tolerance
+    real(dp) :: source_buffer_bound_factor, drift_smoothing_width, calibration_bias_tolerance, electron_tracing_time_limit
+    logical :: boole_ion_electron_collisions
     integer :: recalibration_mode
     real(dp) :: thermodiffusion_coefficient, ion_tracing_time_limit, diffusion_sigma_A_target, diffusion_max_spread_cells
     character(len=256) :: thermodiffusion_table_file
@@ -44,7 +45,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & boole_adaptive_relaxation, restart_phi_file, restart_source_file, thermodiffusion_coefficient, &
     & ion_tracing_time_limit, diffusion_sigma_A_target, diffusion_max_spread_cells, thermodiffusion_table_file, &
     & boole_measured_drift, recalibration_mode, boole_continuous_background, source_buffer_mode, &
-    & source_buffer_bound_factor, collision_background_mode, drift_smoothing_width, calibration_bias_tolerance
+    & source_buffer_bound_factor, collision_background_mode, drift_smoothing_width, calibration_bias_tolerance, &
+    & boole_ion_electron_collisions, electron_tracing_time_limit
 
     quasineutrality_tol = 0.0_dp   !optional in the .inp: no early exit unless set
     i_collision_mode = 1           !optional: full collision operator
@@ -71,6 +73,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
     source_buffer_bound_factor = 2.0_dp   !optional: cap for source_buffer_mode 1, times max |S| outside the buffer
     drift_smoothing_width = 0.0_dp        !optional: no smoothing of the measured B and drift
     calibration_bias_tolerance = 0.02_dp  !optional: biased surface = more than 2 % of the test particles hit the axis or the edge
+    boole_ion_electron_collisions = .true. !optional: ions also collide with the background electrons
+    electron_tracing_time_limit = -1.0_dp  !optional: honestly traced electrons up to time_step
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
     read(s_inp_unit,nml=self_consistent_ef_nml)
     close(s_inp_unit)
@@ -136,6 +140,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%source_buffer_bound_factor = source_buffer_bound_factor
     in%drift_smoothing_width = drift_smoothing_width
     in%calibration_bias_tolerance = calibration_bias_tolerance
+    in%boole_ion_electron_collisions = boole_ion_electron_collisions
+    in%electron_tracing_time_limit = electron_tracing_time_limit
 
     print *,'GORILLA_APPLETS: Loaded input data from self_consistent_ef.inp'
 

@@ -310,6 +310,9 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
         velrat = c%velrat_mat(:,ind_tetr)
         enrat = c%enrat_mat(:,ind_tetr)
     end select
+    !optionally no collisions of ion test particles with the background electrons (last background species),
+    !e.g. ion-ion only as in the EUTERPE benchmark runs
+    if ((species.eq.1).and.(.not.in%boole_ion_electron_collisions)) efcolf(c%n) = 0.0_dp
 
     vpar_background = c%vpar_mat(:,ind_tetr)
 
