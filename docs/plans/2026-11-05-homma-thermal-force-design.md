@@ -398,3 +398,33 @@ Open:
   repo literature), Helander & Sigmar 2002.
 - **Optional:** a semi-implicit friction step to remove the heating bias
   T_eff = T_b (1 + 0.5 Δt/τ_s); a kernel change, ask first.
+
+## 12. B12 status 2026-11-16 (paused)
+
+Paused for the benchmark of B04–B07 (kin6d covers only B01–B07).
+
+Done, uncommitted at the time of writing:
+- `background_profile = 'flux'` in the tokamak driver: T_i(s), n_i(s) from
+  `profile_data_mod` on the `flux_functions.dat` that GORILLA's analytic field
+  writes; at a collision the profiles are expanded linearly about the guiding
+  centre (`flux_profile_at`, gradients (dT/ds)(ds/dψ)∇ψ from the mesh). The
+  kernel's linear profile has a density gradient. Output: flux label s.
+- `EXAMPLES/thermal_force_tokamak_flux` (GORILLA example 8: R₀ = 1.7 m,
+  a = 0.5 m, B₀ = 2 T, q = 1.1–3.1; T_i = 50 eV + 100 eV/m (r − 25 cm)).
+  Screening drift −0.597 ± 0.011 m/s against the target scaled to the local
+  field, −0.588 m/s; checked in `thermal_force_tokamak`.
+- `check_flux.py`: mesh study (drift and radial spread converged at the
+  example mesh 40×80×40) and the flat-profile diffusion over 75–150 τ_s:
+  D_r = 0.210 m²/s with the collision shift, 0.161 m²/s without; classical
+  part 0.049 m²/s, neoclassical/classical = 3.3 (textbook 2q² = 5.1 for a
+  velocity-independent collision rate).
+
+Open:
+- Exact Pfirsch–Schlüter test-particle diffusion for the Homma Maxwellian
+  operator (velocity-dependent rates), derived in Wolfram, as the target
+  for the ratio; longer runs and a step scan.
+- Radial convection V: correct d⟨r⟩/dt for the metric term (spreading alone
+  moves ⟨r⟩ by about D/r); in s, d⟨s⟩/dt = V_s + ∂D_ss/∂s.
+  `calc_diffusion_coefficient` of the anomalous applet omits this as well.
+- `thermal_force_tokamak` takes 11.6 s on one thread; trim if needed.
+- B12b: the background-flow model (u_i = ωR e_φ + K B/n, q_i = q_dia + L B).
