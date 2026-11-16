@@ -55,7 +55,7 @@ subroutine calc_self_consistent_electric_field
     call unlink_files
     call delete_scef_output_files
     call print_errors_for_bad_inputs
-    if (in%update_dimension.eq.3) call initialize_3d_update_grid
+    if ((in%update_dimension.eq.3) .or. in%boole_write_3d_update) call initialize_3d_update_grid
 
     !Prep diffusion coefficients once per species that will use the random walk.
     !Skipping this step reuses the cached A_and_B_species<species>.dat if present.

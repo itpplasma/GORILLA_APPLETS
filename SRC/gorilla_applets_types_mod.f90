@@ -165,6 +165,7 @@ module gorilla_applets_types_mod
     integer  :: source_buffer_mode = 0 !used in self consistent electric field: 0 source in the outer buffer (or outer 10%) kept fixed; 1 updated like elsewhere with |S| capped
     real(dp) :: source_buffer_bound_factor = 2.0_dp !used in self consistent electric field: cap for source_buffer_mode 1 = factor * max |S| outside the buffer
     real(dp) :: drift_smoothing_width = 0.0_dp !used in self consistent electric field: >0 Gaussian width in s of the local linear smoothing of the measured B and drift rest r over the unbiased surfaces (boole_measured_drift; 0 = off)
+    logical  :: boole_write_3d_update = .false. !used in self consistent electric field: write per potential update the prism densities, the 3D vertex charge and the unrelaxed 3D potential step (also for 1D updates)
     logical  :: boole_ion_electron_collisions = .true. !used in self consistent electric field and collisions without background updates: .false. switches off the collisions of ion test particles (species 1) with the background electrons
     real(dp) :: electron_tracing_time_limit = -1.0_dp !used in self consistent electric field: maximum tracing time [s] of honestly traced electrons (<= 0: time_step)
     real(dp) :: calibration_bias_tolerance = 0.02_dp !used in self consistent electric field: a calibrated surface counts as biased if more than this fraction of its test particles was mirrored at the axis or lost at the edge

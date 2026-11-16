@@ -135,10 +135,7 @@ subroutine calc_phi_elec_from_rho(i)
     !twice the linearised Boltzmann response 1/(e^2 n (1/T_i+1/T_e)) of both species, so it reduces to the
     !former T/(n_0*e^2) = 4*pi*r_D^2 for uniform T_i = T_e
     do v = 1, nvert
-        rad = rad_from_s(verts_sthetaphi(1,v))
-        T_i = target_ion_temperature(rad)
-        T_e = target_electron_temperature(rad)
-        ep%phi_elec_from_rho(v) = ep%rho_vert(v)*2.0_dp*T_i*T_e/(T_i+T_e)*ev2erg/(echarge**2*target_density(rad))
+        ep%phi_elec_from_rho(v) = ep%rho_vert(v)*potential_response_factor(v)
     enddo
 
     !under-relaxation against overshooting (potential_relaxation_factor, default 1/3), either global or
@@ -160,6 +157,64 @@ subroutine calc_phi_elec_from_rho(i)
     ! print*, 'maximum phi is', maxval(ep%phi_elec_from_rho), 'minimum phi is', minval(ep%phi_elec_from_rho)
 
 end subroutine calc_phi_elec_from_rho
+
+function potential_response_factor(v) result(f)
+
+    !T_h/(e^2 n) at vertex v for the target profiles, T_h = 2*T_i*T_e/(T_i+T_e) (see calc_phi_elec_from_rho)
+
+    use constants, only: ev2erg, echarge
+    use tetra_grid_mod, only: verts_sthetaphi
+    use scef_target_profiles_mod, only: target_density, target_ion_temperature, target_electron_temperature, &
+                                        rad_from_s
+
+    integer, intent(in) :: v
+    real(dp) :: f, rad, T_i, T_e
+
+    rad = rad_from_s(verts_sthetaphi(1,v))
+    T_i = target_ion_temperature(rad)
+    T_e = target_electron_temperature(rad)
+    f = 2.0_dp*T_i*T_e/(T_i+T_e)*ev2erg/(echarge**2*target_density(rad))
+
+end function potential_response_factor
+
+subroutine write_3d_update_diagnostic(tag)
+
+    !boole_write_3d_update: per potential update, the 3D information behind it, written also when the update
+    !itself is 1D, so that the 3D update can be reconstructed afterwards:
+    !  prism_densities_<tag>.dat        : per prism the densities n_i, n_e [cm^-3] used by this update
+    !                                     (after the exit-time normalisation; prism order of prism_volumes.dat)
+    !  rho_vert_3d_<tag>.dat            : charge density [statC/cm^3] at every vertex as calc_rho_on_vertices_3d
+    !                                     builds it from these prism densities (vertex order of the grid)
+    !  delta_phi_3d_unrelaxed_<tag>.dat : the 3D potential step rho*T_h/(e^2 n) [statV] at every vertex,
+    !                                     before the relaxation factor (potential_relaxation_factor or adaptive)
+    !ep%rho_vert of the actual update is restored afterwards.
+
+    use gorilla_applets_types_mod, only: ep, output
+    use tetra_grid_mod, only: nvert
+
+    character(len=*), intent(in) :: tag
+    real(dp), dimension(:), allocatable :: rho_saved
+    integer :: unit, k, v
+
+    open(newunit = unit, file = 'prism_densities_' // trim(tag) // '.dat')
+    do k = 1, size(output%prism_volumes)
+        write(unit,'(2ES20.10E4)') real(output%prism_moments(1,k,1)), real(output%prism_moments(1,k,2))
+    enddo
+    close(unit)
+
+    rho_saved = ep%rho_vert
+    call calc_rho_on_vertices_3d
+    open(newunit = unit, file = 'rho_vert_3d_' // trim(tag) // '.dat')
+    write(unit,'(ES20.10E4)') ep%rho_vert
+    close(unit)
+    open(newunit = unit, file = 'delta_phi_3d_unrelaxed_' // trim(tag) // '.dat')
+    do v = 1, nvert
+        write(unit,'(ES20.10E4)') ep%rho_vert(v)*potential_response_factor(v)
+    enddo
+    close(unit)
+    ep%rho_vert = rho_saved
+
+end subroutine write_3d_update_diagnostic
 
 subroutine update_shell_relaxation_factors
 
@@ -593,6 +648,8 @@ subroutine print_data(i, source_step)
 
 
 
+    if (in%boole_write_3d_update) call write_3d_update_diagnostic(tag)
+
     ep%average_abs_phi_elec_from_rho(i) = sum(abs(ep%phi_elec_from_rho))/size(ep%phi_elec_from_rho)
 
     print*, "source iteration ", source_step, ", electric potential update ", i, " complete."
@@ -617,6 +674,9 @@ subroutine delete_scef_output_files
                               ' phi_elec_1d_*_*.dat'                                   // &
                               ' relaxation_factor_*_*.dat'                             // &
                               ' one_d_densities*_*.dat'                                // &
+                              ' prism_densities_*_*.dat'                               // &
+                              ' rho_vert_3d_*_*.dat'                                   // &
+                              ' delta_phi_3d_unrelaxed_*_*.dat'                        // &
                               ' phi_elec_after_electric_potential_update_*.dat'        // &
                               ' ion_densities_after_electric_potential_update_*.dat'   // &
                               ' rho_per_vertex_during_electric_potential_update_*.dat' // &
