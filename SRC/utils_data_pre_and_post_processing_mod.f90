@@ -747,12 +747,13 @@ subroutine prepare_next_round_of_parallelised_particle_pushing(species)
 
 end subroutine prepare_next_round_of_parallelised_particle_pushing
 
-subroutine normalise_prism_moments_and_prism_moments_squared(species_in, boole_skip_time_normalisation_in)
+subroutine normalise_prism_moments_and_prism_moments_squared(species_in, boole_skip_time_normalisation_in, time_in)
 
     use gorilla_applets_types_mod, only: moment_specs, output, in, start
 
     integer, intent(in), optional :: species_in
     logical, intent(in), optional :: boole_skip_time_normalisation_in
+    real(dp), intent(in), optional :: time_in   !normalisation time instead of the species' tracing time start%t(species)
     integer :: species
     integer :: n
     real(dp) :: time
@@ -762,6 +763,7 @@ subroutine normalise_prism_moments_and_prism_moments_squared(species_in, boole_s
     species = 1   !not initialised in the declaration: that would imply SAVE
     if (present(species_in)) species = species_in
     time = start%t(species)
+    if (present(time_in)) time = time_in
 
     boole_skip_time_normalisation = .false.
     if (present(boole_skip_time_normalisation_in)) boole_skip_time_normalisation = boole_skip_time_normalisation_in

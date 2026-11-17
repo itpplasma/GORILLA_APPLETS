@@ -175,7 +175,9 @@ subroutine run_scef_iterations(source_step)
             else
                 if (in%boole_collisions) call calc_collision_coefficients_for_all_tetrahedra(species)
                 call parallelised_particle_pushing(species,i,boole_diffusion_coefficient=.false.)
-                call normalise_prism_moments_and_prism_moments_squared(species)
+                !common time_step for both species (not their tracing-time limits start%t), as assumed by the
+                !exit-time correction below and by the random walk, which normalises by time_step as well
+                call normalise_prism_moments_and_prism_moments_squared(species, time_in=in%time_step)
                 ep%mean_exit_time(species) = sum(exit_data%t_confined(:, species))/in%num_particles
                 !markers stopped at the tracing time limit (still confined): their density is cut off there
                 n_at_limit = count(exit_data%t_confined(:, species).ge.(1.0_dp - 1.0d-10)*start%t(species))
