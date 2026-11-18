@@ -38,6 +38,7 @@ subroutine read_helical_core_inp_into_type
                boole_eliminate_particles_outside_flux, boole_delta_f, boole_unidirectional_beam
     logical :: boole_profiles_from_vertex_data = .false.
     logical :: boole_write_marker_weights = .false.
+    logical :: boole_load_local_maxwellian = .false.
     integer :: i_integrator_type, seed_option, n_species, n_time_slices !i_integrator_type, seed_option: read for compatibility with existing input files, unused
     real(dp) :: flux_threshold_for_elimination, beam_density_fraction, reservoir_min_volume_fraction, &
                 background_temperature_eV, reservoir_capacity_flow, reservoir_capacity_temperature
@@ -53,7 +54,7 @@ subroutine read_helical_core_inp_into_type
     & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f, &
     & n_time_slices, boole_unidirectional_beam, beam_density_fraction, reservoir_min_volume_fraction, &
     & background_temperature_eV, reservoir_capacity_flow, reservoir_capacity_temperature, &
-    & boole_profiles_from_vertex_data, boole_write_marker_weights
+    & boole_profiles_from_vertex_data, boole_write_marker_weights, boole_load_local_maxwellian
 
     !optional keys keep their input_t defaults when absent from the file
     n_time_slices = in%n_time_slices
@@ -98,6 +99,7 @@ subroutine read_helical_core_inp_into_type
     in%flux_threshold_for_elimination = flux_threshold_for_elimination
     in%boole_delta_f = boole_delta_f
     in%boole_profiles_from_vertex_data = boole_profiles_from_vertex_data
+    in%boole_load_local_maxwellian = boole_load_local_maxwellian
     boole_marker_weights_output = boole_write_marker_weights
     in%n_time_slices = n_time_slices
     in%boole_unidirectional_beam = boole_unidirectional_beam

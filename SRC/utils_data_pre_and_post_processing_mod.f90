@@ -322,7 +322,11 @@ subroutine set_starting_positions()
 
     ! Initialize position distribution if not already done
     if (.not. start%dist_position%initialized) then
-        call init_distribution_3d(start%dist_position, pdf_flat, xmin, xmax)
+        if (in%boole_load_local_maxwellian) then
+            call init_vertex_density_position_distribution(xmin, xmax)
+        else
+            call init_distribution_3d(start%dist_position, pdf_flat, xmin, xmax)
+        endif
     endif
 
     ! Sample positions for all species
@@ -332,20 +336,112 @@ subroutine set_starting_positions()
 
 end subroutine set_starting_positions
 
+subroutine init_vertex_density_position_distribution(xmin, xmax)
+
+    !Position distribution of the markers for boole_load_local_maxwellian: pdf ~ n(R,Z) R in the
+    !(R, phi, Z) box, n from the vertex data (zero outside the mesh), sampled by rejection
+    !(init_distribution_3d, sample_array_3d). Normalisation and rejection bound are set exactly from
+    !the vertex data instead of the Monte Carlo estimates of init_distribution_3d: n and R are linear on
+    !every triangle, so int n R dA = A/12 (sum n_i R_i + sum n_i sum R_i), and max(n) max(R) bounds n R.
+
+    use gorilla_applets_types_mod, only: in, start
+    use gorilla_settings_mod, only: coord_system
+    use constants, only: pi
+    use marker_distribution_mod, only: init_distribution_3d
+    use vertex_data_mod, only: n_triangles_2d, triangles_2d, R_2d, Z_2d, n_2d
+
+    real(dp), intent(in) :: xmin(3), xmax(3)
+    real(dp) :: integral, area
+    integer :: k
+    integer, dimension(3) :: v
+
+    if (.not.in%boole_profiles_from_vertex_data) then
+        print*, 'Error: boole_load_local_maxwellian needs boole_profiles_from_vertex_data'
+        stop
+    endif
+    if (coord_system.ne.1 .or. in%boole_monoenergetic .or. in%boole_point_source) then
+        print*, 'Error: boole_load_local_maxwellian needs coord_system = 1, no monoenergetic markers, no point source'
+        stop
+    endif
+
+    call init_distribution_3d(start%dist_position, pdf_vertex_density_position, xmin, xmax, n_probe=1)
+
+    integral = 0.0_dp
+    do k = 1, n_triangles_2d
+        v = triangles_2d(:,k)
+        area = 0.5_dp*abs((R_2d(v(2))-R_2d(v(1)))*(Z_2d(v(3))-Z_2d(v(1))) - &
+                          (R_2d(v(3))-R_2d(v(1)))*(Z_2d(v(2))-Z_2d(v(1))))
+        integral = integral + area/12.0_dp*(sum(n_2d(v)*R_2d(v)) + sum(n_2d(v))*sum(R_2d(v)))
+    enddo
+    start%dist_position%normalization = (xmax(2) - xmin(2))*integral
+    start%dist_position%pdf_max = maxval(n_2d)*maxval(R_2d)
+
+    print*, 'Markers loaded from the local Maxwellian of the vertex data: particles in the mesh = ', &
+            start%dist_position%normalization, ', rejection efficiency about ', &
+            start%dist_position%normalization/(start%dist_position%pdf_max*product(xmax - xmin))
+
+end subroutine init_vertex_density_position_distribution
+
+function pdf_vertex_density_position(x) result(val)
+
+    !Unnormalised marker position pdf n(R,Z) R at x = (R, phi, Z); 0 outside the mesh
+
+    real(dp), intent(in) :: x(:)
+    real(dp) :: val
+    real(dp) :: dens, temp_i
+    logical :: found
+
+    call vertex_profiles_at(x(1:3), dens, temp_i, found)
+    val = 0.0_dp
+    if (found) val = max(dens, 0.0_dp)*x(1)
+
+end function pdf_vertex_density_position
+
+subroutine vertex_profiles_at(x, dens, temp_i, found)
+
+    !Density [cm^-3] and ion temperature [eV] of the vertex data at x = (R, phi, Z);
+    !found = .false. outside the mesh
+
+    use find_tetra_mod, only: find_tetra
+    use vertex_data_mod, only: vertex_data_profiles
+
+    real(dp), intent(in) :: x(3)
+    real(dp), intent(out) :: dens, temp_i
+    logical, intent(out) :: found
+    real(dp) :: x_local(3), temp_e
+    integer :: ind_tetr, iface
+
+    x_local = x
+    call find_tetra(x_local, 0.0_dp, 1.0_dp, ind_tetr, iface)
+    found = (ind_tetr.ne.-1)
+    dens = 0.0_dp
+    temp_i = 0.0_dp
+    if (found) call vertex_data_profiles(ind_tetr, x(1), x(3), dens, temp_i, temp_e)
+
+end subroutine vertex_profiles_at
+
 subroutine init_velocity_space_distributions()
 
     !Marker distributions of pitch (uniform on [-1, 1]) and energy (fixed for monoenergetic runs,
-    !uniform on [0, 5*T] otherwise), used for sampling and for evaluating the marker weights
+    !uniform on [0, 5*T] otherwise, Maxwellian in E/T_i with boole_load_local_maxwellian), used for
+    !sampling and for evaluating the marker weights
 
     use gorilla_applets_types_mod, only: in, start
-    use marker_distribution_mod, only: pdf_flat, init_distribution_1d
+    use marker_distribution_mod, only: pdf_flat, init_distribution_1d, pdf_maxwell, pdf_maxwell_integral, &
+                                       maxwell_temperature_eV
 
     if (.not. start%dist_lambda%initialized) then
         call init_distribution_1d(start%dist_lambda, pdf_flat, -1.0_dp, 1.0_dp)
     endif
 
     if (.not. start%dist_energy%initialized) then
-        if (in%boole_monoenergetic) then
+        if (in%boole_load_local_maxwellian) then
+            !energy in units of the local ion temperature (x = E/T_i), scaled per marker in set_rest_of_start_type
+            start%epsilon_max = 16.0_dp
+            maxwell_temperature_eV = 1.0_dp
+            call init_distribution_1d(start%dist_energy, pdf_maxwell, 0.0_dp, start%epsilon_max, &
+                                      normalization = pdf_maxwell_integral(start%epsilon_max))
+        elseif (in%boole_monoenergetic) then
             call init_distribution_1d(start%dist_energy, pdf_flat, in%energy_eV, in%energy_eV)
         else
             call init_distribution_1d(start%dist_energy, pdf_flat, 0.0_dp, 5.0_dp*in%energy_eV)
@@ -359,7 +455,9 @@ subroutine set_rest_of_start_type()
     use gorilla_applets_types_mod, only: in, start
     use marker_distribution_mod, only: sample_array_1d
 
-    integer :: i_species
+    integer :: i_species, n
+    real(dp) :: dens, temp_i
+    logical :: found
 
     call init_velocity_space_distributions
 
@@ -368,6 +466,17 @@ subroutine set_rest_of_start_type()
         call sample_array_1d(start%dist_lambda, in%num_particles, start%pitch(:,i_species))
         call sample_array_1d(start%dist_energy, in%num_particles, start%energy(:,i_species))
     enddo
+
+    !Local Maxwellian: the sampled energies are E/T_i, scaled with the ion temperature at each marker
+    if (in%boole_load_local_maxwellian) then
+        do i_species = 1, in%n_species
+            do n = 1, in%num_particles
+                call vertex_profiles_at(start%x(:,n,i_species), dens, temp_i, found)
+                if (.not.found) error stop 'boole_load_local_maxwellian: a marker was placed outside the mesh'
+                start%energy(n,i_species) = start%energy(n,i_species)*temp_i
+            enddo
+        enddo
+    endif
 
     if (in%boole_antithetic_variate) then
         start%x(:,1:in%num_particles:2,:) = start%x(:,2:in%num_particles:2,:)

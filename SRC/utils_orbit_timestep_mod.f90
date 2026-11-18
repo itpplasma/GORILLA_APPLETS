@@ -323,7 +323,12 @@ subroutine calc_particle_weights_and_jperp(n,z_save,vpar,vperp,ind_tetr, species
     else
         q = start%particle_charge(species)
         energy_erg = start%energy(n,species)*ev2erg
-        pdf_energy_erg = evaluate_distribution_1d(start%dist_energy, start%energy(n,species))/ev2erg
+        if (in%boole_load_local_maxwellian) then
+            !energies were sampled as E/T with the local temperature T of the vertex data (set above)
+            pdf_energy_erg = evaluate_distribution_1d(start%dist_energy, start%energy(n,species)*ev2erg/T)/T
+        else
+            pdf_energy_erg = evaluate_distribution_1d(start%dist_energy, start%energy(n,species))/ev2erg
+        endif
         if (boole_include_potential) then
             Phi_elec = tetra_physics(ind_tetr)%Phi1 + sum(tetra_physics(ind_tetr)%gPhi*z_save)
         else

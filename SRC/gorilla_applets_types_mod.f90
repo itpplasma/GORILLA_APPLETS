@@ -110,6 +110,9 @@ module gorilla_applets_types_mod
     logical  :: boole_linear_temperature_simulation = .false.
     !density and temperatures from the vertex data of grid_kind = 7 (one ion species with Z = 1)
     logical  :: boole_profiles_from_vertex_data = .false.
+    !load the markers from the local Maxwellian of the vertex data (positions ~ n R, energies from the local
+    !ion temperature), so that full-f markers get nearly equal weights; needs boole_profiles_from_vertex_data
+    logical  :: boole_load_local_maxwellian = .false.
     integer  :: num_particles = 0
     logical  :: boole_write_vertex_indices = .false.
     logical  :: boole_write_vertex_coordinates = .false.
