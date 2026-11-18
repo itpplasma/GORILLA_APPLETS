@@ -4,6 +4,20 @@ module utils_parallelised_particle_pushing_mod
 
     implicit none
 
+    !Deferred background updates of the energy and momentum conserving collisions: while
+    !boole_deferred_background_updates is set, collisions read a frozen background and every thread
+    !adds the parallel momentum and energy [erg] its markers gain into its own slot
+    !background_exchange(1:2, species, tetrahedron, thread). apply_deferred_background_updates sums the
+    !slots in thread order (reproducible for a fixed thread count) and updates each reservoir once.
+    !
+    !Electrons (background species c%n) take part in the conserving collisions with instantaneous e-i
+    !friction: the electron flow is locked to the mass-weighted mean ion flow, so the momentum markers
+    !exchange with electrons goes into the common flow of all background species, and the rest of the
+    !exchanged energy into the electron temperature (update_electron_reservoir). There is no finite
+    !e-i friction and no T_e-T_i equipartition (see EXAMPLES/helical_core/CONSERVING_COLLISIONS.md).
+    logical :: boole_deferred_background_updates = .false.
+    real(dp), dimension(:,:,:,:), allocatable :: background_exchange
+
 contains
 
 subroutine print_progress(num_particles,kpart,n)
@@ -40,16 +54,15 @@ subroutine handle_lost_particles(local_counter, boole_particle_lost)
 
 end subroutine handle_lost_particles
 
-subroutine initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp,species_in, &
-                                     boole_keep_moments_in)
+subroutine initialise_loop_variables(l, n, local_counter,particle_status,t,local_tetr_moments,x,vpar,vperp,species_in)
 
 use gorilla_applets_types_mod, only: in, counter_t, start, time_t, particle_status_t
 use constants, only: ev2erg
+use utils_orbit_timestep_mod, only: is_touched
 use gorilla_applets_settings_mod, only: i_option
 
 integer, intent(in) :: l, n
 integer, intent(in), optional :: species_in
-logical, intent(in), optional :: boole_keep_moments_in   !.true.: caller zeroes local_tetr_moments itself
 type(counter_t) :: local_counter
 type(particle_status_t) :: particle_status
 type(time_t) :: t
@@ -67,13 +80,8 @@ particle_status%exit = .false.
 t%step = in%time_step
 if (present(species_in)) t%step = start%t(species)
 t%confined = 0.0_dp
-if (l.eq.1) then
-    if (present(boole_keep_moments_in)) then
-        if (.not.boole_keep_moments_in) local_tetr_moments = 0.0_dp
-    else
-        local_tetr_moments = 0.0_dp
-    endif
-endif
+!with touched-tetrahedron tracking, add_marker_moments_to_thread_sums resets the moments instead
+if ((l.eq.1).and.(.not.allocated(is_touched))) local_tetr_moments = 0.0_dp
 pitchpar = start%pitch(n,species)
 x = start%x(:,n,species)
 v = sqrt(start%energy(n,species)*ev2erg*2/start%particle_mass(species))
@@ -91,35 +99,73 @@ endif
 
 end subroutine initialise_loop_variables
 
-subroutine add_local_tetr_moments_to_output(local_tetr_moments,species_in)
+subroutine add_marker_moments_to_thread_sums(local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared)
+
+    !Adds the moments of one marker (or antithetic pair) to the sums of the calling thread, without
+    !synchronisation. The squared moments need the square of the marker's total per prism (its
+    !contributions to a prism are correlated), so they are formed here, marker by marker.
+    !With touched-tetrahedron tracking, only the visited tetrahedra are transferred and then reset.
+
+    use gorilla_applets_types_mod, only: moment_specs
+    use utils_orbit_timestep_mod, only: touched_tetr, is_touched, n_touched
+
+    complex(dp), dimension(:,:), intent(inout) :: local_tetr_moments
+    complex(dp), dimension(:,:), intent(inout) :: thread_tetr_moments, thread_prism_moments_squared
+    integer :: i, k, ind_tetr, first_in_prism
+
+    if (.not.allocated(is_touched)) then
+        thread_tetr_moments = thread_tetr_moments + local_tetr_moments
+        if (moment_specs%boole_squared_moments) then
+            do k = 1, size(thread_prism_moments_squared, 2)
+                thread_prism_moments_squared(:,k) = thread_prism_moments_squared(:,k) + &
+                    (local_tetr_moments(:,3*k-2) + local_tetr_moments(:,3*k-1) + local_tetr_moments(:,3*k))**2
+            enddo
+        endif
+        return
+    endif
+
+    do i = 1, n_touched
+        ind_tetr = touched_tetr(i)
+        thread_tetr_moments(:,ind_tetr) = thread_tetr_moments(:,ind_tetr) + local_tetr_moments(:,ind_tetr)
+        if (moment_specs%boole_squared_moments) then
+            !square each touched prism once, at its first touched tetrahedron
+            k = (ind_tetr + 2)/3
+            first_in_prism = 3*k - 2
+            do while (.not.is_touched(first_in_prism))
+                first_in_prism = first_in_prism + 1
+            enddo
+            if (first_in_prism.eq.ind_tetr) thread_prism_moments_squared(:,k) = thread_prism_moments_squared(:,k) + &
+                (local_tetr_moments(:,3*k-2) + local_tetr_moments(:,3*k-1) + local_tetr_moments(:,3*k))**2
+        endif
+    enddo
+    do i = 1, n_touched
+        local_tetr_moments(:,touched_tetr(i)) = (0.0_dp, 0.0_dp)
+        is_touched(touched_tetr(i)) = .false.
+    enddo
+    n_touched = 0
+
+end subroutine add_marker_moments_to_thread_sums
+
+subroutine add_thread_moments_to_output(thread_tetr_moments, thread_prism_moments_squared, species)
+
+    !Adds the moment sums of one thread to the output; call once per thread inside a critical section.
 
     use gorilla_applets_types_mod, only: moment_specs, output
-    use tetra_grid_mod, only: ntetr
-    
-    complex(dp), dimension(:,:), intent(in) :: local_tetr_moments
-    integer, intent(in), optional :: species_in
-    integer :: species
-    integer :: k, n_prisms
 
-    species = 1
+    complex(dp), dimension(:,:), intent(in) :: thread_tetr_moments, thread_prism_moments_squared
+    integer, intent(in) :: species
+    integer :: k
 
-    if (present(species_in)) species = species_in
-    
-    n_prisms = ntetr/3
-    
-    output%tetr_moments(:,:,species) = output%tetr_moments(:,:,species) + local_tetr_moments
-    output%prism_moments(:,:,species) = output%prism_moments(:,:,species) + &
-        & (local_tetr_moments(:,(/(1+3*k,k = 0,n_prisms-1)/)) + &
-        &  local_tetr_moments(:,(/(2+3*k,k = 0,n_prisms-1)/)) + &
-        &  local_tetr_moments(:,(/(3+3*k,k = 0,n_prisms-1)/)))
+    output%tetr_moments(:,:,species) = output%tetr_moments(:,:,species) + thread_tetr_moments
+    do k = 1, size(output%prism_moments, 2)
+        output%prism_moments(:,k,species) = output%prism_moments(:,k,species) + &
+            thread_tetr_moments(:,3*k-2) + thread_tetr_moments(:,3*k-1) + thread_tetr_moments(:,3*k)
+    enddo
     if (moment_specs%boole_squared_moments) then
-        output%prism_moments_squared(:,:,species) = output%prism_moments_squared(:,:,species) + &
-            & (local_tetr_moments(:,(/(1+3*k,k = 0,n_prisms-1)/)) + &
-            &  local_tetr_moments(:,(/(2+3*k,k = 0,n_prisms-1)/)) + &
-            &  local_tetr_moments(:,(/(3+3*k,k = 0,n_prisms-1)/)))**2
+        output%prism_moments_squared(:,:,species) = output%prism_moments_squared(:,:,species) + thread_prism_moments_squared
     endif
-    
-end subroutine add_local_tetr_moments_to_output
+
+end subroutine add_thread_moments_to_output
 
 subroutine set_counter_zero(counter)
 
@@ -190,11 +236,11 @@ end subroutine carry_out_collisions
 subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
 
     use gorilla_applets_types_mod, only: in, c, time_t, start, weights
-    use collis_ions, only: stost
-    use collis_ions, only: collis_init
+    use collis_ions, only: stost, collis_init, coleff, collision_step, nu_scale_factor
     use tetra_physics_mod, only: particle_mass,particle_charge
     use constants, only: echarge,amp
     use gorilla_applets_settings_mod, only: i_option
+    use omp_lib, only: omp_get_thread_num
 
     integer, intent(in) :: i, n, species, iswmode
     real(dp), dimension(3), intent(inout) :: x
@@ -203,24 +249,30 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     integer :: ind_tetr
 
     real(dp), dimension(5) :: zet
-    real(dp), dimension(3) :: randnum
-    real(dp), dimension(1) :: m, z, dens, temp, efcolf,velrat,enrat
+    real(dp), dimension(c%n) :: efcolf, velrat, enrat, dpp_vec, dhh_vec, fpeff_vec
     real(dp) :: vpar_background
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar
-    integer :: err, j, p
-    real(dp) :: particle_to_background_coupling_strength, t_max
+    integer :: err, j, thread
+    real(dp) :: marker_to_background_ratio, t_max, w_phys
+    logical :: rejected
 
-    particle_to_background_coupling_strength = 0.0001_dp
+    m0 = particle_mass
+    z0 = particle_charge/echarge
+    call collis_init(m0, z0, c%mass, c%charge_num, c%dens_mat(:,ind_tetr), c%temp_mat(:,ind_tetr), in%energy_eV, &
+                     start%v0(species), efcolf, velrat, enrat)
 
-    do j = 1,c%n-1
-        
-        m0 = particle_mass
-        z0 = particle_charge/echarge
-        m = c%mass(j)
-        z = c%charge_num(j)
-        dens = c%dens_mat(j,ind_tetr)
-        temp = c%temp_mat(j,ind_tetr)
-        call collis_init(m0,z0, m,z, dens, temp, in%energy_eV, start%v0(species), efcolf, velrat, enrat)
+    t_max = (start%t(species)-t%confined)*start%v0(species)
+    if (i_option.eq.13) t_max = min(t_max, t%step_anomalous_transport*start%v0(species))
+
+    !One step for all species, chosen by stost's rule from the summed pitch-angle diffusion (in the frame
+    !of the first background species); the species are then applied one after another with this step
+    !(stost without tau keeps dtau). Choosing the step per species instead would let the last species
+    !overwrite t%step, so the marker time would advance by a step the other species were not applied for.
+    zet(4) = sqrt((vpar - c%vpar_mat(1,ind_tetr))**2 + vperp**2)/start%v0(species)
+    call coleff(efcolf, velrat, enrat, zet(4), dpp_vec, dhh_vec, fpeff_vec)
+    t%step = collision_step(sum(dhh_vec)*nu_scale_factor, zet(4), t_max)
+
+    do j = 1,c%n
 
         vpar_save = vpar
         vperp_save = vperp
@@ -228,19 +280,11 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         vpar = vpar - vpar_background
 
         zet(1:3) = x !spatial position
-        zet(4) = sqrt(vpar**2+vperp**2)/start%v0(species) !normalized velocity module 
+        zet(4) = sqrt(vpar**2+vperp**2)/start%v0(species) !normalized velocity module
         zet(5) = vpar/sqrt(vpar**2+vperp**2) !pitch parameter
 
-        t_max = (start%t(species)-t%confined)*start%v0(species)
-        if (i_option.eq.13) t_max = min(t_max, t%step_anomalous_transport*start%v0(species))
-        
-        if (in%boole_precalc_collisions) then
-            randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species) 
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum)
-        else
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max)
-        endif
-        
+        call stost(efcolf(j:j),velrat(j:j),enrat(j:j),zet,t%step,iswmode,err)
+
         vpar = zet(5)*zet(4)*start%v0(species)+vpar_background
         vperp = sqrt(1-zet(5)**2)*zet(4)*start%v0(species)
         
@@ -252,14 +296,118 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         delta_vpar = vpar - vpar_save
         delta_epsilon = particle_mass/2*(vpar**2 + vperp**2 - vpar_save**2 - vperp_save**2)
 
-        !$omp critical
-        call update_background_reservoir(particle_mass, c%mass(j), &
-            c%weight_factor*real(weights%w(n,species), dp)*particle_to_background_coupling_strength, &
-            delta_vpar, delta_epsilon, c%vpar_mat(j,ind_tetr), c%temp_mat(j,ind_tetr))
-        !$omp end critical
+        !A marker represents weights%w/n_particles physical particles (the moments are normalised the
+        !same way), the reservoir holds dens_mat*tetr_volume background particles
+        w_phys = real(weights%w(n,species), dp)/in%n_particles
+
+        if (boole_deferred_background_updates) then
+            thread = omp_get_thread_num()
+            background_exchange(1,j,ind_tetr,thread) = background_exchange(1,j,ind_tetr,thread) + &
+                                                       w_phys*particle_mass*delta_vpar
+            background_exchange(2,j,ind_tetr,thread) = background_exchange(2,j,ind_tetr,thread) + w_phys*delta_epsilon
+        elseif (j.eq.c%n) then
+            !$omp critical
+            call update_electron_reservoir(c%mass, c%dens_mat(:,ind_tetr)*c%tetr_volume(ind_tetr), &
+                -w_phys*particle_mass*delta_vpar, -w_phys*delta_epsilon, c%vpar_mat(:,ind_tetr), &
+                c%temp_mat(c%n,ind_tetr), rejected)
+            !$omp end critical
+        else
+            marker_to_background_ratio = w_phys/(c%dens_mat(j,ind_tetr)*c%tetr_volume(ind_tetr))
+            !$omp critical
+            call update_background_reservoir(particle_mass, c%mass(j), marker_to_background_ratio, &
+                delta_vpar, delta_epsilon, c%vpar_mat(j,ind_tetr), c%temp_mat(j,ind_tetr))
+            !$omp end critical
+        endif
     enddo
 
 end subroutine collisions_with_background_updates
+
+subroutine start_deferred_background_updates
+
+    !Switches the conserving collisions to deferred background updates (see module header)
+
+    use gorilla_applets_types_mod, only: c
+    use tetra_grid_mod, only: ntetr
+    use omp_lib, only: omp_get_max_threads
+
+    if (allocated(background_exchange)) deallocate(background_exchange)
+    allocate(background_exchange(2, c%n, ntetr, 0:omp_get_max_threads()-1))
+    background_exchange = 0.0_dp
+    boole_deferred_background_updates = .true.
+
+end subroutine start_deferred_background_updates
+
+subroutine apply_deferred_background_updates(n_rejected)
+
+    !Gives each reservoir cell (c%cell_start/c%cell_members, see build_reservoir_cells) the summed
+    !momentum and energy that the markers lost in its tetrahedra since the last call, copies the new
+    !state to all its tetrahedra and resets the exchange. n_rejected counts cells whose update would
+    !have driven the temperature non-positive and was therefore rejected (conservation is broken there).
+
+    use gorilla_applets_types_mod, only: c
+    use tetra_physics_mod, only: particle_mass
+
+    integer, intent(out) :: n_rejected
+    real(dp) :: momentum, energy, particles, u, temp, u_old, temp_old
+    real(dp), dimension(c%n) :: species_particles, u_species
+    integer :: j, k, m, i, thread
+    logical :: rejected
+
+    n_rejected = 0
+    do k = 1, size(c%cell_start) - 1
+        do j = 1, c%n-1
+            momentum = 0.0_dp
+            energy = 0.0_dp
+            particles = 0.0_dp
+            do m = c%cell_start(k), c%cell_start(k+1) - 1
+                i = c%cell_members(m)
+                do thread = 0, size(background_exchange, 4) - 1
+                    momentum = momentum + background_exchange(1,j,i,thread)
+                    energy = energy + background_exchange(2,j,i,thread)
+                enddo
+                particles = particles + c%dens_mat(j,i)*c%tetr_volume(i)
+            enddo
+            if ((momentum.eq.0.0_dp).and.(energy.eq.0.0_dp)) cycle
+            i = c%cell_members(c%cell_start(k))
+            u_old = c%vpar_mat(j,i)
+            temp_old = c%temp_mat(j,i)
+            u = u_old
+            temp = temp_old
+            !one marker of unit ratio carrying the totals: r*m_t*delta_vpar = momentum/N_b, r*delta_epsilon = energy/N_b
+            call update_background_reservoir(particle_mass, c%mass(j), 1.0_dp/particles, &
+                momentum/particle_mass, energy, u, temp)
+            if ((u.eq.u_old).and.(temp.eq.temp_old)) n_rejected = n_rejected + 1
+            c%vpar_mat(j,c%cell_members(c%cell_start(k):c%cell_start(k+1)-1)) = u
+            c%temp_mat(j,c%cell_members(c%cell_start(k):c%cell_start(k+1)-1)) = temp
+        enddo
+
+        !electrons, after the ions: common flow shift of all species, rest of the energy into T_e
+        momentum = 0.0_dp
+        energy = 0.0_dp
+        species_particles = 0.0_dp
+        do m = c%cell_start(k), c%cell_start(k+1) - 1
+            i = c%cell_members(m)
+            do thread = 0, size(background_exchange, 4) - 1
+                momentum = momentum + background_exchange(1,c%n,i,thread)
+                energy = energy + background_exchange(2,c%n,i,thread)
+            enddo
+            species_particles = species_particles + c%dens_mat(:,i)*c%tetr_volume(i)
+        enddo
+        !also without electron exchange, so that u_e follows an ion flow changed above
+        i = c%cell_members(c%cell_start(k))
+        if ((momentum.eq.0.0_dp).and.(energy.eq.0.0_dp).and.(c%vpar_mat(c%n,i).eq.c%vpar_mat(1,i))) cycle
+        u_species = c%vpar_mat(:,i)
+        temp = c%temp_mat(c%n,i)
+        call update_electron_reservoir(c%mass, species_particles, -momentum, -energy, u_species, temp, rejected)
+        if (rejected) n_rejected = n_rejected + 1
+        do m = c%cell_start(k), c%cell_start(k+1) - 1
+            c%vpar_mat(:,c%cell_members(m)) = u_species
+            c%temp_mat(c%n,c%cell_members(m)) = temp
+        enddo
+    enddo
+    background_exchange = 0.0_dp
+
+end subroutine apply_deferred_background_updates
 
 pure subroutine update_background_reservoir(m_t, m_b, r, delta_vpar, delta_epsilon, u_b, temp_b)
     !Background flow u_b and temperature temp_b [eV] take up the parallel momentum and energy [erg]
@@ -285,6 +433,41 @@ pure subroutine update_background_reservoir(m_t, m_b, r, delta_vpar, delta_epsil
 
 end subroutine update_background_reservoir
 
+pure subroutine update_electron_reservoir(mass, particles, momentum, energy, u, temp_e, rejected)
+    !Instantaneous e-i friction: the background of a cell (species 1..n-1 ions, n electrons with masses
+    !mass and particle numbers particles) gains the parallel momentum and energy [erg] that markers lost
+    !to the electrons. All flows u shift by the same amount so that the electron flow ends at the
+    !mass-weighted mean ion flow and the total momentum (with the electron flow) is conserved; the
+    !energy minus the change of the flow kinetic energy goes into the electron temperature temp_e [eV].
+    !An update that would drive temp_e <= 0 is rejected (state unchanged, rejected = .true.).
+
+    use constants, only: ev2erg
+
+    real(dp), dimension(:), intent(in) :: mass, particles
+    real(dp), intent(in) :: momentum, energy
+    real(dp), dimension(:), intent(inout) :: u
+    real(dp), intent(inout) :: temp_e
+    logical, intent(out) :: rejected
+    real(dp), dimension(size(u)) :: u_new
+    real(dp) :: inertia_ions, flow_ions, shift, temp_new
+    integer :: n
+
+    n = size(u)
+    inertia_ions = sum(particles(1:n-1)*mass(1:n-1))
+    flow_ions = sum(particles(1:n-1)*mass(1:n-1)*u(1:n-1))/inertia_ions
+    shift = (sum(particles*mass*u) + momentum)/sum(particles*mass) - flow_ions
+    u_new(1:n-1) = u(1:n-1) + shift
+    u_new(n) = flow_ions + shift
+    temp_new = temp_e + (energy - 0.5_dp*sum(particles*mass*(u_new**2 - u**2)))/(1.5_dp*particles(n)*ev2erg)
+
+    rejected = (temp_new <= 0.0_dp)
+    if (.not.rejected) then
+        u = u_new
+        temp_e = temp_new
+    endif
+
+end subroutine update_electron_reservoir
+
 subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_tetr, species, iswmode)
 
     use gorilla_applets_types_mod, only: in, c, time_t, start
@@ -300,7 +483,6 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
     integer :: ind_tetr
 
     real(dp), dimension(5) :: zet
-    real(dp), dimension(3) :: randnum
     real(dp), dimension(c%n) :: efcolf,velrat,enrat,vpar_background
     integer :: err
     real(dp) :: t_max
@@ -337,20 +519,11 @@ subroutine collisions_without_background_updates(i, n, t, x, vpar, vperp, ind_te
         nu_kim_code = nu_kim_phys / start%v0(species)
     end if
 
-    if (in%boole_precalc_collisions) then
-        randnum = c%randcol(n,mod(i-1,c%randcoli)+1,:,species)
-        if (use_kim_nu_now) then
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum,nu_override=nu_kim_code)
-        else
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,randnum)
-        end if
+    if (use_kim_nu_now) then
+        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,nu_override=nu_kim_code)
     else
-        if (use_kim_nu_now) then
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max,nu_override=nu_kim_code)
-        else
-            call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max)
-        end if
-    endif
+        call stost(efcolf,velrat,enrat,zet,t%step,iswmode,err,t_max)
+    end if
 
     vpar = zet(5)*zet(4)*start%v0(species)+vpar_background(1)
     vperp = sqrt(1-zet(5)**2)*zet(4)*start%v0(species)
@@ -456,19 +629,21 @@ function linspace(start, stop, n) result(x)
     end do
 end function linspace
 
-subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num, second_factor)
-    !Sets an individual, reproducible RNG state for each OpenMP thread. The state
-    !is derived from the master seed loaded from seed.inp (via
-    !set_seed_for_random_numbers) by combining it with thread_num and an optional
-    !second_factor through the SplitMix64 bit mixer, which produces
-    !well-decorrelated 64-bit words for neighbouring inputs. Same seed.inp +
-    !same thread partition => bit-identical per-thread streams. If no master
-    !seed was loaded, we fall back to a hardcoded constant so callers that
-    !skipped set_seed_for_random_numbers keep working.
+subroutine initialise_seed_for_marker(marker, second_factor)
+    !Sets the RNG state of the calling thread to the random stream of one marker. Called before a
+    !marker is pushed, so everything random in its push (collisions, axis-hole kicks, Russian roulette)
+    !depends only on seed.inp, the marker index and second_factor (e.g. the time slice or iteration),
+    !and not on the thread that pushes it: marker histories are the same for any number of threads (sums
+    !over markers can still differ by rounding, and immediate background updates by their order). The state
+    !is derived from the master seed loaded from seed.inp (via set_seed_for_random_numbers) by combining
+    !it with marker and second_factor through the SplitMix64 bit mixer, which produces well-decorrelated
+    !64-bit words for neighbouring inputs. Use a different second_factor for each call that continues
+    !the same markers (time slices), otherwise every call replays the same random numbers. If no master
+    !seed was loaded, a hardcoded constant is used instead.
 
     use utils_data_pre_and_post_processing_mod, only: master_seed_u64, master_seed_loaded, splitmix64_next
 
-    integer, intent(in) :: thread_num
+    integer, intent(in) :: marker
     integer, intent(in), optional :: second_factor
     integer(int64), parameter :: gamma        = -7046029254386353131_int64  ! 0x9E3779B97F4A7C15
     integer(int64), parameter :: second_salt  = -6534898150910275811_int64  ! arbitrary large odd
@@ -481,10 +656,10 @@ subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num, second
     if (present(second_factor)) sf = second_factor
 
     if (master_seed_loaded) then
-        key = ieor(master_seed_u64, int(thread_num, int64) * gamma)
+        key = ieor(master_seed_u64, int(marker, int64) * gamma)
         key = ieor(key,             int(sf,         int64) * second_salt)
     else
-        key = int(20180815, int64) + int(thread_num, int64) + int(sf, int64) * gamma
+        key = int(20180815, int64) + int(marker, int64) + int(sf, int64) * gamma
     endif
 
     sm_state = key
@@ -499,6 +674,6 @@ subroutine initialise_seed_for_random_numbers_for_each_thread(thread_num, second
     call random_seed(put=state)
     deallocate(state)
 
-end subroutine initialise_seed_for_random_numbers_for_each_thread
+end subroutine initialise_seed_for_marker
 
 end module utils_parallelised_particle_pushing_mod

@@ -38,6 +38,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     n_particles_diffusion = 40000  !optional
     diffusion_scan_s0 = -1.0_dp    !optional: calibrate all flux surfaces, then run SCEF
     diffusion_tau = -1.0_dp        !optional: hardcoded calibration time per species
+    boole_precalc_collisions = .false. !obsolete key, still accepted in input files
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
     read(s_inp_unit,nml=self_consistent_ef_nml)
     close(s_inp_unit)
@@ -49,7 +50,8 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%boole_squared_moments = boole_squared_moments
     in%boole_point_source = boole_point_source
     in%boole_collisions = boole_collisions
-    in%boole_precalc_collisions = boole_precalc_collisions
+    if (boole_precalc_collisions) print*, 'Note: boole_precalc_collisions is obsolete and ignored; ' // &
+        'collisions use one random stream per marker (initialise_seed_for_marker)'
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
     in%boole_monoenergetic = boole_monoenergetic
     in%boole_linear_density_simulation = boole_linear_density_simulation

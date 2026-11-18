@@ -71,7 +71,6 @@ module gorilla_applets_types_mod
     type(flux_t) :: flux
 
     type collisions_t
-    real(dp), dimension(:,:,:,:), allocatable :: randcol
     real(dp), dimension(:,:), allocatable :: dens_mat
     real(dp), dimension(:,:), allocatable :: temp_mat
     real(dp), dimension(:,:), allocatable :: vpar_mat
@@ -82,10 +81,11 @@ module gorilla_applets_types_mod
     real(dp), dimension(:), allocatable :: charge_num
     real(dp), dimension(:), allocatable :: dens
     real(dp), dimension(:), allocatable :: temp
-    integer :: randcoli = int(1.0d5)
+    real(dp), dimension(:), allocatable :: tetr_volume !physical tetrahedron volume [cm^3], used by the background reservoir
+    integer, dimension(:), allocatable :: cell_start   !reservoir cell k consists of the tetrahedra
+    integer, dimension(:), allocatable :: cell_members !cell_members(cell_start(k):cell_start(k+1)-1)
+    integer, dimension(:), allocatable :: cell_of_tetr !reservoir cell of each tetrahedron
     integer :: n !number of background species
-    real(dp) :: maxcol = 0
-    real(dp) :: weight_factor
     end type collisions_t
 
     type(collisions_t) :: c
@@ -98,7 +98,6 @@ module gorilla_applets_types_mod
     logical  :: boole_squared_moments = .false.
     logical  :: boole_point_source = .false.
     logical  :: boole_collisions = .false.
-    logical  :: boole_precalc_collisions = .false.
     logical  :: boole_refined_sqrt_g = .false.
     logical  :: boole_monoenergetic = .false.
     logical  :: boole_linear_density_simulation = .false.
@@ -131,6 +130,13 @@ module gorilla_applets_types_mod
     logical  :: boole_eliminate_particles_outside_flux = .false. !Used in helical_core
     real(dp) :: flux_threshold_for_elimination = 0.0_dp !Used in helical_core (0=axis, 1=boundary)
     logical  :: boole_delta_f = .false. !Used in helical_core: use delta-f method for weights
+    integer  :: n_time_slices = 1 !Used in helical_core: all markers are pushed together in slices of time_step/n_time_slices
+    logical  :: boole_unidirectional_beam = .false. !Used in helical_core: all markers start with pitch +1
+    real(dp) :: beam_density_fraction = 1.0_dp !Used in helical_core: marker density / background density
+    real(dp) :: background_temperature_eV = 0.0_dp !Used in helical_core with conserving collisions: background
+                                                  !temperature of all species [eV] if > 0, else energy_eV
+    real(dp) :: reservoir_min_volume_fraction = 0.5_dp !Used in helical_core: merge small tetrahedra near the axis poloidally into
+                                                       !reservoir cells of at least this fraction of the median volume (0 = off)
     integer  :: n_poincare_mappings = 0 !Used in divertor_heat_loads
     integer  :: n_mappings_ignored = 0 !Used in divertor_heat_loads
     real(dp) :: lambda = 0.0_dp !Used in divertor_heat_loads

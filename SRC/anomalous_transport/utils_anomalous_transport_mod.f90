@@ -39,6 +39,7 @@ subroutine read_anomalous_transport_inp_into_type
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, boole_calc_diffusion_coefficient, &
     & i_scan_option, anomalous_diffusion_coefficient
 
+    boole_precalc_collisions = .false. !obsolete key, still accepted in input files
     open(newunit = s_inp_unit, file='anomalous_transport.inp', status='unknown')
     read(s_inp_unit,nml=anomalous_transport_nml)
     close(s_inp_unit)
@@ -50,7 +51,8 @@ subroutine read_anomalous_transport_inp_into_type
     in%boole_squared_moments = boole_squared_moments
     in%boole_point_source = boole_point_source
     in%boole_collisions = boole_collisions
-    in%boole_precalc_collisions = boole_precalc_collisions
+    if (boole_precalc_collisions) print*, 'Note: boole_precalc_collisions is obsolete and ignored; ' // &
+        'collisions use one random stream per marker (initialise_seed_for_marker)'
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
     in%boole_monoenergetic = boole_monoenergetic
     in%boole_linear_density_simulation = boole_linear_density_simulation
@@ -85,9 +87,11 @@ subroutine parallelised_particle_pushing_anomalous_transport(species, n_particle
     use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, s
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
-    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
+    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_marker_moments_to_thread_sums, &
+        add_thread_moments_to_output, &
         add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
-        initialise_seed_for_random_numbers_for_each_thread
+        initialise_seed_for_marker
+    use utils_orbit_timestep_mod, only: start_touched_tetr_tracking, stop_touched_tetr_tracking
     use anomalous_transport_displacement_mod, only: anomalous_transport_displacement
 
     integer, intent(in)                               :: species
@@ -99,8 +103,7 @@ subroutine parallelised_particle_pushing_anomalous_transport(species, n_particle
     type(time_t)                                      :: t
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
-    complex(dp), dimension(:,:), allocatable          :: local_tetr_moments
-    logical                                           :: thread_flag = .true.
+    complex(dp), dimension(:,:), allocatable          :: local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared
 
     if (present(n_particles_in)) then
         n_particles = n_particles_in
@@ -116,23 +119,28 @@ subroutine parallelised_particle_pushing_anomalous_transport(species, n_particle
     t_tot = 0.0_dp
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles) &
+    !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, moment_specs, ntetr) &
     !$OMP& REDUCTION(+:t_tot) &
-    !$OMP& PRIVATE(p, l, n, i, k, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, t_step_s) &
-    !$OMP& FIRSTPRIVATE(thread_flag)
+    !$OMP& PRIVATE(p, l, n, i, k, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, t_step_s, &
+    !$OMP& thread_tetr_moments, thread_prism_moments_squared)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
+
+    !moments are summed per thread and added to the output once per thread
+    allocate(thread_tetr_moments(moment_specs%n_moments,ntetr))
+    allocate(thread_prism_moments_squared(moment_specs%n_moments, &
+                                          merge(ntetr/3, 0, moment_specs%boole_squared_moments)))
+    thread_tetr_moments = (0.0_dp, 0.0_dp)
+    thread_prism_moments_squared = (0.0_dp, 0.0_dp)
+    local_tetr_moments = (0.0_dp, 0.0_dp)
+    call start_touched_tetr_tracking(ntetr)
 
     !$OMP DO SCHEDULE(static)
     do p = 1, n_particles/iantithetic
 
-        if ((.not.in%boole_precalc_collisions).and.thread_flag) then
-            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num(), 1)
-            thread_flag = .false.
-        endif
-
         do l = 1, iantithetic
             n = (p-1)*iantithetic + l
+            call initialise_seed_for_marker(n, 1) !random stream of this marker
 
             !$omp atomic update
             kpart = kpart + 1
@@ -179,7 +187,6 @@ subroutine parallelised_particle_pushing_anomalous_transport(species, n_particle
 
             !$omp critical
             counter%integration_steps = counter%integration_steps + i
-            c%maxcol = max(dble(i)/dble(c%randcoli), c%maxcol)
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
 
@@ -187,11 +194,14 @@ subroutine parallelised_particle_pushing_anomalous_transport(species, n_particle
             call update_start_type(x, vpar, vperp, n, species, ind_tetr)
         enddo
 
-        !$omp critical
-        call add_local_tetr_moments_to_output(local_tetr_moments, species)
-        !$omp end critical
+        call add_marker_moments_to_thread_sums(local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared)
     enddo
     !$OMP END DO
+
+    !$omp critical
+    call add_thread_moments_to_output(thread_tetr_moments, thread_prism_moments_squared, species)
+    !$omp end critical
+    call stop_touched_tetr_tracking
     !$OMP END PARALLEL
 
     print*, 'Total tracing time / number of particles: ', t_tot/n_particles, 's'
