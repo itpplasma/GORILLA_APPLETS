@@ -25,7 +25,7 @@ subroutine calc_helical_core
     use gorilla_applets_types_mod, only: moment_specs, in, start, output, weights, c
     use utils_write_data_to_files_mod, only: write_data_to_files, give_file_names, unlink_files
     use utils_data_pre_and_post_processing_mod, only: set_seed_for_random_numbers, initialize_exit_data, &
-    calc_poloidal_flux, calc_collision_coefficients_for_all_tetrahedra, build_reservoir_cells, &
+    calc_poloidal_flux, calc_collision_coefficients_for_all_tetrahedra, build_reservoir_cells, set_reservoir_capacities, &
     normalise_prism_moments_and_prism_moments_squared, fourier_transform_moments, calc_starting_conditions
     use utils_parallelised_particle_pushing_mod, only: start_deferred_background_updates, &
         apply_deferred_background_updates
@@ -34,6 +34,7 @@ subroutine calc_helical_core
         set_unidirectional_beam, write_collision_relaxation_diagnostics, write_collision_relaxation_profiles
 
     integer :: i_slice, relaxation_unit, n_rejected
+    real(dp) :: max_delta_u, max_delta_temp_rel
     logical :: boole_relaxation_diagnostics
     real(dp), dimension(:), allocatable :: pitch_0, energy_0
     real(dp), dimension(:,:), allocatable :: x_0
@@ -67,14 +68,19 @@ subroutine calc_helical_core
     call set_unidirectional_beam
 
     ! Standard particle tracing (no scan, no diffusion coefficient calculation). With n_time_slices > 1,
-    ! all markers are pushed slice by slice, so markers and the background reservoir of the conserving
-    ! collisions evolve in common time.
+    ! all markers are pushed slice by slice. The background reservoir of the conserving collisions is
+    ! updated after every slice, so markers and background evolve in common time (needed for a
+    ! relaxation in time), and for a stationary state each slice is one step of the iteration between
+    ! markers and background.
     boole_relaxation_diagnostics = in%boole_collisions.and.in%boole_preserve_energy_and_momentum_during_collisions
     if (boole_relaxation_diagnostics) then
         x_0 = start%x(:,:,1)
         pitch_0 = start%pitch(:,1)
         energy_0 = start%energy(:,1)
         call build_reservoir_cells(in%reservoir_min_volume_fraction)
+        call set_reservoir_capacities(in%reservoir_capacity_flow, in%reservoir_capacity_temperature, in%n_particles)
+        if (in%n_time_slices.eq.1) print*, 'WARNING: n_time_slices = 1: the background reservoir is updated only ', &
+            'after all markers are traced, so the markers do not feel the momentum and energy exchange'
         call start_deferred_background_updates
         lost_0 = start%lost(:,1)
         u_b_0 = c%vpar_mat
@@ -87,9 +93,11 @@ subroutine calc_helical_core
     do i_slice = 1, in%n_time_slices
         call parallelised_particle_pushing_helical_core(species=1, boole_reuse_weights_in=(i_slice.gt.1), i_slice_in=i_slice)
         if (boole_relaxation_diagnostics) then
-            call apply_deferred_background_updates(n_rejected)
+            call apply_deferred_background_updates(n_rejected, max_delta_u, max_delta_temp_rel)
             if (n_rejected.gt.0) print*, 'WARNING: background updates rejected (T <= 0) in ', n_rejected, &
                                          ' tetrahedra in slice ', i_slice, ', energy and momentum not conserved there'
+            print*, 'slice ', i_slice, ': largest background change of a cell: |du_par|/v0 = ', &
+                    max_delta_u/start%v0(1), ', |dT|/T = ', max_delta_temp_rel
             !weights are known after the first slice and stay fixed, so the initial row can be written now
             if (i_slice.eq.1) call write_collision_relaxation_diagnostics(relaxation_unit, 0.0_dp, x_0, pitch_0, energy_0, &
                                                                           lost_0, u_b_0, temp_b_0)

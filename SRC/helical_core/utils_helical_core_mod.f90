@@ -33,7 +33,7 @@ subroutine read_helical_core_inp_into_type
                boole_eliminate_particles_outside_flux, boole_delta_f, boole_unidirectional_beam
     integer :: i_integrator_type, seed_option, n_species, n_time_slices !i_integrator_type, seed_option: read for compatibility with existing input files, unused
     real(dp) :: flux_threshold_for_elimination, beam_density_fraction, reservoir_min_volume_fraction, &
-                background_temperature_eV
+                background_temperature_eV, reservoir_capacity_flow, reservoir_capacity_temperature
 
     integer :: s_inp_unit
 
@@ -45,7 +45,7 @@ subroutine read_helical_core_inp_into_type
     & boole_write_grid_data, boole_preserve_energy_and_momentum_during_collisions, n_species, &
     & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f, &
     & n_time_slices, boole_unidirectional_beam, beam_density_fraction, reservoir_min_volume_fraction, &
-    & background_temperature_eV
+    & background_temperature_eV, reservoir_capacity_flow, reservoir_capacity_temperature
 
     !optional keys keep their input_t defaults when absent from the file
     n_time_slices = in%n_time_slices
@@ -53,6 +53,8 @@ subroutine read_helical_core_inp_into_type
     beam_density_fraction = in%beam_density_fraction
     reservoir_min_volume_fraction = in%reservoir_min_volume_fraction
     background_temperature_eV = in%background_temperature_eV
+    reservoir_capacity_flow = in%reservoir_capacity_flow
+    reservoir_capacity_temperature = in%reservoir_capacity_temperature
 
     boole_precalc_collisions = .false. !obsolete key, still accepted in input files
     open(newunit = s_inp_unit, file='helical_core.inp', status='unknown')
@@ -92,6 +94,8 @@ subroutine read_helical_core_inp_into_type
     in%beam_density_fraction = beam_density_fraction
     in%reservoir_min_volume_fraction = reservoir_min_volume_fraction
     in%background_temperature_eV = background_temperature_eV
+    in%reservoir_capacity_flow = reservoir_capacity_flow
+    in%reservoir_capacity_temperature = reservoir_capacity_temperature
 
     ! Set defaults for anomalous transport-specific parameters (disabled)
     in%boole_calc_diffusion_coefficient = .false.
@@ -569,7 +573,8 @@ subroutine write_collision_relaxation_diagnostics(file_unit, time, x, pitch, ene
 ! Writes one row of marker and background reservoir totals for the energy and momentum conserving
 ! collisions (marker species 1, cylindrical coordinates). Markers carry
 ! weights%w/n_particles physical particles, the reservoir of a tetrahedron dens_mat*tetr_volume
-! particles of each background species (u_b, temp_b: species x tetrahedron); P_b, E_b and L_b sum
+! particles of each background species, or with reservoir capacities its share of the cell capacities
+! for flow (P_b, L_b) and temperature (E_b) (u_b, temp_b: species x tetrahedron); P_b, E_b and L_b sum
 ! over all background species including the electrons, <u_par>_b, <T>_b, min T_b, max|u_par|_b are
 ! for the first ion species; sums are in cgs, velocities are normalised by v0. Lost markers keep their state at the
 ! boundary (update_start_type), so the _lost columns are what left the domain.
@@ -599,7 +604,7 @@ subroutine write_collision_relaxation_diagnostics(file_unit, time, x, pitch, ene
     real(dp), dimension(:,:), intent(in) :: u_b, temp_b
 
     real(dp), dimension(size(pitch))     :: w_phys, w_lost, v, vpar, p_phi
-    real(dp), dimension(size(c%tetr_volume)) :: n_b, n_e, h_phi_b
+    real(dp), dimension(size(c%tetr_volume)) :: n_b, n_t, n_e, h_phi_b, cell_share
     logical, dimension(size(c%tetr_volume))  :: region
     real(dp), dimension(3) :: x_n, z, centroid
     real(dp), dimension(3,4) :: verts
@@ -652,13 +657,28 @@ subroutine write_collision_relaxation_diagnostics(file_unit, time, x, pitch, ene
             tetra_physics(i)%Aphi1 + sum(tetra_physics(i)%gAphi*z)).le.in%flux_threshold_for_elimination
     enddo
 
+    !conserved background totals: with reservoir capacities (set_reservoir_capacities) a cell counts its
+    !capacity for the flow (P_b, L_b) and for the temperature (E_b) instead of its physical content,
+    !shared equally by its tetrahedra (which all have the cell's flow and temperature)
+    if (c%capacity_particles_flow.gt.0.0_dp) then
+        do i = 1, size(c%tetr_volume)
+            k = c%cell_of_tetr(i)
+            cell_share(i) = 1.0_dp/real(c%cell_start(k+1) - c%cell_start(k), dp)
+        enddo
+    endif
     p_b = 0.0_dp
     e_b = 0.0_dp
     l_b = 0.0_dp
     do j = 1, c%n
-        n_b = c%dens_mat(j,:)*c%tetr_volume
+        if (c%capacity_particles_flow.gt.0.0_dp) then
+            n_b = c%capacity_particles_flow*cell_share
+            n_t = c%capacity_particles_temperature*cell_share
+        else
+            n_b = c%dens_mat(j,:)*c%tetr_volume
+            n_t = n_b
+        endif
         p_b = p_b + c%mass(j)*sum(n_b*u_b(j,:))
-        e_b = e_b + sum(n_b*(1.5_dp*temp_b(j,:)*ev2erg + 0.5_dp*c%mass(j)*u_b(j,:)**2))
+        e_b = e_b + sum(n_t*(1.5_dp*temp_b(j,:)*ev2erg + 0.5_dp*c%mass(j)*u_b(j,:)**2))
         l_b = l_b + c%mass(j)*sum(n_b*u_b(j,:)*h_phi_b)
     enddo
     n_e = c%dens_mat(c%n,:)*c%tetr_volume

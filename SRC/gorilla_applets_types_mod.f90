@@ -85,6 +85,11 @@ module gorilla_applets_types_mod
     integer, dimension(:), allocatable :: cell_start   !reservoir cell k consists of the tetrahedra
     integer, dimension(:), allocatable :: cell_members !cell_members(cell_start(k):cell_start(k+1)-1)
     integer, dimension(:), allocatable :: cell_of_tetr !reservoir cell of each tetrahedron
+    !Capacities of the reservoir cells in physical particles (set_reservoir_capacities): 0 = physical
+    !content dens_mat*tetr_volume of the cell, > 0 = this many particles per cell and species (flow and
+    !temperature separately, Runov, Kasilov & Helander, J. Comput. Phys. 300 (2015) 605, Eq. 28)
+    real(dp) :: capacity_particles_flow = 0.0_dp
+    real(dp) :: capacity_particles_temperature = 0.0_dp
     integer :: n !number of background species
     end type collisions_t
 
@@ -135,6 +140,10 @@ module gorilla_applets_types_mod
                                                   !temperature of all species [eV] if > 0, else energy_eV
     real(dp) :: reservoir_min_volume_fraction = 0.5_dp !Used in helical_core: merge small tetrahedra near the axis poloidally into
                                                        !reservoir cells of at least this fraction of the median volume (0 = off)
+    real(dp) :: reservoir_capacity_flow = 0.0_dp !Used in helical_core with conserving collisions: capacity W_V/w of every
+                                                 !reservoir cell for the parallel flow, in mean marker weights (0 = physical
+                                                 !cell content); needs reservoir_capacity_temperature > 0 as well
+    real(dp) :: reservoir_capacity_temperature = 0.0_dp !Same for the temperature (W_T/w)
     integer  :: n_poincare_mappings = 0 !Used in divertor_heat_loads
     integer  :: n_mappings_ignored = 0 !Used in divertor_heat_loads
     real(dp) :: lambda = 0.0_dp !Used in divertor_heat_loads

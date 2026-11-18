@@ -106,6 +106,20 @@ GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/helical_core_conserving_work"
 )
 
+add_test(
+    NAME helical_core_conserving_collisions_capacities
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_helical_core_conserving.py
+)
+set_tests_properties(helical_core_conserving_collisions_capacities PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
+GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/helical_core_conserving_capacities_work;\
+RESERVOIR_CAPACITIES=100,10"
+)
+
 add_executable(write_chartmap_fixture.x
     write_chartmap_fixture.f90
 )

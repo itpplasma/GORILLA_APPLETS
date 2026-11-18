@@ -3,7 +3,7 @@ program test_multi_species_collision
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use collis_ions, only: collis_init
     use constants, only: amp, ame, ev2erg
-    use utils_parallelised_particle_pushing_mod, only: update_background_reservoir
+    use utils_parallelised_particle_pushing_mod, only: update_background_reservoir, update_electron_reservoir
 
     implicit none
 
@@ -13,6 +13,7 @@ program test_multi_species_collision
     call test_two_species(all_passed)
     call test_five_species(all_passed)
     call test_background_reservoir(all_passed)
+    call test_separate_capacities(all_passed)
 
     if (.not. all_passed) then
         print *, 'FAIL: some tests failed'
@@ -207,5 +208,71 @@ subroutine test_background_reservoir(all_passed)
     end if
 
 end subroutine test_background_reservoir
+
+subroutine test_separate_capacities(all_passed)
+    ! Reservoir with separate capacities for flow and temperature (Runov et al. 2015, Eq. 28):
+    ! ions: r*m_t*dv + d(m_b*u_b) = 0 and r_temp*dE + d(m_b*u_b**2/2 + 3/2*T_b) = 0;
+    ! electrons (common flow shift, instantaneous e-i friction): momentum with particles,
+    ! energy with particles_temp.
+
+    logical, intent(inout) :: all_passed
+
+    real(dp), parameter :: m_t = 2.0_dp*amp, m_b = 2.0_dp*amp, r = 1.0e-5_dp, r_temp = 2.0e-2_dp
+    real(dp), parameter :: dv = 2.0e7_dp, de = 5.0e-9_dp, u0 = 1.0e6_dp, t0 = 1.0e3_dp
+    real(dp), dimension(2) :: mass, particles, particles_temp, u, u_start
+    real(dp) :: u_b, temp_b, temp_e, momentum, energy, e_before, e_after
+    logical :: rejected
+
+    u_b = u0
+    temp_b = t0
+    call update_background_reservoir(m_t, m_b, r, dv, de, u_b, temp_b, r_temp)
+    if (abs(r*m_t*dv + m_b*(u_b - u0)) > 1.0e-12_dp*m_b*abs(u_b)) then
+        print *, 'FAIL: reservoir with separate capacities does not conserve momentum'
+        all_passed = .false.
+    end if
+    if (abs(r_temp*de + m_b*(u_b**2 - u0**2)/2 + 1.5_dp*(temp_b - t0)*ev2erg) > 1.0e-12_dp*abs(r_temp*de)) then
+        print *, 'FAIL: reservoir with separate capacities does not conserve energy'
+        all_passed = .false.
+    end if
+
+    ! without r_temp the old single-capacity update must result
+    u_b = u0
+    temp_b = t0
+    call update_background_reservoir(m_t, m_b, r_temp, dv, de, u_b, temp_b, r_temp)
+    e_before = temp_b
+    u_b = u0
+    temp_b = t0
+    call update_background_reservoir(m_t, m_b, r_temp, dv, de, u_b, temp_b)
+    if (temp_b /= e_before) then
+        print *, 'FAIL: r_temp = r does not reproduce the single-capacity update'
+        all_passed = .false.
+    end if
+
+    mass = (/2.0_dp*amp, ame/)
+    particles = (/1.0e20_dp, 1.0e20_dp/)
+    particles_temp = (/1.0e17_dp, 1.0e17_dp/)
+    u_start = (/u0, u0/)
+    u = u_start
+    temp_e = t0
+    momentum = 3.0e-3_dp
+    energy = 2.0e7_dp
+    e_before = sum(particles_temp*mass*u**2)/2 + 1.5_dp*particles_temp(2)*temp_e*ev2erg
+    call update_electron_reservoir(mass, particles, momentum, energy, u, temp_e, rejected, particles_temp)
+    e_after = sum(particles_temp*mass*u**2)/2 + 1.5_dp*particles_temp(2)*temp_e*ev2erg
+    if (rejected) then
+        print *, 'FAIL: electron reservoir update with separate capacities rejected'
+        all_passed = .false.
+    end if
+    !tolerance from round-off: the exchanged momentum is 1e-5 of the cell momentum
+    if (abs(sum(particles*mass*(u - u_start)) - momentum) > 1.0e-9_dp*abs(momentum)) then
+        print *, 'FAIL: electron reservoir with separate capacities does not conserve momentum'
+        all_passed = .false.
+    end if
+    if (abs(e_after - e_before - energy) > 1.0e-10_dp*abs(energy)) then
+        print *, 'FAIL: electron reservoir with separate capacities does not conserve energy'
+        all_passed = .false.
+    end if
+
+end subroutine test_separate_capacities
 
 end program test_multi_species_collision

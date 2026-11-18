@@ -253,7 +253,7 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
     real(dp) :: vpar_background
     real(dp) :: m0, z0, vpar_save, vperp_save, delta_epsilon, delta_vpar
     integer :: err, j, thread
-    real(dp) :: marker_to_background_ratio, t_max, w_phys
+    real(dp) :: marker_to_background_ratio, ratio_temperature, particles, t_max, w_phys
     logical :: rejected
 
     m0 = particle_mass
@@ -297,7 +297,8 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
         delta_epsilon = particle_mass/2*(vpar**2 + vperp**2 - vpar_save**2 - vperp_save**2)
 
         !A marker represents weights%w/n_particles physical particles (the moments are normalised the
-        !same way), the reservoir holds dens_mat*tetr_volume background particles
+        !same way); the reservoir holds dens_mat*tetr_volume background particles, or the capacities of
+        !set_reservoir_capacities for flow and temperature
         w_phys = real(weights%w(n,species), dp)/in%n_particles
 
         if (boole_deferred_background_updates) then
@@ -307,15 +308,19 @@ subroutine collisions_with_background_updates(i, n, t, x, vpar, vperp, ind_tetr,
             background_exchange(2,j,ind_tetr,thread) = background_exchange(2,j,ind_tetr,thread) + w_phys*delta_epsilon
         elseif (j.eq.c%n) then
             !$omp critical
-            call update_electron_reservoir(c%mass, c%dens_mat(:,ind_tetr)*c%tetr_volume(ind_tetr), &
+            call update_electron_reservoir(c%mass, &
+                reservoir_particles(c%dens_mat(:,ind_tetr)*c%tetr_volume(ind_tetr), c%capacity_particles_flow), &
                 -w_phys*particle_mass*delta_vpar, -w_phys*delta_epsilon, c%vpar_mat(:,ind_tetr), &
-                c%temp_mat(c%n,ind_tetr), rejected)
+                c%temp_mat(c%n,ind_tetr), rejected, &
+                reservoir_particles(c%dens_mat(:,ind_tetr)*c%tetr_volume(ind_tetr), c%capacity_particles_temperature))
             !$omp end critical
         else
-            marker_to_background_ratio = w_phys/(c%dens_mat(j,ind_tetr)*c%tetr_volume(ind_tetr))
+            particles = c%dens_mat(j,ind_tetr)*c%tetr_volume(ind_tetr)
+            marker_to_background_ratio = w_phys/reservoir_particles_scalar(particles, c%capacity_particles_flow)
+            ratio_temperature = w_phys/reservoir_particles_scalar(particles, c%capacity_particles_temperature)
             !$omp critical
             call update_background_reservoir(particle_mass, c%mass(j), marker_to_background_ratio, &
-                delta_vpar, delta_epsilon, c%vpar_mat(j,ind_tetr), c%temp_mat(j,ind_tetr))
+                delta_vpar, delta_epsilon, c%vpar_mat(j,ind_tetr), c%temp_mat(j,ind_tetr), ratio_temperature)
             !$omp end critical
         endif
     enddo
@@ -337,23 +342,30 @@ subroutine start_deferred_background_updates
 
 end subroutine start_deferred_background_updates
 
-subroutine apply_deferred_background_updates(n_rejected)
+subroutine apply_deferred_background_updates(n_rejected, max_delta_u, max_delta_temp_rel)
 
     !Gives each reservoir cell (c%cell_start/c%cell_members, see build_reservoir_cells) the summed
     !momentum and energy that the markers lost in its tetrahedra since the last call, copies the new
     !state to all its tetrahedra and resets the exchange. n_rejected counts cells whose update would
     !have driven the temperature non-positive and was therefore rejected (conservation is broken there).
+    !A cell takes the exchange with its capacities (physical content or set_reservoir_capacities).
+    !max_delta_u [cm/s] and max_delta_temp_rel are the largest changes of a cell in this update (flow
+    !and relative temperature, over all background species); the per-collision updates of Runov et al.
+    !are reproduced only while these stay small.
 
     use gorilla_applets_types_mod, only: c
     use tetra_physics_mod, only: particle_mass
 
     integer, intent(out) :: n_rejected
-    real(dp) :: momentum, energy, particles, u, temp, u_old, temp_old
-    real(dp), dimension(c%n) :: species_particles, u_species
+    real(dp), intent(out), optional :: max_delta_u, max_delta_temp_rel
+    real(dp) :: momentum, energy, particles, u, temp, u_old, temp_old, du_max, dtemp_max
+    real(dp), dimension(c%n) :: species_particles, u_species, u_species_old
     integer :: j, k, m, i, thread
     logical :: rejected
 
     n_rejected = 0
+    du_max = 0.0_dp
+    dtemp_max = 0.0_dp
     do k = 1, size(c%cell_start) - 1
         do j = 1, c%n-1
             momentum = 0.0_dp
@@ -374,9 +386,13 @@ subroutine apply_deferred_background_updates(n_rejected)
             u = u_old
             temp = temp_old
             !one marker of unit ratio carrying the totals: r*m_t*delta_vpar = momentum/N_b, r*delta_epsilon = energy/N_b
-            call update_background_reservoir(particle_mass, c%mass(j), 1.0_dp/particles, &
-                momentum/particle_mass, energy, u, temp)
+            call update_background_reservoir(particle_mass, c%mass(j), &
+                1.0_dp/reservoir_particles_scalar(particles, c%capacity_particles_flow), &
+                momentum/particle_mass, energy, u, temp, &
+                1.0_dp/reservoir_particles_scalar(particles, c%capacity_particles_temperature))
             if ((u.eq.u_old).and.(temp.eq.temp_old)) n_rejected = n_rejected + 1
+            du_max = max(du_max, abs(u - u_old))
+            dtemp_max = max(dtemp_max, abs(temp - temp_old)/temp_old)
             c%vpar_mat(j,c%cell_members(c%cell_start(k):c%cell_start(k+1)-1)) = u
             c%temp_mat(j,c%cell_members(c%cell_start(k):c%cell_start(k+1)-1)) = temp
         enddo
@@ -397,32 +413,71 @@ subroutine apply_deferred_background_updates(n_rejected)
         i = c%cell_members(c%cell_start(k))
         if ((momentum.eq.0.0_dp).and.(energy.eq.0.0_dp).and.(c%vpar_mat(c%n,i).eq.c%vpar_mat(1,i))) cycle
         u_species = c%vpar_mat(:,i)
-        temp = c%temp_mat(c%n,i)
-        call update_electron_reservoir(c%mass, species_particles, -momentum, -energy, u_species, temp, rejected)
+        u_species_old = u_species
+        temp_old = c%temp_mat(c%n,i)
+        temp = temp_old
+        call update_electron_reservoir(c%mass, reservoir_particles(species_particles, c%capacity_particles_flow), &
+            -momentum, -energy, u_species, temp, rejected, &
+            reservoir_particles(species_particles, c%capacity_particles_temperature))
         if (rejected) n_rejected = n_rejected + 1
+        du_max = max(du_max, maxval(abs(u_species - u_species_old)))
+        dtemp_max = max(dtemp_max, abs(temp - temp_old)/temp_old)
         do m = c%cell_start(k), c%cell_start(k+1) - 1
             c%vpar_mat(:,c%cell_members(m)) = u_species
             c%temp_mat(c%n,c%cell_members(m)) = temp
         enddo
     enddo
     background_exchange = 0.0_dp
+    if (present(max_delta_u)) max_delta_u = du_max
+    if (present(max_delta_temp_rel)) max_delta_temp_rel = dtemp_max
 
 end subroutine apply_deferred_background_updates
 
-pure subroutine update_background_reservoir(m_t, m_b, r, delta_vpar, delta_epsilon, u_b, temp_b)
+pure function reservoir_particles(physical, capacity) result(particles)
+    !Particles of a reservoir (cell) for each background species: the physical content, or the
+    !capacity if it is set (> 0)
+    real(dp), dimension(:), intent(in) :: physical
+    real(dp), intent(in) :: capacity
+    real(dp), dimension(size(physical)) :: particles
+
+    if (capacity.gt.0.0_dp) then
+        particles = capacity
+    else
+        particles = physical
+    endif
+
+end function reservoir_particles
+
+pure function reservoir_particles_scalar(physical, capacity) result(particles)
+    !Scalar version of reservoir_particles
+    real(dp), intent(in) :: physical, capacity
+    real(dp) :: particles
+
+    particles = physical
+    if (capacity.gt.0.0_dp) particles = capacity
+
+end function reservoir_particles_scalar
+
+pure subroutine update_background_reservoir(m_t, m_b, r, delta_vpar, delta_epsilon, u_b, temp_b, r_temp)
     !Background flow u_b and temperature temp_b [eV] take up the parallel momentum and energy [erg]
     !that a test marker of mass m_t and signed marker-to-background ratio r gains in a collision.
+    !r_temp (default r) is the ratio for the energy, if the reservoir has a different capacity for the
+    !temperature than for the flow (Runov, Kasilov & Helander 2015, Eq. 28 with r = w/W_V,
+    !r_temp = w/W_T). Then r*m_b*u_b and r_temp*(3/2 T_b + m_b u_b**2/2) are what is conserved.
 
     use constants, only: ev2erg
 
     real(dp), intent(in) :: m_t, m_b, r, delta_vpar, delta_epsilon
     real(dp), intent(inout) :: u_b, temp_b
-    real(dp) :: u_b_old, temp_b_old
+    real(dp), intent(in), optional :: r_temp
+    real(dp) :: u_b_old, temp_b_old, r_t
 
+    r_t = r
+    if (present(r_temp)) r_t = r_temp
     u_b_old = u_b
     temp_b_old = temp_b
     u_b = u_b_old - r*m_t*delta_vpar/m_b
-    temp_b = temp_b - (2.0_dp*r*delta_epsilon + m_b*(u_b**2 - u_b_old**2))/(3.0_dp*ev2erg)
+    temp_b = temp_b - (2.0_dp*r_t*delta_epsilon + m_b*(u_b**2 - u_b_old**2))/(3.0_dp*ev2erg)
     ! Guard against a non-positive background temperature: an exchange that
     ! would drive T_b <= 0 is unphysical, so the reservoir keeps its
     ! previous state instead of propagating an invalid temperature.
@@ -433,13 +488,15 @@ pure subroutine update_background_reservoir(m_t, m_b, r, delta_vpar, delta_epsil
 
 end subroutine update_background_reservoir
 
-pure subroutine update_electron_reservoir(mass, particles, momentum, energy, u, temp_e, rejected)
+pure subroutine update_electron_reservoir(mass, particles, momentum, energy, u, temp_e, rejected, particles_temp)
     !Instantaneous e-i friction: the background of a cell (species 1..n-1 ions, n electrons with masses
     !mass and particle numbers particles) gains the parallel momentum and energy [erg] that markers lost
     !to the electrons. All flows u shift by the same amount so that the electron flow ends at the
     !mass-weighted mean ion flow and the total momentum (with the electron flow) is conserved; the
     !energy minus the change of the flow kinetic energy goes into the electron temperature temp_e [eV].
     !An update that would drive temp_e <= 0 is rejected (state unchanged, rejected = .true.).
+    !particles_temp (default particles) are the particle numbers for the energy (flow kinetic energy and
+    !electron heat capacity) if the reservoir has separate capacities for flow and temperature.
 
     use constants, only: ev2erg
 
@@ -448,17 +505,20 @@ pure subroutine update_electron_reservoir(mass, particles, momentum, energy, u, 
     real(dp), dimension(:), intent(inout) :: u
     real(dp), intent(inout) :: temp_e
     logical, intent(out) :: rejected
-    real(dp), dimension(size(u)) :: u_new
+    real(dp), dimension(:), intent(in), optional :: particles_temp
+    real(dp), dimension(size(u)) :: u_new, particles_t
     real(dp) :: inertia_ions, flow_ions, shift, temp_new
     integer :: n
 
     n = size(u)
+    particles_t = particles
+    if (present(particles_temp)) particles_t = particles_temp
     inertia_ions = sum(particles(1:n-1)*mass(1:n-1))
     flow_ions = sum(particles(1:n-1)*mass(1:n-1)*u(1:n-1))/inertia_ions
     shift = (sum(particles*mass*u) + momentum)/sum(particles*mass) - flow_ions
     u_new(1:n-1) = u(1:n-1) + shift
     u_new(n) = flow_ions + shift
-    temp_new = temp_e + (energy - 0.5_dp*sum(particles*mass*(u_new**2 - u**2)))/(1.5_dp*particles(n)*ev2erg)
+    temp_new = temp_e + (energy - 0.5_dp*sum(particles_t*mass*(u_new**2 - u**2)))/(1.5_dp*particles_t(n)*ev2erg)
 
     rejected = (temp_new <= 0.0_dp)
     if (.not.rejected) then
