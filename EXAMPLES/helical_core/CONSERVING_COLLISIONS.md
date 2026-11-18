@@ -17,57 +17,64 @@ the frame moving with `u`. Its changes in parallel velocity `Δv_∥` and energy
 
 `r` is the marker-to-background ratio, `w/n_V` in Eq. (269).
 
-## What r has to be
+## Coupling: physical content or free capacities
 
-Let a marker stand for `p` real particles. In a collision it gains momentum
-`p m_t Δv_∥`. The reservoir of its tetrahedron holds `n V_tet` particles. Momentum and
-energy are conserved only if the reservoir takes exactly what the marker loses, that is
+A collision of a marker that stands for `p = w/n_particles` real particles changes its cell by
 
-    r = p / (n V_tet).
+    u_new = u_old - r_V (m_t/m_b) Δv_∥,     r_V = p / N_V
+    T_new = T_old - (2 r_T Δε + m_b (u_new² - u_old²)) / 3,     r_T = p / N_T
 
-`p` itself is a free choice; choosing it is a relabelling of how many real particles a
-marker represents. That only works under two conditions:
+`N_V` and `N_T` are the capacities of the cell for flow and temperature, in particles.
+The cell then conserves `N_V m_b u` and `N_T (3/2 T + m_b u²/2)` together with the markers.
+This is Eq. (28) of Runov, Kasilov & Helander, J. Comput. Phys. 300 (2015) 605, with
+`N_V = W_V`, `N_T = W_T` and the marker weight `w`.
 
-1. **`p` must be constant along the marker's trajectory.** A marker cannot represent
-   more particles in one tetrahedron than in another. A fixed `r` for every collision
-   means `p = r n V_tet`, which changes with the volume of the cell the marker is in.
-   Each collision is then consistent with itself, but no fixed `p` exists for which total
-   momentum and energy are conserved. On the shipped grid, tetrahedron volumes range from
-   2e-5 to 870 cm³ (a factor of about 1e7).
-2. **`p` must be the same in the feedback and in the moments.** The moments count a
-   marker as `w/n_particles` real particles, because they are divided by `n_particles`.
-   If the feedback uses a different `p`, the output describes one plasma and the momentum
-   exchange another. Also, if `r` does not depend on `n_particles`, doubling the number of
-   markers doubles the momentum fed to the background, so results change with the marker
-   number instead of converging.
+What the capacities must be depends on the problem.
 
-The code therefore now uses
+- **Relaxation in time** (e.g. the beam test): the background is a second, physical
+  population, and how fast and where markers and background meet depends on how many
+  particles it holds. Then `N_V = N_T = n V_cell`, the physical content of the cell. This
+  is the default (`reservoir_capacity_flow = reservoir_capacity_temperature = 0`).
+- **Stationary state** (e.g. neoclassical flows and currents): the background only stands
+  for the field particles in the collision operator. In a stationary state its flow and
+  temperature no longer change, so the summed kicks in every cell vanish:
+  Σ w Δv_∥ = 0 and Σ w Δε = 0 per cell. These are the conservation laws of the collision
+  operator (Runov et al., Eqs. 25–27), and the capacities drop out of them. `N_V` and
+  `N_T` are then free numerical parameters, and they may even differ between cells. They
+  set only how noisy the cells are and how fast they relax:
+  - variance of a cell's flow ≈ v_T² p/N_V, of its temperature ≈ T² p/N_T (Runov et al.,
+    App. C);
+  - the markers must spend a total time of about τ_c N/p in a cell before it has relaxed.
 
-    r = (w / n_particles) / (n V_tet)
+  Runov et al. use `N_T/p` = 50–100 and, for the parallel flow in a tokamak core (small
+  compared with v_T), `N_V/p` = 1e5.
 
-with the exact physical tetrahedron volume `c%tetr_volume`. Their sum matches
-`prism_volumes` to 1e-11. The volume is the coordinate volume times R at the centroid,
-which is exact because the Jacobian R is linear.
+In the stationary case the capacities are set in helical_core.inp in units of the mean
+marker weight, `reservoir_capacity_flow` = W_V/w and `reservoir_capacity_temperature` = W_T/w
+(both > 0, or both 0 for the physical content). The mean marker weight is the physical
+particle number of the first background species in the mesh divided by `n_particles`
+(`set_reservoir_capacities`), i.e. the mean weight if the markers sample that species. Every
+cell gets the same capacities, independent of its volume, for every background species.
+A collision of a marker of weight w_n then changes its cell by r = (w_n/w_mean)/(W/w). Small
+cells are visited less often, so they relax more slowly, but they are not noisier.
 
-To let the markers represent a different number of real particles, scale `w`, not a
-separate coupling factor. Then moments and feedback change together. For the beam test,
-`beam_density_fraction` does this.
-
-Changing `p` is not only a noise setting. It sets the ratio of marker particles to
-background particles, which is physics:
-
-- **Small `p`:** the background hardly changes, so this is the pure test-particle limit.
-- **Large `p`:** strong coupling, but a noisy background in each cell.
-
-In helical_core the markers are full-f samples of the same ions as the background (both
-at density `n`). The consistent choice there is `p = w/n_particles`.
+**Correction (2026-11-18).** Earlier versions of this file stated two conditions that
+supposedly forced the physical content in all cases: the number of particles a marker
+represents had to be the same in every cell, and the same in the feedback as in the moments,
+otherwise results would change with the marker number. Both treat the background as a
+physical population whose momentum has to balance the markers' at every moment. That is
+true for a relaxation in time, but not for a stationary state, where only the vanishing
+summed exchange per cell matters. The statement "the noise can no longer be reduced with a
+free coupling factor" was wrong for stationary problems.
 
 ### The previous formula
 
     r = c%weight_factor * w * 1e-4,    c%weight_factor = 1/(n V_box R_max)
 
 With the full-f weight `w = n R V_box` this is `r = 1e-4 R/R_max`, about 1e-4 regardless
-of `n_particles`, tetrahedron volume and density. It violates both conditions above. In
+of `n_particles`, tetrahedron volume and density. For a stationary state this was a free
+capacity of about 1e4 marker weights (the same for flow and temperature), which is allowed; for
+the beam relaxation it was wrong. In
 addition, helical_core computed `c%weight_factor` before `calc_starting_conditions` had
 set the box sizes (`g%amax` etc.). That divided by zero, so the run crashed at once
 (SIGFPE).
@@ -84,17 +91,18 @@ and `sfc_s_min=1e-7`, 1000 markers.
 | check: `Σ w/N` against `n V_plasma` | 3.91e20 = 3.91e20 |
 | tetrahedron volume: median / smallest | 54 cm³ / 2e-5 cm³ |
 | background particles per tetrahedron: median / smallest | 1.6e15 / 6e8 |
-| consistent `r`: median cell / smallest cell | about 340 / about 1e9 |
-| previous `r` | about 1e-4 (about 3e6 times too small in a typical cell) |
+| `r` with physical content: median cell / smallest cell | about 340 / about 1e9 |
+| previous `r` | about 1e-4 (capacity about 3e6 times the physical content of a typical cell) |
 
 ## Noise: the dilemma of section 4.3.2.2
 
-With a consistent `r`, a single marker can carry many times the particles of a cell. Each
-collision then kicks that cell's flow and temperature hard. With the shipped grid (axis
-cells 1e-6 times the median) this produced cell flows of about 6 v0 and temperatures of
+With the physical content as capacity, a single marker can carry many times the particles of
+a cell. Each collision then kicks that cell's flow and temperature hard. With the shipped grid
+(axis cells 1e-6 times the median) this produced cell flows of about 6 v0 and temperatures of
 about 1 eV. The guard that rejects `T <= 0` then fired, which breaks conservation.
 
-The noise can no longer be reduced with a free coupling factor. Only these help:
+For a stationary state the remedy is larger capacities (`reservoir_capacity_flow`,
+`reservoir_capacity_temperature`, see above). For a relaxation in time only these help:
 
 - **More markers.** `r` per marker scales as 1/`n_particles`.
 - **Reservoir cells** (`reservoir_min_volume_fraction`, default 0.5, 0 = off). Small tetrahedra
@@ -137,7 +145,8 @@ starts at t = 0 against a background that has already absorbed the full historie
 earlier markers.
 
 For a stationary end state this acts like an iteration, which is the argument of section
-4.3.2.3. For a relaxation followed in time it is wrong. Single-slice test: at t = 500 µs
+4.3.2.3 and of the single-particle algorithm of Runov et al. For a relaxation followed in time it
+is wrong. Single-slice test: at t = 500 µs
 the beam markers end at 0.099 v0 and the background at 0.154 v0. Markers slower than the
 background are impossible, because markers traced late relaxed toward a background that
 had already been spun up.
@@ -147,6 +156,14 @@ next slice starts from where each marker stopped (`update_start_type`). The
 parallelisation over markers is unchanged, and markers and background stay in step to
 within one slice. Within a run, the weights are computed once and kept fixed. A
 zero-length step sets each marker's weight before its first collision.
+
+**Stationary states.** Common time is not needed there, but with the deferred updates below
+the background only changes between slices. With `n_time_slices = 1` it is updated once,
+after all markers have been traced, so the markers never feel the exchange (helical_core
+prints a warning). For a stationary state, use many slices: each slice is then one step of
+the iteration between markers and background. Every slice prints the largest change of a
+cell (`|du_par|/v0`, `|dT|/T`); the per-collision updates of Runov et al. are reproduced
+while these stay small. Large capacities make them small.
 
 **Random numbers.** The seed must differ between slices. The per-thread seeding first ran at
 the start of every parallel region with the same factor, so with several slices every
@@ -259,6 +276,8 @@ Input keys (helical_core.inp):
 | `beam_density_fraction` | 1 | marker density / background density |
 | `reservoir_min_volume_fraction` | 0.5 | merge small tetrahedra near the axis into reservoir cells of at least this fraction of the median volume |
 | `background_temperature_eV` | 0 | background temperature of all species if > 0, else `energy_eV` (conserving collisions only) |
+| `reservoir_capacity_flow` | 0 | capacity W_V/w of every reservoir cell for the flow, in mean marker weights; 0 = physical content (stationary states only, see "Coupling") |
+| `reservoir_capacity_temperature` | 0 | same for the temperature (W_T/w); set both or neither |
 
 Output with conserving collisions:
 

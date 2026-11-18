@@ -14,6 +14,11 @@ of collision_relaxation.dat instead of reference files:
 - total energy of markers, background and lost markers is conserved;
 - the beam slows down and the background flow grows in the beam direction.
 
+With RESERVOIR_CAPACITIES="W_V,W_T" (in mean marker weights) the reservoir cells use these
+capacities instead of their physical content (Runov et al. 2015); then the beam must still
+slow down monotonically, energy is conserved in capacity units, the background flow must end
+in the beam direction and every slice reports its largest background change.
+
 Paths are passed in by TESTS/CMakeLists.txt via environment variables.
 """
 import os
@@ -40,6 +45,7 @@ GORILLA_ROOT = env_path("GORILLA_ROOT")
 BINARY = env_path("GORILLA_APPLETS_BIN")
 WORK_DIR = env_path("WORK_DIR")
 N_SLICES = 4
+CAPACITIES = os.environ.get("RESERVOIR_CAPACITIES")
 
 if WORK_DIR.exists():
     shutil.rmtree(WORK_DIR)
@@ -101,6 +107,10 @@ h["boole_antithetic_variate"] = False
 h["boole_unidirectional_beam"] = True
 h["beam_density_fraction"] = 0.05
 h["n_time_slices"] = N_SLICES
+if CAPACITIES:
+    w_v, w_t = (float(v) for v in CAPACITIES.split(","))
+    h["reservoir_capacity_flow"] = w_v
+    h["reservoir_capacity_temperature"] = w_t
 h["i_integrator_type"] = 1
 h["seed_option"] = 2
 for key in ("boole_write_vertex_indices", "boole_write_vertex_coordinates", "boole_write_prism_volumes",
@@ -153,6 +163,15 @@ if rel_energy_error > 1.0e-6:
     sys.exit(f"FAIL: total energy not conserved, relative error {rel_energy_error:.2e}")
 if not all(later < earlier for earlier, later in zip(vpar_m, vpar_m[1:])):
     sys.exit("FAIL: the beam does not slow down monotonically")
+if CAPACITIES:
+    if "reservoir capacities: W_V/w" not in result.stdout:
+        sys.exit("FAIL: the reservoir capacities were not set")
+    if result.stdout.count("largest background change of a cell") != N_SLICES:
+        sys.exit("FAIL: not every slice reported its largest background change")
+    if not u_b[-1] > 0.0:
+        sys.exit("FAIL: the background flow does not end in the beam direction")
+    print("PASS (capacities): beam slows down, background flow in beam direction, energy conserved")
+    sys.exit(0)
 if not all(later > earlier for earlier, later in zip(u_b, u_b[1:])):
     sys.exit("FAIL: the background flow does not grow monotonically in the beam direction")
 

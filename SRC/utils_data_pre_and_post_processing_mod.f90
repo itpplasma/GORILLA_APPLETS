@@ -902,6 +902,50 @@ contains
 
 end subroutine build_reservoir_cells
 
+subroutine set_reservoir_capacities(capacity_flow, capacity_temperature, n_particles)
+
+    !Capacities of the reservoir cells of the energy and momentum conserving collisions (Runov,
+    !Kasilov & Helander, J. Comput. Phys. 300 (2015) 605, Eq. 28): every cell takes up the momentum
+    !and energy of the markers as if it held capacity_flow (flow) and capacity_temperature (temperature)
+    !mean marker weights of particles, for every background species, independent of its volume and
+    !density. Only a stationary state is physical then; the capacities set how noisy the cells are
+    !(variance of u ~ v_T**2/capacity_flow) and how slowly they relax (the markers must spend about
+    !tau_c*capacity in a cell). Both 0 keep the physical content dens_mat*tetr_volume of each cell,
+    !which is needed to follow a relaxation in time (e.g. the beam test).
+    !The mean marker weight is the physical particle number of the first background species in the
+    !mesh divided by n_particles, i.e. the mean weight if the markers sample that species.
+
+    use gorilla_applets_types_mod, only: c
+
+    real(dp), intent(in) :: capacity_flow, capacity_temperature, n_particles
+    real(dp) :: w_mean, particles_median
+    real(dp), dimension(size(c%tetr_volume)) :: particles_tetr
+
+    c%capacity_particles_flow = 0.0_dp
+    c%capacity_particles_temperature = 0.0_dp
+    if ((capacity_flow.le.0.0_dp).and.(capacity_temperature.le.0.0_dp)) return
+    if ((capacity_flow.le.0.0_dp).or.(capacity_temperature.le.0.0_dp)) then
+        print*, 'Error: set both reservoir_capacity_flow and reservoir_capacity_temperature (> 0), or neither'
+        stop
+    endif
+
+    particles_tetr = c%dens_mat(1,:)*c%tetr_volume
+    w_mean = sum(particles_tetr)/n_particles
+    c%capacity_particles_flow = capacity_flow*w_mean
+    c%capacity_particles_temperature = capacity_temperature*w_mean
+
+    block
+        integer, dimension(size(particles_tetr)) :: p
+        call sort_index(particles_tetr, p)
+        particles_median = particles_tetr(p((size(p)+1)/2))
+    end block
+    print*, 'reservoir capacities: W_V/w = ', capacity_flow, ', W_T/w = ', capacity_temperature, &
+            ', mean marker weight w = ', w_mean, ' particles'
+    print*, 'capacities / physical content of the median tetrahedron: flow ', c%capacity_particles_flow/particles_median, &
+            ', temperature ', c%capacity_particles_temperature/particles_median
+
+end subroutine set_reservoir_capacities
+
 subroutine cluster_values(values, tol, ids, n_ids)
 
     !ids(i) = rank of the cluster of values(i) among clusters of values closer than tol, ascending
