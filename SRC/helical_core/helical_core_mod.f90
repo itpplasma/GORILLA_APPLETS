@@ -33,8 +33,12 @@ subroutine calc_helical_core
         parallelised_particle_pushing_helical_core, eliminate_particles_outside_flux_threshold, &
         set_unidirectional_beam, write_collision_relaxation_diagnostics, write_collision_relaxation_profiles, &
         write_marker_weights, boole_df_time_dependent, df_burn_in_time, df_time_offset, w_td, w1_td
+    use delta_f_restoring_mod, only: boole_restoring, setup_restoring, compute_restoring_coefficients, rest_loss, &
+        write_restoring_diagnostics, n_rest_exact, n_rest_fallback, n_rest_empty, rest_given
 
-    integer :: i_slice, relaxation_unit, n_rejected
+    integer :: i_slice, relaxation_unit, n_rejected, restoring_unit
+    real(dp) :: dp_tot, de_tot, dp_abs
+    real(dp), dimension(:), allocatable :: base_w, w1_use
     real(dp) :: max_delta_u, max_delta_temp_rel
     logical :: boole_relaxation_diagnostics
     real(dp), dimension(:), allocatable :: pitch_0, energy_0
@@ -100,11 +104,31 @@ subroutine calc_helical_core
         w1_td = 0.0_dp
         print*, 'time-dependent delta-f weights: ', in%n_time_slices, ' slices, burn-in ', df_burn_in_time, &
                 ' s of ', in%time_step, ' s'
+        if (boole_restoring) then
+            call setup_restoring(in%num_particles)
+            allocate(base_w(in%num_particles), w1_use(in%num_particles))
+            open(newunit=restoring_unit, file='delta_f_restoring.dat', status='replace')
+            write(restoring_unit,'(A)') '#slice time sum_dp sum_dE sum|dp| given_dp given_dE n_bins_exact n_bins_fallback n_bins_empty'
+        endif
     endif
     start%t = in%time_step/in%n_time_slices
     do i_slice = 1, in%n_time_slices
         df_time_offset = (i_slice - 1)*start%t(1)
         call parallelised_particle_pushing_helical_core(species=1, boole_reuse_weights_in=(i_slice.gt.1), i_slice_in=i_slice)
+        if (boole_restoring) then
+            !momentum and energy lost by delta-f in this slice are returned during the next slice
+            dp_tot = sum(rest_loss(1, :))
+            de_tot = sum(rest_loss(2, :))
+            dp_abs = sum(abs(rest_loss(1, :)))
+            base_w = real(weights%original(:, 1), dp)
+            w1_use = 0.0_dp
+            if (allocated(w1_td)) w1_use = w1_td
+            call compute_restoring_coefficients(start%t(1), 1, base_w, w1_use)
+            call write_restoring_diagnostics(restoring_unit, i_slice, i_slice*start%t(1), dp_tot, de_tot, dp_abs)
+            rest_given = 0.0_dp
+            print*, 'slice ', i_slice, ': restoring bins exact/fallback/empty = ', n_rest_exact, n_rest_fallback, &
+                    n_rest_empty
+        endif
         if (boole_relaxation_diagnostics) then
             call apply_deferred_background_updates(n_rejected, max_delta_u, max_delta_temp_rel)
             if (n_rejected.gt.0) print*, 'WARNING: background updates rejected (T <= 0) in ', n_rejected, &
@@ -119,6 +143,7 @@ subroutine calc_helical_core
         endif
     enddo
     start%t = in%time_step
+    if (boole_restoring) close(restoring_unit)
     if (boole_relaxation_diagnostics) then
         close(relaxation_unit)
         call write_collision_relaxation_profiles

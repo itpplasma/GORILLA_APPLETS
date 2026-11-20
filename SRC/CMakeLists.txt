@@ -32,6 +32,7 @@ add_library(GORILLA_APPLETS STATIC
   anomalous_transport/anomalous_transport_displacement_mod.f90
   anomalous_transport/utils_anomalous_transport_mod.f90
   anomalous_transport/anomalous_transport_mod.f90
+  helical_core/delta_f_restoring_mod.f90
   helical_core/utils_helical_core_mod.f90
   helical_core/helical_core_mod.f90
   profile_data_mod.f90

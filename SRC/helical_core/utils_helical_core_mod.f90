@@ -39,6 +39,7 @@ contains
 subroutine read_helical_core_inp_into_type
 
     use gorilla_applets_types_mod, only: in
+    use delta_f_restoring_mod, only: boole_restoring, n_rest_psi, n_rest_theta, rest_min_markers, rest_max_condition
 
     real(dp) :: time_step, energy_eV, n_particles, density
     logical :: boole_squared_moments, boole_point_source, boole_collisions, boole_precalc_collisions, boole_refined_sqrt_g, &
@@ -53,6 +54,9 @@ subroutine read_helical_core_inp_into_type
     logical :: boole_delta_f_time_dependent = .false.
     logical :: boole_delta_f_second_weight = .false.
     real(dp) :: delta_f_burn_in_time = 0.0_dp
+    logical :: boole_delta_f_restoring = .false.
+    integer :: n_restoring_psi_bins = 30, n_restoring_theta_bins = 16, restoring_min_markers = 50
+    real(dp) :: restoring_max_condition = 1.0d8
     integer :: i_integrator_type, seed_option, n_species, n_time_slices !i_integrator_type, seed_option: read for compatibility with existing input files, unused
     real(dp) :: flux_threshold_for_elimination, beam_density_fraction, reservoir_min_volume_fraction, &
                 background_temperature_eV, reservoir_capacity_flow, reservoir_capacity_temperature
@@ -69,7 +73,9 @@ subroutine read_helical_core_inp_into_type
     & n_time_slices, boole_unidirectional_beam, beam_density_fraction, reservoir_min_volume_fraction, &
     & background_temperature_eV, reservoir_capacity_flow, reservoir_capacity_temperature, &
     & boole_profiles_from_vertex_data, boole_write_marker_weights, boole_load_local_maxwellian, &
-    & boole_delta_f_time_dependent, boole_delta_f_second_weight, delta_f_burn_in_time
+    & boole_delta_f_time_dependent, boole_delta_f_second_weight, delta_f_burn_in_time, &
+    & boole_delta_f_restoring, n_restoring_psi_bins, n_restoring_theta_bins, restoring_min_markers, &
+    & restoring_max_condition
 
     !optional keys keep their input_t defaults when absent from the file
     n_time_slices = in%n_time_slices
@@ -126,6 +132,20 @@ subroutine read_helical_core_inp_into_type
     boole_df_time_dependent = boole_delta_f_time_dependent
     boole_df_second_weight = boole_delta_f_second_weight
     df_burn_in_time = delta_f_burn_in_time
+    boole_restoring = boole_delta_f_restoring
+    n_rest_psi = n_restoring_psi_bins
+    n_rest_theta = n_restoring_theta_bins
+    rest_min_markers = restoring_min_markers
+    rest_max_condition = restoring_max_condition
+    if (boole_restoring.and..not.(boole_delta_f_time_dependent.and.boole_collisions)) then
+        print*, 'Error: boole_delta_f_restoring requires boole_delta_f_time_dependent and boole_collisions'
+        stop
+    endif
+    if (boole_restoring.and.boole_preserve_energy_and_momentum_during_collisions) then
+        print*, 'Error: boole_delta_f_restoring replaces the reservoir of the conserving full-f collisions; ', &
+                'set boole_preserve_energy_and_momentum_during_collisions = .false.'
+        stop
+    endif
     if (boole_df_time_dependent) then
         if (.not.boole_delta_f) then
             print*, 'Error: boole_delta_f_time_dependent requires boole_delta_f'
@@ -161,7 +181,7 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
 ! i_slice_in gives every slice its own random number streams (the same streams in every slice would
 ! replay the same collision noise for each marker and heat the markers).
 !
-    use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, s
+    use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, s, weights
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
     use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_marker_moments_to_thread_sums, &
@@ -169,6 +189,8 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
         add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
         initialise_seed_for_marker
     use utils_orbit_timestep_mod, only: start_touched_tetr_tracking, stop_touched_tetr_tracking
+    use delta_f_restoring_mod, only: boole_restoring, n_rest_bins, rest_loss, marker_tetr, add_kick_to_losses, &
+        given_thr, rest_given
 
     integer, intent(in)                               :: species
     integer, intent(in), optional                     :: n_particles_in
@@ -184,6 +206,8 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
     complex(dp), dimension(:,:), allocatable          :: local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared
+    real(dp), dimension(:,:), allocatable             :: thread_loss   !momentum/energy lost by delta-f per bin
+    real(dp)                                          :: vpar_kick, vperp_kick
 
     if (present(n_particles_in)) then
         n_particles = n_particles_in
@@ -210,12 +234,17 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, boole_reuse_weights, i_slice, &
-    !$OMP& moment_specs, ntetr) &
+    !$OMP& moment_specs, ntetr, boole_restoring, n_rest_bins, rest_loss, marker_tetr, w_td, weights, rest_given) &
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p, l, n, i, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, &
-    !$OMP& thread_tetr_moments, thread_prism_moments_squared)
+    !$OMP& thread_tetr_moments, thread_prism_moments_squared, thread_loss, vpar_kick, vperp_kick)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
+    if (boole_restoring) then
+        allocate(thread_loss(2, n_rest_bins))
+        thread_loss = 0.0_dp
+        given_thr = 0.0_dp
+    endif
 
     !moments are summed per thread and added to the output once per thread
     allocate(thread_tetr_moments(moment_specs%n_moments,ntetr))
@@ -259,7 +288,13 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
 
                 ! Apply collisions if enabled
                 if (in%boole_collisions) then
+                    vpar_kick = vpar
+                    vperp_kick = vperp
                     call carry_out_collisions(i, n, t, x, vpar, vperp, ind_tetr, iface, species,iswmode_in=1)
+                    !momentum and energy removed from delta-f by the test-particle kick (W = base * w)
+                    if (boole_restoring) call add_kick_to_losses(thread_loss, ind_tetr, &
+                        real(weights%original(n, species), dp)*w_td(n), start%particle_mass(species), &
+                        vpar_kick, vperp_kick, vpar, vperp)
                     t%step = t%step / start%v0(species)
                 else
                     t%step = start%t(species) - t%confined
@@ -286,6 +321,7 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
 
             call update_exit_data(particle_status%lost, t%confined, x, vpar, vperp, i, n, species_in=species, ind_tetr=ind_tetr)
             call update_start_type(x, vpar, vperp, n, species, ind_tetr)
+            if (boole_restoring) marker_tetr(n) = ind_tetr   !-1 if lost
         enddo
 
         call add_marker_moments_to_thread_sums(local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared)
@@ -294,7 +330,12 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
 
     !$omp critical
     call add_thread_moments_to_output(thread_tetr_moments, thread_prism_moments_squared, species)
+    if (boole_restoring) then
+        rest_loss = rest_loss + thread_loss
+        rest_given = rest_given + given_thr
+    endif
     !$omp end critical
+    if (allocated(thread_loss)) deallocate(thread_loss)
     call stop_touched_tetr_tracking
     !$OMP END PARALLEL
 
@@ -318,6 +359,7 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
                                         update_local_tetr_moments, calc_particle_weights_and_jperp, &
                                         place_particle_on_grid, push_within_tetrahedron, push_across_axis_hole
     use utils_data_pre_and_post_processing_mod, only: normalised_poloidal_flux
+    use delta_f_restoring_mod, only: boole_restoring, restoring_rate, given_thr
 
     real(dp), dimension(3), intent(inout)        :: x
     real(dp), intent(inout)                      :: vpar, vperp
@@ -332,7 +374,8 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
 
     real(dp), dimension(3)                       :: z_save, z_entry
     real(dp)                                     :: t_pass, perpinv
-    real(dp)                                     :: vpar_entry, vperp_entry, t_cross_start, dw
+    real(dp)                                     :: vpar_entry, vperp_entry, t_cross_start, dw, dw_rest, fac
+    real(dp), dimension(3)                       :: x_entry
     logical                                      :: boole_t_finished, boole_pusher_failed, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
     type(optional_quantities_type)               :: optional_quantities
@@ -394,6 +437,7 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
         ind_tetr_save = ind_tetr
         if (boole_df_time_dependent) then !entry point of this crossing, where the source rate is evaluated
             z_entry = z_save
+            x_entry = x
             vpar_entry = vpar
             vperp_entry = vperp
             t_cross_start = df_time_offset + t%confined + t%step - t%remain
@@ -414,19 +458,24 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
         if (boole_df_time_dependent) then
             !dw/dt = (1 - w1) sigma with sigma at the entry point, integrated over this crossing; the moments
             !of this crossing use the midpoint weight and are deposited only after the burn-in time
-            if (boole_df_second_weight) then
-                dw = (1.0_dp - w1_td(n)) * delta_f_source_rate(z_entry, vpar_entry, vperp_entry, ind_tetr_save, &
-                                                               species) * t_pass
-            else
-                dw = delta_f_source_rate(z_entry, vpar_entry, vperp_entry, ind_tetr_save, species) * t_pass
-            endif
+            !the restoring term (field-particle collisions) changes the physics weight w only, not the
+            !marker-density weight w1 (Wang et al. 1999, Eqs. 51-52)
+            fac = 1.0_dp
+            if (boole_df_second_weight) fac = 1.0_dp - w1_td(n)
+            dw = fac * delta_f_source_rate(z_entry, vpar_entry, vperp_entry, ind_tetr_save, species) * t_pass
+            dw_rest = 0.0_dp
+            if (boole_restoring) dw_rest = fac * restoring_rate(ind_tetr_save, x_entry, vpar_entry, vperp_entry, &
+                                                                species) * t_pass
             if (t_cross_start.ge.df_burn_in_time) then
-                weights%w(n, species) = weights%original(n, species) * (w_td(n) + 0.5_dp*dw)
+                weights%w(n, species) = weights%original(n, species) * (w_td(n) + 0.5_dp*(dw + dw_rest))
             else
                 weights%w(n, species) = (0.0_dp, 0.0_dp)
             endif
-            w_td(n) = w_td(n) + dw
-            if (boole_df_second_weight) w1_td(n) = w1_td(n) + dw   !no marker injection, no restoring yet: w1 = w
+            w_td(n) = w_td(n) + dw + dw_rest
+            if (boole_restoring) given_thr = given_thr + real(weights%original(n, species), dp)*dw_rest* &
+                [start%particle_mass(species)*vpar_entry, &
+                 0.5_dp*start%particle_mass(species)*(vpar_entry**2 + vperp_entry**2)]
+            if (boole_df_second_weight) w1_td(n) = w1_td(n) + dw   !no marker injection
         elseif (in%boole_delta_f) then
             ! Apply smooth fading of particle weights for t > t_tot*2/3 (fixed-weight delta-f only)
             call apply_weight_fading(n, species, t, t_tot)
