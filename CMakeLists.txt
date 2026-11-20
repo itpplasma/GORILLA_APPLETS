@@ -70,16 +70,42 @@ endif()
 find_package(BLAS REQUIRED)
 find_package(LAPACK REQUIRED)
 find_package(netCDF REQUIRED)
+find_package(OpenMP REQUIRED COMPONENTS Fortran)
 
-# No -ffpe-trap=invalid: LAPACK dgesv produces transient NaN in the
-# make_tetra_physics OMP loop for grid_kind=5 with coord_system=2 (macOS ARM64).
-add_compile_options(-g -fbacktrace -ffpe-trap=zero,overflow -fbounds-check -fopenmp -ffree-line-length-none)
-add_link_options(-g -fbacktrace -ffpe-trap=zero,overflow -fbounds-check -fopenmp)
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+  add_compile_options("$<$<COMPILE_LANGUAGE:Fortran>:-ffree-line-length-none>")
+endif()
+
+# Keep performance builds free of runtime checks unless explicitly requested.
+if(CMAKE_BUILD_TYPE MATCHES "^(Release|MinSizeRel)$")
+  set(_runtime_checks_default OFF)
+else()
+  set(_runtime_checks_default ON)
+endif()
+option(GORILLA_RUNTIME_CHECKS
+  "Fortran bounds checks, FPE traps and backtraces" ${_runtime_checks_default})
+
+if(GORILLA_RUNTIME_CHECKS)
+  # Invalid-operation traps conflict with transient LAPACK NaNs on macOS ARM64.
+  if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+    add_compile_options(
+      "$<$<COMPILE_LANGUAGE:Fortran>:-g;-fbacktrace;-ffpe-trap=zero,overflow;-fbounds-check>")
+  elseif(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC|PGI")
+    add_compile_options("$<$<COMPILE_LANGUAGE:Fortran>:-g;-C;-Ktrap=divz,ovf>")
+  else()
+    message(FATAL_ERROR "GORILLA_RUNTIME_CHECKS is not supported for "
+                        "${CMAKE_Fortran_COMPILER_ID}; use a supported compiler "
+                        "or set GORILLA_RUNTIME_CHECKS=OFF.")
+  endif()
+endif()
 
 enable_testing()
 
 add_subdirectory(SRC)
 add_subdirectory(SRC_CORE)
+# Embedded core revisions need OpenMP; properties support CMake 3.12.
+set_property(TARGET GORILLA APPEND PROPERTY LINK_LIBRARIES OpenMP::OpenMP_Fortran)
+set_property(TARGET GORILLA APPEND PROPERTY INTERFACE_LINK_LIBRARIES OpenMP::OpenMP_Fortran)
 add_subdirectory(TESTS)
 
 add_executable(gorilla_applets_main.x
