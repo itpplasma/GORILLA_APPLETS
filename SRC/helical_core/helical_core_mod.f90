@@ -32,7 +32,7 @@ subroutine calc_helical_core
     use utils_helical_core_mod, only: read_helical_core_inp_into_type, &
         parallelised_particle_pushing_helical_core, eliminate_particles_outside_flux_threshold, &
         set_unidirectional_beam, write_collision_relaxation_diagnostics, write_collision_relaxation_profiles, &
-        write_marker_weights
+        write_marker_weights, boole_df_time_dependent, df_burn_in_time, df_time_offset, w_td, w1_td
 
     integer :: i_slice, relaxation_unit, n_rejected
     real(dp) :: max_delta_u, max_delta_temp_rel
@@ -94,8 +94,16 @@ subroutine calc_helical_core
         write(relaxation_unit,'(A)') '#time <v_par>_m/v0 <u_par>_b/v0 P_m P_b P_lost E_m E_b E_lost E_tot ' // &
                                      'L_m L_b L_lost L_tot <T>_b T_m min_T_b max|u_b|/v0 n_confined <T>_e min_T_e'
     endif
+    if (boole_df_time_dependent) then
+        allocate(w_td(in%num_particles), w1_td(in%num_particles))
+        w_td = 0.0_dp
+        w1_td = 0.0_dp
+        print*, 'time-dependent delta-f weights: ', in%n_time_slices, ' slices, burn-in ', df_burn_in_time, &
+                ' s of ', in%time_step, ' s'
+    endif
     start%t = in%time_step/in%n_time_slices
     do i_slice = 1, in%n_time_slices
+        df_time_offset = (i_slice - 1)*start%t(1)
         call parallelised_particle_pushing_helical_core(species=1, boole_reuse_weights_in=(i_slice.gt.1), i_slice_in=i_slice)
         if (boole_relaxation_diagnostics) then
             call apply_deferred_background_updates(n_rejected, max_delta_u, max_delta_temp_rel)
@@ -117,7 +125,14 @@ subroutine calc_helical_core
     endif
     call write_marker_weights
 
-    call normalise_prism_moments_and_prism_moments_squared(boole_skip_time_normalisation_in=in%boole_delta_f)
+    if (boole_df_time_dependent) then
+        !time average over the deposit window [burn-in, time_step]: the moments are then densities (as in full-f)
+        start%t = in%time_step - df_burn_in_time
+        call normalise_prism_moments_and_prism_moments_squared(boole_skip_time_normalisation_in=.false.)
+        start%t = in%time_step
+    else
+        call normalise_prism_moments_and_prism_moments_squared(boole_skip_time_normalisation_in=in%boole_delta_f)
+    endif
 
     if (moment_specs%n_moments.gt.0) call fourier_transform_moments
     call write_data_to_files

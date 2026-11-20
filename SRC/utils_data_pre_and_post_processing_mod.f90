@@ -397,10 +397,10 @@ function pdf_vertex_density_position(x) result(val)
 
 end function pdf_vertex_density_position
 
-subroutine vertex_profiles_at(x, dens, temp_i, found)
+subroutine vertex_profiles_at(x, dens, temp_i, found, temp_e_out)
 
-    !Density [cm^-3] and ion temperature [eV] of the vertex data at x = (R, phi, Z);
-    !found = .false. outside the mesh
+    !Density [cm^-3], ion temperature [eV] and optionally electron temperature [eV] of the vertex data
+    !at x = (R, phi, Z); found = .false. outside the mesh
 
     use find_tetra_mod, only: find_tetra
     use vertex_data_mod, only: vertex_data_profiles
@@ -408,6 +408,7 @@ subroutine vertex_profiles_at(x, dens, temp_i, found)
     real(dp), intent(in) :: x(3)
     real(dp), intent(out) :: dens, temp_i
     logical, intent(out) :: found
+    real(dp), intent(out), optional :: temp_e_out
     real(dp) :: x_local(3), temp_e
     integer :: ind_tetr, iface
 
@@ -416,7 +417,9 @@ subroutine vertex_profiles_at(x, dens, temp_i, found)
     found = (ind_tetr.ne.-1)
     dens = 0.0_dp
     temp_i = 0.0_dp
+    temp_e = 0.0_dp
     if (found) call vertex_data_profiles(ind_tetr, x(1), x(3), dens, temp_i, temp_e)
+    if (present(temp_e_out)) temp_e_out = temp_e
 
 end subroutine vertex_profiles_at
 
@@ -456,10 +459,12 @@ subroutine set_rest_of_start_type()
     use marker_distribution_mod, only: sample_array_1d
 
     integer :: i_species, n
-    real(dp) :: dens, temp_i
+    real(dp) :: dens, temp_i, temp_e
     logical :: found
 
     call init_velocity_space_distributions
+    !charges are needed below to pick the temperature of each species
+    call set_species_properties
 
     ! Sample pitch and energy for all species
     do i_species = 1, in%n_species
@@ -467,13 +472,18 @@ subroutine set_rest_of_start_type()
         call sample_array_1d(start%dist_energy, in%num_particles, start%energy(:,i_species))
     enddo
 
-    !Local Maxwellian: the sampled energies are E/T_i, scaled with the ion temperature at each marker
+    !Local Maxwellian: the sampled energies are E/T, scaled with the local temperature of the species
+    !(T_i for ions, T_e for electrons; calc_particle_weights_and_jperp uses the same T in the weight)
     if (in%boole_load_local_maxwellian) then
         do i_species = 1, in%n_species
             do n = 1, in%num_particles
-                call vertex_profiles_at(start%x(:,n,i_species), dens, temp_i, found)
+                call vertex_profiles_at(start%x(:,n,i_species), dens, temp_i, found, temp_e)
                 if (.not.found) error stop 'boole_load_local_maxwellian: a marker was placed outside the mesh'
-                start%energy(n,i_species) = start%energy(n,i_species)*temp_i
+                if (start%particle_charge(i_species) > 0.0_dp) then
+                    start%energy(n,i_species) = start%energy(n,i_species)*temp_i
+                else
+                    start%energy(n,i_species) = start%energy(n,i_species)*temp_e
+                endif
             enddo
         enddo
     endif
@@ -483,8 +493,6 @@ subroutine set_rest_of_start_type()
         start%pitch(1:in%num_particles:2,:) = -start%pitch(2:in%num_particles:2,:)
         start%energy(1:in%num_particles:2,:) = start%energy(2:in%num_particles:2,:)
     endif
-
-    call set_species_properties
 
 end subroutine set_rest_of_start_type
 

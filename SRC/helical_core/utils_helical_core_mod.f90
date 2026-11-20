@@ -23,6 +23,17 @@ module utils_helical_core_mod
     logical, public :: boole_marker_weights_output = .false.
     real(dp), dimension(:,:), allocatable, public :: marker_diag
 
+    !time-dependent delta-f weights (Wang et al. 1999, Eqs. 51-52 without marker injection):
+    !markers loaded from the local Maxwellian F0 (g = F0 up to a constant), weights start at 0 and collect the
+    !source -v_d.grad(F0)/F0 at every tetrahedron crossing at the current position,
+    !    dw/dt = (1 - w1) sigma,   dw1/dt = (1 - w1) sigma   (w1: marker density g = F0/(1 - w1)),
+    !and moments are averaged over [delta_f_burn_in_time, time_step]. Without restoring terms w1 = w.
+    logical, public :: boole_df_time_dependent = .false.
+    logical, public :: boole_df_second_weight = .false.
+    real(dp), public :: df_burn_in_time = 0.0_dp
+    real(dp), public :: df_time_offset = 0.0_dp          !global time at the start of the current slice
+    real(dp), dimension(:), allocatable, public :: w_td, w1_td
+
 contains
 
 subroutine read_helical_core_inp_into_type
@@ -39,6 +50,9 @@ subroutine read_helical_core_inp_into_type
     logical :: boole_profiles_from_vertex_data = .false.
     logical :: boole_write_marker_weights = .false.
     logical :: boole_load_local_maxwellian = .false.
+    logical :: boole_delta_f_time_dependent = .false.
+    logical :: boole_delta_f_second_weight = .false.
+    real(dp) :: delta_f_burn_in_time = 0.0_dp
     integer :: i_integrator_type, seed_option, n_species, n_time_slices !i_integrator_type, seed_option: read for compatibility with existing input files, unused
     real(dp) :: flux_threshold_for_elimination, beam_density_fraction, reservoir_min_volume_fraction, &
                 background_temperature_eV, reservoir_capacity_flow, reservoir_capacity_temperature
@@ -54,7 +68,8 @@ subroutine read_helical_core_inp_into_type
     & boole_eliminate_particles_outside_flux, flux_threshold_for_elimination, boole_delta_f, &
     & n_time_slices, boole_unidirectional_beam, beam_density_fraction, reservoir_min_volume_fraction, &
     & background_temperature_eV, reservoir_capacity_flow, reservoir_capacity_temperature, &
-    & boole_profiles_from_vertex_data, boole_write_marker_weights, boole_load_local_maxwellian
+    & boole_profiles_from_vertex_data, boole_write_marker_weights, boole_load_local_maxwellian, &
+    & boole_delta_f_time_dependent, boole_delta_f_second_weight, delta_f_burn_in_time
 
     !optional keys keep their input_t defaults when absent from the file
     n_time_slices = in%n_time_slices
@@ -108,6 +123,24 @@ subroutine read_helical_core_inp_into_type
     in%background_temperature_eV = background_temperature_eV
     in%reservoir_capacity_flow = reservoir_capacity_flow
     in%reservoir_capacity_temperature = reservoir_capacity_temperature
+    boole_df_time_dependent = boole_delta_f_time_dependent
+    boole_df_second_weight = boole_delta_f_second_weight
+    df_burn_in_time = delta_f_burn_in_time
+    if (boole_df_time_dependent) then
+        if (.not.boole_delta_f) then
+            print*, 'Error: boole_delta_f_time_dependent requires boole_delta_f'
+            stop
+        endif
+        if (.not.(boole_load_local_maxwellian.and.boole_profiles_from_vertex_data)) then
+            print*, 'Error: boole_delta_f_time_dependent needs markers loaded from the local Maxwellian ', &
+                    '(boole_load_local_maxwellian and boole_profiles_from_vertex_data), so that g = F0'
+            stop
+        endif
+        if ((delta_f_burn_in_time.lt.0.0_dp).or.(delta_f_burn_in_time.ge.time_step)) then
+            print*, 'Error: delta_f_burn_in_time must lie in [0, time_step)'
+            stop
+        endif
+    endif
 
     ! Set defaults for anomalous transport-specific parameters (disabled)
     in%boole_calc_diffusion_coefficient = .false.
@@ -297,8 +330,9 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
     real(dp), intent(in)                         :: t_tot
     logical, intent(in)                          :: boole_reuse_weights
 
-    real(dp), dimension(3)                       :: z_save
+    real(dp), dimension(3)                       :: z_save, z_entry
     real(dp)                                     :: t_pass, perpinv
+    real(dp)                                     :: vpar_entry, vperp_entry, t_cross_start, dw
     logical                                      :: boole_t_finished, boole_pusher_failed, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
     type(optional_quantities_type)               :: optional_quantities
@@ -312,8 +346,17 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
         if (.not.boole_reuse_weights) then
             call calc_particle_weights_and_jperp(n, z_save, vpar, vperp, ind_tetr, species)
             if (in%boole_delta_f) then
-                call adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
-                weights%original(n, species) = weights%w(n, species)
+                if (boole_df_time_dependent) then
+                    !base weight (number of physical particles per marker, constant for markers loaded from F0);
+                    !the delta-f weight starts at 0 and grows along the orbit
+                    weights%original(n, species) = weights%w(n, species)
+                    weights%w(n, species) = (0.0_dp, 0.0_dp)
+                    w_td(n) = 0.0_dp
+                    w1_td(n) = 0.0_dp
+                else
+                    call adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
+                    weights%original(n, species) = weights%w(n, species)
+                endif
             endif
         endif
         if (boole_marker_weights_output.and.(.not.boole_reuse_weights)) then !birth values, first slice only
@@ -349,6 +392,12 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
         endif
 
         ind_tetr_save = ind_tetr
+        if (boole_df_time_dependent) then !entry point of this crossing, where the source rate is evaluated
+            z_entry = z_save
+            vpar_entry = vpar
+            vperp_entry = vperp
+            t_cross_start = df_time_offset + t%confined + t%step - t%remain
+        endif
 
         call push_within_tetrahedron(ind_tetr, iface, x, vpar, z_save, t%remain, t_pass, boole_t_finished, iper_phi, &
                                      optional_quantities, &
@@ -362,8 +411,26 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
 
         t%remain = t%remain - t_pass
 
-        ! Apply smooth fading of particle weights for t > t_tot*2/3 (only for delta-f method)
-        if (in%boole_delta_f) call apply_weight_fading(n, species, t, t_tot)
+        if (boole_df_time_dependent) then
+            !dw/dt = (1 - w1) sigma with sigma at the entry point, integrated over this crossing; the moments
+            !of this crossing use the midpoint weight and are deposited only after the burn-in time
+            if (boole_df_second_weight) then
+                dw = (1.0_dp - w1_td(n)) * delta_f_source_rate(z_entry, vpar_entry, vperp_entry, ind_tetr_save, &
+                                                               species) * t_pass
+            else
+                dw = delta_f_source_rate(z_entry, vpar_entry, vperp_entry, ind_tetr_save, species) * t_pass
+            endif
+            if (t_cross_start.ge.df_burn_in_time) then
+                weights%w(n, species) = weights%original(n, species) * (w_td(n) + 0.5_dp*dw)
+            else
+                weights%w(n, species) = (0.0_dp, 0.0_dp)
+            endif
+            w_td(n) = w_td(n) + dw
+            if (boole_df_second_weight) w1_td(n) = w1_td(n) + dw   !no marker injection, no restoring yet: w1 = w
+        elseif (in%boole_delta_f) then
+            ! Apply smooth fading of particle weights for t > t_tot*2/3 (fixed-weight delta-f only)
+            call apply_weight_fading(n, species, t, t_tot)
+        endif
 
         call update_local_tetr_moments(local_tetr_moments, ind_tetr_save, n, optional_quantities, species)
         if (boole_marker_weights_output) marker_diag(8, n) = marker_diag(8, n) + &
@@ -544,27 +611,44 @@ end subroutine calc_v_r
 ! ====================================================================
 subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
 !
-! Sets particle weights for the delta-f method.
+! Sets particle weights for the delta-f method with weights fixed at birth.
 !
-    use gorilla_applets_types_mod, only: start, in, g, weights
-    use tetra_physics_mod, only: tetra_physics
-    use volume_integrals_and_sqrt_g_mod, only: sqrt_g
-    use supporting_functions_mod, only: bmod_func
-    use constants, only: pi, ev2erg
-    use marker_distribution_mod, only: linear_profile_slope
-    use vertex_data_mod, only: vertex_data_profiles
+    use gorilla_applets_types_mod, only: weights
 
     integer, intent(in) :: n, ind_tetr, species
     real(dp), dimension(3), intent(in) :: z_save
     real(dp), intent(in) :: vpar, vperp
 
-    real(dp) :: v_r, v_psi, base_weight, r, z
+    !weights%w holds the f_M weight with the local n and T (calc_particle_weights_and_jperp);
+    !the delta-f source is -v_d.grad(f_M) = f_M * delta_f_source_rate
+    weights%w(n,species) = weights%w(n,species) * delta_f_source_rate(z_save, vpar, vperp, ind_tetr, species)
+
+end subroutine adapt_weights_delta_f
+
+! ====================================================================
+function delta_f_source_rate(z_save, vpar, vperp, ind_tetr, species) result(sigma)
+!
+! Delta-f source divided by the local Maxwellian, sigma = -v_d.grad(f_M)/f_M [1/s], at the
+! guiding-center position z_save (local coordinates of tetrahedron ind_tetr) and velocity (vpar, vperp).
+!
+    use gorilla_applets_types_mod, only: start, in
+    use tetra_physics_mod, only: tetra_physics
+    use constants, only: ev2erg
+    use marker_distribution_mod, only: linear_profile_slope
+    use vertex_data_mod, only: vertex_data_profiles
+
+    real(dp), dimension(3), intent(in) :: z_save
+    real(dp), intent(in) :: vpar, vperp
+    integer, intent(in) :: ind_tetr, species
+    real(dp) :: sigma
+
+    real(dp) :: v_r, v_psi, r, z
     real(dp) :: dens, temp_i, temp_e, ddens, dtemp_i, dtemp_e, temp, dtemp, energy_eV
 
     if (in%boole_profiles_from_vertex_data) then
         !Local Maxwellian f_M(n(psi), T(psi), E) with psi = A_phi and Phi = 0 (E = kinetic energy):
-        !-v^psi df_M/dpsi = -v^psi f_M [n'/n + (E/T - 3/2) T'/T]. weights%w already holds the f_M weight
-        !with the local n and T (calc_particle_weights_and_jperp).
+        !-v^psi df_M/dpsi = -v^psi f_M [n'/n + (E/T - 3/2) T'/T].
+        !TODO (Phi /= 0): use the total energy, i.e. add (e/T) dPhi/dpsi to the density term.
         call calc_v_r(z_save, vpar, vperp, ind_tetr, v_r, v_psi)
         r = tetra_physics(ind_tetr)%x1(1) + z_save(1)
         z = tetra_physics(ind_tetr)%x1(3) + z_save(3)
@@ -577,16 +661,15 @@ subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
             dtemp = dtemp_e
         endif
         energy_eV = 0.5_dp*start%particle_mass(species)*(vpar**2 + vperp**2)/ev2erg
-        weights%w(n,species) = -weights%w(n,species) * v_psi * (ddens/dens + (energy_eV/temp - 1.5_dp)*dtemp/temp)
+        sigma = -v_psi * (ddens/dens + (energy_eV/temp - 1.5_dp)*dtemp/temp)
     else
         call calc_v_r(z_save, vpar, vperp, ind_tetr, v_r)
-
         !Densities follow the linear profile f = f_M*linear_profile_factor(r), so -v^r\partial f/\partial r turns into
         !-v^r*linear_profile_slope*f_M
-        weights%w(n,species) = -weights%w(n,species) * v_r * linear_profile_slope
+        sigma = -v_r * linear_profile_slope
     endif
 
-end subroutine adapt_weights_delta_f
+end function delta_f_source_rate
 
 ! ====================================================================
 subroutine apply_weight_fading(n, species, t, t_tot)
