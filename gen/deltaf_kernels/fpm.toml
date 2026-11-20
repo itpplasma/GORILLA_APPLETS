@@ -1,0 +1,23 @@
+name = "gorilla-applets-deltaf-kernels"
+version = "0.1.0"
+license = "MIT"
+description = "FortSym generator for the linear delta-f NTV momentum-source kernels"
+
+[build]
+auto-executables = false
+auto-examples = false
+auto-tests = false
+link = ["symengine", "flint", "mpfr", "gmp", "stdc++", "dl"]
+
+[fortran]
+implicit-typing = false
+implicit-external = false
+source-form = "free"
+
+[dependencies]
+fortsym = { git = "https://github.com/lazy-fortran/fortsym.git", rev = "8a418e2efe40dd9a01231a0900f71caad7858360" }
+
+[[executable]]
+name = "gen_deltaf_kernels"
+source-dir = "app"
+main = "gen_deltaf_kernels.f90"
