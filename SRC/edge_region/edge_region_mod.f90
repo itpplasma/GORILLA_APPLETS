@@ -22,11 +22,17 @@ module edge_region_mod
 !   edge_region_residence.dat time spent per 2D mesh triangle, summed over all
 !                             markers and toroidal slices [s]. For a source of
 !                             S markers/s, n(triangle) = S*time/(N*V_triangle).
+! Charge-state changes (species_element /= ''): markers of one element (e.g. Be as in Harting et
+! al. 2025, Sec. 5) change their charge state with constant ionisation/recombination rates per
+! charge state (marker_species_mod): velocity kept, guiding-centre jump. Residence times are then
+! written per charge state.
 ! Random numbers per marker (thermal_force_rng_mod): results do not depend on
 ! the number of threads. CGS units, temperatures in eV, masses in amu.
 
     use, intrinsic :: iso_fortran_env, only: dp => real64, int64
     use thermal_force_rng_mod, only: rng_t, rng_seed, rng_normal3, rng_uniform
+    use marker_species_mod, only: species_set_t, init_species_set, set_marker_charge, total_rate, &
+                                  choose_transition, change_charge_state
 
     implicit none
 
@@ -36,6 +42,7 @@ module edge_region_mod
     real(dp), parameter :: me_g = 9.1093837015e-28_dp
     real(dp), parameter :: pi = 3.14159265358979323846264338327950288_dp
 
+    integer, parameter :: max_z = 74
     integer, parameter :: st_time = 0, st_wall = 1, st_inner = 2, st_pusher = 3, st_outside = -1
 
     type :: edge_region_input_t
@@ -57,6 +64,12 @@ module edge_region_mod
         integer :: n_particles = 1000
         integer :: seed = 1
         character(len=256) :: output_prefix = 'edge_region'
+        ! charge-state changes: element ('' = off, fixed species test_mass_amu, test_charge_number)
+        character(len=8) :: species_element = ''
+        integer :: start_charge = 1
+        real(dp) :: ionisation_rate_s(0:max_z) = 0.0_dp     ! per charge state [1/s]
+        real(dp) :: recombination_rate_s(0:max_z) = 0.0_dp  ! per charge state [1/s]
+        logical :: boole_gc_jump = .true.
     end type edge_region_input_t
 
     public :: calc_edge_region
@@ -72,10 +85,15 @@ subroutine load_edge_region_inp(inp)
     character(len=32) :: start_mode
     integer :: n_particles, seed, iu, ios
     character(len=256) :: output_prefix
+    character(len=8) :: species_element
+    integer :: start_charge
+    real(dp) :: ionisation_rate_s(0:max_z), recombination_rate_s(0:max_z)
+    logical :: boole_gc_jump
     namelist /edge_region_nml/ test_mass_amu, test_charge_number, background_mass_amu, &
         background_charge_number, electron_density_cm3, temperature_ev, boole_collisions, &
         boole_electron_collisions, dt_free_s, start_mode, start_R_cm, start_Z_cm, t_max_s, &
-        n_particles, seed, output_prefix
+        n_particles, seed, output_prefix, species_element, start_charge, ionisation_rate_s, &
+        recombination_rate_s, boole_gc_jump
 
     test_mass_amu = inp%test_mass_amu; test_charge_number = inp%test_charge_number
     background_mass_amu = inp%background_mass_amu; background_charge_number = inp%background_charge_number
@@ -84,6 +102,9 @@ subroutine load_edge_region_inp(inp)
     dt_free_s = inp%dt_free_s; start_mode = inp%start_mode
     start_R_cm = inp%start_R_cm; start_Z_cm = inp%start_Z_cm; t_max_s = inp%t_max_s
     n_particles = inp%n_particles; seed = inp%seed; output_prefix = inp%output_prefix
+    species_element = inp%species_element; start_charge = inp%start_charge
+    ionisation_rate_s = inp%ionisation_rate_s; recombination_rate_s = inp%recombination_rate_s
+    boole_gc_jump = inp%boole_gc_jump
 
     open(newunit=iu, file='edge_region.inp', status='old', action='read', iostat=ios)
     if (ios /= 0) error stop 'edge region: cannot open edge_region.inp'
@@ -98,6 +119,9 @@ subroutine load_edge_region_inp(inp)
     inp%dt_free_s = dt_free_s; inp%start_mode = start_mode
     inp%start_R_cm = start_R_cm; inp%start_Z_cm = start_Z_cm; inp%t_max_s = t_max_s
     inp%n_particles = n_particles; inp%seed = seed; inp%output_prefix = output_prefix
+    inp%species_element = species_element; inp%start_charge = start_charge
+    inp%ionisation_rate_s = ionisation_rate_s; inp%recombination_rate_s = recombination_rate_s
+    inp%boole_gc_jump = boole_gc_jump
 
     if (trim(inp%start_mode) /= 'point' .and. trim(inp%start_mode) /= 'region') &
         error stop "edge region: start_mode must be 'point' or 'region'"
@@ -116,17 +140,24 @@ subroutine calc_edge_region()
     use tetra_grid_mod, only: ntetr, tetra_in_edge_region, tetra_grid, verts_rphiz
     use tetra_grid_settings_mod, only: grid_size, n_field_periods, s_edge_region
     use collis_ions, only: collis_init
+    use tetra_physics_mod, only: check_species_switch_allowed
 
     type(edge_region_input_t) :: inp
     integer :: nphi, ntri, ip, itri, k, nb, iu
     integer, allocatable :: status(:)
-    real(dp), allocatable :: final(:,:), residence(:), cum_weight(:), tri_rz(:,:,:)
+    real(dp), allocatable :: final(:,:), residence(:,:), cum_weight(:), tri_rz(:,:,:)
+    type(species_set_t) :: ss
+    logical :: boole_species
+    integer :: nstate, iz
+    integer(int64) :: n_jumps
+    real(dp) :: sum_jump
     real(dp) :: m_a, v0, mb(2), zb(2), db(2), tb(2), efcolf(2), velrat(2), enrat(2)
     integer :: n_status(-1:3)
 
     call load_edge_region_inp(inp)
     if (coord_system /= 1) error stop 'edge region: needs coord_system = 1 (R, phi, Z) in gorilla.inp'
     call initialize_gorilla()
+    boole_species = (len_trim(inp%species_element) > 0)
     m_a = inp%test_mass_amu*amu_g
     particle_mass = m_a
     particle_charge = inp%test_charge_number*echarge
@@ -146,8 +177,25 @@ subroutine calc_edge_region()
     db = [inp%electron_density_cm3/inp%background_charge_number, inp%electron_density_cm3]
     tb = inp%temperature_ev
     ! velocity normalisation v0 = sqrt(2 T/m_a)
-    call collis_init(m_a, inp%test_charge_number, mb(1:nb), zb(1:nb), db(1:nb), tb(1:nb), &
-                     inp%temperature_ev, v0, efcolf(1:nb), velrat(1:nb), enrat(1:nb))
+    if (boole_species) then
+        call check_species_switch_allowed()
+        call init_species_set(ss, inp%species_element, mb(1:nb), zb(1:nb), db(1:nb), tb(1:nb), &
+                              inp%temperature_ev, inp%ionisation_rate_s, inp%recombination_rate_s, inp%boole_gc_jump)
+        m_a = ss%mass_g
+        v0 = ss%v0
+        call set_marker_charge(ss, inp%start_charge)
+        nstate = ss%z_nuc + 1                 ! columns for charge states 0 ... z_nuc
+        print '(a,a,a,i0,a,f8.4,a,i0,a,l1)', ' edge region: element ', trim(ss%element), ', Z_nuc = ', ss%z_nuc, &
+            ', m = ', ss%mass_amu, ' amu, start charge ', inp%start_charge, ', guiding-centre jump ', ss%boole_gc_jump
+        do iz = 0, ss%z_nuc
+            if (total_rate(ss, iz) > 0.0_dp) print '(a,i3,a,es11.4,a,es11.4)', '   charge ', iz, &
+                ': ionisation rate [1/s] ', ss%rate_ion(iz), ', recombination rate [1/s] ', ss%rate_rec(iz)
+        end do
+    else
+        call collis_init(m_a, inp%test_charge_number, mb(1:nb), zb(1:nb), db(1:nb), tb(1:nb), &
+                         inp%temperature_ev, v0, efcolf(1:nb), velrat(1:nb), enrat(1:nb))
+        nstate = 1
+    end if
 
     ! 2D triangles of the region (first slice) for start_mode = 'region': weight = area * R_centroid
     allocate(cum_weight(ntri), tri_rz(2, 3, ntri))
@@ -164,16 +212,18 @@ subroutine calc_edge_region()
 
     print '(a,es12.4,a,i0,a,i0,a)', ' edge region: s_edge_region = ', s_edge_region, ', ', &
         count(tetra_in_edge_region), ' of ', ntetr, ' tetrahedra'
-    print '(a,f8.2,a,f5.1,a,es10.3,a,f7.2,a)', ' edge region: test ion m = ', inp%test_mass_amu, ' amu, Z = ', &
+    if (.not. boole_species) print '(a,f8.2,a,f5.1,a,es10.3,a,f7.2,a)', ' edge region: test ion m = ', inp%test_mass_amu, ' amu, Z = ', &
         inp%test_charge_number, ', background n_e = ', inp%electron_density_cm3, ' cm^-3, T = ', inp%temperature_ev, ' eV'
 
-    allocate(status(inp%n_particles), final(8, inp%n_particles), residence(ntri))
+    allocate(status(inp%n_particles), final(10, inp%n_particles), residence(ntri, nstate))
     residence = 0.0_dp
+    n_jumps = 0
+    sum_jump = 0.0_dp
 
-    !$omp parallel do schedule(dynamic, 4) default(shared) private(ip) reduction(+:residence) &
+    !$omp parallel do schedule(dynamic, 4) default(shared) private(ip) reduction(+:residence, n_jumps, sum_jump) &
     !$omp& COPYIN(cm_over_e,particle_charge,particle_mass)
     do ip = 1, inp%n_particles
-        call trace_marker(ip, status(ip), final(:, ip), residence)
+        call trace_marker(ip, status(ip), final(:, ip), residence, n_jumps, sum_jump)
     end do
     !$omp end parallel do
 
@@ -184,23 +234,30 @@ subroutine calc_edge_region()
     print '(a,5(a,i0))', ' edge region: markers', ' wall ', n_status(st_wall), ', inner boundary ', &
         n_status(st_inner), ', time limit ', n_status(st_time), ', pusher removed ', n_status(st_pusher), &
         ', started outside ', n_status(st_outside)
+    if (boole_species) then
+        print '(a,15i8)', ' edge region: final charge state counts (0 ... Z_nuc): ', &
+            [(count(nint(final(9, :)) == iz), iz = 0, ss%z_nuc)]
+        if (n_jumps > 0) print '(a,i0,a,es12.4,a)', ' edge region: ', n_jumps, &
+            ' charge-state transitions, mean guiding-centre jump ', sum_jump/real(n_jumps, dp), ' cm'
+    end if
 
     open(newunit=iu, file=trim(inp%output_prefix)//'_exits.dat', status='replace', action='write')
     write(iu, '(a)') '# status (1 wall, 2 inner boundary, 0 time limit, 3 pusher removed, -1 started outside)'
-    write(iu, '(a)') '# marker status t[s] R[cm] phi[rad] Z[cm] v_par[cm/s] v_perp[cm/s] R_start[cm] Z_start[cm]'
+    write(iu, '(a)') '# marker status t[s] R[cm] phi[rad] Z[cm] v_par[cm/s] v_perp[cm/s] R_start[cm] Z_start[cm]' // &
+        ' charge n_transitions'
     write(iu, '(a,es24.16,a,es24.16,a,i0,a,es24.16)') '# s_edge_region = ', s_edge_region, ' t_max_s = ', &
         inp%t_max_s, ' n_particles = ', inp%n_particles, ' v0[cm/s] = ', v0
     do ip = 1, inp%n_particles
-        write(iu, '(i10,i4,8es24.16)') ip, status(ip), final(:, ip)
+        write(iu, '(i10,i4,8es24.16,2i6)') ip, status(ip), final(1:8, ip), nint(final(9:10, ip))
     end do
     close(iu)
 
     open(newunit=iu, file=trim(inp%output_prefix)//'_residence.dat', status='replace', action='write')
-    write(iu, '(a)') '# time spent per 2D triangle [s], summed over markers and toroidal slices'
-    write(iu, '(a)') '# ntri n_particles t_max_s'
-    write(iu, '(i10,i10,es24.16)') ntri, inp%n_particles, inp%t_max_s
+    write(iu, '(a)') '# time spent per 2D triangle [s], summed over markers and toroidal slices; one column per'
+    write(iu, '(a)') '# charge state 0 ... Z_nuc (charge-state mode) or one column (fixed species). ntri n_particles t_max_s ncol'
+    write(iu, '(i10,i10,es24.16,i6)') ntri, inp%n_particles, inp%t_max_s, nstate
     do itri = 1, ntri
-        write(iu, '(es24.16)') residence(itri)
+        write(iu, '(*(es24.16))') residence(itri, :)
     end do
     close(iu)
 
@@ -232,7 +289,7 @@ contains
         a = 0.5_dp*abs((rz(1,2) - rz(1,1))*(rz(2,3) - rz(2,1)) - (rz(1,3) - rz(1,1))*(rz(2,2) - rz(2,1)))
     end function triangle_area
 
-    subroutine trace_marker(ip, stat, fin, res)
+    subroutine trace_marker(ip, stat, fin, res, n_jumps, sum_jump)
 
         use find_tetra_mod, only: find_tetra
         use collis_ions, only: stost
@@ -243,14 +300,16 @@ contains
 
         integer, intent(in) :: ip
         integer, intent(out) :: stat
-        real(dp), intent(out) :: fin(8)
-        real(dp), intent(inout) :: res(:)
+        real(dp), intent(out) :: fin(10)
+        real(dp), intent(inout) :: res(:,:)
+        integer(int64), intent(inout) :: n_jumps
+        real(dp), intent(inout) :: sum_jump
 
         type(rng_t) :: rng
         type(optional_quantities_type) :: optional_quantities
         real(dp) :: x(3), xi(3), vpar, vperp, v, t, h, dtau, zet(5), randnum(3), z_save(3), perpinv, &
-                    t_remain, t_pass, x_start(3), u, w(3)
-        integer :: ind_tetr, iface, ind_tetr_save, iper_phi, ierr, j
+                    t_remain, t_pass, x_start(3), u, w(3), t_event, t_stop, jump(3)
+        integer :: ind_tetr, iface, ind_tetr_save, iper_phi, ierr, j, iz, icol, n_trans
         logical :: boole_t_finished, boole_pusher_failed
 
         call rng_seed(rng, int(inp%seed, int64), int(ip, int64))
@@ -277,6 +336,18 @@ contains
 
         t = 0.0_dp
         stat = st_time
+        n_trans = 0
+        iz = 1
+        icol = 1
+        t_event = huge(1.0_dp)
+        if (boole_species) then
+            iz = inp%start_charge
+            icol = iz + 1
+            call set_marker_charge(ss, iz)     ! this thread's previous marker may have ended in another state
+            ! absolute time of the next transition out of iz (exponential waiting time)
+            t_event = huge(1.0_dp)
+            if (total_rate(ss, iz) > 0.0_dp) t_event = t - log(1.0_dp - rng_uniform(rng))/total_rate(ss, iz)
+        end if
         call find_tetra(x, vpar, vperp, ind_tetr, iface)
         if (ind_tetr == -1) then
             stat = st_outside
@@ -285,7 +356,8 @@ contains
         end if
 
         do while (stat == st_time .and. t < inp%t_max_s)
-            ! collision, adaptive step dtau (length at v0) from stost
+            t_stop = min(inp%t_max_s, t_event)
+            ! collision, adaptive step dtau (length at v0) from stost, at most up to the next event
             if (inp%boole_collisions) then
                 v = sqrt(vpar**2 + vperp**2)
                 zet(1:3) = x
@@ -294,13 +366,18 @@ contains
                 u = rng_uniform(rng); randnum(1) = sqrt(12.0_dp)*(u - 0.5_dp)
                 randnum(2) = rng_uniform(rng)
                 u = rng_uniform(rng); randnum(3) = sqrt(12.0_dp)*(u - 0.5_dp)
-                call stost(efcolf(1:nb), velrat(1:nb), enrat(1:nb), zet, dtau, 1, ierr, &
-                           (inp%t_max_s - t)*v0, randnum)
+                if (boole_species) then
+                    call stost(ss%efcolf(:, iz), ss%velrat(:, iz), ss%enrat(:, iz), zet, dtau, 1, ierr, &
+                               (t_stop - t)*v0, randnum)
+                else
+                    call stost(efcolf(1:nb), velrat(1:nb), enrat(1:nb), zet, dtau, 1, ierr, &
+                               (t_stop - t)*v0, randnum)
+                end if
                 vpar = zet(5)*zet(4)*v0
                 vperp = sqrt(max(0.0_dp, 1.0_dp - zet(5)**2))*zet(4)*v0
                 h = dtau/v0
             else
-                h = min(inp%dt_free_s, inp%t_max_s - t)
+                h = min(inp%dt_free_s, t_stop - t)
             end if
 
             ! guiding-centre orbit over h, stop at the region boundary
@@ -311,7 +388,7 @@ contains
                 ind_tetr_save = ind_tetr
                 call push_within_tetrahedron(ind_tetr, iface, x, vpar, z_save, t_remain, t_pass, &
                                              boole_t_finished, iper_phi, optional_quantities, boole_pusher_failed)
-                res(mod(ind_tetr_save - 1, 3*ntri)/3 + 1) = res(mod(ind_tetr_save - 1, 3*ntri)/3 + 1) + t_pass
+                res(mod(ind_tetr_save - 1, 3*ntri)/3 + 1, icol) = res(mod(ind_tetr_save - 1, 3*ntri)/3 + 1, icol) + t_pass
                 t = t + t_pass
                 t_remain = t_remain - t_pass
                 if (boole_pusher_failed) then
@@ -329,9 +406,29 @@ contains
                 end if
                 if (boole_t_finished) exit
             end do
+
+            ! charge-state transition when the event time is reached
+            if (stat == st_time .and. boole_species .and. t >= t_event*(1.0_dp - 1.0e-12_dp)) then
+                j = choose_transition(ss, iz, rng_uniform(rng))
+                call change_charge_state(ss, iz, j, rng_uniform(rng), x, ind_tetr, iface, vpar, vperp, jump)
+                n_jumps = n_jumps + 1
+                sum_jump = sum_jump + norm2(jump)
+                iz = j
+                icol = iz + 1
+                n_trans = n_trans + 1
+                if (ind_tetr == -1) then
+                    stat = st_wall
+                else if (.not. tetra_in_edge_region(ind_tetr)) then
+                    stat = st_inner
+                end if
+                ! absolute time of the next transition out of iz (exponential waiting time)
+                t_event = huge(1.0_dp)
+                if (total_rate(ss, iz) > 0.0_dp) t_event = t - log(1.0_dp - rng_uniform(rng))/total_rate(ss, iz)
+            end if
         end do
 
-        fin = [t, x(1), x(2), x(3), vpar, vperp, x_start(1), x_start(3)]
+        fin = [t, x(1), x(2), x(3), vpar, vperp, x_start(1), x_start(3), real(iz, dp), real(n_trans, dp)]
+
 
     end subroutine trace_marker
 
