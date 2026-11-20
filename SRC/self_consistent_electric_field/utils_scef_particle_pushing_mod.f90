@@ -27,7 +27,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     integer                                           :: kpart, iantithetic, ind_tetr, iface, n_particles
     integer                                           :: p, l, n, i, k
     real(dp), dimension(3)                            :: x
-    real(dp)                                          :: vpar,vperp, t_step_s, v, v_save,vpar_save, vperp_save, t_tot, v_init
+    real(dp)                                          :: vpar,vperp, t_step_s, v, vpar_save, vperp_save, t_tot, v_init
     type(time_t)                                      :: t
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
@@ -62,7 +62,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr,weights, &
     !$OMP& moment_specs, ntetr) &
     !$OMP& REDUCTION(+:t_tot) &
-    !$OMP& PRIVATE(p,l,n,i,x,v_save,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
+    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
     !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init, thread_tetr_moments, thread_prism_moments_squared) &
     !$OMP& FIRSTPRIVATE(local_rr)
     if (omp_get_thread_num().eq.0) print*, 'get number of threads', omp_get_num_threads()
@@ -106,7 +106,6 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
 
                 vpar_save = vpar
                 vperp_save = vperp
-                v_save = sqrt(vpar_save**2+vperp_save**2)
 
                 if (in%boole_collisions) then
                     call carry_out_collisions(i, n, t, x, vpar,vperp,ind_tetr, iface, species, in%i_collision_mode)
@@ -124,7 +123,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                         block
                             real(dp) :: w_rr
                             w_rr = real(weights%w(n,species),dp)
-                            call play_russian_roulette(w_rr,v,v_save,particle_state_for_rr,local_rr)
+                            call play_russian_roulette(w_rr,v,particle_state_for_rr,local_rr)
                             weights%w(n,species) = cmplx(w_rr,0.0_dp,kind=dp)
                         end block
                     endif
@@ -209,7 +208,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     logical                                      :: boole_t_finished, boole_pusher_failed, boole_lost_inside, mirror_condition
     integer                                      :: ind_tetr_save,iper_phi,k,i
     type(optional_quantities_type)               :: optional_quantities
-    real(dp)                                     :: tau, v, t_pusher, v_save, vpar_init, vperp_init, critical_distance
+    real(dp)                                     :: tau, v, t_pusher, vpar_init, vperp_init, critical_distance
     type(local_rr_t)                             :: local_rr
     real(dp), dimension(10)                      :: particle_state_for_rr
 
@@ -273,7 +272,6 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         z_save_at_x_save = z_save
         vpar_save = vpar
         vperp_save = vperp!_func(z_save_at_x_save,perpinv,ind_tetr_save)
-        v_save = sqrt(vpar_save**2+vperp**2)
         t_pusher = t%remain
         if (boole_diffusion_coefficient) t_pusher = min(t%remain,t_step_s)
 
@@ -324,7 +322,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
             block
                 real(dp) :: w_rr
                 w_rr = real(weights%w(n,species),dp)
-                call play_russian_roulette(w_rr,v,v_save,particle_state_for_rr,local_rr)
+                call play_russian_roulette(w_rr,v,particle_state_for_rr,local_rr)
                 weights%w(n,species) = cmplx(w_rr,0.0_dp,kind=dp)
             end block
         endif
