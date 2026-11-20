@@ -20,6 +20,7 @@
   use helical_core_mod, only: calc_helical_core
   use rmp_response_currents_mod, only: calc_rmp_response_currents
   use thermal_force_mod, only: calc_thermal_force
+  use edge_region_mod, only: calc_edge_region
 !
   implicit none
 !
@@ -164,6 +165,12 @@
         case(16) !Thermal force: Homma-Hatayama collision operator, benchmark drivers
 !
             call calc_thermal_force
+!
+!-------------------------------------------------------------------------------------------!
+!
+        case(17) !Edge region: impurity tracing in the edge region of the extended EFIT mesh
+!
+            call calc_edge_region
 !
 !-------------------------------------------------------------------------------------------!
 !
