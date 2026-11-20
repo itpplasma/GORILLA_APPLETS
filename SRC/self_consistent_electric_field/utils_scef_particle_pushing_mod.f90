@@ -7,6 +7,7 @@ module utils_scef_particle_pushing_mod
 contains
 
 subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n_particles_in)
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, exit_data, s, &
     g, maximum_s, weights
@@ -62,7 +63,8 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p,l,n,i,x,v_save,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
     !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init) &
-    !$OMP& FIRSTPRIVATE(thread_flag,local_rr)
+    !$OMP& FIRSTPRIVATE(thread_flag,local_rr) &
+    !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
     if (omp_get_thread_num().eq.0) print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO SCHEDULE(static)
     !SCHEDULE(dynamic,1)

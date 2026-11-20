@@ -85,6 +85,7 @@ module reversibility_test_mod
     contains
 
     subroutine make_reversibility_test()
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 !
         use constants, only: pi
         use orbit_timestep_gorilla_mod, only: initialize_gorilla
@@ -186,7 +187,8 @@ module reversibility_test_mod
         !$OMP& PRIVATE(k,x_0,alpha_0,lambda,perpinv,perpinv2, &
         !$OMP& vpar_0,ind_tetr,iface, &
         !$OMP& x1_vec,x2_vec,x3_vec,pitchpar_vec,kin_energy_eV_vec,energy_eV, &
-        !$OMP& hamiltonian_time_vec,gyrophase_vec, starting_values)
+        !$OMP& hamiltonian_time_vec,gyrophase_vec, starting_values) &
+        !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
         !$OMP DO
 !
         !Loop over orbits and store data

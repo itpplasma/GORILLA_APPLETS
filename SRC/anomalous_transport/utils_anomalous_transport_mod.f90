@@ -77,6 +77,7 @@ end subroutine read_anomalous_transport_inp_into_type
 
 ! ====================================================================
 subroutine parallelised_particle_pushing_anomalous_transport(species, n_particles_in)
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 !
 ! Simplified parallelised particle pushing for anomalous transport.
 ! Removes self-consistent electric field specific parts.
@@ -119,7 +120,8 @@ subroutine parallelised_particle_pushing_anomalous_transport(species, n_particle
     !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles) &
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p, l, n, i, k, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, t_step_s) &
-    !$OMP& FIRSTPRIVATE(thread_flag)
+    !$OMP& FIRSTPRIVATE(thread_flag) &
+    !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
 

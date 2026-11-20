@@ -74,6 +74,7 @@ subroutine read_divertor_heat_loads_inp_into_type
 end subroutine read_divertor_heat_loads_inp_into_type
 
 subroutine calc_divertor_heat_loads
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     use utils_data_pre_and_post_processing_mod, only: setup_applet, print_applet_summary
     use constants, only: ev2erg,pi,echarge
@@ -127,7 +128,8 @@ subroutine calc_divertor_heat_loads
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart,v0, in, c, iantithetic) &
-    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status)
+    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status) &
+    !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO SCHEDULE(static)
 

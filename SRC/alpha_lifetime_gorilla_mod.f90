@@ -96,6 +96,7 @@
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !
         subroutine calc_alpha_lifetime_gorilla()
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 !
             use orbit_timestep_gorilla_mod, only: initialize_gorilla,orbit_timestep_gorilla
             use constants, only: ev2erg, pi
@@ -189,7 +190,8 @@
             !$OMP& SHARED(n_particles,pos_fluxtv_mat,xi,n_lost_particles,kpart,vmod,time_step,i_integrator_type, &
             !$OMP& dtau,dtaumin,rd_start_position,rd_start_pitchpar,boole_random_precalc,n_start,n_end,alpha_unit) &
             !$OMP& PRIVATE(n,boole_particle_lost,i,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized, &
-            !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr,tau_out_can)
+            !$OMP& ind_tetr,iface,t_remain,t_confined,z,ierr,tau_out_can) &
+            !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
             !$OMP DO
 !
             !Loop over particles

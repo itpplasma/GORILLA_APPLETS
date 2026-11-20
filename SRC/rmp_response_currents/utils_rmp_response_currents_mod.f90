@@ -617,6 +617,7 @@ end subroutine set_rest_of_start_type_rmp
 
 ! ====================================================================
 subroutine parallelised_particle_pushing_rmp_response_currents(species, n_particles_in)
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, s
     use tetra_grid_mod, only: ntetr
@@ -730,7 +731,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
     !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local, n_da_sub, i_da_sub) &
     !$OMP& PRIVATE(prof_local, prof_marker, ibatch) &
-    !$OMP& FIRSTPRIVATE(thread_flag)
+    !$OMP& FIRSTPRIVATE(thread_flag) &
+    !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
 
@@ -1508,6 +1510,7 @@ end subroutine init_regularisation_for_particle
 ! collis_init coefficients. The OU equilibrium is then <v_par^2> = T_e(s)/m.
 ! ====================================================================
 subroutine set_local_collision_background()
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     use gorilla_applets_types_mod, only: in, c
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
@@ -1525,7 +1528,8 @@ subroutine set_local_collision_background()
     m0 = particle_mass
     z0 = particle_charge / echarge
     !$omp parallel default(shared) private(i, k, x_c, s_c, pv, v0_l, &
-    !$omp& efcolf_l, velrat_l, enrat_l, dens_l, temp_l)
+    !$omp& efcolf_l, velrat_l, enrat_l, dens_l, temp_l) &
+    !$omp& COPYIN(cm_over_e,particle_charge,particle_mass)
     allocate(efcolf_l(c%n), velrat_l(c%n), enrat_l(c%n), dens_l(c%n), temp_l(c%n))
     !$omp do
     do i = 1, ntetr

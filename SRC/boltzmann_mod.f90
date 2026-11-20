@@ -126,6 +126,7 @@ subroutine calc_boltzmann
 end subroutine calc_boltzmann
 
 subroutine parallelised_particle_pushing(v0)
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t
     use tetra_grid_mod, only: ntetr
@@ -153,7 +154,8 @@ subroutine parallelised_particle_pushing(v0)
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart,v0, in, c, iantithetic) &
     !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status) &
-    !$OMP& FIRSTPRIVATE(thread_flag)
+    !$OMP& FIRSTPRIVATE(thread_flag) &
+    !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
     print*, 'get number of threads', omp_get_num_threads()
     !$OMP DO SCHEDULE(static)
 

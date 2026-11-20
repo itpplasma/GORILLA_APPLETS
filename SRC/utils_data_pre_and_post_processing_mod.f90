@@ -491,6 +491,7 @@ elemental function normalised_poloidal_flux(psi) result(s)
 end function normalised_poloidal_flux
 
 subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     use gorilla_applets_types_mod, only: in, c, start, s, g
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
@@ -591,7 +592,8 @@ subroutine calc_collision_coefficients_for_all_tetrahedra(species_in)
     c%dens_mat(c%n, :) = matmul(c%charge_num(1:c%n-1), c%dens_mat(1:c%n-1, :))
 
     if (.not.in%boole_preserve_energy_and_momentum_during_collisions) then
-        !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(i,j,efcolf_l,velrat_l,enrat_l,dens_l,temp_l,v0_l)
+        !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(i,j,efcolf_l,velrat_l,enrat_l,dens_l,temp_l,v0_l) &
+        !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
         allocate(efcolf_l(c%n), velrat_l(c%n), enrat_l(c%n), dens_l(c%n), temp_l(c%n))
         !$OMP DO
         do i = 1, ntetr

@@ -106,6 +106,7 @@ subroutine load_edge_region_inp(inp)
 end subroutine load_edge_region_inp
 
 subroutine calc_edge_region()
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     use constants, only: clight, echarge, ev2erg
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
@@ -169,7 +170,8 @@ subroutine calc_edge_region()
     allocate(status(inp%n_particles), final(8, inp%n_particles), residence(ntri))
     residence = 0.0_dp
 
-    !$omp parallel do schedule(dynamic, 4) default(shared) private(ip) reduction(+:residence)
+    !$omp parallel do schedule(dynamic, 4) default(shared) private(ip) reduction(+:residence) &
+    !$omp& COPYIN(cm_over_e,particle_charge,particle_mass)
     do ip = 1, inp%n_particles
         call trace_marker(ip, status(ip), final(:, ip), residence)
     end do

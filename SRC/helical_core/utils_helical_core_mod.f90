@@ -87,6 +87,7 @@ end subroutine read_helical_core_inp_into_type
 
 ! ====================================================================
 subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 !
 ! Parallelised particle pushing for helical core.
 ! Standard guiding-center orbit integration without anomalous displacement.
@@ -127,7 +128,8 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in)
     !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles) &
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p, l, n, i, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status) &
-    !$OMP& FIRSTPRIVATE(thread_flag)
+    !$OMP& FIRSTPRIVATE(thread_flag) &
+    !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
 

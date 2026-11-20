@@ -53,6 +53,7 @@ module field_line_tracing_mod
 contains
 
 subroutine calc_field_lines
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
     use constants, only: ev2erg,pi,echarge
@@ -169,10 +170,10 @@ print*, 'calc_starting_conditions finished'
         !$OMP& energy_eV,tetra_grid,tetra_physics, counter, &
         !$OMP& exit_status,exit_pushings,exit_s_geom,exit_s_time,exit_x, &
         !$OMP& boole_start_points_file,boole_write_trajectories,traj_start_indices) &
-        !$OMP& FIRSTPRIVATE(particle_mass, particle_charge) &
         !$OMP& PRIVATE(n,boole_particle_lost,x_rand_beg,x,pitchpar,vpar,vperp,boole_initialized,t_step, &
         !$OMP& ind_tetr,iface,t_remain,t_confined,ierr,v, &
-        !$OMP& i,local_counter,s_geom,boole_traj_line,boole_stuck)
+        !$OMP& i,local_counter,s_geom,boole_traj_line,boole_stuck) &
+        !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
 
         print*, 'get number of threads', omp_get_num_threads()
         !$OMP DO

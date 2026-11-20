@@ -151,6 +151,7 @@ subroutine build_setup(inp, su)
 end subroutine build_setup
 
 subroutine run_velocity_driver(inp, su)
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     use constants, only: ev2erg
 
@@ -176,7 +177,8 @@ subroutine run_velocity_driver(inp, su)
 
     !$omp parallel do schedule(dynamic, 256) default(shared) &
     !$omp private(ip, rng, v_grad, v_ctrl, xi, dv, t, h, k, ierr, q_grad, q_ctrl) &
-    !$omp reduction(+:sums, fails)
+    !$omp reduction(+:sums, fails) &
+    !$omp& COPYIN(cm_over_e,particle_charge,particle_mass)
     do ip = 1, inp%n_particles
         call rng_seed(rng, int(inp%seed, int64), int(ip, int64))
         call sample_initial_velocity(inp, su, rng, v_grad)
@@ -222,6 +224,7 @@ subroutine run_velocity_driver(inp, su)
 end subroutine run_velocity_driver
 
 subroutine run_slab_driver(inp, su)
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     ! Collisions on the fixed grid t_n = n dt (kick at t_n), exact free motion
     ! in between. Output times sample the free motion and do not shorten the
@@ -246,7 +249,8 @@ subroutine run_slab_driver(inp, su)
         write(traj_unit, '(a)') 'particle,t_s,omega_t,x,y,z'
     end if
 
-    !$omp parallel do schedule(dynamic, 64) default(shared) private(ip) reduction(+:sums, fails)
+    !$omp parallel do schedule(dynamic, 64) default(shared) private(ip) reduction(+:sums, fails) &
+    !$omp& COPYIN(cm_over_e,particle_charge,particle_mass)
     do ip = 1, inp%n_particles
         call slab_ion(inp, su, ip, traj_unit, sums, fails)
     end do
@@ -463,6 +467,7 @@ subroutine tokamak_start_field(inp, b_field)
 end subroutine tokamak_start_field
 
 subroutine run_tokamak_driver(inp, su)
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     ! As the slab driver: collisions on the fixed grid t_n = n dt, GORILLA
     ! orbit integration in between, sampled at the output times.
@@ -478,7 +483,8 @@ subroutine run_tokamak_driver(inp, su)
     fails = 0
     n_lost = 0
 
-    !$omp parallel do schedule(dynamic, 16) default(shared) private(ip) reduction(+:sums, fails, n_lost)
+    !$omp parallel do schedule(dynamic, 16) default(shared) private(ip) reduction(+:sums, fails, n_lost) &
+    !$omp& COPYIN(cm_over_e,particle_charge,particle_mass)
     do ip = 1, inp%n_particles
         call tokamak_ion(inp, su, ip, sums, fails, n_lost)
     end do

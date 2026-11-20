@@ -115,6 +115,7 @@
         subroutine calc_flux_deviation(n_particles,n_time_steps,t_step,vmod,boole_collisions,boole_random_precalc,coll_freq, &
                                     & file_id_transp_diff_coef,file_id_psi2,file_id_std_psi2,i_integrator_type,idiffcoef_output, &
                                     & nu_star,file_id_loss_events,file_id_loss_summary,file_id_particle_histories)
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 !
             use omp_lib, only: omp_get_thread_num
             use fluxtv_mod, only: pos_fluxtv_mat
@@ -274,7 +275,7 @@
 !
             !$OMP PARALLEL DEFAULT(NONE) &
             !$OMP& SHARED(n_particles,pos_fluxtv_mat,xi,t_step,psi_mat,boole_random_precalc, &
-            !$OMP& vmod,coord_system,n_time_steps,lost_particles,psitor_max,i_integrator_type,cm_over_e, &
+            !$OMP& vmod,coord_system,n_time_steps,lost_particles,psitor_max,i_integrator_type,&
             !$OMP& lost_reason,lost_step,lost_position, &
             !$OMP& n_contributors, &
             !$OMP& boole_collisions,eps_collisions,rd_start_pitchpar,rd_xi_collision,num_vec,kpart,boole_psi_mat, &
@@ -285,7 +286,8 @@
             !$OMP& t_pass,boole_t_finished,iper,ierr, &
             !$OMP& ipert,bmod_multiplier,A_s,A_theta,A_phi,B_s,B_theta,B_phi,boole_initialized,dR_ds,dZ_ds,sqg, &
             !$OMP& bmod,q,delta_A_amplitude,counter_mappings,vmod1,pitchpar,xi_collision,l,num_vec_size,tau_out_can, &
-            !$OMP& valid_steps)
+            !$OMP& valid_steps) &
+            !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
             !$OMP DO
 !
 !do o = 1,num_vec_size

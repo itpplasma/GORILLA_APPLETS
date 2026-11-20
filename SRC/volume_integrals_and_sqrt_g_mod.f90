@@ -55,6 +55,7 @@ subroutine calc_square_root_g
 end subroutine calc_square_root_g
 
 subroutine calc_volume_integrals
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     use constants, only: pi, ev2erg
     use tetra_grid_mod, only: ntetr, verts_rphiz, tetra_grid
@@ -115,11 +116,12 @@ subroutine calc_volume_integrals
     call ieee_set_halting_mode(ieee_divide_by_zero, .false.)
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(n_prisms,verts_rphiz,tetra_grid,grid_size,tetra_indices_per_prism,prism_volumes, particle_charge, in, &
+    !$OMP& SHARED(n_prisms,verts_rphiz,tetra_grid,grid_size,tetra_indices_per_prism,prism_volumes, in, &
     !$OMP& refined_prism_volumes,sqrt_g,r_integrand_constants, elec_pot_vec,n_b,tetra_physics, &
     !$OMP& n_field_periods) &
     !$OMP& PRIVATE(r_values,z_values,rmin,triangle_indices,r_values_intermediate,z_values_intermediate, delta_r, delta_z, eta, &
-    !$OMP& r,z,gradient,z_star,alpha,beta,gamma,delta,epsilon,capital_gamma,capital_delta, limits,a,a_dash,b,b_dash,c,c_dash,phi_0)
+    !$OMP& r,z,gradient,z_star,alpha,beta,gamma,delta,epsilon,capital_gamma,capital_delta, limits,a,a_dash,b,b_dash,c,c_dash,phi_0) &
+    !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
     !$OMP DO
     do i = 1,n_prisms
         !calculate prism volumes using the basic approach (compare with chapter 4.2 of master thesis from Jonatan Schatzlmayr)

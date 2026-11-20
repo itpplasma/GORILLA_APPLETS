@@ -11,6 +11,7 @@ module poincare_invariances_mod
     contains
 !
     subroutine compute_first_poincare_invariance()
+    use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 !
         use constants, only: ev2erg, pi
         use tetra_physics_mod, only: particle_mass,cm_over_e,get_dt_dtau_const_1,set_all_dt_dtau_const
@@ -167,14 +168,15 @@ print *, ''
         endif !boole_integration_over_tau
 !
         !$OMP PARALLEL DEFAULT(NONE) &
-        !$OMP& SHARED(n_orbits,i_integrator_type,alpha_0_vec,particle_mass,cm_over_e,t_total,n_steps,ePhi_mat,perpinv_vec, &
+        !$OMP& SHARED(n_orbits,i_integrator_type,alpha_0_vec,t_total,n_steps,ePhi_mat,perpinv_vec, &
         !$OMP& pitchpar_0,s_mat,theta_mat,phi_mat,vpar_mat,A_theta_mat,A_phi_mat, hamiltonian_time_mat,energy_eV_0, &
         !$OMP& h_s_mat, h_theta_mat, h_phi_mat,pitchpar_mat,counter_particles,J_perp,perpinv,perpinv2,energy_eV_vec, &
         !$OMP& gyrophase_mat,bmod_mat ) &
         !$OMP& PRIVATE(k,s_0,theta_0,phi_0,A_theta,A_phi,dA_theta_ds,dA_phi_ds,aiota, &
         !$OMP& sqg,alam,dl_ds,dl_dt,dl_dp,Bctrvr_vartheta,Bctrvr_varphi,Bcovar_r,Bcovar_vartheta,Bcovar_varphi, &
         !$OMP& bmod,s_vec,theta_vec,phi_vec,vpar_vec,A_theta_vec,A_phi_vec,h_s_vec, h_theta_vec, h_phi_vec,pitchpar_vec, &
-        !$OMP& hamiltonian_time_vec,ePhi_vec,energy_eV,gyrophase_vec,bmod_vec)
+        !$OMP& hamiltonian_time_vec,ePhi_vec,energy_eV,gyrophase_vec,bmod_vec) &
+        !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
         !$OMP DO
 !
         !Loop over orbits and store data
@@ -256,11 +258,12 @@ print *, ''
         counter_particles = 0
 !
         !$OMP PARALLEL DEFAULT(NONE) &
-        !$OMP& SHARED(n_orbits,particle_mass,cm_over_e,n_steps,boole_integration_over_tau,i_integrator_type, &
+        !$OMP& SHARED(n_orbits,n_steps,boole_integration_over_tau,i_integrator_type, &
         !$OMP& s_mat,theta_mat,phi_mat,vpar_mat,A_theta_mat,A_phi_mat,hamiltonian_time_mat,n_field_periods, &
         !$OMP& h_s_mat, h_theta_mat, h_phi_mat,pitchpar_mat,counter_particles,energy_eV_vec,first_poincare_invariance, &
         !$OMP& gyrophase_mat,perpinv_vec,gyro_term) &
-        !$OMP& PRIVATE(j,k,delta_theta,delta_phi,delta_gyro_term)
+        !$OMP& PRIVATE(j,k,delta_theta,delta_phi,delta_gyro_term) &
+        !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
         !$OMP DO
 
         do j = 1,n_steps+1
