@@ -1,7 +1,7 @@
 ! Impurity tracing (i_option = 17), see SRC/impurity_tracing/impurity_tracing_mod.f90
 ! Default: Be0 launched from a point at the AUG outer midplane (mid SOL) with 25 eV in -R
 ! (Harting et al. 2025, Sec. 5), straight-line flight until ionisation, then the charge-state chain
-! Be1+ -> 2+ -> 3+ -> 4+. All rates are constant placeholders [1/s] until ADAS rates are in.
+! Be1+ -> 2+ -> 3+ -> 4+. Constant rates [1/s] below; ADAS rates with the commented lines.
 ! Ions only: start_charge = 1. Fixed species: species_element = '' and test_mass_amu,
 ! test_charge_number, e.g. W5+ with the commented line below.
 &impurity_tracing_nml
@@ -10,6 +10,9 @@
  ionisation_rate_s(3) = 5.0d4 ,
  neutral_energy_ev = 25.0 , neutral_direction = -1.0, 0.0, 0.0 ,   ! along e_R, e_phi, e_Z
  neutral_face_test = 'auto' , face_sag_tol = 0.1 ,                 ! or 'hybrid', 'cartesian'
+! rates n_e <sigma v>(n_e, T_e) from ADAS instead (download: see README.md):
+! adas_scd_file = 'scd96_be.dat' , adas_acd_file = 'acd96_be.dat' ,
+! background_cells_file = 'cells.dat' ,   ! n_e T_e per triangle for the ADAS rates (see README.md)
 ! species_element = '' , test_mass_amu = 183.84 , test_charge_number = 5.0 ,   ! fixed W5+
  background_mass_amu = 2.01410177812 , background_charge_number = 1.0 ,  ! D+
  electron_density_cm3 = 1.0d13 , temperature_ev = 20.0 ,   ! constant n, T (Ti = Te)

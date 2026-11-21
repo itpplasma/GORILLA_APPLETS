@@ -220,6 +220,15 @@ add_test(NAME marker_species_reject COMMAND test_marker_species_reject.x)
 set_tests_properties(marker_species_reject PROPERTIES
     PASS_REGULAR_EXPRESSION "recombination to neutrals is not implemented")
 
+# ADAS ADF11 reader (adf11_mod) and marker_species_mod adas_rates on a synthetic file
+add_executable(test_adf11.x
+    test_adf11.f90
+)
+target_link_libraries(test_adf11.x GORILLA_APPLETS)
+target_include_directories(test_adf11.x
+    PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+add_test(NAME adf11 COMMAND test_adf11.x)
+
 # Impurity tracing: straight-line neutral flight (neutral_flight_mod) on the analytic circular tokamak
 add_executable(test_neutral_flight.x
     test_neutral_flight.f90

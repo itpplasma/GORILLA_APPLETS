@@ -37,8 +37,9 @@ module impurity_tracing_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64, int64
     use thermal_force_rng_mod, only: rng_t, rng_seed, rng_normal3, rng_uniform
-    use marker_species_mod, only: species_set_t, init_species_set, set_marker_charge, total_rate, &
-                                  next_event_time, choose_transition, change_charge_state, field_direction
+    use marker_species_mod, only: adas_rates, adas_cell_rates, set_cell_rates, cell_rates, draw_optical_depth, &
+                                  time_to_event, species_set_t, init_species_set, set_marker_charge, total_rate, &
+                                  choose_transition, change_charge_state, field_direction
     use neutral_flight_mod, only: flight_result_t, choose_face_mode, fly_neutral, face_cartesian, &
                                   nf_ionised, nf_wall, nf_time, nf_error, cart_of_rphiz
 
@@ -78,6 +79,14 @@ module impurity_tracing_mod
         real(dp) :: ionisation_rate_s(0:max_z) = 0.0_dp     ! per charge state [1/s]
         real(dp) :: recombination_rate_s(0:max_z) = 0.0_dp  ! per charge state [1/s]
         logical :: boole_gc_jump = .true.
+        ! ADAS ADF11 files (e.g. scd96_be.dat, acd96_be.dat); if given, they replace the
+        ! ionisation / recombination rates by n_e <sigma v>(n_e, T_e) of the background
+        character(len=256) :: adas_scd_file = ''
+        character(len=256) :: adas_acd_file = ''
+        ! per-cell background for the rates (needs the ADAS files): one line 'n_e[cm^-3] T_e[eV]'
+        ! per 2D triangle in mesh order (as in <prefix>_residence.dat), '#' lines are comments.
+        ! Collisions still use electron_density_cm3, temperature_ev.
+        character(len=256) :: background_cells_file = ''
         ! neutrals (start_charge = 0)
         real(dp) :: neutral_energy_ev = 25.0_dp
         real(dp) :: neutral_direction(3) = [-1.0_dp, 0.0_dp, 0.0_dp]   ! along e_R, e_phi, e_Z
@@ -102,13 +111,15 @@ subroutine load_impurity_tracing_inp(inp)
     integer :: start_charge
     real(dp) :: ionisation_rate_s(0:max_z), recombination_rate_s(0:max_z)
     logical :: boole_gc_jump
+    character(len=256) :: adas_scd_file, adas_acd_file, background_cells_file
     real(dp) :: neutral_energy_ev, neutral_direction(3), face_sag_tol
     character(len=16) :: neutral_face_test
     namelist /impurity_tracing_nml/ test_mass_amu, test_charge_number, background_mass_amu, &
         background_charge_number, electron_density_cm3, temperature_ev, boole_collisions, &
         boole_electron_collisions, dt_free_s, start_mode, start_R_cm, start_Z_cm, t_max_s, &
         n_particles, seed, output_prefix, species_element, start_charge, ionisation_rate_s, &
-        recombination_rate_s, boole_gc_jump, neutral_energy_ev, neutral_direction, neutral_face_test, face_sag_tol
+        recombination_rate_s, boole_gc_jump, adas_scd_file, adas_acd_file, background_cells_file, &
+        neutral_energy_ev, neutral_direction, neutral_face_test, face_sag_tol
 
     test_mass_amu = inp%test_mass_amu; test_charge_number = inp%test_charge_number
     background_mass_amu = inp%background_mass_amu; background_charge_number = inp%background_charge_number
@@ -120,6 +131,8 @@ subroutine load_impurity_tracing_inp(inp)
     species_element = inp%species_element; start_charge = inp%start_charge
     ionisation_rate_s = inp%ionisation_rate_s; recombination_rate_s = inp%recombination_rate_s
     boole_gc_jump = inp%boole_gc_jump
+    adas_scd_file = inp%adas_scd_file; adas_acd_file = inp%adas_acd_file
+    background_cells_file = inp%background_cells_file
     neutral_energy_ev = inp%neutral_energy_ev; neutral_direction = inp%neutral_direction
     neutral_face_test = inp%neutral_face_test; face_sag_tol = inp%face_sag_tol
 
@@ -139,6 +152,8 @@ subroutine load_impurity_tracing_inp(inp)
     inp%species_element = species_element; inp%start_charge = start_charge
     inp%ionisation_rate_s = ionisation_rate_s; inp%recombination_rate_s = recombination_rate_s
     inp%boole_gc_jump = boole_gc_jump
+    inp%adas_scd_file = adas_scd_file; inp%adas_acd_file = adas_acd_file
+    inp%background_cells_file = background_cells_file
     inp%neutral_energy_ev = neutral_energy_ev; inp%neutral_direction = neutral_direction
     inp%neutral_face_test = neutral_face_test; inp%face_sag_tol = face_sag_tol
 
@@ -209,6 +224,11 @@ subroutine calc_impurity_tracing()
     ! velocity normalisation v0 = sqrt(2 T/m_a)
     if (boole_species) then
         call check_species_switch_allowed()
+        if (len_trim(inp%adas_scd_file) > 0 .or. len_trim(inp%adas_acd_file) > 0) then
+            print '(a)', ' impurity tracing: rates from ADAS: '//trim(inp%adas_scd_file)//' '//trim(inp%adas_acd_file)
+            call adas_rates(inp%species_element, inp%adas_scd_file, inp%adas_acd_file, inp%electron_density_cm3, &
+                            inp%temperature_ev, inp%ionisation_rate_s, inp%recombination_rate_s)
+        end if
         call init_species_set(ss, inp%species_element, mb(1:nb), zb(1:nb), db(1:nb), tb(1:nb), &
                               inp%temperature_ev, inp%ionisation_rate_s, inp%recombination_rate_s, inp%boole_gc_jump)
         m_a = ss%mass_g
@@ -221,6 +241,9 @@ subroutine calc_impurity_tracing()
             if (total_rate(ss, iz) > 0.0_dp) print '(a,i3,a,es11.4,a,es11.4)', '   charge ', iz, &
                 ': ionisation rate [1/s] ', ss%rate_ion(iz), ', recombination rate [1/s] ', ss%rate_rec(iz)
         end do
+        if (len_trim(inp%background_cells_file) > 0) call load_cell_rates()
+    else if (len_trim(inp%background_cells_file) > 0) then
+        error stop 'impurity tracing: background_cells_file needs charge-state mode (species_element)'
     else
         call collis_init(m_a, inp%test_charge_number, mb(1:nb), zb(1:nb), db(1:nb), tb(1:nb), &
                          inp%temperature_ev, v0, efcolf(1:nb), velrat(1:nb), enrat(1:nb))
@@ -255,7 +278,11 @@ subroutine calc_impurity_tracing()
             trim(merge('cartesian', 'hybrid   ', face_mode == face_cartesian)), ' (max face sag ', sag_max, &
             ' cm, sag/inradius ', sag_ratio, ', ', n_degenerate, ' degenerate tetrahedra)'
         allocate(nu_tetr(ntetr), tri_of_tetr(ntetr))
-        nu_tetr = ss%rate_ion(0)
+        ! neutral ionisation rate per tetrahedron: rate of its cell (ADAS per triangle) or uniform
+        do k = 1, ntetr
+            nu_tetr(k) = ss%rate_ion(0)
+            if (allocated(ss%cell_rate_ion)) nu_tetr(k) = ss%cell_rate_ion(0, mod(k - 1, 3*ntri)/3 + 1)
+        end do
         do k = 1, ntetr
             tri_of_tetr(k) = mod(k - 1, 3*ntri)/3 + 1
         end do
@@ -336,6 +363,58 @@ subroutine calc_impurity_tracing()
 
 contains
 
+    subroutine load_cell_rates()
+        ! n_e, T_e per 2D triangle from background_cells_file -> ADAS rates per triangle and
+        ! charge state (uniform input rates where no ADAS file is given)
+        real(dp), allocatable :: ne(:), te(:), ri(:,:), rr(:,:)
+        character(len=512) :: line
+        integer :: iu_c, ios, n
+        if (len_trim(inp%adas_scd_file) == 0 .and. len_trim(inp%adas_acd_file) == 0) &
+            error stop 'impurity tracing: background_cells_file needs adas_scd_file and/or adas_acd_file'
+        allocate(ne(ntri), te(ntri))
+        open(newunit=iu_c, file=trim(inp%background_cells_file), status='old', action='read', iostat=ios)
+        if (ios /= 0) error stop 'impurity tracing: cannot open background_cells_file'
+        n = 0
+        do
+            read(iu_c, '(a)', iostat=ios) line
+            if (ios /= 0) exit
+            line = adjustl(line)
+            if (len_trim(line) == 0 .or. line(1:1) == '#') cycle
+            n = n + 1
+            if (n > ntri) error stop 'impurity tracing: background_cells_file has more lines than mesh triangles'
+            read(line, *, iostat=ios) ne(n), te(n)
+            if (ios /= 0) error stop 'impurity tracing: background_cells_file: cannot read n_e T_e'
+        end do
+        close(iu_c)
+        if (n /= ntri) then
+            print '(a,i0,a,i0)', ' impurity tracing: background_cells_file has ', n, ' cells, mesh triangles: ', ntri
+            error stop
+        end if
+        if (any(ne <= 0.0_dp) .or. any(te <= 0.0_dp)) error stop 'impurity tracing: background cells need n_e, T_e > 0'
+        allocate(ri(0:ss%z_nuc, ntri), rr(0:ss%z_nuc, ntri))
+        ri = spread(ss%rate_ion, 2, ntri)
+        rr = spread(ss%rate_rec, 2, ntri)
+        call adas_cell_rates(inp%species_element, inp%adas_scd_file, inp%adas_acd_file, ne, te, ri, rr)
+        call set_cell_rates(ss, ri, rr)
+        print '(a,a,a,i0,a)', ' impurity tracing: rates per triangle from ', trim(inp%background_cells_file), ' (', ntri, &
+            ' cells; collisions keep the constant n_e, T)'
+        print '(a,2es11.3,a,2es11.3)', '   n_e [cm^-3] min/max ', minval(ne), maxval(ne), ', T_e [eV] min/max ', &
+            minval(te), maxval(te)
+        do iz = 0, ss%z_nuc
+            if (maxval(ri(iz, :) + rr(iz, :)) > 0.0_dp) print '(a,i3,a,2es11.3,a,2es11.3)', '   charge ', iz, &
+                ': ionisation rate [1/s] min/max ', minval(ri(iz, :)), maxval(ri(iz, :)), &
+                ', recombination min/max ', minval(rr(iz, :)), maxval(rr(iz, :))
+        end do
+    end subroutine load_cell_rates
+
+    pure function cell_of_tetra(ind_tetr) result(icell)
+        ! cell (2D triangle) of tetrahedron ind_tetr; 0 = uniform rates
+        integer, intent(in) :: ind_tetr
+        integer :: icell
+        icell = 0
+        if (allocated(ss%cell_rate_ion)) icell = mod(ind_tetr - 1, 3*ntri)/3 + 1
+    end function cell_of_tetra
+
     subroutine prism_triangle(ind_tetr, rz)
         ! (R, Z) of the 2D triangle of the prism that contains tetrahedron ind_tetr:
         ! the three distinct (R, Z) of its knots (axisymmetric extrusion, no shear)
@@ -383,11 +462,12 @@ contains
         type(rng_t) :: rng
         type(optional_quantities_type) :: optional_quantities
         real(dp) :: x(3), xi(3), vpar, vperp, v, t, h, dtau, zet(5), randnum(3), z_save(3), perpinv, &
-                    t_remain, t_pass, x_start(3), u, w(3), t_event, t_stop, jump(3)
+                    t_remain, t_pass, x_start(3), u, w(3), t_stop, jump(3), tau, tau_acc, nu, nu_ion, nu_rec, &
+                    t_push
         integer :: ind_tetr, iface, ind_tetr_save, iper_phi, ierr, j, iz, icol, n_trans
         type(flight_result_t) :: fl
         real(dp) :: dir(3), vcart(3), cphi, sphi
-        logical :: boole_t_finished, boole_pusher_failed
+        logical :: boole_t_finished, boole_pusher_failed, boole_event
 
         call rng_seed(rng, int(inp%seed, int64), int(ip, int64))
         ion_pt = 0.0_dp
@@ -417,14 +497,16 @@ contains
         n_trans = 0
         iz = 1
         icol = 1
-        t_event = huge(1.0_dp)
+        ! transition when the accumulated optical depth tau_acc (sum of nu dt) reaches tau
+        tau = huge(1.0_dp)
+        tau_acc = 0.0_dp
         if (boole_species) then
             iz = inp%start_charge
             icol = iz + 1
             ! this thread's previous marker may have ended in another state
             if (iz >= 1) then
                 call set_marker_charge(ss, iz)
-                t_event = next_event_time(ss, iz, t, rng)
+                if (total_rate(ss, iz) > 0.0_dp .or. allocated(ss%cell_rate_ion)) tau = draw_optical_depth(rng)
             end if
         end if
         if (iz == 0) then
@@ -442,7 +524,7 @@ contains
         end if
         if (stat == st_time .and. iz == 0) then
             call fly_neutral(face_mode, cart_of_rphiz(x), vcart, t, ind_tetr, inp%t_max_s, &
-                             -log(1.0_dp - rng_uniform(rng)), nu_tetr, fl, tri_of_tetr, res(:, 1))
+                             draw_optical_depth(rng), nu_tetr, fl, tri_of_tetr, res(:, 1))
             n_neut(fl%status) = n_neut(fl%status) + 1
             ion_pt = [real(fl%status, dp), fl%t, fl%x(1), fl%x(2), fl%x(3), real(fl%ind_tetr, dp)]
             if (face_mode == face_cartesian) n_handover(fl%handover) = n_handover(fl%handover) + 1
@@ -468,7 +550,9 @@ contains
                     iz = 1
                     icol = 2
                     call set_marker_charge(ss, iz)
-                    t_event = next_event_time(ss, iz, t, rng)
+                    tau_acc = 0.0_dp
+                    tau = huge(1.0_dp)
+                    if (total_rate(ss, iz) > 0.0_dp .or. allocated(ss%cell_rate_ion)) tau = draw_optical_depth(rng)
                     if (ind_tetr == -1) then
                         stat = st_wall
                     else if (.not. tetra_in_edge_region(ind_tetr)) then
@@ -479,7 +563,14 @@ contains
         end if
 
         do while (stat == st_time .and. t < inp%t_max_s)
-            t_stop = min(inp%t_max_s, t_event)
+            ! step end: t_max or the transition, if the rate of the current cell stayed constant
+            nu = 0.0_dp
+            if (boole_species) then
+                call cell_rates(ss, iz, cell_of_tetra(ind_tetr), nu_ion, nu_rec)
+                nu = nu_ion + nu_rec
+            end if
+            t_stop = inp%t_max_s
+            if (nu > 0.0_dp) t_stop = min(t_stop, t + time_to_event(nu, tau_acc, tau))
             ! collision, adaptive step dtau (length at v0) from stost, at most up to the next event
             if (inp%boole_collisions) then
                 v = sqrt(vpar**2 + vperp**2)
@@ -507,13 +598,24 @@ contains
             z_save = x - tetra_physics(ind_tetr)%x1
             call initialize_constants_of_motion(vperp, z_save, ind_tetr, perpinv)
             t_remain = h
+            boole_event = .false.
             do
                 ind_tetr_save = ind_tetr
-                call push_within_tetrahedron(ind_tetr, iface, x, vpar, z_save, t_remain, t_pass, &
+                ! rate in this tetrahedron's cell; the push stops where the optical depth is reached
+                nu = 0.0_dp
+                if (boole_species) then
+                    call cell_rates(ss, iz, cell_of_tetra(ind_tetr), nu_ion, nu_rec)
+                    nu = nu_ion + nu_rec
+                end if
+                t_push = min(t_remain, time_to_event(nu, tau_acc, tau))
+                call push_within_tetrahedron(ind_tetr, iface, x, vpar, z_save, t_push, t_pass, &
                                              boole_t_finished, iper_phi, optional_quantities, boole_pusher_failed)
                 res(mod(ind_tetr_save - 1, 3*ntri)/3 + 1, icol) = res(mod(ind_tetr_save - 1, 3*ntri)/3 + 1, icol) + t_pass
                 t = t + t_pass
                 t_remain = t_remain - t_pass
+                tau_acc = tau_acc + nu*t_pass
+                ! transition reached inside this tetrahedron (orbit step ends early if t_push < t_remain)
+                boole_event = boole_t_finished .and. nu > 0.0_dp .and. tau_acc >= tau*(1.0_dp - 1.0e-12_dp)
                 if (boole_pusher_failed) then
                     stat = st_pusher
                     exit
@@ -530,9 +632,9 @@ contains
                 if (boole_t_finished) exit
             end do
 
-            ! charge-state transition when the event time is reached
-            if (stat == st_time .and. boole_species .and. t >= t_event*(1.0_dp - 1.0e-12_dp)) then
-                j = choose_transition(ss, iz, rng_uniform(rng))
+            ! charge-state transition when the optical depth is reached (branching with the cell rates)
+            if (stat == st_time .and. boole_event) then
+                j = choose_transition(ss, iz, rng_uniform(rng), cell_of_tetra(ind_tetr_save))
                 call change_charge_state(ss, iz, j, rng_uniform(rng), x, ind_tetr, iface, vpar, vperp, jump)
                 n_jumps = n_jumps + 1
                 sum_jump = sum_jump + norm2(jump)
@@ -544,7 +646,9 @@ contains
                 else if (.not. tetra_in_edge_region(ind_tetr)) then
                     stat = st_inner
                 end if
-                t_event = next_event_time(ss, iz, t, rng)
+                tau_acc = 0.0_dp
+                tau = huge(1.0_dp)
+                if (total_rate(ss, iz) > 0.0_dp .or. allocated(ss%cell_rate_ion)) tau = draw_optical_depth(rng)
             end if
         end do
 
