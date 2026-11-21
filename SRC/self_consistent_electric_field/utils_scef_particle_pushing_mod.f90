@@ -9,6 +9,13 @@ module utils_scef_particle_pushing_mod
     integer, parameter :: max_problem_dumps = 1000
     integer :: n_problem_dumps = 0
 
+    !A marker the pusher cannot move (each retry from the last tetrahedron crossing with halved vpar fails again
+    !and charges no time, so the tracing time limit never triggers) is removed after this many consecutive
+    !failed retries. Without the limit one marker near a turning point looped for 1.3 h and wrote 57 GB of
+    !GORILLA "Trouble shooting failed" lines (r07, 2026-11-20). Removals are counted and reported per pass.
+    integer, parameter :: max_stuck_retries = 20
+    integer :: n_stuck_markers_removed = 0
+
     !Per-thread accumulators of the diffusion-coefficient calibration (delta_s statistics per time bin). Each
     !thread sums into its own copy and adds it to s% once at the end of the parallel region; a shared critical
     !section per calibration step cost ~19 % of a calibration at 128 threads. With one thread the summation
@@ -71,6 +78,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     endif
 
     t_tot = 0.0_dp
+    n_stuck_markers_removed = 0
 
     !Each marker's density contribution per flux shell (sum and sum of squares over the markers) gives the
     !statistical error of the shell densities, used for the noise-based stopping criteria
@@ -222,6 +230,8 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     if (.not.in%boole_precalc_collisions) call initialise_seed_for_random_numbers_for_each_thread(n_particles+1, j)
 
     print*, 'Total tracing time of all particles divided by number of particles is: ', t_tot/n_particles, 's'
+    if (n_stuck_markers_removed.gt.0) print*, 'species ', species, ': ', n_stuck_markers_removed, &
+        ' markers removed as lost after ', max_stuck_retries, ' consecutive failed pushes (stuck in the pusher)'
 
 end subroutine parallelised_particle_pushing
 
@@ -257,6 +267,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     real(dp)                                     :: t_pass,perpinv, vpar_save, vperp_save
     logical                                      :: boole_t_finished, boole_lost_inside, mirror_condition
     integer                                      :: ind_tetr_save,iper_phi,k,i,ns_marker
+    integer                                      :: n_retries   !consecutive failed pushes of this marker
     type(optional_quantities_type)               :: optional_quantities
     real(dp)                                     :: tau, v, t_pusher, v_save, vpar_init, vperp_init, critical_distance
     type(local_rr_t)                             :: local_rr
@@ -302,6 +313,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     local_counter%tetr_pushings = local_counter%tetr_pushings -1 !set tetr_pushings to -1 because when entering the loop it will go back to one without pushing
     vpar_init = vpar
     vperp_init = vperp
+    n_retries = 0
 
     do !Loop for tetrahedron pushings until t%step is reached
         local_counter%tetr_pushings = local_counter%tetr_pushings +1
@@ -315,6 +327,13 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
                 call mirror_particles_on_domain_boundaries(x,vpar,n,ind_tetr,iface,z_save,perpinv,ind_tetr_save)
                 if (ind_tetr.eq.-1) exit
             elseif (x(1).lt.0.99_dp) then
+                n_retries = n_retries + 1
+                if (n_retries.gt.max_stuck_retries) then !give up: remove as lost at the last good position
+                    x = x_save
+                    !$omp atomic
+                    n_stuck_markers_removed = n_stuck_markers_removed + 1
+                    exit
+                endif
                 call treat_particles_that_are_lost_but_should_not_be(z_save_at_x_save,ind_tetr_save,z_save,x_save,x,vpar,vperp, &
                                                                      perpinv,ind_tetr,vpar_save,vperp_save,vpar_init,vperp_init)
             else
@@ -339,6 +358,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
                                                     & t_pass,boole_t_finished,iper_phi,optional_quantities)
         end select
 
+        if (ind_tetr.ne.-1) n_retries = 0 !successful push
         vperp = vperp_func(z_save,perpinv,ind_tetr_save) !Compute vperp from position
         v = sqrt(vperp**2+vpar**2)
 
