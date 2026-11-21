@@ -23,7 +23,8 @@ module marker_species_mod
 !     NOTE: for a background that varies inside a cell (e.g. linear per tetrahedron, as used by the
 !     thermal-force collisions), the rates would instead have to be evaluated along the orbit at
 !     the local n_e, T_e, with the sum of nu dt approximated per step (time-step error); not done.
-! Neutrals (iz = 0) are not traced yet: recombination to iz = 0 is rejected.
+! Neutrals (iz = 0) fly on straight lines (neutral_flight_mod); ion_to_neutral and neutral_to_ion convert
+! between the guiding centre of the ion and the particle position and velocity of the neutral.
 ! Collision coefficients (collis_ions collis_init) are precomputed per charge state for a background
 ! of constant density and temperature.
 ! CGS units, temperatures in eV, masses in amu.
@@ -54,7 +55,7 @@ module marker_species_mod
 
     public :: init_species_set, set_marker_charge, total_rate, next_event_time, choose_transition, &
               change_charge_state, field_direction, element_data, adas_rates, adas_cell_rates, &
-              set_cell_rates, cell_rates, draw_optical_depth, time_to_event
+              set_cell_rates, cell_rates, draw_optical_depth, time_to_event, neutral_to_ion, ion_to_neutral
 
 contains
 
@@ -109,8 +110,7 @@ subroutine adas_cell_rates(element, scd_file, acd_file, ne_cm3, te_ev, rate_ion,
     ! Rates [1/s] per charge state 0 ... z_nuc and cell from ADF11 files (each file read once):
     ! ionisation iz -> iz+1 from scd (block Z1 = iz+1), recombination iz -> iz-1 from acd
     ! (block Z1 = iz), rate = n_e <sigma v>(n_e, T_e) of the cell. An empty file name leaves the
-    ! corresponding rates unchanged. Recombination to neutrals (iz = 1 -> 0) is set to zero:
-    ! recombination back to neutrals is not implemented yet (neutrals only from the launch).
+    ! corresponding rates unchanged. Recombination to neutrals (iz = 1 -> 0) from block Z1 = 1.
 
     use adf11_mod, only: adf11_t, read_adf11, adf11_coef
 
@@ -140,7 +140,7 @@ subroutine adas_cell_rates(element, scd_file, acd_file, ne_cm3, te_ev, rate_ion,
         call check_table(tab)
         rate_rec(0:z_nuc, :) = 0.0_dp
         do ic = 1, size(ne_cm3)
-            do iz = 2, z_nuc
+            do iz = 1, z_nuc
                 rate_rec(iz, ic) = ne_cm3(ic)*adf11_coef(tab, iz, ne_cm3(ic), te_ev(ic))
             end do
         end do
@@ -171,7 +171,6 @@ subroutine set_cell_rates(ss, rate_ion, rate_rec)
     if (any(rate_ion(0:ss%z_nuc, :) < 0.0_dp) .or. any(rate_rec(0:ss%z_nuc, :) < 0.0_dp)) &
         error stop 'marker species: negative cell rate'
     if (any(rate_ion(ss%z_nuc, :) > 0.0_dp)) error stop 'marker species: ionisation of the bare nucleus'
-    if (any(rate_rec(1, :) > 0.0_dp)) error stop 'marker species: recombination to neutrals is not implemented yet'
     if (allocated(ss%cell_rate_ion)) deallocate(ss%cell_rate_ion, ss%cell_rate_rec)
     allocate(ss%cell_rate_ion(0:ss%z_nuc, size(rate_ion, 2)), ss%cell_rate_rec(0:ss%z_nuc, size(rate_rec, 2)))
     ss%cell_rate_ion(:,:) = rate_ion(0:ss%z_nuc, :)          ! explicit bounds: charge state 0 ... z_nuc
@@ -251,7 +250,6 @@ subroutine init_species_set(ss, element, mb, zb, db, tb, temperature_ev, rate_io
     ss%rate_rec = rate_rec(0:ss%z_nuc)
     if (any(ss%rate_ion < 0.0_dp) .or. any(ss%rate_rec < 0.0_dp)) error stop 'marker species: negative rate'
     if (ss%rate_ion(ss%z_nuc) > 0.0_dp) error stop 'marker species: ionisation of the bare nucleus'
-    if (ss%rate_rec(1) > 0.0_dp) error stop 'marker species: recombination to neutrals is not implemented yet'
 
     allocate(ss%efcolf(ss%nb, ss%z_nuc), ss%velrat(ss%nb, ss%z_nuc), ss%enrat(ss%nb, ss%z_nuc))
     do iz = 1, ss%z_nuc
@@ -383,6 +381,76 @@ subroutine change_charge_state(ss, iz_old, iz_new, phase_u, x, ind_tetr, iface, 
     if (iz_new >= 1) call set_marker_charge(ss, iz_new)
 
 end subroutine change_charge_state
+
+subroutine neutral_to_ion(ss, x, ind_tetr, iface, vcart, vpar, vperp, jump)
+
+    ! Neutral -> charge 1 at the particle position x (R, phi, Z) with Cartesian velocity vcart: the ion
+    ! keeps the velocity, v_par = v.b, v_perp = |v - v_par b|; guiding centre X = x - (b x v)/Omega,
+    ! Omega = e B/(m c) (gyrophase known). x, ind_tetr, iface: guiding centre on return
+    ! (ind_tetr = -1 if outside the mesh). jump: X - x, physical components (R, phi, Z) [cm].
+
+    use constants, only: clight, echarge
+    use anomalous_transport_displacement_mod, only: displace_by_straight_line
+
+    type(species_set_t), intent(in) :: ss
+    real(dp), intent(inout) :: x(3)
+    integer, intent(inout) :: ind_tetr, iface
+    real(dp), intent(in) :: vcart(3)
+    real(dp), intent(out) :: vpar, vperp, jump(3)
+    real(dp) :: b_hat(3), bmod, vloc(3), c, s, bxv(3)
+
+    c = cos(x(2)); s = sin(x(2))
+    vloc = [c*vcart(1) + s*vcart(2), -s*vcart(1) + c*vcart(2), vcart(3)]    ! along e_R, e_phi, e_Z at x
+    call field_direction(x, ind_tetr, b_hat, bmod)
+    vpar = dot_product(vloc, b_hat)
+    vperp = norm2(vloc - vpar*b_hat)
+    bxv = cross(b_hat, vloc)
+    jump = -bxv*ss%mass_g*clight/(echarge*bmod)
+    call displace_by_straight_line(x, ind_tetr, iface, [jump(1), jump(2)/x(1), jump(3)], vpar, vperp)
+    call set_marker_charge(ss, 1)
+
+end subroutine neutral_to_ion
+
+subroutine ion_to_neutral(ss, iz_old, phase_u, x, ind_tetr, iface, vpar, vperp, vcart, jump)
+
+    ! Charge iz_old -> neutral at the guiding centre x (R, phi, Z) of the ion: random gyrophase
+    ! alpha = 2 pi phase_u, v_perp vector = v_perp (cos alpha e1 + sin alpha e2) (e1, e2 perpendicular to
+    ! b), particle position x + (b x v)/Omega, Omega = iz_old e B/(m c). The neutral keeps the
+    ! velocity: vcart (Cartesian). x, ind_tetr, iface: particle position on return (ind_tetr = -1 if
+    ! outside the mesh). jump: particle - guiding centre, physical components (R, phi, Z) [cm].
+
+    use constants, only: clight, echarge
+    use anomalous_transport_displacement_mod, only: displace_by_straight_line
+
+    type(species_set_t), intent(in) :: ss
+    integer, intent(in) :: iz_old
+    real(dp), intent(in) :: phase_u, vpar, vperp
+    real(dp), intent(inout) :: x(3)
+    integer, intent(inout) :: ind_tetr, iface
+    real(dp), intent(out) :: vcart(3), jump(3)
+    real(dp) :: b_hat(3), bmod, e1(3), e2(3), alpha, vloc(3), c, s, vperp_vec(3)
+
+    call field_direction(x, ind_tetr, b_hat, bmod)
+    call perp_basis(b_hat, e1, e2)
+    alpha = 2.0_dp*pi*phase_u
+    vperp_vec = vperp*(cos(alpha)*e1 + sin(alpha)*e2)
+    vloc = vpar*b_hat + vperp_vec
+    jump = cross(b_hat, vperp_vec)*ss%mass_g*clight/(real(iz_old, dp)*echarge*bmod)
+    ! Cartesian velocity: vloc is given in the local basis at the guiding centre
+    c = cos(x(2)); s = sin(x(2))
+    vcart = [c*vloc(1) - s*vloc(2), s*vloc(1) + c*vloc(2), vloc(3)]
+    call displace_by_straight_line(x, ind_tetr, iface, [jump(1), jump(2)/x(1), jump(3)], vpar, vperp)
+
+end subroutine ion_to_neutral
+
+pure function cross(a, b) result(c)
+
+    real(dp), intent(in) :: a(3), b(3)
+    real(dp) :: c(3)
+
+    c = [a(2)*b(3) - a(3)*b(2), a(3)*b(1) - a(1)*b(3), a(1)*b(2) - a(2)*b(1)]
+
+end function cross
 
 pure subroutine perp_basis(b, e1, e2)
 

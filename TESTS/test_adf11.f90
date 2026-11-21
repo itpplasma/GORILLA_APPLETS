@@ -54,7 +54,7 @@ program test_adf11
     end do
 
     ! adas_rates: ionisation iz -> iz+1 = block Z1 = iz+1 (scd), recombination iz -> iz-1 = block
-    ! Z1 = iz (acd), rate = n_e <sigma v>; no recombination to neutrals, no ionisation of Be4+
+    ! Z1 = iz (acd, including Be1+ -> Be0), rate = n_e <sigma v>; no ionisation of Be4+
     ne = 4.2e13_dp; te = 33.0_dp
     rate_ion = -1.0_dp; rate_rec = -1.0_dp
     call adas_rates('Be', fscd, facd, ne, te, rate_ion, rate_rec)
@@ -63,7 +63,7 @@ program test_adf11
         if (k < z_nuc) want = ne*10.0_dp**f(k + 1, 0.0_dp, log10(ne), log10(te))
         call check('rate_ion', k, 0, rate_ion(k), want)
         want = 0.0_dp
-        if (k >= 2) want = ne*10.0_dp**f(k, 3.0_dp, log10(ne), log10(te))
+        if (k >= 1) want = ne*10.0_dp**f(k, 3.0_dp, log10(ne), log10(te))
         call check('rate_rec', k, 0, rate_rec(k), want)
     end do
 

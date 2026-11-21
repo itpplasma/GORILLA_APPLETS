@@ -218,7 +218,7 @@ target_include_directories(test_marker_species_reject.x
     PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
 add_test(NAME marker_species_reject COMMAND test_marker_species_reject.x)
 set_tests_properties(marker_species_reject PROPERTIES
-    PASS_REGULAR_EXPRESSION "recombination to neutrals is not implemented")
+    PASS_REGULAR_EXPRESSION "ionisation of the bare nucleus")
 
 # ADAS ADF11 reader (adf11_mod) and marker_species_mod adas_rates on a synthetic file
 add_executable(test_adf11.x

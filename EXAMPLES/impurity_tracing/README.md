@@ -31,7 +31,7 @@ Ionisation and recombination rates for Be come from OPEN-ADAS (https://open.adas
 of year 96 (the ADAS 96 data used in Harting et al., NME 42 (2025) 101887). With `adas_scd_file` and/or `adas_acd_file`
 in the namelist, the rates become n_e <sigma v> at the background n_e and T_e (bilinear interpolation in
 log10 n_e, log10 T_e, edge values outside the table; `SRC/impurity_tracing/adf11_mod.f90`).
-Recombination to neutrals is set to zero (recombination back to Be0 is not implemented yet; neutrals are traced from the launch only).
+Recombination Be1+ -> Be0 (acd block Z1 = 1, or `recombination_rate_s(1)`) turns the ion back into a neutral: particle position and velocity from the guiding centre with a random gyrophase, then the straight-line flight as for the launch. `<prefix>_neutrals.dat` lists the last neutral flight of each marker.
 
 Rates per cell: with `background_cells_file` (one line `n_e[cm^-3] T_e[eV]` per 2D mesh triangle, in
 the triangle order of `<prefix>_residence.dat`; `#` lines are comments) the ADAS rates are precomputed

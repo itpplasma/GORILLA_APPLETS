@@ -30,7 +30,9 @@ module impurity_tracing_mod
 ! in the direction neutral_direction (components along e_R, e_phi, e_Z at the start point) until
 ! ionisation with ionisation_rate_s(0) (rate per tetrahedron, track-length estimator), wall or t_max_s.
 ! At ionisation the ion keeps the neutral velocity; its guiding centre is X = x - (b x v)/Omega (the
-! gyrophase is known here). Face test neutral_face_test = 'auto', 'cartesian' or 'hybrid' (see
+! gyrophase is known here). Recombination of charge 1 to the neutral (recombination_rate_s(1) or ADAS):
+! particle position X + (b x v_perp)/Omega and velocity v_par b + v_perp with a random gyrophase, then
+! the same straight-line flight. Face test neutral_face_test = 'auto', 'cartesian' or 'hybrid' (see
 ! neutral_flight_mod; 'auto' uses cartesian if the face sag / inradius <= face_sag_tol).
 ! Random numbers per marker (thermal_force_rng_mod): results do not depend on
 ! the number of threads. CGS units, temperatures in eV, masses in amu.
@@ -39,7 +41,7 @@ module impurity_tracing_mod
     use thermal_force_rng_mod, only: rng_t, rng_seed, rng_normal3, rng_uniform
     use marker_species_mod, only: adas_rates, adas_cell_rates, set_cell_rates, cell_rates, draw_optical_depth, &
                                   time_to_event, species_set_t, init_species_set, set_marker_charge, total_rate, &
-                                  choose_transition, change_charge_state, field_direction
+                                  choose_transition, change_charge_state, neutral_to_ion, ion_to_neutral
     use neutral_flight_mod, only: flight_result_t, choose_face_mode, fly_neutral, face_cartesian, &
                                   nf_ionised, nf_wall, nf_time, nf_error, cart_of_rphiz
 
@@ -268,8 +270,9 @@ subroutine calc_impurity_tracing()
     if (.not. boole_species) print '(a,f8.2,a,f5.1,a,es10.3,a,f7.2,a)', ' impurity tracing: test ion m = ', inp%test_mass_amu, ' amu, Z = ', &
         inp%test_charge_number, ', background n_e = ', inp%electron_density_cm3, ' cm^-3, T = ', inp%temperature_ev, ' eV'
 
-    ! neutrals: face test, rate per tetrahedron (constant for now), triangle of each tetrahedron
-    boole_neutral = boole_species .and. inp%start_charge == 0
+    ! neutrals (launched with start_charge = 0 or from recombination): face test, ionisation rate per
+    ! tetrahedron, triangle of each tetrahedron
+    boole_neutral = boole_species
     face_mode = 0
     v_neutral = 0.0_dp
     if (boole_neutral) then
@@ -322,8 +325,8 @@ subroutine calc_impurity_tracing()
             [(count(nint(final(9, :)) == iz), iz = 0, ss%z_nuc)]
         if (n_jumps > 0) print '(a,i0,a,es12.4,a)', ' impurity tracing: ', n_jumps, &
             ' charge-state transitions, mean guiding-centre jump ', sum_jump/real(n_jumps, dp), ' cm'
-        if (boole_neutral) then
-            print '(a,4(a,i0))', ' impurity tracing: neutrals', ' ionised ', n_neut(nf_ionised), ', wall ', &
+        if (sum(n_neut) > 0) then
+            print '(a,4(a,i0))', ' impurity tracing: neutral flights', ' ionised ', n_neut(nf_ionised), ', wall ', &
                 n_neut(nf_wall), ', time limit ', n_neut(nf_time), ', flight error ', n_neut(nf_error)
             if (face_mode == face_cartesian) print '(a,5i9)', ' impurity tracing: cartesian handover ' // &
                 '(direct, same, neighbour, find_tetra, failed): ', n_handover
@@ -341,10 +344,10 @@ subroutine calc_impurity_tracing()
     end do
     close(iu)
 
-    if (boole_neutral) then
+    if (sum(n_neut) > 0) then
         open(newunit=iu, file=trim(inp%output_prefix)//'_neutrals.dat', status='replace', action='write')
-        write(iu, '(a)') '# end of the neutral flight per marker: flight status (1 ionised, 2 wall, 3 time limit, ' // &
-            '4 error), t[s], particle position R[cm] phi[rad] Z[cm], tetrahedron'
+        write(iu, '(a)') '# end of the last neutral flight per marker: flight status (0 no neutral phase, 1 ionised, ' // &
+            '2 wall, 3 time limit, 4 error), t[s], particle position R[cm] phi[rad] Z[cm], tetrahedron'
         write(iu, '(a)') '# marker status t R phi Z ind_tetr'
         do ip = 1, inp%n_particles
             write(iu, '(i10,i4,4es24.16,i10)') ip, nint(ion_point(1, ip)), ion_point(2:5, ip), nint(ion_point(6, ip))
@@ -522,47 +525,48 @@ contains
         else if (.not. tetra_in_edge_region(ind_tetr)) then
             stat = st_outside
         end if
-        if (stat == st_time .and. iz == 0) then
-            call fly_neutral(face_mode, cart_of_rphiz(x), vcart, t, ind_tetr, inp%t_max_s, &
-                             draw_optical_depth(rng), nu_tetr, fl, tri_of_tetr, res(:, 1))
-            n_neut(fl%status) = n_neut(fl%status) + 1
-            ion_pt = [real(fl%status, dp), fl%t, fl%x(1), fl%x(2), fl%x(3), real(fl%ind_tetr, dp)]
-            if (face_mode == face_cartesian) n_handover(fl%handover) = n_handover(fl%handover) + 1
-            t = fl%t
-            x = fl%x
-            ind_tetr = fl%ind_tetr
-            iface = 0
-            select case (fl%status)
-            case (nf_wall)
-                stat = st_wall
-            case (nf_time)
-                stat = st_time
-            case (nf_error)
-                stat = st_pusher
-            case (nf_ionised)
-                if (ind_tetr < 1) then
-                    stat = st_pusher
-                else
-                    call ionise_neutral(x, ind_tetr, iface, vcart, vpar, vperp, jump)
-                    n_jumps = n_jumps + 1
-                    sum_jump = sum_jump + norm2(jump)
-                    n_trans = n_trans + 1
-                    iz = 1
-                    icol = 2
-                    call set_marker_charge(ss, iz)
-                    tau_acc = 0.0_dp
-                    tau = huge(1.0_dp)
-                    if (total_rate(ss, iz) > 0.0_dp .or. allocated(ss%cell_rate_ion)) tau = draw_optical_depth(rng)
-                    if (ind_tetr == -1) then
-                        stat = st_wall
-                    else if (.not. tetra_in_edge_region(ind_tetr)) then
-                        stat = st_inner
-                    end if
-                end if
-            end select
-        end if
-
         do while (stat == st_time .and. t < inp%t_max_s)
+            if (iz == 0) then
+                ! neutral: straight-line flight until ionisation (optical depth with the charge-0 rates),
+                ! wall or t_max; the ion continues from its guiding centre
+                call fly_neutral(face_mode, cart_of_rphiz(x), vcart, t, ind_tetr, inp%t_max_s, &
+                                 draw_optical_depth(rng), nu_tetr, fl, tri_of_tetr, res(:, 1))
+                n_neut(fl%status) = n_neut(fl%status) + 1
+                ion_pt = [real(fl%status, dp), fl%t, fl%x(1), fl%x(2), fl%x(3), real(fl%ind_tetr, dp)]
+                if (face_mode == face_cartesian) n_handover(fl%handover) = n_handover(fl%handover) + 1
+                t = fl%t
+                x = fl%x
+                ind_tetr = fl%ind_tetr
+                iface = 0
+                select case (fl%status)
+                case (nf_wall)
+                    stat = st_wall
+                case (nf_time)
+                    stat = st_time
+                case (nf_error)
+                    stat = st_pusher
+                case (nf_ionised)
+                    if (ind_tetr < 1) then
+                        stat = st_pusher
+                    else
+                        call neutral_to_ion(ss, x, ind_tetr, iface, vcart, vpar, vperp, jump)
+                        n_jumps = n_jumps + 1
+                        sum_jump = sum_jump + norm2(jump)
+                        n_trans = n_trans + 1
+                        iz = 1
+                        icol = 2
+                        tau_acc = 0.0_dp
+                        tau = huge(1.0_dp)
+                        if (total_rate(ss, iz) > 0.0_dp .or. allocated(ss%cell_rate_ion)) tau = draw_optical_depth(rng)
+                        if (ind_tetr == -1) then
+                            stat = st_wall
+                        else if (.not. tetra_in_edge_region(ind_tetr)) then
+                            stat = st_inner
+                        end if
+                    end if
+                end select
+                cycle
+            end if
             ! step end: t_max or the transition, if the rate of the current cell stayed constant
             nu = 0.0_dp
             if (boole_species) then
@@ -635,7 +639,12 @@ contains
             ! charge-state transition when the optical depth is reached (branching with the cell rates)
             if (stat == st_time .and. boole_event) then
                 j = choose_transition(ss, iz, rng_uniform(rng), cell_of_tetra(ind_tetr_save))
-                call change_charge_state(ss, iz, j, rng_uniform(rng), x, ind_tetr, iface, vpar, vperp, jump)
+                if (j == 0) then
+                    ! recombination to the neutral: particle position and velocity with a random gyrophase
+                    call ion_to_neutral(ss, iz, rng_uniform(rng), x, ind_tetr, iface, vpar, vperp, vcart, jump)
+                else
+                    call change_charge_state(ss, iz, j, rng_uniform(rng), x, ind_tetr, iface, vpar, vperp, jump)
+                end if
                 n_jumps = n_jumps + 1
                 sum_jump = sum_jump + norm2(jump)
                 iz = j
@@ -643,45 +652,19 @@ contains
                 n_trans = n_trans + 1
                 if (ind_tetr == -1) then
                     stat = st_wall
-                else if (.not. tetra_in_edge_region(ind_tetr)) then
-                    stat = st_inner
+                else if (iz >= 1 .and. .not. tetra_in_edge_region(ind_tetr)) then
+                    stat = st_inner          ! neutrals may cross the inner region boundary
                 end if
                 tau_acc = 0.0_dp
                 tau = huge(1.0_dp)
-                if (total_rate(ss, iz) > 0.0_dp .or. allocated(ss%cell_rate_ion)) tau = draw_optical_depth(rng)
+                if (iz >= 1 .and. (total_rate(ss, iz) > 0.0_dp .or. allocated(ss%cell_rate_ion))) &
+                    tau = draw_optical_depth(rng)
             end if
         end do
 
         fin = [t, x(1), x(2), x(3), vpar, vperp, x_start(1), x_start(3), real(iz, dp), real(n_trans, dp)]
 
     end subroutine trace_marker
-
-    subroutine ionise_neutral(x, ind_tetr, iface, vcart, vpar, vperp, jump)
-
-        ! Neutral -> charge 1 at the particle position x (R, phi, Z) with Cartesian velocity vcart:
-        ! v_par = v.b, v_perp = |v - v_par b|, guiding centre X = x - (b x v)/Omega, Omega = e B/(m c).
-        ! ind_tetr = -1 on return if the guiding centre lies outside the mesh.
-
-        use anomalous_transport_displacement_mod, only: displace_by_straight_line
-
-        real(dp), intent(inout) :: x(3)
-        integer, intent(inout) :: ind_tetr, iface
-        real(dp), intent(in) :: vcart(3)
-        real(dp), intent(out) :: vpar, vperp, jump(3)
-        real(dp) :: b_hat(3), bmod, vloc(3), c, s, bxv(3)
-
-        ! velocity in the local physical basis (e_R, e_phi, e_Z) at x
-        c = cos(x(2)); s = sin(x(2))
-        vloc = [c*vcart(1) + s*vcart(2), -s*vcart(1) + c*vcart(2), vcart(3)]
-        call field_direction(x, ind_tetr, b_hat, bmod)
-        vpar = dot_product(vloc, b_hat)
-        vperp = norm2(vloc - vpar*b_hat)
-        bxv = [b_hat(2)*vloc(3) - b_hat(3)*vloc(2), b_hat(3)*vloc(1) - b_hat(1)*vloc(3), &
-               b_hat(1)*vloc(2) - b_hat(2)*vloc(1)]
-        jump = -bxv*ss%mass_g*clight/(echarge*bmod)
-        call displace_by_straight_line(x, ind_tetr, iface, [jump(1), jump(2)/x(1), jump(3)], vpar, vperp)
-
-    end subroutine ionise_neutral
 
 end subroutine calc_impurity_tracing
 

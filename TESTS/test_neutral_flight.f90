@@ -14,6 +14,10 @@ program test_neutral_flight
 !   4. ionisation with a constant rate nu: wall fraction exp(-nu t_wall), ionised before t_wall/2
 !      1 - exp(-nu t_wall/2) (4.5 binomial sigma); the ionisation point lies in the returned
 !      GORILLA tetrahedron.
+!   5. recombination and ionisation (marker_species_mod): ion_to_neutral puts the particle at
+!      X + (b x v_perp)/Omega with |v| kept and the displacement perpendicular to b; neutral_to_ion
+!      at that point with that velocity gives back the guiding centre X and v_par, v_perp (up to the
+!      variation of b over a Larmor radius).
 
     use, intrinsic :: iso_fortran_env, only: dp => real64, int64
     use orbit_timestep_gorilla_mod, only: initialize_gorilla
@@ -26,6 +30,8 @@ program test_neutral_flight
                                   flight_result_t, face_sag_measure, choose_face_mode, fly_neutral, &
                                   lambda_mesh, cart_of_rphiz
     use thermal_force_rng_mod, only: rng_t, rng_seed, rng_uniform
+    use marker_species_mod, only: species_set_t, init_species_set, set_marker_charge, ion_to_neutral, &
+                                  neutral_to_ion, field_direction
 
     implicit none
 
@@ -105,6 +111,9 @@ program test_neutral_flight
     ! 4. ionisation statistics
     call statistics(face_hybrid)
     if (mode_auto == face_cartesian) call statistics(face_cartesian)
+
+    ! 5. guiding centre <-> particle
+    call round_trip()
 
     if (n_fail > 0) then
         print '(a,i0,a)', 'test_neutral_flight: ', n_fail, ' check(s) FAILED'
@@ -318,6 +327,43 @@ subroutine statistics(mode)
     if (n_bad > 0 .or. n_hof > 0) call fail('ionisation point not in the returned tetrahedron')
 
 end subroutine statistics
+
+subroutine round_trip()
+
+    use constants, only: echarge, clight
+
+    real(dp), parameter :: amu = 1.66053906660e-24_dp
+    type(species_set_t) :: ss
+    real(dp) :: rate0(0:4), xg(3), x(3), vcart(3), jump(3), jump2(3), vpar, vperp, vpar2, vperp2, b(3), bmod, &
+                rho, err_x, err_v, err_perp, err_len
+    integer :: k0, k, iface, i
+
+    rate0 = 0.0_dp
+    call init_species_set(ss, 'Be', [2.01410177812_dp*amu], [1.0_dp], [1.0e13_dp], [20.0_dp], 20.0_dp, &
+                          rate0, rate0, .true.)
+    call set_marker_charge(ss, 1)
+    xg = [230.0_dp, 0.4_dp, 5.0_dp]
+    call find_tetra(xg, vel, vel, k0, iface)
+    vpar = 1.0e6_dp; vperp = 2.0e6_dp
+    call field_direction(xg, k0, b, bmod)
+    rho = vperp*ss%mass_g*clight/(echarge*bmod)
+    err_x = 0.0_dp; err_v = 0.0_dp; err_perp = 0.0_dp; err_len = 0.0_dp
+    do i = 0, 7
+        x = xg; k = k0; iface = 0
+        call ion_to_neutral(ss, 1, (i + 0.3_dp)/8.0_dp, x, k, iface, vpar, vperp, vcart, jump)
+        err_len = max(err_len, abs(norm2(jump) - rho)/rho)
+        err_perp = max(err_perp, abs(dot_product(jump, b))/rho)
+        err_v = max(err_v, abs(norm2(vcart) - hypot(vpar, vperp))/hypot(vpar, vperp))
+        call neutral_to_ion(ss, x, k, iface, vcart, vpar2, vperp2, jump2)
+        err_x = max(err_x, norm2(cart_of_rphiz(x) - cart_of_rphiz(xg))/rho)
+        err_v = max(err_v, abs(vpar2 - vpar)/vperp, abs(vperp2 - vperp)/vperp)
+    end do
+    print '(a,es10.3,a,4es10.2)', ' round trip (Be1+, Larmor radius ', rho, ' cm): |X''-X|/rho, |jump|-rho, ' // &
+        'jump.b/rho, velocity error: ', err_x, err_len, err_perp, err_v
+    if (err_len > 1.0e-10_dp .or. err_perp > 1.0e-10_dp) call fail('ion_to_neutral: Larmor displacement')
+    if (err_x > 1.0e-2_dp .or. err_v > 1.0e-2_dp) call fail('round trip ion -> neutral -> ion')
+
+end subroutine round_trip
 
 subroutine fail(msg)
 
