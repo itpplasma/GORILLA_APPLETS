@@ -32,7 +32,7 @@ module impurity_tracing_mod
     use, intrinsic :: iso_fortran_env, only: dp => real64, int64
     use thermal_force_rng_mod, only: rng_t, rng_seed, rng_normal3, rng_uniform
     use marker_species_mod, only: species_set_t, init_species_set, set_marker_charge, total_rate, &
-                                  choose_transition, change_charge_state
+                                  next_event_time, choose_transition, change_charge_state
 
     implicit none
 
@@ -344,9 +344,7 @@ contains
             iz = inp%start_charge
             icol = iz + 1
             call set_marker_charge(ss, iz)     ! this thread's previous marker may have ended in another state
-            ! absolute time of the next transition out of iz (exponential waiting time)
-            t_event = huge(1.0_dp)
-            if (total_rate(ss, iz) > 0.0_dp) t_event = t - log(1.0_dp - rng_uniform(rng))/total_rate(ss, iz)
+            t_event = next_event_time(ss, iz, t, rng)
         end if
         call find_tetra(x, vpar, vperp, ind_tetr, iface)
         if (ind_tetr == -1) then
@@ -421,9 +419,7 @@ contains
                 else if (.not. tetra_in_edge_region(ind_tetr)) then
                     stat = st_inner
                 end if
-                ! absolute time of the next transition out of iz (exponential waiting time)
-                t_event = huge(1.0_dp)
-                if (total_rate(ss, iz) > 0.0_dp) t_event = t - log(1.0_dp - rng_uniform(rng))/total_rate(ss, iz)
+                t_event = next_event_time(ss, iz, t, rng)
             end if
         end do
 

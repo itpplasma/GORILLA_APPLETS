@@ -200,3 +200,22 @@ set_tests_properties(thermal_force_tokamak PROPERTIES
 GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/thermal_force_tokamak_work"
 )
+
+# Impurity tracing (i_option 17): charge-state sampling of marker_species_mod vs rate equations
+add_executable(test_marker_species.x
+    test_marker_species.f90
+)
+target_link_libraries(test_marker_species.x GORILLA_APPLETS)
+target_include_directories(test_marker_species.x
+    PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+add_test(NAME marker_species COMMAND test_marker_species.x)
+
+add_executable(test_marker_species_reject.x
+    test_marker_species_reject.f90
+)
+target_link_libraries(test_marker_species_reject.x GORILLA_APPLETS)
+target_include_directories(test_marker_species_reject.x
+    PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+add_test(NAME marker_species_reject COMMAND test_marker_species_reject.x)
+set_tests_properties(marker_species_reject PROPERTIES
+    PASS_REGULAR_EXPRESSION "recombination to neutrals is not implemented")

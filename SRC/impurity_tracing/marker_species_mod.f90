@@ -40,8 +40,8 @@ module marker_species_mod
         logical :: boole_gc_jump = .true.
     end type species_set_t
 
-    public :: init_species_set, set_marker_charge, total_rate, choose_transition, change_charge_state, &
-              field_direction, element_data
+    public :: init_species_set, set_marker_charge, total_rate, next_event_time, choose_transition, &
+              change_charge_state, field_direction, element_data
 
 contains
 
@@ -130,6 +130,25 @@ pure function total_rate(ss, iz) result(nu)
     nu = ss%rate_ion(iz) + ss%rate_rec(iz)
 
 end function total_rate
+
+function next_event_time(ss, iz, t, rng) result(t_event)
+
+    ! Absolute time of the next transition out of iz for a marker at time t: exponential waiting
+    ! time with the total rate of iz. huge() if iz has no transitions (no random number drawn then).
+
+    use thermal_force_rng_mod, only: rng_t, rng_uniform
+
+    type(species_set_t), intent(in) :: ss
+    integer, intent(in) :: iz
+    real(dp), intent(in) :: t
+    type(rng_t), intent(inout) :: rng
+    real(dp) :: t_event, nu
+
+    t_event = huge(1.0_dp)
+    nu = total_rate(ss, iz)
+    if (nu > 0.0_dp) t_event = t - log(1.0_dp - rng_uniform(rng))/nu
+
+end function next_event_time
 
 pure function choose_transition(ss, iz, u) result(iz_new)
 
