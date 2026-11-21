@@ -1,8 +1,8 @@
-module edge_region_mod
+module impurity_tracing_mod
 
-! Edge-region impurity tracing (i_option = 17), input edge_region.inp.
+! Impurity tracing (i_option = 17), input impurity_tracing.inp.
 !
-! Test ions (e.g. tungsten, fixed charge state) are followed as GORILLA guiding
+! Test ions (fixed species, e.g. W5+, or an element with charge-state changes) are followed as GORILLA guiding
 ! centres in the edge region of an extended EFIT mesh (tetra_grid.inp:
 ! boole_extend_to_wall, s_edge_region; GORILLA tetra_in_edge_region) until they
 !   - hit the wall (leave the mesh)                       -> status 1
@@ -17,11 +17,11 @@ module edge_region_mod
 ! Cross-field motion comes from the guiding-centre drifts only.
 !
 ! Output:
-!   edge_region_exits.dat     one line per marker: status, time and position
-!                             (R, phi, Z) at the end, v_par, v_perp
-!   edge_region_residence.dat time spent per 2D mesh triangle, summed over all
-!                             markers and toroidal slices [s]. For a source of
-!                             S markers/s, n(triangle) = S*time/(N*V_triangle).
+!   impurity_tracing_exits.dat      one line per marker: status, time and position
+!                                   (R, phi, Z) at the end, v_par, v_perp
+!   impurity_tracing_residence.dat  time spent per 2D mesh triangle, summed over all
+!                                   markers and toroidal slices [s]. For a source of
+!                                   S markers/s, n(triangle) = S*time/(N*V_triangle).
 ! Charge-state changes (species_element /= ''): markers of one element (e.g. Be as in Harting et
 ! al. 2025, Sec. 5) change their charge state with constant ionisation/recombination rates per
 ! charge state (marker_species_mod): velocity kept, guiding-centre jump. Residence times are then
@@ -45,7 +45,7 @@ module edge_region_mod
     integer, parameter :: max_z = 74
     integer, parameter :: st_time = 0, st_wall = 1, st_inner = 2, st_pusher = 3, st_outside = -1
 
-    type :: edge_region_input_t
+    type :: impurity_tracing_input_t
         real(dp) :: test_mass_amu = 183.84_dp
         real(dp) :: test_charge_number = 5.0_dp
         real(dp) :: background_mass_amu = 2.01410177812_dp
@@ -63,22 +63,22 @@ module edge_region_mod
         real(dp) :: t_max_s = 1.0e-3_dp
         integer :: n_particles = 1000
         integer :: seed = 1
-        character(len=256) :: output_prefix = 'edge_region'
+        character(len=256) :: output_prefix = 'impurity_tracing'
         ! charge-state changes: element ('' = off, fixed species test_mass_amu, test_charge_number)
         character(len=8) :: species_element = ''
         integer :: start_charge = 1
         real(dp) :: ionisation_rate_s(0:max_z) = 0.0_dp     ! per charge state [1/s]
         real(dp) :: recombination_rate_s(0:max_z) = 0.0_dp  ! per charge state [1/s]
         logical :: boole_gc_jump = .true.
-    end type edge_region_input_t
+    end type impurity_tracing_input_t
 
-    public :: calc_edge_region
+    public :: calc_impurity_tracing
 
 contains
 
-subroutine load_edge_region_inp(inp)
+subroutine load_impurity_tracing_inp(inp)
 
-    type(edge_region_input_t), intent(out) :: inp
+    type(impurity_tracing_input_t), intent(out) :: inp
     real(dp) :: test_mass_amu, test_charge_number, background_mass_amu, background_charge_number, &
                 electron_density_cm3, temperature_ev, dt_free_s, start_R_cm, start_Z_cm, t_max_s
     logical :: boole_collisions, boole_electron_collisions
@@ -89,7 +89,7 @@ subroutine load_edge_region_inp(inp)
     integer :: start_charge
     real(dp) :: ionisation_rate_s(0:max_z), recombination_rate_s(0:max_z)
     logical :: boole_gc_jump
-    namelist /edge_region_nml/ test_mass_amu, test_charge_number, background_mass_amu, &
+    namelist /impurity_tracing_nml/ test_mass_amu, test_charge_number, background_mass_amu, &
         background_charge_number, electron_density_cm3, temperature_ev, boole_collisions, &
         boole_electron_collisions, dt_free_s, start_mode, start_R_cm, start_Z_cm, t_max_s, &
         n_particles, seed, output_prefix, species_element, start_charge, ionisation_rate_s, &
@@ -106,10 +106,10 @@ subroutine load_edge_region_inp(inp)
     ionisation_rate_s = inp%ionisation_rate_s; recombination_rate_s = inp%recombination_rate_s
     boole_gc_jump = inp%boole_gc_jump
 
-    open(newunit=iu, file='edge_region.inp', status='old', action='read', iostat=ios)
-    if (ios /= 0) error stop 'edge region: cannot open edge_region.inp'
-    read(iu, nml=edge_region_nml, iostat=ios)
-    if (ios /= 0) error stop 'edge region: error reading namelist edge_region_nml in edge_region.inp'
+    open(newunit=iu, file='impurity_tracing.inp', status='old', action='read', iostat=ios)
+    if (ios /= 0) error stop 'impurity tracing: cannot open impurity_tracing.inp'
+    read(iu, nml=impurity_tracing_nml, iostat=ios)
+    if (ios /= 0) error stop 'impurity tracing: error reading namelist impurity_tracing_nml in impurity_tracing.inp'
     close(iu)
 
     inp%test_mass_amu = test_mass_amu; inp%test_charge_number = test_charge_number
@@ -124,12 +124,12 @@ subroutine load_edge_region_inp(inp)
     inp%boole_gc_jump = boole_gc_jump
 
     if (trim(inp%start_mode) /= 'point' .and. trim(inp%start_mode) /= 'region') &
-        error stop "edge region: start_mode must be 'point' or 'region'"
-    if (inp%t_max_s <= 0.0_dp .or. inp%n_particles < 1) error stop 'edge region: need t_max_s > 0, n_particles >= 1'
+        error stop "impurity tracing: start_mode must be 'point' or 'region'"
+    if (inp%t_max_s <= 0.0_dp .or. inp%n_particles < 1) error stop 'impurity tracing: need t_max_s > 0, n_particles >= 1'
 
-end subroutine load_edge_region_inp
+end subroutine load_impurity_tracing_inp
 
-subroutine calc_edge_region()
+subroutine calc_impurity_tracing()
     use tetra_physics_mod, only: cm_over_e, particle_charge, particle_mass
 
     use constants, only: clight, echarge, ev2erg
@@ -142,7 +142,7 @@ subroutine calc_edge_region()
     use collis_ions, only: collis_init
     use tetra_physics_mod, only: check_species_switch_allowed
 
-    type(edge_region_input_t) :: inp
+    type(impurity_tracing_input_t) :: inp
     integer :: nphi, ntri, ip, itri, k, nb, iu
     integer, allocatable :: status(:)
     real(dp), allocatable :: final(:,:), residence(:,:), cum_weight(:), tri_rz(:,:,:)
@@ -154,8 +154,8 @@ subroutine calc_edge_region()
     real(dp) :: m_a, v0, mb(2), zb(2), db(2), tb(2), efcolf(2), velrat(2), enrat(2)
     integer :: n_status(-1:3)
 
-    call load_edge_region_inp(inp)
-    if (coord_system /= 1) error stop 'edge region: needs coord_system = 1 (R, phi, Z) in gorilla.inp'
+    call load_impurity_tracing_inp(inp)
+    if (coord_system /= 1) error stop 'impurity tracing: needs coord_system = 1 (R, phi, Z) in gorilla.inp'
     call initialize_gorilla()
     boole_species = (len_trim(inp%species_element) > 0)
     m_a = inp%test_mass_amu*amu_g
@@ -164,10 +164,10 @@ subroutine calc_edge_region()
     cm_over_e = clight*particle_mass/particle_charge
     call make_precomp_poly()
     if (.not. allocated(tetra_in_edge_region)) &
-        error stop 'edge region: needs the extended mesh (tetra_grid.inp: grid_kind = 2, boole_extend_to_wall)'
+        error stop 'impurity tracing: needs the extended mesh (tetra_grid.inp: grid_kind = 2, boole_extend_to_wall)'
 
     nphi = grid_size(2)
-    if (mod(ntetr, 3*nphi) /= 0) error stop 'edge region: ntetr is not 3 * triangles * slices'
+    if (mod(ntetr, 3*nphi) /= 0) error stop 'impurity tracing: ntetr is not 3 * triangles * slices'
     ntri = ntetr/(3*nphi)
 
     ! background: ions and (optionally) electrons, constant n and T
@@ -185,7 +185,7 @@ subroutine calc_edge_region()
         v0 = ss%v0
         call set_marker_charge(ss, inp%start_charge)
         nstate = ss%z_nuc + 1                 ! columns for charge states 0 ... z_nuc
-        print '(a,a,a,i0,a,f8.4,a,i0,a,l1)', ' edge region: element ', trim(ss%element), ', Z_nuc = ', ss%z_nuc, &
+        print '(a,a,a,i0,a,f8.4,a,i0,a,l1)', ' impurity tracing: element ', trim(ss%element), ', Z_nuc = ', ss%z_nuc, &
             ', m = ', ss%mass_amu, ' amu, start charge ', inp%start_charge, ', guiding-centre jump ', ss%boole_gc_jump
         do iz = 0, ss%z_nuc
             if (total_rate(ss, iz) > 0.0_dp) print '(a,i3,a,es11.4,a,es11.4)', '   charge ', iz, &
@@ -208,11 +208,11 @@ subroutine calc_edge_region()
     do itri = 2, ntri
         cum_weight(itri) = cum_weight(itri) + cum_weight(itri - 1)
     end do
-    if (cum_weight(ntri) <= 0.0_dp) error stop 'edge region: the region is empty'
+    if (cum_weight(ntri) <= 0.0_dp) error stop 'impurity tracing: the region is empty'
 
-    print '(a,es12.4,a,i0,a,i0,a)', ' edge region: s_edge_region = ', s_edge_region, ', ', &
+    print '(a,es12.4,a,i0,a,i0,a)', ' impurity tracing: s_edge_region = ', s_edge_region, ', ', &
         count(tetra_in_edge_region), ' of ', ntetr, ' tetrahedra'
-    if (.not. boole_species) print '(a,f8.2,a,f5.1,a,es10.3,a,f7.2,a)', ' edge region: test ion m = ', inp%test_mass_amu, ' amu, Z = ', &
+    if (.not. boole_species) print '(a,f8.2,a,f5.1,a,es10.3,a,f7.2,a)', ' impurity tracing: test ion m = ', inp%test_mass_amu, ' amu, Z = ', &
         inp%test_charge_number, ', background n_e = ', inp%electron_density_cm3, ' cm^-3, T = ', inp%temperature_ev, ' eV'
 
     allocate(status(inp%n_particles), final(10, inp%n_particles), residence(ntri, nstate))
@@ -231,13 +231,13 @@ subroutine calc_edge_region()
     do ip = 1, inp%n_particles
         n_status(status(ip)) = n_status(status(ip)) + 1
     end do
-    print '(a,5(a,i0))', ' edge region: markers', ' wall ', n_status(st_wall), ', inner boundary ', &
+    print '(a,5(a,i0))', ' impurity tracing: markers', ' wall ', n_status(st_wall), ', inner boundary ', &
         n_status(st_inner), ', time limit ', n_status(st_time), ', pusher removed ', n_status(st_pusher), &
         ', started outside ', n_status(st_outside)
     if (boole_species) then
-        print '(a,15i8)', ' edge region: final charge state counts (0 ... Z_nuc): ', &
+        print '(a,15i8)', ' impurity tracing: final charge state counts (0 ... Z_nuc): ', &
             [(count(nint(final(9, :)) == iz), iz = 0, ss%z_nuc)]
-        if (n_jumps > 0) print '(a,i0,a,es12.4,a)', ' edge region: ', n_jumps, &
+        if (n_jumps > 0) print '(a,i0,a,es12.4,a)', ' impurity tracing: ', n_jumps, &
             ' charge-state transitions, mean guiding-centre jump ', sum_jump/real(n_jumps, dp), ' cm'
     end if
 
@@ -276,11 +276,11 @@ contains
             if (n > 0) then
                 if (any([(all(abs(p - rz(:, l)) < 1.0e-9_dp), l = 1, n)])) cycle
             end if
-            if (n == 3) error stop 'edge region: prism tetrahedron with more than 3 distinct (R,Z) knots'
+            if (n == 3) error stop 'impurity tracing: prism tetrahedron with more than 3 distinct (R,Z) knots'
             n = n + 1
             rz(:, n) = p
         end do
-        if (n /= 3) error stop 'edge region: prism tetrahedron with less than 3 distinct (R,Z) knots'
+        if (n /= 3) error stop 'impurity tracing: prism tetrahedron with less than 3 distinct (R,Z) knots'
     end subroutine prism_triangle
 
     pure function triangle_area(rz) result(a)
@@ -432,6 +432,6 @@ contains
 
     end subroutine trace_marker
 
-end subroutine calc_edge_region
+end subroutine calc_impurity_tracing
 
-end module edge_region_mod
+end module impurity_tracing_mod

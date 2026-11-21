@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Plots for the edge-region impurity tracing (GORILLA_APPLETS i_option = 17).
+"""Plots for the impurity tracing (GORILLA_APPLETS i_option = 17).
 
-usage: region_plots.py RUNDIR [--mesh MESHDIR] [--prefix edge_region] [--bin 2.0] [--out FILE.png]
+usage: region_plots.py RUNDIR [--mesh MESHDIR] [--prefix impurity_tracing] [--bin 2.0] [--out FILE.png]
 
 RUNDIR holds <prefix>_exits.dat and <prefix>_residence.dat; MESHDIR (default RUNDIR/mesh) the
 extended mesh with s_edge_region. Four panels:
@@ -84,7 +84,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("rundir")
     ap.add_argument("--mesh", default=None)
-    ap.add_argument("--prefix", default="edge_region")
+    ap.add_argument("--prefix", default="impurity_tracing")
     ap.add_argument("--bin", type=float, default=2.0, help="arc-length bin [cm] for (c), (d)")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
