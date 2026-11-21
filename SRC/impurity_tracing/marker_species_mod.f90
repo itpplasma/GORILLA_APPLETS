@@ -12,7 +12,8 @@ module marker_species_mod
 !     and Omega = Z e B/(m c) changes, so X_new = X_old + (b x v_perp)(1/Omega_old - 1/Omega_new).
 !     The gyrophase is not known in the guiding-centre model and is drawn at random.
 ! Transition times: constant rates per charge state [1/s] (ionisation iz -> iz+1, recombination
-! iz -> iz-1), exponential waiting times. Rates from atomic data (ADAS, n_e S(T_e)) come later.
+! iz -> iz-1), exponential waiting times; either given directly or from ADAS ADF11 files
+! (adas_rates: n_e <sigma v>(n_e, T_e) at the constant background, adf11_mod).
 ! Neutrals (iz = 0) are not traced yet: recombination to iz = 0 is rejected.
 ! Collision coefficients (collis_ions collis_init) are precomputed per charge state for a background
 ! of constant density and temperature.
@@ -41,7 +42,7 @@ module marker_species_mod
     end type species_set_t
 
     public :: init_species_set, set_marker_charge, total_rate, next_event_time, choose_transition, &
-              change_charge_state, field_direction, element_data
+              change_charge_state, field_direction, element_data, adas_rates
 
 contains
 
@@ -66,6 +67,55 @@ subroutine element_data(element, z_nuc, mass_amu)
     end select
 
 end subroutine element_data
+
+subroutine adas_rates(element, scd_file, acd_file, ne_cm3, te_ev, rate_ion, rate_rec)
+
+    ! Rates [1/s] per charge state 0 ... z_nuc from ADF11 files: ionisation iz -> iz+1 from
+    ! scd (block Z1 = iz+1), recombination iz -> iz-1 from acd (block Z1 = iz), rate = n_e <sigma v>.
+    ! An empty file name leaves the corresponding rates unchanged. Recombination to neutrals
+    ! (iz = 1 -> 0) is set to zero: neutrals are not traced yet.
+
+    use adf11_mod, only: adf11_t, read_adf11, adf11_coef
+
+    character(len=*), intent(in) :: element, scd_file, acd_file
+    real(dp), intent(in) :: ne_cm3, te_ev
+    real(dp), intent(inout) :: rate_ion(0:), rate_rec(0:)
+    type(adf11_t) :: tab
+    integer :: z_nuc, iz
+    real(dp) :: mass_amu
+
+    call element_data(element, z_nuc, mass_amu)
+    if (ubound(rate_ion, 1) < z_nuc .or. ubound(rate_rec, 1) < z_nuc) &
+        error stop 'marker species: rate arrays shorter than the nuclear charge'
+    if (len_trim(scd_file) > 0) then
+        call read_adf11(trim(scd_file), tab)
+        call check_table(tab)
+        rate_ion(0:z_nuc) = 0.0_dp
+        do iz = 0, z_nuc - 1
+            rate_ion(iz) = ne_cm3*adf11_coef(tab, iz + 1, ne_cm3, te_ev)
+        end do
+    end if
+    if (len_trim(acd_file) > 0) then
+        call read_adf11(trim(acd_file), tab)
+        call check_table(tab)
+        rate_rec(0:z_nuc) = 0.0_dp
+        do iz = 2, z_nuc
+            rate_rec(iz) = ne_cm3*adf11_coef(tab, iz, ne_cm3, te_ev)
+        end do
+    end if
+
+contains
+
+    subroutine check_table(t)
+        type(adf11_t), intent(in) :: t
+        if (t%z_nuc /= z_nuc .or. t%z1_min /= 1 .or. t%z1_max /= z_nuc) then
+            print *, 'marker species: ', trim(t%file), ' has Z = ', t%z_nuc, ', blocks Z1 = ', t%z1_min, ' ... ', &
+                t%z1_max, '; element ', trim(element), ' needs Z = 1 ... ', z_nuc
+            error stop
+        end if
+    end subroutine check_table
+
+end subroutine adas_rates
 
 subroutine init_species_set(ss, element, mb, zb, db, tb, temperature_ev, rate_ion, rate_rec, boole_gc_jump)
 

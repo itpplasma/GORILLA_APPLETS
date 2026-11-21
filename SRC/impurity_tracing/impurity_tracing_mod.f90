@@ -31,7 +31,7 @@ module impurity_tracing_mod
 
     use, intrinsic :: iso_fortran_env, only: dp => real64, int64
     use thermal_force_rng_mod, only: rng_t, rng_seed, rng_normal3, rng_uniform
-    use marker_species_mod, only: species_set_t, init_species_set, set_marker_charge, total_rate, &
+    use marker_species_mod, only: adas_rates, species_set_t, init_species_set, set_marker_charge, total_rate, &
                                   next_event_time, choose_transition, change_charge_state
 
     implicit none
@@ -70,6 +70,10 @@ module impurity_tracing_mod
         real(dp) :: ionisation_rate_s(0:max_z) = 0.0_dp     ! per charge state [1/s]
         real(dp) :: recombination_rate_s(0:max_z) = 0.0_dp  ! per charge state [1/s]
         logical :: boole_gc_jump = .true.
+        ! ADAS ADF11 files (e.g. scd96_be.dat, acd96_be.dat); if given, they replace the
+        ! ionisation / recombination rates by n_e <sigma v>(n_e, T_e) of the background
+        character(len=256) :: adas_scd_file = ''
+        character(len=256) :: adas_acd_file = ''
     end type impurity_tracing_input_t
 
     public :: calc_impurity_tracing
@@ -89,11 +93,12 @@ subroutine load_impurity_tracing_inp(inp)
     integer :: start_charge
     real(dp) :: ionisation_rate_s(0:max_z), recombination_rate_s(0:max_z)
     logical :: boole_gc_jump
+    character(len=256) :: adas_scd_file, adas_acd_file
     namelist /impurity_tracing_nml/ test_mass_amu, test_charge_number, background_mass_amu, &
         background_charge_number, electron_density_cm3, temperature_ev, boole_collisions, &
         boole_electron_collisions, dt_free_s, start_mode, start_R_cm, start_Z_cm, t_max_s, &
         n_particles, seed, output_prefix, species_element, start_charge, ionisation_rate_s, &
-        recombination_rate_s, boole_gc_jump
+        recombination_rate_s, boole_gc_jump, adas_scd_file, adas_acd_file
 
     test_mass_amu = inp%test_mass_amu; test_charge_number = inp%test_charge_number
     background_mass_amu = inp%background_mass_amu; background_charge_number = inp%background_charge_number
@@ -105,6 +110,7 @@ subroutine load_impurity_tracing_inp(inp)
     species_element = inp%species_element; start_charge = inp%start_charge
     ionisation_rate_s = inp%ionisation_rate_s; recombination_rate_s = inp%recombination_rate_s
     boole_gc_jump = inp%boole_gc_jump
+    adas_scd_file = inp%adas_scd_file; adas_acd_file = inp%adas_acd_file
 
     open(newunit=iu, file='impurity_tracing.inp', status='old', action='read', iostat=ios)
     if (ios /= 0) error stop 'impurity tracing: cannot open impurity_tracing.inp'
@@ -122,6 +128,7 @@ subroutine load_impurity_tracing_inp(inp)
     inp%species_element = species_element; inp%start_charge = start_charge
     inp%ionisation_rate_s = ionisation_rate_s; inp%recombination_rate_s = recombination_rate_s
     inp%boole_gc_jump = boole_gc_jump
+    inp%adas_scd_file = adas_scd_file; inp%adas_acd_file = adas_acd_file
 
     if (trim(inp%start_mode) /= 'point' .and. trim(inp%start_mode) /= 'region') &
         error stop "impurity tracing: start_mode must be 'point' or 'region'"
@@ -179,6 +186,11 @@ subroutine calc_impurity_tracing()
     ! velocity normalisation v0 = sqrt(2 T/m_a)
     if (boole_species) then
         call check_species_switch_allowed()
+        if (len_trim(inp%adas_scd_file) > 0 .or. len_trim(inp%adas_acd_file) > 0) then
+            print '(a)', ' impurity tracing: rates from ADAS: '//trim(inp%adas_scd_file)//' '//trim(inp%adas_acd_file)
+            call adas_rates(inp%species_element, inp%adas_scd_file, inp%adas_acd_file, inp%electron_density_cm3, &
+                            inp%temperature_ev, inp%ionisation_rate_s, inp%recombination_rate_s)
+        end if
         call init_species_set(ss, inp%species_element, mb(1:nb), zb(1:nb), db(1:nb), tb(1:nb), &
                               inp%temperature_ev, inp%ionisation_rate_s, inp%recombination_rate_s, inp%boole_gc_jump)
         m_a = ss%mass_g

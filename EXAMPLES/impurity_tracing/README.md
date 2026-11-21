@@ -18,3 +18,23 @@ Output (prefix `output_prefix`): `<prefix>_exits.dat` (status, time and position
 Plots: `python region_plots.py RUNDIR [--prefix impurity_tracing]` (density, boundary hits coloured on the
 contours, hits vs arc length; one density map per charge state in charge-state mode).
 `python region_check.py MESHDIR` checks the region boundary of a mesh.
+
+## Atomic data (ADAS)
+
+Ionisation and recombination rates for Be come from OPEN-ADAS (https://open.adas.ac.uk), ADF11 files
+of year 96 (the ADAS 96 data used in Harting et al., NME 42 (2025) 101887). With `adas_scd_file` and/or `adas_acd_file`
+in the namelist, the rates become n_e <sigma v> at the background n_e and T_e (bilinear interpolation in
+log10 n_e, log10 T_e, edge values outside the table; `SRC/impurity_tracing/adf11_mod.f90`).
+Recombination to neutrals is set to zero (neutrals are not traced yet).
+- `scd96_be.dat`: effective ionisation coefficients, Be0 -> Be1+ ... Be3+ -> Be4+
+- `acd96_be.dat`: effective recombination coefficients (radiative, dielectronic, three-body), Be1+ -> Be0 ... Be4+ -> Be3+
+
+Each file (about 27 kB) contains log10 of the rate coefficient in cm^3/s per charge state on a grid of
+24 log10 n_e [cm^-3] x 25 log10 T_e [eV] values. Download (no registration needed) from the ADF11 page on
+the OPEN-ADAS website or directly:
+
+    curl -O https://open.adas.ac.uk/download/adf11/scd96/scd96_be.dat
+    curl -O https://open.adas.ac.uk/download/adf11/acd96/acd96_be.dat
+
+The files are NOT part of this repository: the OPEN-ADAS terms (at the end of each file) do not allow
+redistributing the data together with a modelling code. Every user has to download them.

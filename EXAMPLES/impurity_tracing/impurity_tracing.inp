@@ -6,6 +6,8 @@
 &impurity_tracing_nml
  species_element = 'Be' , start_charge = 1 , boole_gc_jump = .true. ,
  ionisation_rate_s(1) = 2.0d5 , ionisation_rate_s(2) = 1.0d5 , ionisation_rate_s(3) = 5.0d4 ,
+! rates n_e <sigma v>(n_e, T_e) from ADAS instead (download: see README.md):
+! adas_scd_file = 'scd96_be.dat' , adas_acd_file = 'acd96_be.dat' ,
 ! species_element = '' , test_mass_amu = 183.84 , test_charge_number = 5.0 ,   ! fixed W5+
  background_mass_amu = 2.01410177812 , background_charge_number = 1.0 ,  ! D+
  electron_density_cm3 = 1.0d13 , temperature_ev = 20.0 ,   ! constant n, T (Ti = Te)
