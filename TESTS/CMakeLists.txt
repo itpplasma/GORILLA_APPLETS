@@ -219,3 +219,26 @@ target_include_directories(test_marker_species_reject.x
 add_test(NAME marker_species_reject COMMAND test_marker_species_reject.x)
 set_tests_properties(marker_species_reject PROPERTIES
     PASS_REGULAR_EXPRESSION "recombination to neutrals is not implemented")
+
+# Impurity tracing: straight-line neutral flight (neutral_flight_mod) on the analytic circular tokamak
+add_executable(test_neutral_flight.x
+    test_neutral_flight.f90
+)
+target_link_libraries(test_neutral_flight.x GORILLA_APPLETS)
+target_include_directories(test_neutral_flight.x
+    PUBLIC ${CMAKE_BINARY_DIR}/SRC ${CMAKE_BINARY_DIR}/SRC_CORE)
+# case: n2, n_field_periods, sag tolerance for 'auto', expected 'auto' choice
+foreach(nf_case "coarse;8;1;0.01;hybrid" "periods;6;3;0.01;hybrid" "fine;400;1;0.1;cartesian")
+    list(GET nf_case 0 nf_name)
+    list(SUBLIST nf_case 1 4 nf_args)
+    set(nf_dir ${CMAKE_CURRENT_BINARY_DIR}/neutral_flight_${nf_name})
+    file(MAKE_DIRECTORY ${nf_dir})
+    foreach(f gorilla.inp field_divB0.inp preload_for_SYNCH.inp)
+        configure_file(${CMAKE_SOURCE_DIR}/EXAMPLES/thermal_force_tokamak/${f} ${nf_dir}/${f} COPYONLY)
+    endforeach()
+    add_test(NAME neutral_flight_${nf_name} COMMAND test_neutral_flight.x ${nf_args} WORKING_DIRECTORY ${nf_dir})
+endforeach()
+# GORILLA stops with exit code 0 on input errors: pass only on the final message
+set_tests_properties(neutral_flight_coarse neutral_flight_periods neutral_flight_fine PROPERTIES
+    PASS_REGULAR_EXPRESSION "test_neutral_flight: all checks passed"
+    FAIL_REGULAR_EXPRESSION "FAIL|ERROR")

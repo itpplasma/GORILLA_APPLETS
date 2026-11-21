@@ -8,6 +8,7 @@ add_library(GORILLA_APPLETS STATIC
   thermal_force/thermal_force_settings_mod.f90
   thermal_force/thermal_force_mod.f90
   impurity_tracing/marker_species_mod.f90
+  impurity_tracing/neutral_flight_mod.f90
   impurity_tracing/impurity_tracing_mod.f90
   direct_vmec_integrator_mod.f90
   divertor_heat_loads_mod.f90
