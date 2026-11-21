@@ -26,13 +26,21 @@ module impurity_tracing_mod
 ! al. 2025, Sec. 5) change their charge state with constant ionisation/recombination rates per
 ! charge state (marker_species_mod): velocity kept, guiding-centre jump. Residence times are then
 ! written per charge state.
+! Neutrals (start_charge = 0): straight-line flight (neutral_flight_mod) with energy neutral_energy_ev
+! in the direction neutral_direction (components along e_R, e_phi, e_Z at the start point) until
+! ionisation with ionisation_rate_s(0) (rate per tetrahedron, track-length estimator), wall or t_max_s.
+! At ionisation the ion keeps the neutral velocity; its guiding centre is X = x - (b x v)/Omega (the
+! gyrophase is known here). Face test neutral_face_test = 'auto', 'cartesian' or 'hybrid' (see
+! neutral_flight_mod; 'auto' uses cartesian if the face sag / inradius <= face_sag_tol).
 ! Random numbers per marker (thermal_force_rng_mod): results do not depend on
 ! the number of threads. CGS units, temperatures in eV, masses in amu.
 
     use, intrinsic :: iso_fortran_env, only: dp => real64, int64
     use thermal_force_rng_mod, only: rng_t, rng_seed, rng_normal3, rng_uniform
     use marker_species_mod, only: species_set_t, init_species_set, set_marker_charge, total_rate, &
-                                  next_event_time, choose_transition, change_charge_state
+                                  next_event_time, choose_transition, change_charge_state, field_direction
+    use neutral_flight_mod, only: flight_result_t, choose_face_mode, fly_neutral, face_cartesian, &
+                                  nf_ionised, nf_wall, nf_time, nf_error, cart_of_rphiz
 
     implicit none
 
@@ -70,6 +78,11 @@ module impurity_tracing_mod
         real(dp) :: ionisation_rate_s(0:max_z) = 0.0_dp     ! per charge state [1/s]
         real(dp) :: recombination_rate_s(0:max_z) = 0.0_dp  ! per charge state [1/s]
         logical :: boole_gc_jump = .true.
+        ! neutrals (start_charge = 0)
+        real(dp) :: neutral_energy_ev = 25.0_dp
+        real(dp) :: neutral_direction(3) = [-1.0_dp, 0.0_dp, 0.0_dp]   ! along e_R, e_phi, e_Z
+        character(len=16) :: neutral_face_test = 'auto'
+        real(dp) :: face_sag_tol = 0.1_dp
     end type impurity_tracing_input_t
 
     public :: calc_impurity_tracing
@@ -89,11 +102,13 @@ subroutine load_impurity_tracing_inp(inp)
     integer :: start_charge
     real(dp) :: ionisation_rate_s(0:max_z), recombination_rate_s(0:max_z)
     logical :: boole_gc_jump
+    real(dp) :: neutral_energy_ev, neutral_direction(3), face_sag_tol
+    character(len=16) :: neutral_face_test
     namelist /impurity_tracing_nml/ test_mass_amu, test_charge_number, background_mass_amu, &
         background_charge_number, electron_density_cm3, temperature_ev, boole_collisions, &
         boole_electron_collisions, dt_free_s, start_mode, start_R_cm, start_Z_cm, t_max_s, &
         n_particles, seed, output_prefix, species_element, start_charge, ionisation_rate_s, &
-        recombination_rate_s, boole_gc_jump
+        recombination_rate_s, boole_gc_jump, neutral_energy_ev, neutral_direction, neutral_face_test, face_sag_tol
 
     test_mass_amu = inp%test_mass_amu; test_charge_number = inp%test_charge_number
     background_mass_amu = inp%background_mass_amu; background_charge_number = inp%background_charge_number
@@ -105,6 +120,8 @@ subroutine load_impurity_tracing_inp(inp)
     species_element = inp%species_element; start_charge = inp%start_charge
     ionisation_rate_s = inp%ionisation_rate_s; recombination_rate_s = inp%recombination_rate_s
     boole_gc_jump = inp%boole_gc_jump
+    neutral_energy_ev = inp%neutral_energy_ev; neutral_direction = inp%neutral_direction
+    neutral_face_test = inp%neutral_face_test; face_sag_tol = inp%face_sag_tol
 
     open(newunit=iu, file='impurity_tracing.inp', status='old', action='read', iostat=ios)
     if (ios /= 0) error stop 'impurity tracing: cannot open impurity_tracing.inp'
@@ -122,10 +139,17 @@ subroutine load_impurity_tracing_inp(inp)
     inp%species_element = species_element; inp%start_charge = start_charge
     inp%ionisation_rate_s = ionisation_rate_s; inp%recombination_rate_s = recombination_rate_s
     inp%boole_gc_jump = boole_gc_jump
+    inp%neutral_energy_ev = neutral_energy_ev; inp%neutral_direction = neutral_direction
+    inp%neutral_face_test = neutral_face_test; inp%face_sag_tol = face_sag_tol
 
     if (trim(inp%start_mode) /= 'point' .and. trim(inp%start_mode) /= 'region') &
         error stop "impurity tracing: start_mode must be 'point' or 'region'"
     if (inp%t_max_s <= 0.0_dp .or. inp%n_particles < 1) error stop 'impurity tracing: need t_max_s > 0, n_particles >= 1'
+    if (inp%start_charge == 0) then
+        if (len_trim(inp%species_element) == 0) error stop 'impurity tracing: neutrals (start_charge = 0) need species_element'
+        if (inp%neutral_energy_ev <= 0.0_dp .or. norm2(inp%neutral_direction) <= 0.0_dp) &
+            error stop 'impurity tracing: neutrals need neutral_energy_ev > 0 and a nonzero neutral_direction'
+    end if
 
 end subroutine load_impurity_tracing_inp
 
@@ -153,6 +177,12 @@ subroutine calc_impurity_tracing()
     real(dp) :: sum_jump
     real(dp) :: m_a, v0, mb(2), zb(2), db(2), tb(2), efcolf(2), velrat(2), enrat(2)
     integer :: n_status(-1:3)
+    ! neutrals
+    logical :: boole_neutral
+    integer :: face_mode, n_degenerate, n_neut(4), n_handover(0:4)
+    integer, allocatable :: tri_of_tetr(:)
+    real(dp) :: sag_ratio, sag_max, v_neutral
+    real(dp), allocatable :: nu_tetr(:), ion_point(:,:)
 
     call load_impurity_tracing_inp(inp)
     if (coord_system /= 1) error stop 'impurity tracing: needs coord_system = 1 (R, phi, Z) in gorilla.inp'
@@ -183,7 +213,7 @@ subroutine calc_impurity_tracing()
                               inp%temperature_ev, inp%ionisation_rate_s, inp%recombination_rate_s, inp%boole_gc_jump)
         m_a = ss%mass_g
         v0 = ss%v0
-        call set_marker_charge(ss, inp%start_charge)
+        if (inp%start_charge >= 1) call set_marker_charge(ss, inp%start_charge)
         nstate = ss%z_nuc + 1                 ! columns for charge states 0 ... z_nuc
         print '(a,a,a,i0,a,f8.4,a,i0,a,l1)', ' impurity tracing: element ', trim(ss%element), ', Z_nuc = ', ss%z_nuc, &
             ', m = ', ss%mass_amu, ' amu, start charge ', inp%start_charge, ', guiding-centre jump ', ss%boole_gc_jump
@@ -215,15 +245,41 @@ subroutine calc_impurity_tracing()
     if (.not. boole_species) print '(a,f8.2,a,f5.1,a,es10.3,a,f7.2,a)', ' impurity tracing: test ion m = ', inp%test_mass_amu, ' amu, Z = ', &
         inp%test_charge_number, ', background n_e = ', inp%electron_density_cm3, ' cm^-3, T = ', inp%temperature_ev, ' eV'
 
+    ! neutrals: face test, rate per tetrahedron (constant for now), triangle of each tetrahedron
+    boole_neutral = boole_species .and. inp%start_charge == 0
+    face_mode = 0
+    v_neutral = 0.0_dp
+    if (boole_neutral) then
+        call choose_face_mode(inp%neutral_face_test, inp%face_sag_tol, face_mode, sag_ratio, sag_max, n_degenerate)
+        print '(a,a,a,es10.3,a,es10.3,a,i0,a)', ' impurity tracing: neutral face test ', &
+            trim(merge('cartesian', 'hybrid   ', face_mode == face_cartesian)), ' (max face sag ', sag_max, &
+            ' cm, sag/inradius ', sag_ratio, ', ', n_degenerate, ' degenerate tetrahedra)'
+        allocate(nu_tetr(ntetr), tri_of_tetr(ntetr))
+        nu_tetr = ss%rate_ion(0)
+        do k = 1, ntetr
+            tri_of_tetr(k) = mod(k - 1, 3*ntri)/3 + 1
+        end do
+        v_neutral = sqrt(2.0_dp*inp%neutral_energy_ev*ev2erg/ss%mass_g)
+        print '(a,f8.2,a,es11.4,a,3f7.3,a,es11.4,a)', ' impurity tracing: neutrals ', inp%neutral_energy_ev, &
+            ' eV (', v_neutral, ' cm/s), direction (e_R, e_phi, e_Z) ', inp%neutral_direction, &
+            ', ionisation rate ', ss%rate_ion(0), ' 1/s'
+    end if
+
     allocate(status(inp%n_particles), final(10, inp%n_particles), residence(ntri, nstate))
+    allocate(ion_point(6, inp%n_particles))
+    ion_point = 0.0_dp
     residence = 0.0_dp
     n_jumps = 0
     sum_jump = 0.0_dp
+    n_neut = 0
+    n_handover = 0
 
-    !$omp parallel do schedule(dynamic, 4) default(shared) private(ip) reduction(+:residence, n_jumps, sum_jump) &
+    !$omp parallel do schedule(dynamic, 4) default(shared) private(ip) &
+    !$omp& reduction(+:residence, n_jumps, sum_jump, n_neut, n_handover) &
     !$omp& COPYIN(cm_over_e,particle_charge,particle_mass)
     do ip = 1, inp%n_particles
-        call trace_marker(ip, status(ip), final(:, ip), residence, n_jumps, sum_jump)
+        call trace_marker(ip, status(ip), final(:, ip), residence, n_jumps, sum_jump, n_neut, n_handover, &
+                          ion_point(:, ip))
     end do
     !$omp end parallel do
 
@@ -239,6 +295,12 @@ subroutine calc_impurity_tracing()
             [(count(nint(final(9, :)) == iz), iz = 0, ss%z_nuc)]
         if (n_jumps > 0) print '(a,i0,a,es12.4,a)', ' impurity tracing: ', n_jumps, &
             ' charge-state transitions, mean guiding-centre jump ', sum_jump/real(n_jumps, dp), ' cm'
+        if (boole_neutral) then
+            print '(a,4(a,i0))', ' impurity tracing: neutrals', ' ionised ', n_neut(nf_ionised), ', wall ', &
+                n_neut(nf_wall), ', time limit ', n_neut(nf_time), ', flight error ', n_neut(nf_error)
+            if (face_mode == face_cartesian) print '(a,5i9)', ' impurity tracing: cartesian handover ' // &
+                '(direct, same, neighbour, find_tetra, failed): ', n_handover
+        end if
     end if
 
     open(newunit=iu, file=trim(inp%output_prefix)//'_exits.dat', status='replace', action='write')
@@ -251,6 +313,17 @@ subroutine calc_impurity_tracing()
         write(iu, '(i10,i4,8es24.16,2i6)') ip, status(ip), final(1:8, ip), nint(final(9:10, ip))
     end do
     close(iu)
+
+    if (boole_neutral) then
+        open(newunit=iu, file=trim(inp%output_prefix)//'_neutrals.dat', status='replace', action='write')
+        write(iu, '(a)') '# end of the neutral flight per marker: flight status (1 ionised, 2 wall, 3 time limit, ' // &
+            '4 error), t[s], particle position R[cm] phi[rad] Z[cm], tetrahedron'
+        write(iu, '(a)') '# marker status t R phi Z ind_tetr'
+        do ip = 1, inp%n_particles
+            write(iu, '(i10,i4,4es24.16,i10)') ip, nint(ion_point(1, ip)), ion_point(2:5, ip), nint(ion_point(6, ip))
+        end do
+        close(iu)
+    end if
 
     open(newunit=iu, file=trim(inp%output_prefix)//'_residence.dat', status='replace', action='write')
     write(iu, '(a)') '# time spent per 2D triangle [s], summed over markers and toroidal slices; one column per'
@@ -289,7 +362,7 @@ contains
         a = 0.5_dp*abs((rz(1,2) - rz(1,1))*(rz(2,3) - rz(2,1)) - (rz(1,3) - rz(1,1))*(rz(2,2) - rz(2,1)))
     end function triangle_area
 
-    subroutine trace_marker(ip, stat, fin, res, n_jumps, sum_jump)
+    subroutine trace_marker(ip, stat, fin, res, n_jumps, sum_jump, n_neut, n_handover, ion_pt)
 
         use find_tetra_mod, only: find_tetra
         use collis_ions, only: stost
@@ -304,15 +377,20 @@ contains
         real(dp), intent(inout) :: res(:,:)
         integer(int64), intent(inout) :: n_jumps
         real(dp), intent(inout) :: sum_jump
+        integer, intent(inout) :: n_neut(4), n_handover(0:4)
+        real(dp), intent(out) :: ion_pt(6)
 
         type(rng_t) :: rng
         type(optional_quantities_type) :: optional_quantities
         real(dp) :: x(3), xi(3), vpar, vperp, v, t, h, dtau, zet(5), randnum(3), z_save(3), perpinv, &
                     t_remain, t_pass, x_start(3), u, w(3), t_event, t_stop, jump(3)
         integer :: ind_tetr, iface, ind_tetr_save, iper_phi, ierr, j, iz, icol, n_trans
+        type(flight_result_t) :: fl
+        real(dp) :: dir(3), vcart(3), cphi, sphi
         logical :: boole_t_finished, boole_pusher_failed
 
         call rng_seed(rng, int(inp%seed, int64), int(ip, int64))
+        ion_pt = 0.0_dp
 
         ! start position
         if (trim(inp%start_mode) == 'point') then
@@ -343,14 +421,61 @@ contains
         if (boole_species) then
             iz = inp%start_charge
             icol = iz + 1
-            call set_marker_charge(ss, iz)     ! this thread's previous marker may have ended in another state
-            t_event = next_event_time(ss, iz, t, rng)
+            ! this thread's previous marker may have ended in another state
+            if (iz >= 1) then
+                call set_marker_charge(ss, iz)
+                t_event = next_event_time(ss, iz, t, rng)
+            end if
+        end if
+        if (iz == 0) then
+            ! neutral: velocity along neutral_direction (local e_R, e_phi, e_Z at the start point)
+            dir = inp%neutral_direction/norm2(inp%neutral_direction)
+            cphi = cos(x(2)); sphi = sin(x(2))
+            vcart = v_neutral*[dir(1)*cphi - dir(2)*sphi, dir(1)*sphi + dir(2)*cphi, dir(3)]
+            vpar = v_neutral; vperp = 0.0_dp
         end if
         call find_tetra(x, vpar, vperp, ind_tetr, iface)
         if (ind_tetr == -1) then
             stat = st_outside
         else if (.not. tetra_in_edge_region(ind_tetr)) then
             stat = st_outside
+        end if
+        if (stat == st_time .and. iz == 0) then
+            call fly_neutral(face_mode, cart_of_rphiz(x), vcart, t, ind_tetr, inp%t_max_s, &
+                             -log(1.0_dp - rng_uniform(rng)), nu_tetr, fl, tri_of_tetr, res(:, 1))
+            n_neut(fl%status) = n_neut(fl%status) + 1
+            ion_pt = [real(fl%status, dp), fl%t, fl%x(1), fl%x(2), fl%x(3), real(fl%ind_tetr, dp)]
+            if (face_mode == face_cartesian) n_handover(fl%handover) = n_handover(fl%handover) + 1
+            t = fl%t
+            x = fl%x
+            ind_tetr = fl%ind_tetr
+            iface = 0
+            select case (fl%status)
+            case (nf_wall)
+                stat = st_wall
+            case (nf_time)
+                stat = st_time
+            case (nf_error)
+                stat = st_pusher
+            case (nf_ionised)
+                if (ind_tetr < 1) then
+                    stat = st_pusher
+                else
+                    call ionise_neutral(x, ind_tetr, iface, vcart, vpar, vperp, jump)
+                    n_jumps = n_jumps + 1
+                    sum_jump = sum_jump + norm2(jump)
+                    n_trans = n_trans + 1
+                    iz = 1
+                    icol = 2
+                    call set_marker_charge(ss, iz)
+                    t_event = next_event_time(ss, iz, t, rng)
+                    if (ind_tetr == -1) then
+                        stat = st_wall
+                    else if (.not. tetra_in_edge_region(ind_tetr)) then
+                        stat = st_inner
+                    end if
+                end if
+            end select
         end if
 
         do while (stat == st_time .and. t < inp%t_max_s)
@@ -425,8 +550,34 @@ contains
 
         fin = [t, x(1), x(2), x(3), vpar, vperp, x_start(1), x_start(3), real(iz, dp), real(n_trans, dp)]
 
-
     end subroutine trace_marker
+
+    subroutine ionise_neutral(x, ind_tetr, iface, vcart, vpar, vperp, jump)
+
+        ! Neutral -> charge 1 at the particle position x (R, phi, Z) with Cartesian velocity vcart:
+        ! v_par = v.b, v_perp = |v - v_par b|, guiding centre X = x - (b x v)/Omega, Omega = e B/(m c).
+        ! ind_tetr = -1 on return if the guiding centre lies outside the mesh.
+
+        use anomalous_transport_displacement_mod, only: displace_by_straight_line
+
+        real(dp), intent(inout) :: x(3)
+        integer, intent(inout) :: ind_tetr, iface
+        real(dp), intent(in) :: vcart(3)
+        real(dp), intent(out) :: vpar, vperp, jump(3)
+        real(dp) :: b_hat(3), bmod, vloc(3), c, s, bxv(3)
+
+        ! velocity in the local physical basis (e_R, e_phi, e_Z) at x
+        c = cos(x(2)); s = sin(x(2))
+        vloc = [c*vcart(1) + s*vcart(2), -s*vcart(1) + c*vcart(2), vcart(3)]
+        call field_direction(x, ind_tetr, b_hat, bmod)
+        vpar = dot_product(vloc, b_hat)
+        vperp = norm2(vloc - vpar*b_hat)
+        bxv = [b_hat(2)*vloc(3) - b_hat(3)*vloc(2), b_hat(3)*vloc(1) - b_hat(1)*vloc(3), &
+               b_hat(1)*vloc(2) - b_hat(2)*vloc(1)]
+        jump = -bxv*ss%mass_g*clight/(echarge*bmod)
+        call displace_by_straight_line(x, ind_tetr, iface, [jump(1), jump(2)/x(1), jump(3)], vpar, vperp)
+
+    end subroutine ionise_neutral
 
 end subroutine calc_impurity_tracing
 

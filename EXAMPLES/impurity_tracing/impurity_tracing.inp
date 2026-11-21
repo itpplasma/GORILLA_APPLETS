@@ -1,11 +1,15 @@
 ! Impurity tracing (i_option = 17), see SRC/impurity_tracing/impurity_tracing_mod.f90
-! Default: Be1+ from a point source at the AUG outer midplane (mid SOL), charge-state chain
-! Be1+ -> 2+ -> 3+ -> 4+ with constant ionisation rates (marker_species_mod).
-! Fixed species instead: set species_element = '' and give test_mass_amu, test_charge_number,
-! e.g. W5+ with the commented line below.
+! Default: Be0 launched from a point at the AUG outer midplane (mid SOL) with 25 eV in -R
+! (Harting et al. 2025, Sec. 5), straight-line flight until ionisation, then the charge-state chain
+! Be1+ -> 2+ -> 3+ -> 4+. All rates are constant placeholders [1/s] until ADAS rates are in.
+! Ions only: start_charge = 1. Fixed species: species_element = '' and test_mass_amu,
+! test_charge_number, e.g. W5+ with the commented line below.
 &impurity_tracing_nml
- species_element = 'Be' , start_charge = 1 , boole_gc_jump = .true. ,
- ionisation_rate_s(1) = 2.0d5 , ionisation_rate_s(2) = 1.0d5 , ionisation_rate_s(3) = 5.0d4 ,
+ species_element = 'Be' , start_charge = 0 , boole_gc_jump = .true. ,
+ ionisation_rate_s(0) = 5.0d5 , ionisation_rate_s(1) = 2.0d5 , ionisation_rate_s(2) = 1.0d5 ,
+ ionisation_rate_s(3) = 5.0d4 ,
+ neutral_energy_ev = 25.0 , neutral_direction = -1.0, 0.0, 0.0 ,   ! along e_R, e_phi, e_Z
+ neutral_face_test = 'auto' , face_sag_tol = 0.1 ,                 ! or 'hybrid', 'cartesian'
 ! species_element = '' , test_mass_amu = 183.84 , test_charge_number = 5.0 ,   ! fixed W5+
  background_mass_amu = 2.01410177812 , background_charge_number = 1.0 ,  ! D+
  electron_density_cm3 = 1.0d13 , temperature_ev = 20.0 ,   ! constant n, T (Ti = Te)
