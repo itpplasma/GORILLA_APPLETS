@@ -11,9 +11,18 @@ module marker_species_mod
 !   - the guiding centre jumps (boole_gc_jump): the particle position x = X + b x v/Omega is kept
 !     and Omega = Z e B/(m c) changes, so X_new = X_old + (b x v_perp)(1/Omega_old - 1/Omega_new).
 !     The gyrophase is not known in the guiding-centre model and is drawn at random.
-! Transition times: constant rates per charge state [1/s] (ionisation iz -> iz+1, recombination
-! iz -> iz-1), exponential waiting times; either given directly or from ADAS ADF11 files
-! (adas_rates: n_e <sigma v>(n_e, T_e) at the constant background, adf11_mod).
+! Transition rates [1/s] per charge state (ionisation iz -> iz+1, recombination iz -> iz-1):
+!   - uniform: one value per charge state, given directly or from ADAS ADF11 files at the constant
+!     background (adas_rates, adf11_mod);
+!   - per cell: one value per charge state and cell, precomputed from cell values of n_e, T_e
+!     (set_cell_rates, adas_cell_rates). A cell is any piece of the mesh on which the background is
+!     constant (impurity tracing: a 2D triangle). The rate is then piecewise constant along the
+!     orbit and the transition is sampled exactly: draw an optical depth tau = -ln(1-u)
+!     (draw_optical_depth), add nu_cell * dt per piece of orbit, transition where the sum reaches
+!     tau (time_to_event gives the time left in the current cell).
+!     NOTE: for a background that varies inside a cell (e.g. linear per tetrahedron, as used by the
+!     thermal-force collisions), the rates would instead have to be evaluated along the orbit at
+!     the local n_e, T_e, with the sum of nu dt approximated per step (time-step error); not done.
 ! Neutrals (iz = 0) are not traced yet: recombination to iz = 0 is rejected.
 ! Collision coefficients (collis_ions collis_init) are precomputed per charge state for a background
 ! of constant density and temperature.
@@ -38,11 +47,14 @@ module marker_species_mod
         real(dp), allocatable :: efcolf(:,:), velrat(:,:), enrat(:,:)
         ! transition rates per charge state (0:z_nuc) [1/s]
         real(dp), allocatable :: rate_ion(:), rate_rec(:)
+        ! optional per-cell rates (0:z_nuc, ncell) [1/s]; used when allocated (cell index >= 1)
+        real(dp), allocatable :: cell_rate_ion(:,:), cell_rate_rec(:,:)
         logical :: boole_gc_jump = .true.
     end type species_set_t
 
     public :: init_species_set, set_marker_charge, total_rate, next_event_time, choose_transition, &
-              change_charge_state, field_direction, element_data, adas_rates
+              change_charge_state, field_direction, element_data, adas_rates, adas_cell_rates, &
+              set_cell_rates, cell_rates, draw_optical_depth, time_to_event
 
 contains
 
@@ -70,37 +82,67 @@ end subroutine element_data
 
 subroutine adas_rates(element, scd_file, acd_file, ne_cm3, te_ev, rate_ion, rate_rec)
 
-    ! Rates [1/s] per charge state 0 ... z_nuc from ADF11 files: ionisation iz -> iz+1 from
-    ! scd (block Z1 = iz+1), recombination iz -> iz-1 from acd (block Z1 = iz), rate = n_e <sigma v>.
-    ! An empty file name leaves the corresponding rates unchanged. Recombination to neutrals
-    ! (iz = 1 -> 0) is set to zero: neutrals are not traced yet.
-
-    use adf11_mod, only: adf11_t, read_adf11, adf11_coef
+    ! Uniform rates [1/s] per charge state 0 ... z_nuc from ADF11 files at one (n_e, T_e); see
+    ! adas_cell_rates. An empty file name leaves the corresponding rates unchanged.
 
     character(len=*), intent(in) :: element, scd_file, acd_file
     real(dp), intent(in) :: ne_cm3, te_ev
     real(dp), intent(inout) :: rate_ion(0:), rate_rec(0:)
-    type(adf11_t) :: tab
-    integer :: z_nuc, iz
+    real(dp), allocatable :: ri(:,:), rr(:,:)
+    integer :: z_nuc
     real(dp) :: mass_amu
 
     call element_data(element, z_nuc, mass_amu)
     if (ubound(rate_ion, 1) < z_nuc .or. ubound(rate_rec, 1) < z_nuc) &
         error stop 'marker species: rate arrays shorter than the nuclear charge'
+    allocate(ri(0:z_nuc, 1), rr(0:z_nuc, 1))
+    ri(:, 1) = rate_ion(0:z_nuc)
+    rr(:, 1) = rate_rec(0:z_nuc)
+    call adas_cell_rates(element, scd_file, acd_file, [ne_cm3], [te_ev], ri, rr)
+    rate_ion(0:z_nuc) = ri(:, 1)
+    rate_rec(0:z_nuc) = rr(:, 1)
+
+end subroutine adas_rates
+
+subroutine adas_cell_rates(element, scd_file, acd_file, ne_cm3, te_ev, rate_ion, rate_rec)
+
+    ! Rates [1/s] per charge state 0 ... z_nuc and cell from ADF11 files (each file read once):
+    ! ionisation iz -> iz+1 from scd (block Z1 = iz+1), recombination iz -> iz-1 from acd
+    ! (block Z1 = iz), rate = n_e <sigma v>(n_e, T_e) of the cell. An empty file name leaves the
+    ! corresponding rates unchanged. Recombination to neutrals (iz = 1 -> 0) is set to zero:
+    ! neutrals are not traced yet.
+
+    use adf11_mod, only: adf11_t, read_adf11, adf11_coef
+
+    character(len=*), intent(in) :: element, scd_file, acd_file
+    real(dp), intent(in) :: ne_cm3(:), te_ev(:)                  ! per cell
+    real(dp), intent(inout) :: rate_ion(0:,:), rate_rec(0:,:)    ! (0:z_nuc, ncell)
+    type(adf11_t) :: tab
+    integer :: z_nuc, iz, ic
+    real(dp) :: mass_amu
+
+    call element_data(element, z_nuc, mass_amu)
+    if (size(te_ev) /= size(ne_cm3) .or. size(rate_ion, 2) /= size(ne_cm3) .or. size(rate_rec, 2) /= size(ne_cm3) &
+        .or. ubound(rate_ion, 1) < z_nuc .or. ubound(rate_rec, 1) < z_nuc) &
+        error stop 'marker species: adas_cell_rates: inconsistent array sizes'
     if (len_trim(scd_file) > 0) then
         call read_adf11(trim(scd_file), tab)
         call check_table(tab)
-        rate_ion(0:z_nuc) = 0.0_dp
-        do iz = 0, z_nuc - 1
-            rate_ion(iz) = ne_cm3*adf11_coef(tab, iz + 1, ne_cm3, te_ev)
+        rate_ion(0:z_nuc, :) = 0.0_dp
+        do ic = 1, size(ne_cm3)
+            do iz = 0, z_nuc - 1
+                rate_ion(iz, ic) = ne_cm3(ic)*adf11_coef(tab, iz + 1, ne_cm3(ic), te_ev(ic))
+            end do
         end do
     end if
     if (len_trim(acd_file) > 0) then
         call read_adf11(trim(acd_file), tab)
         call check_table(tab)
-        rate_rec(0:z_nuc) = 0.0_dp
-        do iz = 2, z_nuc
-            rate_rec(iz) = ne_cm3*adf11_coef(tab, iz, ne_cm3, te_ev)
+        rate_rec(0:z_nuc, :) = 0.0_dp
+        do ic = 1, size(ne_cm3)
+            do iz = 2, z_nuc
+                rate_rec(iz, ic) = ne_cm3(ic)*adf11_coef(tab, iz, ne_cm3(ic), te_ev(ic))
+            end do
         end do
     end if
 
@@ -115,7 +157,71 @@ contains
         end if
     end subroutine check_table
 
-end subroutine adas_rates
+end subroutine adas_cell_rates
+
+subroutine set_cell_rates(ss, rate_ion, rate_rec)
+
+    ! Per-cell rates (0:z_nuc, ncell) [1/s]; same checks as the uniform rates of init_species_set
+
+    type(species_set_t), intent(inout) :: ss
+    real(dp), intent(in) :: rate_ion(0:,:), rate_rec(0:,:)
+
+    if (ubound(rate_ion, 1) < ss%z_nuc .or. ubound(rate_rec, 1) < ss%z_nuc .or. size(rate_ion, 2) /= size(rate_rec, 2)) &
+        error stop 'marker species: set_cell_rates: inconsistent array sizes'
+    if (any(rate_ion(0:ss%z_nuc, :) < 0.0_dp) .or. any(rate_rec(0:ss%z_nuc, :) < 0.0_dp)) &
+        error stop 'marker species: negative cell rate'
+    if (any(rate_ion(ss%z_nuc, :) > 0.0_dp)) error stop 'marker species: ionisation of the bare nucleus'
+    if (any(rate_rec(1, :) > 0.0_dp)) error stop 'marker species: recombination to neutrals is not implemented yet'
+    if (allocated(ss%cell_rate_ion)) deallocate(ss%cell_rate_ion, ss%cell_rate_rec)
+    allocate(ss%cell_rate_ion(0:ss%z_nuc, size(rate_ion, 2)), ss%cell_rate_rec(0:ss%z_nuc, size(rate_rec, 2)))
+    ss%cell_rate_ion(:,:) = rate_ion(0:ss%z_nuc, :)          ! explicit bounds: charge state 0 ... z_nuc
+    ss%cell_rate_rec(:,:) = rate_rec(0:ss%z_nuc, :)
+
+end subroutine set_cell_rates
+
+pure subroutine cell_rates(ss, iz, icell, nu_ion, nu_rec)
+
+    ! Rates out of charge state iz in cell icell (uniform rates if no cell rates are set or icell < 1)
+
+    type(species_set_t), intent(in) :: ss
+    integer, intent(in) :: iz, icell
+    real(dp), intent(out) :: nu_ion, nu_rec
+
+    if (allocated(ss%cell_rate_ion) .and. icell >= 1) then
+        nu_ion = ss%cell_rate_ion(iz, icell)
+        nu_rec = ss%cell_rate_rec(iz, icell)
+    else
+        nu_ion = ss%rate_ion(iz)
+        nu_rec = ss%rate_rec(iz)
+    end if
+
+end subroutine cell_rates
+
+function draw_optical_depth(rng) result(tau)
+
+    ! Optical depth to the next transition, exponentially distributed with mean 1
+
+    use thermal_force_rng_mod, only: rng_t, rng_uniform
+
+    type(rng_t), intent(inout) :: rng
+    real(dp) :: tau
+
+    tau = -log(1.0_dp - rng_uniform(rng))
+
+end function draw_optical_depth
+
+pure function time_to_event(nu, tau_acc, tau) result(dt)
+
+    ! Time until the accumulated optical depth tau_acc reaches tau at constant rate nu;
+    ! huge() for nu = 0
+
+    real(dp), intent(in) :: nu, tau_acc, tau
+    real(dp) :: dt
+
+    dt = huge(1.0_dp)
+    if (nu > 0.0_dp) dt = max(0.0_dp, tau - tau_acc)/nu
+
+end function time_to_event
 
 subroutine init_species_set(ss, element, mb, zb, db, tb, temperature_ev, rate_ion, rate_rec, boole_gc_jump)
 
@@ -200,16 +306,24 @@ function next_event_time(ss, iz, t, rng) result(t_event)
 
 end function next_event_time
 
-pure function choose_transition(ss, iz, u) result(iz_new)
+pure function choose_transition(ss, iz, u, icell) result(iz_new)
 
-    ! Next charge state for a transition out of iz; u uniform in [0, 1)
+    ! Next charge state for a transition out of iz; u uniform in [0, 1); icell: cell of the
+    ! transition (per-cell rates), absent or < 1 for the uniform rates
 
     type(species_set_t), intent(in) :: ss
     integer, intent(in) :: iz
     real(dp), intent(in) :: u
+    integer, intent(in), optional :: icell
     integer :: iz_new
+    real(dp) :: nu_ion, nu_rec
 
-    if (u*total_rate(ss, iz) < ss%rate_ion(iz)) then
+    if (present(icell)) then
+        call cell_rates(ss, iz, icell, nu_ion, nu_rec)
+    else
+        call cell_rates(ss, iz, 0, nu_ion, nu_rec)
+    end if
+    if (u*(nu_ion + nu_rec) < nu_ion) then
         iz_new = iz + 1
     else
         iz_new = iz - 1

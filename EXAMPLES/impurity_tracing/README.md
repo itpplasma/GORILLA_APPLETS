@@ -26,6 +26,15 @@ of year 96 (the ADAS 96 data used in Harting et al., NME 42 (2025) 101887). With
 in the namelist, the rates become n_e <sigma v> at the background n_e and T_e (bilinear interpolation in
 log10 n_e, log10 T_e, edge values outside the table; `SRC/impurity_tracing/adf11_mod.f90`).
 Recombination to neutrals is set to zero (neutrals are not traced yet).
+
+Rates per cell: with `background_cells_file` (one line `n_e[cm^-3] T_e[eV]` per 2D mesh triangle, in
+the triangle order of `<prefix>_residence.dat`; `#` lines are comments) the ADAS rates are precomputed
+per triangle and charge state. Along the orbit the rate is then piecewise constant: an exponentially
+distributed optical depth is drawn and nu_cell * dt is summed per tetrahedron until it is reached, so
+the transition point is sampled exactly for the given cell values. Collisions still use the constant
+`electron_density_cm3`, `temperature_ev`. A background that varies inside a cell (e.g. linear per
+tetrahedron) would need the rates evaluated along the orbit at the local n_e, T_e instead (not
+implemented; time-step error from summing nu dt per step).
 - `scd96_be.dat`: effective ionisation coefficients, Be0 -> Be1+ ... Be3+ -> Be4+
 - `acd96_be.dat`: effective recombination coefficients (radiative, dielectronic, three-body), Be1+ -> Be0 ... Be4+ -> Be3+
 
