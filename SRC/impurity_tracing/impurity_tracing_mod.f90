@@ -13,15 +13,25 @@ module impurity_tracing_mod
 ! Collisions: GORILLA's Maxwellian Coulomb operator (collis_ions stost, full
 ! operator: pitch-angle and energy scattering and drag) with a background of
 ! constant density and temperature (ions + electrons, at rest). Velocity-only
-! collisions: no guiding-centre shift, no thermal force, no anomalous transport.
-! Cross-field motion comes from the guiding-centre drifts only.
+! collisions: no guiding-centre shift, no thermal force.
+! Cross-field motion: guiding-centre drifts and, with d_perp_m2s > 0, an anomalous random walk
+! perpendicular to B (anomalous_transport_displacement, as in i_option 13: Delta x = sqrt(2 dt) alpha xi
+! + V_c dt, D_perp (g - h h) = alpha alpha^T) after every orbit step of ions; steps are limited to
+! dt <= d_perp_max_step_cm**2/(2 D_perp). A displacement that leaves the mesh ends at the wall
+! (status 1), one into the core at the inner boundary (status 2).
 !
 ! Output:
 !   impurity_tracing_exits.dat      one line per marker: status, time and position
 !                                   (R, phi, Z) at the end, v_par, v_perp
-!   impurity_tracing_residence.dat  time spent per 2D mesh triangle, summed over all
-!                                   markers and toroidal slices [s]. For a source of
-!                                   S markers/s, n(triangle) = S*time/(N*V_triangle).
+!   impurity_tracing_residence.dat  time spent per cell, summed over all markers [s]:
+!                                   residence_output = '2d': per 2D mesh triangle, summed
+!                                   over the toroidal slices of one field period;
+!                                   '3d': per triangle and toroidal slice (prism), rows
+!                                   slice by slice. For a source of S markers/s,
+!                                   n(cell) = S*time/(N*V_cell).
+!   impurity_tracing_cells.dat      geometry of the cells: triangle corners, area, centroid R,
+!                                   region flag and volumes (prism = area*R_c*dphi exactly,
+!                                   2D ring = area*R_c*2 pi/n_field_periods).
 ! Charge-state changes (species_element /= ''): markers of one element (e.g. Be as in Harting et
 ! al. 2025, Sec. 5) change their charge state with constant ionisation/recombination rates per
 ! charge state (marker_species_mod): velocity kept, guiding-centre jump. Residence times are then
@@ -94,6 +104,13 @@ module impurity_tracing_mod
         real(dp) :: neutral_direction(3) = [-1.0_dp, 0.0_dp, 0.0_dp]   ! along e_R, e_phi, e_Z
         character(len=16) :: neutral_face_test = 'auto'
         real(dp) :: face_sag_tol = 0.1_dp
+        ! start toroidal angle [rad] in [0, 2 pi/n_field_periods); < 0: random (uniform)
+        real(dp) :: start_phi_rad = -1.0_dp
+        ! anomalous perpendicular diffusion of ions [m^2/s] (0 = off) and its largest step [cm]
+        real(dp) :: d_perp_m2s = 0.0_dp
+        real(dp) :: d_perp_max_step_cm = 0.1_dp
+        ! residence time per 2D triangle ('2d') or per triangle and toroidal slice ('3d')
+        character(len=8) :: residence_output = '2d'
     end type impurity_tracing_input_t
 
     public :: calc_impurity_tracing
@@ -116,12 +133,15 @@ subroutine load_impurity_tracing_inp(inp)
     character(len=256) :: adas_scd_file, adas_acd_file, background_cells_file
     real(dp) :: neutral_energy_ev, neutral_direction(3), face_sag_tol
     character(len=16) :: neutral_face_test
+    real(dp) :: start_phi_rad, d_perp_m2s, d_perp_max_step_cm
+    character(len=8) :: residence_output
     namelist /impurity_tracing_nml/ test_mass_amu, test_charge_number, background_mass_amu, &
         background_charge_number, electron_density_cm3, temperature_ev, boole_collisions, &
         boole_electron_collisions, dt_free_s, start_mode, start_R_cm, start_Z_cm, t_max_s, &
         n_particles, seed, output_prefix, species_element, start_charge, ionisation_rate_s, &
         recombination_rate_s, boole_gc_jump, adas_scd_file, adas_acd_file, background_cells_file, &
-        neutral_energy_ev, neutral_direction, neutral_face_test, face_sag_tol
+        neutral_energy_ev, neutral_direction, neutral_face_test, face_sag_tol, start_phi_rad, d_perp_m2s, &
+        d_perp_max_step_cm, residence_output
 
     test_mass_amu = inp%test_mass_amu; test_charge_number = inp%test_charge_number
     background_mass_amu = inp%background_mass_amu; background_charge_number = inp%background_charge_number
@@ -137,6 +157,8 @@ subroutine load_impurity_tracing_inp(inp)
     background_cells_file = inp%background_cells_file
     neutral_energy_ev = inp%neutral_energy_ev; neutral_direction = inp%neutral_direction
     neutral_face_test = inp%neutral_face_test; face_sag_tol = inp%face_sag_tol
+    start_phi_rad = inp%start_phi_rad; d_perp_m2s = inp%d_perp_m2s
+    d_perp_max_step_cm = inp%d_perp_max_step_cm; residence_output = inp%residence_output
 
     open(newunit=iu, file='impurity_tracing.inp', status='old', action='read', iostat=ios)
     if (ios /= 0) error stop 'impurity tracing: cannot open impurity_tracing.inp'
@@ -158,9 +180,16 @@ subroutine load_impurity_tracing_inp(inp)
     inp%background_cells_file = background_cells_file
     inp%neutral_energy_ev = neutral_energy_ev; inp%neutral_direction = neutral_direction
     inp%neutral_face_test = neutral_face_test; inp%face_sag_tol = face_sag_tol
+    inp%start_phi_rad = start_phi_rad; inp%d_perp_m2s = d_perp_m2s
+    inp%d_perp_max_step_cm = d_perp_max_step_cm; inp%residence_output = residence_output
 
     if (trim(inp%start_mode) /= 'point' .and. trim(inp%start_mode) /= 'region') &
         error stop "impurity tracing: start_mode must be 'point' or 'region'"
+    if (trim(inp%residence_output) /= '2d' .and. trim(inp%residence_output) /= '3d') &
+        error stop "impurity tracing: residence_output must be '2d' or '3d'"
+    if (inp%d_perp_m2s < 0.0_dp) error stop 'impurity tracing: d_perp_m2s must be >= 0'
+    if (inp%d_perp_m2s > 0.0_dp .and. inp%d_perp_max_step_cm <= 0.0_dp) &
+        error stop 'impurity tracing: d_perp_max_step_cm must be > 0'
     if (inp%t_max_s <= 0.0_dp .or. inp%n_particles < 1) error stop 'impurity tracing: need t_max_s > 0, n_particles >= 1'
     if (inp%start_charge == 0) then
         if (len_trim(inp%species_element) == 0) error stop 'impurity tracing: neutrals (start_charge = 0) need species_element'
@@ -197,7 +226,9 @@ subroutine calc_impurity_tracing()
     ! neutrals
     logical :: boole_neutral
     integer :: face_mode, n_degenerate, n_neut(4), n_handover(0:4)
-    integer, allocatable :: tri_of_tetr(:)
+    integer, allocatable :: bin_of_tetr(:)
+    integer :: nbin
+    real(dp) :: dphi_slice, d_perp_cm2s, dt_dperp
     real(dp) :: sag_ratio, sag_max, v_neutral
     real(dp), allocatable :: nu_tetr(:), ion_point(:,:)
 
@@ -216,6 +247,25 @@ subroutine calc_impurity_tracing()
     nphi = grid_size(2)
     if (mod(ntetr, 3*nphi) /= 0) error stop 'impurity tracing: ntetr is not 3 * triangles * slices'
     ntri = ntetr/(3*nphi)
+    dphi_slice = 2.0_dp*pi/(n_field_periods*nphi)
+    call check_slice_order()
+    ! output cell of each tetrahedron: its 2D triangle ('2d') or its prism (triangle, slice) ('3d')
+    allocate(bin_of_tetr(ntetr))
+    do k = 1, ntetr
+        bin_of_tetr(k) = mod(k - 1, 3*ntri)/3 + 1
+        if (trim(inp%residence_output) == '3d') bin_of_tetr(k) = bin_of_tetr(k) + ntri*((k - 1)/(3*ntri))
+    end do
+    nbin = merge(ntri*nphi, ntri, trim(inp%residence_output) == '3d')
+    ! anomalous diffusion [cm^2/s] and the largest time step for it
+    d_perp_cm2s = 1.0e4_dp*inp%d_perp_m2s
+    dt_dperp = huge(1.0_dp)
+    if (d_perp_cm2s > 0.0_dp) then
+        dt_dperp = inp%d_perp_max_step_cm**2/(2.0_dp*d_perp_cm2s)
+        print '(a,es11.4,a,es11.4,a)', ' impurity tracing: anomalous D_perp = ', inp%d_perp_m2s, &
+            ' m^2/s, time step <= ', dt_dperp, ' s'
+    end if
+    if (inp%start_phi_rad >= 2.0_dp*pi/n_field_periods) &
+        error stop 'impurity tracing: start_phi_rad must be < 2 pi/n_field_periods (or < 0 for random)'
 
     ! background: ions and (optionally) electrons, constant n and T
     nb = merge(2, 1, inp%boole_electron_collisions)
@@ -280,14 +330,11 @@ subroutine calc_impurity_tracing()
         print '(a,a,a,es10.3,a,es10.3,a,i0,a)', ' impurity tracing: neutral face test ', &
             trim(merge('cartesian', 'hybrid   ', face_mode == face_cartesian)), ' (max face sag ', sag_max, &
             ' cm, sag/inradius ', sag_ratio, ', ', n_degenerate, ' degenerate tetrahedra)'
-        allocate(nu_tetr(ntetr), tri_of_tetr(ntetr))
+        allocate(nu_tetr(ntetr))
         ! neutral ionisation rate per tetrahedron: rate of its cell (ADAS per triangle) or uniform
         do k = 1, ntetr
             nu_tetr(k) = ss%rate_ion(0)
             if (allocated(ss%cell_rate_ion)) nu_tetr(k) = ss%cell_rate_ion(0, mod(k - 1, 3*ntri)/3 + 1)
-        end do
-        do k = 1, ntetr
-            tri_of_tetr(k) = mod(k - 1, 3*ntri)/3 + 1
         end do
         v_neutral = sqrt(2.0_dp*inp%neutral_energy_ev*ev2erg/ss%mass_g)
         print '(a,f8.2,a,es11.4,a,3f7.3,a,es11.4,a)', ' impurity tracing: neutrals ', inp%neutral_energy_ev, &
@@ -295,7 +342,7 @@ subroutine calc_impurity_tracing()
             ', ionisation rate ', ss%rate_ion(0), ' 1/s'
     end if
 
-    allocate(status(inp%n_particles), final(10, inp%n_particles), residence(ntri, nstate))
+    allocate(status(inp%n_particles), final(10, inp%n_particles), residence(nbin, nstate))
     allocate(ion_point(6, inp%n_particles))
     ion_point = 0.0_dp
     residence = 0.0_dp
@@ -356,15 +403,64 @@ subroutine calc_impurity_tracing()
     end if
 
     open(newunit=iu, file=trim(inp%output_prefix)//'_residence.dat', status='replace', action='write')
-    write(iu, '(a)') '# time spent per 2D triangle [s], summed over markers and toroidal slices; one column per'
-    write(iu, '(a)') '# charge state 0 ... Z_nuc (charge-state mode) or one column (fixed species). ntri n_particles t_max_s ncol'
-    write(iu, '(i10,i10,es24.16,i6)') ntri, inp%n_particles, inp%t_max_s, nstate
-    do itri = 1, ntri
+    if (trim(inp%residence_output) == '3d') then
+        write(iu, '(a)') '# time spent per prism (2D triangle x toroidal slice) [s], summed over markers; rows: slice 1' // &
+            ' triangles 1..ntri, slice 2, ...; one column per'
+    else
+        write(iu, '(a)') '# time spent per 2D triangle [s], summed over markers and toroidal slices; one column per'
+    end if
+    write(iu, '(a)') '# charge state 0 ... Z_nuc (charge-state mode) or one column (fixed species). ' // &
+        'ntri n_particles t_max_s ncol n_slices(3d: nphi, 2d: 1)'
+    write(iu, '(i10,i10,es24.16,i6,i6)') ntri, inp%n_particles, inp%t_max_s, nstate, nbin/ntri
+    do itri = 1, nbin
         write(iu, '(*(es24.16))') residence(itri, :)
     end do
     close(iu)
 
+    call write_cells_file()
+
 contains
+
+    subroutine check_slice_order()
+        ! The binning assumes tetrahedron k lies in toroidal slice (k-1)/(3*ntri)+1, covering
+        ! [(j-1) dphi, j dphi]; stop if the mesh is ordered differently.
+        integer :: kk, j, jv
+        real(dp) :: ph, tol
+        tol = 1.0e-6_dp*dphi_slice
+        do kk = 1, ntetr
+            j = (kk - 1)/(3*ntri) + 1
+            do jv = 1, 4
+                ph = verts_rphiz(2, tetra_grid(kk)%ind_knot(jv))
+                if (j == nphi .and. abs(ph) <= tol) ph = nphi*dphi_slice    ! periodic seam knots stored at phi = 0
+                if (ph < (j - 1)*dphi_slice - tol .or. ph > j*dphi_slice + tol) then
+                    print '(a,i0,a,i0,a,es12.4)', ' impurity tracing: tetrahedron ', kk, ' (slice ', j, &
+                        ') has a vertex at phi = ', ph
+                    error stop 'impurity tracing: tetrahedra are not ordered slice by slice'
+                end if
+            end do
+        end do
+    end subroutine check_slice_order
+
+    subroutine write_cells_file()
+        ! geometry of the output cells: 2D triangles and their volumes; one line per triangle
+        integer :: iu_c, it, kk
+        real(dp) :: rz(2, 3), area, rc
+        open(newunit=iu_c, file=trim(inp%output_prefix)//'_cells.dat', status='replace', action='write')
+        write(iu_c, '(a)') '# output cells of <prefix>_residence.dat: one line per 2D triangle (same order). ' // &
+            'ntri n_slices n_field_periods dphi_slice[rad]'
+        write(iu_c, '(a)') '# triangle region(1 = edge region) R1 Z1 R2 Z2 R3 Z3 [cm] area[cm^2] R_centroid[cm] ' // &
+            'V_prism[cm^3] (= area*R_c*dphi, one slice) V_ring[cm^3] (= area*R_c*2pi/n_field_periods, all slices)'
+        write(iu_c, '(i10,i6,i6,es24.16)') ntri, nphi, n_field_periods, dphi_slice
+        do it = 1, ntri
+            kk = 3*(it - 1) + 1
+            call prism_triangle(kk, rz)
+            area = triangle_area(rz)
+            rc = sum(rz(1, :))/3.0_dp
+            write(iu_c, '(i10,i3,10es24.16)') it, merge(1, 0, tetra_in_edge_region(kk)), rz(:, 1), rz(:, 2), rz(:, 3), &
+                area, rc, area*rc*dphi_slice, area*rc*dphi_slice*nphi
+        end do
+        close(iu_c)
+    end subroutine write_cells_file
 
     subroutine load_cell_rates()
         ! n_e, T_e per 2D triangle from background_cells_file -> ADAS rates per triangle and
@@ -452,6 +548,7 @@ contains
         use gorilla_settings_mod, only: optional_quantities_type
         use supporting_functions_mod, only: vperp_func
         use utils_orbit_timestep_mod, only: push_within_tetrahedron, initialize_constants_of_motion
+        use anomalous_transport_displacement_mod, only: anomalous_transport_displacement
 
         integer, intent(in) :: ip
         integer, intent(out) :: stat
@@ -466,7 +563,8 @@ contains
         type(optional_quantities_type) :: optional_quantities
         real(dp) :: x(3), xi(3), vpar, vperp, v, t, h, dtau, zet(5), randnum(3), z_save(3), perpinv, &
                     t_remain, t_pass, x_start(3), u, w(3), t_stop, jump(3), tau, tau_acc, nu, nu_ion, nu_rec, &
-                    t_push
+                    t_push, t_step0
+        integer :: n_zero_push
         integer :: ind_tetr, iface, ind_tetr_save, iper_phi, ierr, j, iz, icol, n_trans
         type(flight_result_t) :: fl
         real(dp) :: dir(3), vcart(3), cphi, sphi
@@ -487,6 +585,7 @@ contains
             x = [sum(w*tri_rz(1,:,j)), 0.0_dp, sum(w*tri_rz(2,:,j))]
         end if
         x(2) = rng_uniform(rng)*2.0_dp*pi/n_field_periods
+        if (inp%start_phi_rad >= 0.0_dp) x(2) = inp%start_phi_rad
         x_start = x
 
         ! Maxwellian at the background temperature
@@ -498,6 +597,7 @@ contains
         t = 0.0_dp
         stat = st_time
         n_trans = 0
+        n_zero_push = 0
         iz = 1
         icol = 1
         ! transition when the accumulated optical depth tau_acc (sum of nu dt) reaches tau
@@ -530,7 +630,7 @@ contains
                 ! neutral: straight-line flight until ionisation (optical depth with the charge-0 rates),
                 ! wall or t_max; the ion continues from its guiding centre
                 call fly_neutral(face_mode, cart_of_rphiz(x), vcart, t, ind_tetr, inp%t_max_s, &
-                                 draw_optical_depth(rng), nu_tetr, fl, tri_of_tetr, res(:, 1))
+                                 draw_optical_depth(rng), nu_tetr, fl, bin_of_tetr, res(:, 1))
                 n_neut(fl%status) = n_neut(fl%status) + 1
                 ion_pt = [real(fl%status, dp), fl%t, fl%x(1), fl%x(2), fl%x(3), real(fl%ind_tetr, dp)]
                 if (face_mode == face_cartesian) n_handover(fl%handover) = n_handover(fl%handover) + 1
@@ -573,8 +673,14 @@ contains
                 call cell_rates(ss, iz, cell_of_tetra(ind_tetr), nu_ion, nu_rec)
                 nu = nu_ion + nu_rec
             end if
+            ! transition due within the time resolution of t (t + dt == t): it happens now
+            if (nu > 0.0_dp) then
+                if (t + time_to_event(nu, tau_acc, tau) <= t) tau_acc = tau
+            end if
             t_stop = inp%t_max_s
             if (nu > 0.0_dp) t_stop = min(t_stop, t + time_to_event(nu, tau_acc, tau))
+            ! anomalous diffusion: step at most dt_dperp
+            if (d_perp_cm2s > 0.0_dp) t_stop = min(t_stop, t + dt_dperp)
             ! collision, adaptive step dtau (length at v0) from stost, at most up to the next event
             if (inp%boole_collisions) then
                 v = sqrt(vpar**2 + vperp**2)
@@ -599,6 +705,16 @@ contains
             end if
 
             ! guiding-centre orbit over h, stop at the region boundary
+            t_step0 = t
+            ! guard: steps that make no progress in t (marker removed, state printed)
+            n_zero_push = merge(n_zero_push + 1, 0, t + h <= t .and. .not. (nu > 0.0_dp .and. tau_acc >= tau))
+            if (n_zero_push > 100) then
+                print '(a,i0,a,i0,a,i0,a,es23.15,a,es12.4,a,es12.4,a,es23.15,a,es23.15)', &
+                    ' impurity tracing: no progress, marker removed: ', ip, ' charge ', iz, ' tetra ', ind_tetr, &
+                    ' t ', t, ' h ', h, ' nu ', nu, ' tau ', tau, ' tau_acc ', tau_acc
+                stat = st_pusher
+                exit
+            end if
             z_save = x - tetra_physics(ind_tetr)%x1
             call initialize_constants_of_motion(vperp, z_save, ind_tetr, perpinv)
             t_remain = h
@@ -611,10 +727,16 @@ contains
                     call cell_rates(ss, iz, cell_of_tetra(ind_tetr), nu_ion, nu_rec)
                     nu = nu_ion + nu_rec
                 end if
+                ! transition already due: the previous push ended on a face exactly when the optical
+                ! depth was reached (a push of length 0 would never report boole_t_finished)
+                if (nu > 0.0_dp .and. tau_acc >= tau*(1.0_dp - 1.0e-12_dp)) then
+                    boole_event = .true.
+                    exit
+                end if
                 t_push = min(t_remain, time_to_event(nu, tau_acc, tau))
                 call push_within_tetrahedron(ind_tetr, iface, x, vpar, z_save, t_push, t_pass, &
                                              boole_t_finished, iper_phi, optional_quantities, boole_pusher_failed)
-                res(mod(ind_tetr_save - 1, 3*ntri)/3 + 1, icol) = res(mod(ind_tetr_save - 1, 3*ntri)/3 + 1, icol) + t_pass
+                res(bin_of_tetr(ind_tetr_save), icol) = res(bin_of_tetr(ind_tetr_save), icol) + t_pass
                 t = t + t_pass
                 t_remain = t_remain - t_pass
                 tau_acc = tau_acc + nu*t_pass
@@ -659,6 +781,18 @@ contains
                 tau = huge(1.0_dp)
                 if (iz >= 1 .and. (total_rate(ss, iz) > 0.0_dp .or. allocated(ss%cell_rate_ion))) &
                     tau = draw_optical_depth(rng)
+            end if
+
+            ! anomalous perpendicular random walk of the ion over the time of this orbit step
+            if (d_perp_cm2s > 0.0_dp .and. stat == st_time .and. iz >= 1 .and. t > t_step0) then
+                call rng_normal3(rng, xi)
+                call anomalous_transport_displacement(x, ind_tetr, iface, t - t_step0, vpar, vperp, &
+                                                      d_local=d_perp_cm2s, xi_in=xi, boole_wall_absorbs=.true.)
+                if (ind_tetr == -1) then
+                    stat = st_wall
+                else if (.not. tetra_in_edge_region(ind_tetr)) then
+                    stat = st_inner
+                end if
             end if
         end do
 

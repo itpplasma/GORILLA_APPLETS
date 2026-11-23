@@ -18,6 +18,9 @@
  electron_density_cm3 = 1.0d13 , temperature_ev = 20.0 ,   ! constant n, T (Ti = Te)
  boole_collisions = .true. , boole_electron_collisions = .true. ,
  start_mode = 'point' , start_R_cm = 217.5 , start_Z_cm = 13.6 ,  ! 'region': uniform in the region volume
+ start_phi_rad = -1.0 ,                ! >= 0: fixed start phi [rad], < 0: random
+ d_perp_m2s = 0.0 , d_perp_max_step_cm = 0.1 ,   ! anomalous D_perp of the ions (e.g. 0.3 m^2/s)
+ residence_output = '2d' ,             ! '3d': per triangle and toroidal slice
  t_max_s = 1.0d-3 ,
  n_particles = 1000 , seed = 1 ,
  output_prefix = 'impurity_tracing' ,

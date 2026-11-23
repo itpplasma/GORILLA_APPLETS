@@ -16,7 +16,7 @@ module anomalous_transport_displacement_mod
 contains
 
 subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp, &
-                                           d_local, rho_bounds)
+                                           d_local, rho_bounds, xi_in, boole_wall_absorbs)
 !
 ! Computes the displacement vector for anomalous transport and applies it.
 !
@@ -45,6 +45,11 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
 !   rho_bounds(2) - grid_kind = 5 only: minor-radius window [rho_lo, rho_hi];
 !               an end point outside is reflected back into it (zero-flux
 !               boundary), so the marker does not leave the annular mesh.
+!   xi_in(3)  - random numbers (zero mean, unit variance) supplied by the caller,
+!               e.g. from a per-marker generator; default: getran.
+!   boole_wall_absorbs - .true.: a displacement that leaves the mesh ends at the
+!               boundary face with ind_tetr = -1 (marker lost at the wall), no
+!               recovery towards the axis. Default .false.
 !
     use tetra_physics_mod, only: tetra_physics,isinside
     use collis_ions, only: getran
@@ -58,6 +63,8 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     real(dp), intent(in)                  :: dt, vpar, vperp
     real(dp), intent(in), optional        :: d_local
     real(dp), intent(in), optional        :: rho_bounds(2)
+    real(dp), intent(in), optional        :: xi_in(3)
+    logical, intent(in), optional         :: boole_wall_absorbs
 
     real(dp), dimension(3) :: displacement, xi, V_c, x_new, x_save, displacement_towards_axis
 
@@ -97,9 +104,13 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     call compute_correction_velocity(ind_tetr, h_contra, R_local, D_eff, V_c)
 
     ! Generate random numbers with zero mean and unit variance
-    call getran(0, xi(1))
-    call getran(0, xi(2))
-    call getran(0, xi(3))
+    if (present(xi_in)) then
+        xi = xi_in
+    else
+        call getran(0, xi(1))
+        call getran(0, xi(2))
+        call getran(0, xi(3))
+    end if
 
     ! Compute displacement: Delta x^i = sqrt(2 * dt) * alpha^{ij} * xi_j + V_c^i * dt
     ! Note: alpha_perp_mat is lower triangular, so alpha^{ij} * xi_j expands as:
@@ -121,6 +132,10 @@ subroutine anomalous_transport_displacement(x, ind_tetr, iface, dt, vpar, vperp,
     iface_save = iface
 
     call displace_by_straight_line(x, ind_tetr, iface, displacement, vpar, vperp)
+
+    if (present(boole_wall_absorbs)) then
+        if (boole_wall_absorbs) return
+    end if
 
     ! Check if particle was lost and attempt recovery
     if (ind_tetr.eq.-1) then

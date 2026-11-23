@@ -109,7 +109,9 @@ def main():
         head = f.readline().split()
         ntri, n_part, t_max = int(head[0]), int(head[1]), float(head[2])
         ncol = int(head[3]) if len(head) > 3 else 1
-        res_states = np.array(f.read().split(), dtype=float).reshape(ntri, ncol)
+        nslices = int(head[4]) if len(head) > 4 else 1
+        # residence_output = '3d': rows slice by slice -> sum over the slices
+        res_states = np.array(f.read().split(), dtype=float).reshape(nslices, ntri, ncol).sum(axis=0)
         res = res_states.sum(axis=1)
     assert ntri == len(T) and n_part == n_mark
 
