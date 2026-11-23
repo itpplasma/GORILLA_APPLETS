@@ -589,7 +589,7 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
 
     character(len=100) :: filename, species_str
     integer :: id, ns, lower_bound, upper_bound, ios, n_v
-    real(dp), dimension(:), allocatable :: x,y
+    real(dp), dimension(:), allocatable :: x,y, qEcal_T
     logical :: success, boole_field_column
     real(dp) :: a0, a1, a2
     character(len=512) :: line
@@ -637,6 +637,11 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
         !B' of the tabulated B (central differences, one-sided at the ends) and the measured rest of the drift,
         !r = (A - B')/B - qE_cal/T, which sets the zero-flux shape n'/n = r + qE/T of the walk
         n_v = grid_size(1)+1
+        allocate(qEcal_T(n_v))
+        do ns = 1,n_v
+            qEcal_T(ns) = start%particle_charge(species)*dc%E_cal(ns, species) &
+                          /(target_temperature(rad_from_s(g%s_vertices(ns)), species)*ev2erg)
+        enddo
         do ns = 1,n_v
             if (ns.eq.1) then
                 dc%dB_meas(ns, species) = (dc%B(2, species)-dc%B(1, species))/(g%s_vertices(2)-g%s_vertices(1))
@@ -647,15 +652,14 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
             endif
             if (dc%B(ns, species).gt.0.0_dp) then
                 dc%r_rest(ns, species) = (dc%A(ns, species) - dc%dB_meas(ns, species))/dc%B(ns, species) &
-                    - start%particle_charge(species)*dc%E_cal(ns, species) &
-                      /(target_temperature(rad_from_s(g%s_vertices(ns)), species)*ev2erg)
+                    - qEcal_T(ns)
             else
                 dc%r_rest(ns, species) = 0.0_dp
             endif
         enddo
         if (dc%B(n_v, species).le.0.0_dp) dc%r_rest(n_v, species) = dc%r_rest(n_v-1, species)
         print*, 'measured drift: r = (A-dB/ds)/B - qE_cal/T at the vertices: ', dc%r_rest(:, species)
-        if (in%drift_smoothing_width.gt.0.0_dp) call smooth_measured_drift(species)
+        if (in%drift_smoothing_width.gt.0.0_dp) call smooth_measured_drift(species, qEcal_T)
     endif
 
     dc%A_from_first_run(:, species) = dc%A(:, species)
@@ -687,25 +691,30 @@ subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
 
 end subroutine get_diffusion_coefficient_data
 
-subroutine smooth_measured_drift(species)
+subroutine smooth_measured_drift(species, qEcal_T)
 
-    !Replaces the measured B, its derivative dB/ds and the drift rest r at every vertex by a local linear
-    !least-squares fit with Gaussian weights of width in%drift_smoothing_width in s. Only unbiased
-    !surfaces enter the fit: calibrated (not the extrapolated boundary vertices), B > 0, and at most
-    !in%calibration_bias_tolerance of the test particles mirrored at the axis or lost at the edge. Biased
-    !vertices get the value extrapolated from their unbiased neighbours. dB/ds is the slope of the fit of B.
+    !Smooths the measured A and B directly and only then forms the drift rest r: A, B and dB/ds at every
+    !vertex are replaced by a local linear least-squares fit with Gaussian weights of width
+    !in%drift_smoothing_width in s (dB/ds = slope of the fit of B), and r = (A - dB/ds)/B - qE_cal/T is
+    !computed from the smoothed values. Smoothing r itself amplifies the noise of A where B is small (edge
+    !electrons). With this r the walk drift is A_smooth + B_smooth*(qE/T - qE_cal/T), i.e. no division by B
+    !survives. Only unbiased surfaces enter the fit: calibrated (not the extrapolated boundary vertices),
+    !B > 0, and at most in%calibration_bias_tolerance of the test particles mirrored at the axis or lost at
+    !the edge. Biased vertices get the value extrapolated from their unbiased neighbours. Where the smoothed
+    !B is not positive, B = 0, r = 0 and dB/ds is set to the smoothed A, so that the drift is still A_smooth.
 
     use gorilla_applets_types_mod, only: dc, g, in
     use tetra_grid_settings_mod, only: grid_size
 
     integer, intent(in) :: species
+    real(dp), dimension(:), intent(in) :: qEcal_T
     integer :: n_v, ns
     logical, dimension(:), allocatable :: good
-    real(dp), dimension(:), allocatable :: w, d, B_new, dB_new, r_new
+    real(dp), dimension(:), allocatable :: w, d, A_new, B_new, dB_new
     real(dp) :: S0, S1, S2, det
 
     n_v = grid_size(1)+1
-    allocate(good(n_v), w(n_v), d(n_v), B_new(n_v), dB_new(n_v), r_new(n_v))
+    allocate(good(n_v), w(n_v), d(n_v), A_new(n_v), B_new(n_v), dB_new(n_v))
     good = (dc%frac_axis(:, species) + dc%frac_edge(:, species).le.in%calibration_bias_tolerance) &
            .and.(dc%B(:, species).gt.0.0_dp)
     good(1) = .false.
@@ -723,22 +732,33 @@ subroutine smooth_measured_drift(species)
         S2 = sum(w*d**2)
         det = S0*S2 - S1**2
         if (det.gt.1.0d-12*S0*S2) then
+            A_new(ns)  = (S2*sum(w*dc%A(:, species)) - S1*sum(w*d*dc%A(:, species)))/det
             B_new(ns)  = (S2*sum(w*dc%B(:, species)) - S1*sum(w*d*dc%B(:, species)))/det
             dB_new(ns) = (S0*sum(w*d*dc%B(:, species)) - S1*sum(w*dc%B(:, species)))/det
-            r_new(ns)  = (S2*sum(w*dc%r_rest(:, species)) - S1*sum(w*d*dc%r_rest(:, species)))/det
         else   !only one surface with noticeable weight: its values, no slope
+            A_new(ns)  = sum(w*dc%A(:, species))/S0
             B_new(ns)  = sum(w*dc%B(:, species))/S0
             dB_new(ns) = 0.0_dp
-            r_new(ns)  = sum(w*dc%r_rest(:, species))/S0
         endif
     enddo
 
-    dc%B(:, species) = max(B_new, 0.0_dp)
-    dc%dB_meas(:, species) = dB_new
-    dc%r_rest(:, species) = r_new
-    print*, 'drift smoothing (width ', in%drift_smoothing_width, ' in s): ', count(good), ' of ', n_v, &
+    do ns = 1,n_v
+        if (B_new(ns).gt.0.0_dp) then
+            dc%B(ns, species) = B_new(ns)
+            dc%dB_meas(ns, species) = dB_new(ns)
+            dc%r_rest(ns, species) = (A_new(ns) - dB_new(ns))/B_new(ns) - qEcal_T(ns)
+        else
+            dc%B(ns, species) = 0.0_dp
+            dc%dB_meas(ns, species) = A_new(ns)
+            dc%r_rest(ns, species) = 0.0_dp
+        endif
+    enddo
+    print*, 'drift smoothing of A and B (width ', in%drift_smoothing_width, ' in s): ', count(good), ' of ', n_v, &
             ' vertices unbiased; biased: ', pack([(ns, ns=1,n_v)], .not.good)
-    print*, 'smoothed drift r at the vertices: ', dc%r_rest(:, species)
+    print*, 'smoothed A at the vertices: ', A_new
+    print*, 'smoothed B at the vertices: ', dc%B(:, species)
+    print*, 'smoothed dB/ds at the vertices: ', dc%dB_meas(:, species)
+    print*, 'drift r from the smoothed A and B at the vertices: ', dc%r_rest(:, species)
 
 end subroutine smooth_measured_drift
 

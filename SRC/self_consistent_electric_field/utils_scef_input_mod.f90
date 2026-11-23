@@ -71,7 +71,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     collision_background_mode = 0           !optional: 0 per prism (staircase), 1 exact at the particle, 2 linear in the tetrahedron
     source_buffer_mode = 0                !optional: 0 source in the edge buffer not updated; 1 updated, |S| capped
     source_buffer_bound_factor = 2.0_dp   !optional: cap for source_buffer_mode 1, times max |S| outside the buffer
-    drift_smoothing_width = 0.0_dp        !optional: no smoothing of the measured B and drift
+    drift_smoothing_width = 0.0_dp        !optional: no smoothing of the measured A and B
     calibration_bias_tolerance = 0.02_dp  !optional: biased surface = more than 2 % of the test particles hit the axis or the edge
     boole_ion_electron_collisions = .true. !optional: ions also collide with the background electrons
     electron_tracing_time_limit = -1.0_dp  !optional: honestly traced electrons up to time_step
