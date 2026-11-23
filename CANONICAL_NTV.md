@@ -243,6 +243,9 @@ on `(rho, theta_B, zeta_B)` nodes (`SRC/rmp_response_currents/chartmap_ntv_mod.f
   `dh_mesh` remains available. For comparison with a test-particle model,
   `ntv_plain_stost = .true.` with `boole_mh_collisions = .false.` uses collision
   modes 1–4, whose kicks do not preserve the canonical background.
+  With `ntv_flux_drive = .true.`, the reference Maxwellian uses the
+  position's flux label. The drive uses the poloidal flux step in place of the
+  canonical momentum step. The torque still uses the mesh force.
 - **E_r.** Zero on the chartmap (`eps_Phi = 0`, empty `er_profile_file`):
   GORILLA's prescribed-E_r loader evaluates the EFIT field and the strong-E
   terms exclude direct flux grids. A radial `Phi0(s)` enters f0 through the

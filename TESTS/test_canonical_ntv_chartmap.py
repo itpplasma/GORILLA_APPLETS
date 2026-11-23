@@ -327,9 +327,10 @@ def main():
         drive = {"ntv_amplitude": 0.0, "ntv_mesh_drive": ".true.",
                  "ntv_plain_stost": ".true."}
 
-        def mesh_driven(tag, mesh):
+        def mesh_driven(tag, mesh, flux_drive=".false."):
             d = WORK_DIR / tag
-            prepare(d, "chartmap", npart, dt, True, drive, mesh=mesh, n2=n2)
+            prepare(d, "chartmap", npart, dt, True, {**drive, "ntv_flux_drive": flux_drive},
+                    mesh=mesh, n2=n2)
             set_nml(d / "rmp_response_currents.inp",
                     {"boole_mh_collisions": ".false.", "i_collision_mode": 4})
             return run(d, threads)
@@ -342,6 +343,11 @@ def main():
             failures.append("weights are driven by a force other than the mesh force")
         if math.hypot(*axisymmetric["tq_deltaf"]) > 1e-10 * math.hypot(*rippled["tq_deltaf"]):
             failures.append("axisymmetric mesh produces weighted torque")
+        flux = mesh_driven("d_flux_driven_axis", zero, ".true.")
+        if math.hypot(*flux["tq_deltaf"]) > 1e-10 * math.hypot(*rippled["tq_deltaf"]):
+            failures.append("flux drive gives torque in an axisymmetric mesh")
+        if max(map(abs, flux["w_end"])) < 1e-6:
+            failures.append("flux drive misses the bounce displacement")
 
     if "e" in gates:
         # Wall: circle r_w = 60 cm around the axis inside the spawn window.
