@@ -37,7 +37,7 @@ program test_neutral_flight
 
     real(dp), parameter :: pi = 3.14159265358979323846264338327950288_dp
     real(dp), parameter :: r0 = 200.0_dp, a_minor = 50.0_dp, vel = 1.0e6_dp
-    integer, parameter :: n_launch = 6, n_stat = 20000
+    integer, parameter :: n_launch = 8, n_stat = 20000
     integer :: n2, nfp, n_fail, mode_auto, mode_expect, i, nb, n_deg
     real(dp) :: sag_tol, ratio, sag, sag_exp, sag_max, per, rmax, dr_max
     real(dp), allocatable :: poly(:,:)
@@ -68,7 +68,7 @@ program test_neutral_flight
     sag_max = sag_exp + 0.5_dp*dr_max*per/n2
     print '(a,es12.4,a,es12.4,a,es12.4,a,es12.4)', 'max face sag ', sag, ' cm, chord sag ', sag_exp, &
         ', bound with twist ', sag_max, ', max sag/inradius ', ratio
-    print '(a,i0,a)', 'degenerate tetrahedra (axis ring of grid_kind 5) skipped: ', n_deg, ''
+    print '(a,i0,a)', 'zero-volume tetrahedra skipped (flagged placeholder slots of the grid_kind 5 axis fan): ', n_deg, ''
     if (sag < 0.8_dp*sag_exp .or. sag > sag_max) call fail('face sag')
 
     ! 2. face_hybrid wall exits vs the polygon
@@ -81,6 +81,9 @@ program test_neutral_flight
     xs(:,4) = [230.0_dp, 1.0_dp, 20.0_dp];         dirs(:,4) = [-0.5_dp, 0.2_dp, 0.7_dp]
     xs(:,5) = [240.0_dp, 0.5_dp, 10.0_dp];         dirs(:,5) = [-1.0_dp, 0.0_dp, 0.0_dp]  ! across, past the axis ring
     xs(:,6) = [200.0_dp, 0.2_dp, 30.0_dp];         dirs(:,6) = [0.0_dp, 1.0_dp, 0.0_dp]   ! toroidal
+    ! through the triangle fan at the magnetic axis (R0 = 200, Z = 0): 0.8 cm from it, and exactly through it
+    xs(:,7) = [240.0_dp, 0.5_dp, 0.0_dp];          dirs(:,7) = [-1.0_dp, 0.0_dp, 0.02_dp]
+    xs(:,8) = [240.0_dp, 0.5_dp, -0.8_dp];         dirs(:,8) = [-1.0_dp, 0.0_dp, 0.02_dp]
     do i = 1, n_launch
         xs(2,i) = modulo(xs(2,i), per)
         call launch(face_hybrid, i, 0.0_dp, 1.0_dp, res)
