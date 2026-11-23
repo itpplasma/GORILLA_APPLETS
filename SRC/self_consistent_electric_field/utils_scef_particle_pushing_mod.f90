@@ -13,9 +13,11 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     g, maximum_s, weights
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
-    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
+    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_marker_moments_to_thread_sums, &
+    add_thread_moments_to_output, &
     add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
-    initialise_seed_for_random_numbers_for_each_thread
+    initialise_seed_for_marker
+    use utils_orbit_timestep_mod, only: start_touched_tetr_tracking, stop_touched_tetr_tracking
     use russian_roulette_mod, only: play_russian_roulette, rr, local_rr_t, initiate_local_rr
     use constants, only: ev2erg
 
@@ -26,12 +28,11 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     integer                                           :: kpart, iantithetic, ind_tetr, iface, n_particles
     integer                                           :: p, l, n, i, k
     real(dp), dimension(3)                            :: x
-    real(dp)                                          :: vpar,vperp, t_step_s, v, v_save,vpar_save, vperp_save, t_tot, v_init
+    real(dp)                                          :: vpar,vperp, t_step_s, v, vpar_save, vperp_save, t_tot, v_init
     type(time_t)                                      :: t
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
-    complex(dp), dimension(:,:), allocatable          :: local_tetr_moments
-    logical                                           :: thread_flag = .true.
+    complex(dp), dimension(:,:), allocatable          :: local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared
     type(local_rr_t)                                  :: local_rr
     real(dp), dimension(10)                           :: particle_state_for_rr
 
@@ -59,13 +60,23 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     t_tot = 0.0_dp
 
     !$OMP PARALLEL DEFAULT(NONE) &
-    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr,weights) &
+    !$OMP& SHARED(counter, kpart,species, in, c, iantithetic, start, j, s, boole_diffusion_coefficient,n_particles,rr,weights, &
+    !$OMP& moment_specs, ntetr) &
     !$OMP& REDUCTION(+:t_tot) &
-    !$OMP& PRIVATE(p,l,n,i,x,v_save,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
-    !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init) &
-    !$OMP& FIRSTPRIVATE(thread_flag,local_rr) &
+    !$OMP& PRIVATE(p,l,n,i,x,vpar,vperp,t,ind_tetr,iface,local_tetr_moments,local_counter,particle_status,t_step_s,k,v, &
+    !$OMP& vpar_save, vperp_save, particle_state_for_rr, v_init, thread_tetr_moments, thread_prism_moments_squared) &
+    !$OMP& FIRSTPRIVATE(local_rr) &
     !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
     if (omp_get_thread_num().eq.0) print*, 'get number of threads', omp_get_num_threads()
+    !moments are summed per thread and added to the output once per thread
+    allocate(thread_tetr_moments(moment_specs%n_moments,ntetr))
+    allocate(thread_prism_moments_squared(moment_specs%n_moments, &
+                                          merge(ntetr/3, 0, moment_specs%boole_squared_moments)))
+    thread_tetr_moments = (0.0_dp, 0.0_dp)
+    thread_prism_moments_squared = (0.0_dp, 0.0_dp)
+    local_tetr_moments = (0.0_dp, 0.0_dp)
+    call start_touched_tetr_tracking(ntetr)
+
     !$OMP DO SCHEDULE(static)
     !SCHEDULE(dynamic,1)
     !SCHEDULE(static)
@@ -73,13 +84,9 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
     !Loop over particles
     do p = 1,n_particles/iantithetic
 
-        if ((.not.in%boole_precalc_collisions).and.thread_flag) then
-            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num(), j)
-            thread_flag = .false.
-        endif
-
         do l = 1,iantithetic
             n = (p-1)*iantithetic+l
+            call initialise_seed_for_marker(n, j) !random stream of this marker and iteration
             !$omp atomic update
             kpart = kpart + 1 !in general not equal to n because of parallelisation
             call print_progress(n_particles,kpart,n)
@@ -101,7 +108,6 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
 
                 vpar_save = vpar
                 vperp_save = vperp
-                v_save = sqrt(vpar_save**2+vperp_save**2)
 
                 if (in%boole_collisions) then
                     call carry_out_collisions(i, n, t, x, vpar,vperp,ind_tetr, iface, species, in%i_collision_mode)
@@ -119,7 +125,7 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
                         block
                             real(dp) :: w_rr
                             w_rr = real(weights%w(n,species),dp)
-                            call play_russian_roulette(w_rr,v,v_save,particle_state_for_rr,local_rr)
+                            call play_russian_roulette(w_rr,v,particle_state_for_rr,local_rr)
                             weights%w(n,species) = cmplx(w_rr,0.0_dp,kind=dp)
                         end block
                     endif
@@ -156,17 +162,19 @@ subroutine parallelised_particle_pushing(species,j,boole_diffusion_coefficient,n
 
             !$omp critical
             counter%integration_steps = counter%integration_steps + i
-            c%maxcol = max(dble(i)/dble(c%randcoli),c%maxcol)
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
             call update_exit_data(particle_status%lost,t%confined,x,vpar,vperp,i,n,species_in=species)
             call update_start_type(x,vpar,vperp,n,species,ind_tetr)
         enddo
-        !$omp critical
-        call add_local_tetr_moments_to_output(local_tetr_moments,species)
-        !$omp end critical
+        call add_marker_moments_to_thread_sums(local_tetr_moments, thread_tetr_moments, thread_prism_moments_squared)
     enddo !n
     !$OMP END DO
+
+    !$omp critical
+    call add_thread_moments_to_output(thread_tetr_moments, thread_prism_moments_squared, species)
+    !$omp end critical
+    call stop_touched_tetr_tracking
     !$OMP END PARALLEL
 
     print*, 'Total tracing time of all particles divided by number of particles is: ', t_tot/n_particles, 's'
@@ -202,7 +210,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
     logical                                      :: boole_t_finished, boole_pusher_failed, boole_lost_inside, mirror_condition
     integer                                      :: ind_tetr_save,iper_phi,k,i
     type(optional_quantities_type)               :: optional_quantities
-    real(dp)                                     :: tau, v, t_pusher, v_save, vpar_init, vperp_init, critical_distance
+    real(dp)                                     :: tau, v, t_pusher, vpar_init, vperp_init, critical_distance
     type(local_rr_t)                             :: local_rr
     real(dp), dimension(10)                      :: particle_state_for_rr
 
@@ -266,7 +274,6 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
         z_save_at_x_save = z_save
         vpar_save = vpar
         vperp_save = vperp!_func(z_save_at_x_save,perpinv,ind_tetr_save)
-        v_save = sqrt(vpar_save**2+vperp**2)
         t_pusher = t%remain
         if (boole_diffusion_coefficient) t_pusher = min(t%remain,t_step_s)
 
@@ -317,7 +324,7 @@ subroutine orbit_timestep_gorilla_self_consistent_ef(x,vpar,vperp,t,particle_sta
             block
                 real(dp) :: w_rr
                 w_rr = real(weights%w(n,species),dp)
-                call play_russian_roulette(w_rr,v,v_save,particle_state_for_rr,local_rr)
+                call play_russian_roulette(w_rr,v,particle_state_for_rr,local_rr)
                 weights%w(n,species) = cmplx(w_rr,0.0_dp,kind=dp)
             end block
         endif

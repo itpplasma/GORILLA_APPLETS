@@ -314,6 +314,7 @@ subroutine read_rmp_response_currents_inp_into_type
     ! Default: no anomalous transport (D_anom = 0 disables the kick).
     anomalous_diffusion_coefficient = 0.0_dp
 
+    boole_precalc_collisions = .false. !obsolete key, still accepted in input files
     open(newunit = s_inp_unit, file='rmp_response_currents.inp', status='unknown')
     read(s_inp_unit,nml=rmp_response_currents_nml)
     close(s_inp_unit)
@@ -325,7 +326,8 @@ subroutine read_rmp_response_currents_inp_into_type
     in%boole_squared_moments = boole_squared_moments
     in%boole_point_source = boole_point_source
     in%boole_collisions = boole_collisions
-    in%boole_precalc_collisions = boole_precalc_collisions
+    if (boole_precalc_collisions) print*, 'Note: boole_precalc_collisions is obsolete and ignored; ' // &
+        'collisions use one random stream per marker (initialise_seed_for_marker)'
     in%i_collision_mode = i_collision_mode
     in%boole_refined_sqrt_g = boole_refined_sqrt_g
     ! Sanity-fix e_cutoff_factor if user passed a non-positive value.
@@ -622,9 +624,11 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     use gorilla_applets_types_mod, only: counter, c, in, time_t, moment_specs, counter_t, particle_status_t, start, s
     use tetra_grid_mod, only: ntetr
     use omp_lib, only: omp_get_num_threads, omp_get_thread_num
-    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_local_tetr_moments_to_output, &
+    use utils_parallelised_particle_pushing_mod, only: print_progress, handle_lost_particles, add_marker_moments_to_thread_sums, &
+        add_thread_moments_to_output, &
         add_local_counter_to_counter, initialise_loop_variables, carry_out_collisions, update_exit_data, update_start_type, &
-        initialise_seed_for_random_numbers_for_each_thread
+        initialise_seed_for_marker
+    use utils_orbit_timestep_mod, only: start_touched_tetr_tracking, stop_touched_tetr_tracking, touched_tetr, n_touched
     use find_tetra_mod, only: find_tetra
     ! Anomalous-transport kick: re-use the existing applet's perpendicular
     ! random-walk displacement. Enabled when in%anomalous_diffusion_coefficient > 0
@@ -646,6 +650,8 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     type(counter_t)                                   :: local_counter
     type(particle_status_t)                           :: particle_status
     complex(dp), dimension(:,:), allocatable          :: local_tetr_moments
+    complex(dp), dimension(:,:), allocatable          :: thread_tetr_moments, thread_prism_moments_squared
+    integer                                           :: k_touched
     ! Per-particle workspace for the delta-f time average. Each marker's
     ! deposits accumulate here across ALL respawn attempts (we do NOT reset
     ! the workspace on respawn). At the end of all attempts we divide by
@@ -661,7 +667,6 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     real(dp)                                          :: rho_win(2), s_edge_win
     complex(dp), dimension(:), allocatable            :: prof_marker
     integer                                           :: ibatch
-    logical                                           :: thread_flag = .true.
     logical                                           :: respawn_success
 
     if (present(n_particles_in)) then
@@ -730,8 +735,7 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
     !$OMP&        boole_nonlinear_weight, boole_mh_collisions) &
     !$OMP& REDUCTION(+:t_tot, n_respawn_total, n_truly_lost) &
     !$OMP& PRIVATE(p, l, n, i, i_total, n_respawn_used, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, trace_time_n, particle_tetr_moments, t_actual_n, respawn_success, da_local, n_da_sub, i_da_sub) &
-    !$OMP& PRIVATE(prof_local, prof_marker, ibatch) &
-    !$OMP& FIRSTPRIVATE(thread_flag) &
+    !$OMP& PRIVATE(prof_local, prof_marker, ibatch, thread_tetr_moments, thread_prism_moments_squared, k_touched) &
     !$OMP& COPYIN(cm_over_e,particle_charge,particle_mass)
 
     if (omp_get_thread_num().eq.0) print*, 'Number of threads: ', omp_get_num_threads()
@@ -751,18 +755,25 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
         allocate(prof_local(3 * n_prof_bins, n_prof_batches))
         allocate(prof_marker(3 * n_prof_bins))
         prof_local = (0.0_dp, 0.0_dp)
+    else
+        ! Per-tetrahedron moments are summed per thread and added to the output once per
+        ! thread; a marker's moments are moved and reset only where it deposited.
+        allocate(thread_tetr_moments(moment_specs%n_moments, ntetr))
+        allocate(thread_prism_moments_squared(moment_specs%n_moments, &
+                                              merge(ntetr/3, 0, moment_specs%boole_squared_moments)))
+        thread_tetr_moments = (0.0_dp, 0.0_dp)
+        thread_prism_moments_squared = (0.0_dp, 0.0_dp)
+        local_tetr_moments = (0.0_dp, 0.0_dp)
+        if (in%boole_delta_f) particle_tetr_moments = (0.0_dp, 0.0_dp)
+        call start_touched_tetr_tracking(ntetr)
     end if
 
     !$OMP DO SCHEDULE(static)
     do p = 1, n_particles/iantithetic
 
-        if ((.not.in%boole_precalc_collisions).and.thread_flag) then
-            call initialise_seed_for_random_numbers_for_each_thread(omp_get_thread_num(), 1)
-            thread_flag = .false.
-        endif
-
         do l = 1, iantithetic
             n = (p-1)*iantithetic + l
+            call initialise_seed_for_marker(n, 1) !random stream of this marker
 
             !$omp atomic update
             kpart = kpart + 1
@@ -773,8 +784,9 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
                 cycle
             endif
 
-            ! Per-particle accumulators that persist across respawn attempts.
-            if (in%boole_delta_f) particle_tetr_moments = (0.0_dp, 0.0_dp)
+            ! Per-particle accumulators that persist across respawn attempts (with the
+            ! per-tetrahedron moments, the time average below resets them).
+            if (in%boole_delta_f .and. n_prof_bins > 0) particle_tetr_moments = (0.0_dp, 0.0_dp)
             if (n_prof_bins > 0) prof_marker = (0.0_dp, 0.0_dp)
             n_respawn_used = 0
 
@@ -921,7 +933,14 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
             ! This makes killed-and-not-respawned markers contribute their
             ! short trace at full weight, instead of being suppressed by
             ! division by the full intended T_n they never reached.
-            if (in%boole_delta_f .and. t_actual_n > 0.0_dp) then
+            if (in%boole_delta_f .and. n_prof_bins == 0) then
+                do k_touched = 1, n_touched
+                    if (t_actual_n > 0.0_dp) local_tetr_moments(:, touched_tetr(k_touched)) = &
+                        local_tetr_moments(:, touched_tetr(k_touched)) &
+                        + particle_tetr_moments(:, touched_tetr(k_touched)) / t_actual_n
+                    particle_tetr_moments(:, touched_tetr(k_touched)) = (0.0_dp, 0.0_dp)
+                end do
+            else if (in%boole_delta_f .and. t_actual_n > 0.0_dp) then
                 local_tetr_moments = local_tetr_moments &
                                    + particle_tetr_moments / t_actual_n
             end if
@@ -939,7 +958,6 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
 
             !$omp critical
             counter%integration_steps = counter%integration_steps + i_total
-            c%maxcol = max(dble(i_total)/dble(c%randcoli), c%maxcol)
             call add_local_counter_to_counter(local_counter)
             !$omp end critical
 
@@ -947,12 +965,17 @@ subroutine parallelised_particle_pushing_rmp_response_currents(species, n_partic
             call update_start_type(x, vpar, vperp, n, species, ind_tetr)
         enddo
 
-        !$omp critical
-        if (n_prof_bins == 0) &
-            call add_local_tetr_moments_to_output(local_tetr_moments, species)
-        !$omp end critical
+        if (n_prof_bins == 0) call add_marker_moments_to_thread_sums(local_tetr_moments, thread_tetr_moments, &
+                                                                     thread_prism_moments_squared)
     enddo
     !$OMP END DO
+
+    if (n_prof_bins == 0) then
+        !$omp critical
+        call add_thread_moments_to_output(thread_tetr_moments, thread_prism_moments_squared, species)
+        !$omp end critical
+        call stop_touched_tetr_tracking
+    end if
 
     if (allocated(particle_tetr_moments)) deallocate(particle_tetr_moments)
     if (n_prof_bins > 0) then

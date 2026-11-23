@@ -71,7 +71,9 @@ tetra_grid["tetra_grid_nml"]["n2"] = 4               # nphi
 tetra_grid["tetra_grid_nml"]["n3"] = 20              # nZ
 tetra_grid["tetra_grid_nml"]["boole_n_field_periods"] = True
 tetra_grid["tetra_grid_nml"]["g_file_filename"] = "DATA/ASDEX/g26884.4300"
-tetra_grid["tetra_grid_nml"]["convex_wall_filename"] = "DATA/ASDEX/convexwall.dat"
+# The convex wall must exist: GORILLA opens it with status "unknown", so a missing
+# file is created empty and stretch_coords then maps every point onto R ~ 1.6 cm.
+tetra_grid["tetra_grid_nml"]["convex_wall_filename"] = "MHD_EQUILIBRIA/convex_wall_for_test.dat"
 
 # Applets dispatcher
 gorilla_applets["gorilla_applets_nml"]["i_option"] = 10
@@ -100,9 +102,10 @@ field_line_tracing["field_line_tracing_nml"]["seed_option"] = 2
 # values are read into a dummy and ignored.
 shutil.copy(GORILLA_ROOT / "INPUT" / "field_divB0.inp", WORK_DIR / "field_divB0.inp")
 
-# Symlink the bundled ASDEX g-file + convex wall into the work dir
+# Symlink the bundled ASDEX g-file and GORILLA's test convex wall into the work dir
 (WORK_DIR / "DATA").mkdir()
 (WORK_DIR / "DATA" / "ASDEX").symlink_to(ASDEX_DIR, target_is_directory=True)
+(WORK_DIR / "MHD_EQUILIBRIA").symlink_to(GORILLA_ROOT / "MHD_EQUILIBRIA", target_is_directory=True)
 
 # Write namelists
 gorilla.write(str(WORK_DIR / "gorilla.inp"), force=True)

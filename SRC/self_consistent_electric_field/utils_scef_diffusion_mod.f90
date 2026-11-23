@@ -29,7 +29,7 @@ subroutine calc_diffusion_coefficients(species)
     integer, intent(in) :: species
 
     integer :: ns, i, n_particles, file_id, n_ignored, ns_first, ns_last
-    real(dp) :: extrapolation_factor, A, B, offset, tau_calibration, v0, v_max, weights_before_redistribution
+    real(dp) :: extrapolation_factor, A, B, offset, tau_calibration, v0, weights_before_redistribution
     real(dp) :: standard_deviation, dummy
     real(dp), dimension(:,:,:), allocatable :: rand_matrix
     character(len=100) :: filename, ns_str, species_str
@@ -108,9 +108,8 @@ subroutine calc_diffusion_coefficients(species)
             call calc_collision_coefficients_for_all_tetrahedra(species)
 
             v0 = start%v0(species)
-            v_max = v0*sqrt(start%epsilon_max)
             weights_before_redistribution = g%total_volume*in%density
-            call prepare_russian_roulette(v0,v_max,weights_before_redistribution,10)
+            call prepare_russian_roulette(v0,weights_before_redistribution,10)
         endif
 
         ! open(23,file = 'energy_before_pushing.dat')
