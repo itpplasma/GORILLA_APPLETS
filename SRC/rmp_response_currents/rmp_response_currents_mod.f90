@@ -43,7 +43,8 @@ subroutine calc_rmp_response_currents
         n_respawn_max, n_prof_bins, da_profile_file, boole_mh_collisions, &
         boole_local_energy_sampling, rescale_energies_to_local_temperature
     use profile_data_mod, only: load_profiles, load_kim_nu
-    use canonical_ntv_mod, only: boole_canonical_ntv, canonical_ntv_init, ntv_lorentz_nu
+    use canonical_ntv_mod, only: boole_canonical_ntv, canonical_ntv_init, ntv_lorentz_nu, &
+                                 ntv_plain_stost
     use chartmap_ntv_mod, only: chartmap_mesh_setup
     use tetra_grid_settings_mod, only: netcdf_filename
     use perturbation_field_mod, only: init_constant_perturbation, load_perturbation_field, &
@@ -116,8 +117,11 @@ subroutine calc_rmp_response_currents
         ! Lorentz kicks of the estimator (ntv_lorentz_nu > 0) choose it with
         ! ntv_lorentz_mh.
         if (in%boole_collisions .and. .not. boole_mh_collisions &
-            .and. .not. ntv_lorentz_nu > 0.0_dp) &
+            .and. .not. ntv_lorentz_nu > 0.0_dp .and. .not. ntv_plain_stost) &
             error stop 'canonical NTV requires MH collisions (f0 invariance)'
+        if (ntv_plain_stost .and. (boole_mh_collisions .or. ntv_lorentz_nu > 0.0_dp .or. &
+            in%i_collision_mode < 1 .or. in%i_collision_mode > 4)) &
+            error stop 'canonical NTV: ntv_plain_stost needs collision mode 1-4 without MH or Lorentz kicks'
         call canonical_ntv_init()
     end if
 

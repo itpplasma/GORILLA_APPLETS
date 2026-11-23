@@ -10,7 +10,7 @@ module utils_rmp_response_currents_mod
     use rmp_volume_loading_mod, only: volume_candidate, analytic_window_volume
     use rmp_maxwellian_loading_mod, only: maxwellian_from_uniforms
     use canonical_ntv_mod, only: boole_canonical_ntv, species_temperature_eV, ntv_h_phi, &
-        ntv_marker_rng, canonical_ntv_mark_loss, loss_wall, loss_outer_cut
+        ntv_marker_rng, canonical_ntv_mark_loss, loss_wall, loss_outer_cut, ntv_flux_drive
 
     implicit none
 
@@ -2019,6 +2019,7 @@ real(dp) function ln_f0_point(psi0, h_phi, vpar, mub, species) result(lnf0)
     s0 = max(0.0_dp, min(1.0_dp, eval_s_from_psi_pol(psi0)))
     s_star = max(0.0_dp, min(1.0_dp, eval_s_from_psi_pol(psi0 &
         + start%cm_over_e(species) * vpar * h_phi)))
+    if (ntv_flux_drive) s_star = s0
     call eval_profiles(s0, pv0)
     call eval_profiles(s_star, pvs)
     K0 = 0.5_dp * start%particle_mass(species) * vpar**2 + mub &
@@ -2138,6 +2139,7 @@ subroutine ln_f0_and_H(ind_tetr, x, vpar, perpinv, species, lnf0, H, H_in, ln_ml
     s_star = max(0.0_dp, min(1.0_dp, &
         eval_s_from_psi_pol(psi0 + start%cm_over_e(species) &
             * (vpar*h_phi + drift_phi))))
+    if (ntv_flux_drive) s_star = s0
     call eval_profiles(s0, pv0)
     call eval_profiles(s_star, pvs)
     K0 = K + energy_drift &
