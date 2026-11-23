@@ -41,7 +41,7 @@ module canonical_ntv_mod
         ntv_phimn, ntv_profile_file, ntv_theta_kind, ntv_output_file, &
         ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
         ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, ntv_lorentz_mh, &
-        ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn
+        ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn, ntv_plain_stost
     public :: canonical_ntv_nml_read, canonical_ntv_init, canonical_ntv_allocate, &
         canonical_ntv_birth, canonical_ntv_push, canonical_ntv_collision, &
         canonical_ntv_end, canonical_ntv_write, ntv_harmonic_dphi, &
@@ -67,6 +67,9 @@ module canonical_ntv_mod
     !> Chartmap whose |B| harmonics (toroidal mode ntv_n_tor) define dB1; scaled
     !> by ntv_amplitude. Empty: single harmonic from ntv_bmn / ntv_profile_file.
     character(len=512) :: ntv_chartmap_file = ''
+    !> Drive the weights with the toroidal force of the orbit mesh.
+    logical  :: ntv_mesh_drive = .false.
+    logical  :: ntv_plain_stost = .false.
     !> Poloidal modes taken from ntv_chartmap_file: m = -ntv_m_max..ntv_m_max;
     !> a negative value takes the single mode m = ntv_m_pol.
     integer  :: ntv_m_max = -1
@@ -106,7 +109,8 @@ module canonical_ntv_mod
         ntv_amplitude, ntv_bmn, ntv_phimn, ntv_profile_file, ntv_theta_kind, &
         ntv_output_file, ntv_chartmap_file, ntv_m_max, loss_wall_file, ntv_marker_rng, &
         ntv_bmn_relative, ntv_lorentz_nu, ntv_lorentz_dt, &
-        ntv_lorentz_mh, ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn
+        ntv_lorentz_mh, ntv_n_check, ntv_check_dt, ntv_w_reset_dt, ntv_w_reset_burn, &
+        ntv_mesh_drive, ntv_plain_stost
 
     !> Loss kinds (column loss_kind): grid exit (last mesh surface or inner
     !> boundary), wall contour, s_outer_cut.
@@ -201,6 +205,8 @@ subroutine canonical_ntv_init()
         ntv_lorentz_dt = 1.0e-4_dp / ntv_lorentz_nu
     if (ntv_bmn_relative .and. len_trim(ntv_chartmap_file) > 0) error stop &
         'canonical NTV: ntv_bmn_relative does not apply to chartmap harmonics'
+    if (ntv_mesh_drive .and. (grid_kind /= 6 .or. ntv_amplitude /= 0.0_dp)) &
+        error stop 'canonical NTV: ntv_mesh_drive needs grid_kind 6 and ntv_amplitude = 0'
     n_tab = 0
     if (len_trim(ntv_chartmap_file) > 0) then
         if (len_trim(ntv_profile_file) > 0) error stop &
@@ -501,7 +507,7 @@ subroutine canonical_ntv_push(n, pa, pm, pb, s_end, dt, w)
     type(ntv_point_t), intent(in) :: pa, pm, pb
     real(dp), intent(in) :: s_end, dt
     real(dp), intent(inout) :: w
-    real(dp) :: w_old, dtq, t0, t1, frac, tk, t_on, dh_old, tq_old
+    real(dp) :: w_old, dtq, t0, t1, frac, tk, t_on, dh_old, tq_old, dp_toroidal
 
     t0 = tphys(n)
     t1 = t0 + dt
@@ -516,10 +522,11 @@ subroutine canonical_ntv_push(n, pa, pm, pb, s_end, dt, w)
     w_old = w
     dh_old = rec(c_dh, n)
     tq_old = rec(c_tq, n)
-    w = w + pm%dlnf0_dpphi * pm%dh1_dphi * dt
-    dtq = -0.5_dp * (w_old + w) * pm%dh1_dphi * dt
+    dp_toroidal = -merge(pm%dh_mesh_dphi, pm%dh1_dphi, ntv_mesh_drive) * dt
+    w = w - pm%dlnf0_dpphi * dp_toroidal
+    dtq = 0.5_dp * (w_old + w) * dp_toroidal
     rec(c_tq, n) = rec(c_tq, n) + dtq
-    rec(c_dh, n) = rec(c_dh, n) - pm%dh1_dphi * dt
+    rec(c_dh, n) = rec(c_dh, n) + dp_toroidal
     rec(c_dhm, n) = rec(c_dhm, n) - pm%dh_mesh_dphi * dt
     rec(c_psi1, n) = pb%psi0
     if (ntv_w_reset_dt > 0.0_dp .and. dt > 0.0_dp) then

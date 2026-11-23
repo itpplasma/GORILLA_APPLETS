@@ -15,6 +15,8 @@ The RMP applet (`i_option = 15`) has an optional estimator for the toroidal torq
   ntv_theta_kind = 1 ,              ! 1 straight-field-line angle, 0 geometric
   ntv_output_file = 'canonical_ntv_markers.dat' ,
   ntv_chartmap_file = '' ,          ! chartmap whose |B| harmonics give dB1 (grid_kind 6)
+  ntv_mesh_drive = .false. ,        ! drive delta-f weights with the chartmap mesh force
+  ntv_plain_stost = .false. ,       ! allow stost collision modes 1-4 without MH
   ntv_m_max = -1 ,                  ! chartmap modes m = -ntv_m_max..ntv_m_max; <0: m = ntv_m_pol
   loss_wall_file = '' ,             ! optional (R, Z) [cm] wall polygon as loss boundary
   ntv_marker_rng = .true. ,         ! one random stream per marker (CRN)
@@ -232,6 +234,15 @@ on `(rho, theta_B, zeta_B)` nodes (`SRC/rmp_response_currents/chartmap_ntv_mod.f
   is corrected by `ln f0(B0) - ln f0(B) + 2 ln(B0/B)` at fixed `v_par` and
   `mu` (zero on an axisymmetric mesh). The torque follows from the CRN second
   difference of `P dh_mesh` (NTV part) and of `P (pphi_end - pphi_birth)`.
+- **Mesh-driven delta-f.** With `ntv_mesh_drive = .true.` and
+  `ntv_amplitude = 0`, the weights obey
+  `dw = -(d ln f0/dp_phi)|_H0 dp_phi_mesh` along the perturbed chartmap orbits.
+  The torque integral is `int w dp_phi_mesh`, and the `dh_int` column and
+  checkpoints use the mesh torque. The linear weights retain the canonical
+  background and omit the source `C[f0]`. The independent full-f tally
+  `dh_mesh` remains available. For comparison with a test-particle model,
+  `ntv_plain_stost = .true.` with `boole_mh_collisions = .false.` uses collision
+  modes 1–4, whose kicks do not preserve the canonical background.
 - **E_r.** Zero on the chartmap (`eps_Phi = 0`, empty `er_profile_file`):
   GORILLA's prescribed-E_r loader evaluates the EFIT field and the strong-E
   terms exclude direct flux grids. A radial `Phi0(s)` enters f0 through the
