@@ -61,31 +61,33 @@ end subroutine coleff
 !
 subroutine onseff(v,dp,dh,dpd)
 
+  use constants, only: pi
+
 !  dp - dimensionless dpp
 !  dh - dhh*p^2     (p - dmls)
 !  dpd - (1/p)(d/dp)p^2*dp   (p - dmls)
 
-! square root of pi
-  double precision, parameter :: sqp=1.7724538d0
-! cons=4./(3.*sqrt(pi))
-  double precision, parameter :: cons=.75225278d0
-  double precision :: v,dp,dh,dpd,v2,v3,ex,er
+  double precision, parameter :: sqp=sqrt(pi), cons=4.d0/(3.d0*sqp)
+  double precision, intent(in) :: v
+  double precision, intent(out) :: dp,dh,dpd
+  double precision :: v2,v3,ex,er_over_v
 
   v2=v**2
   v3=v2*v
   if(v.lt.0.01d0) then
-    dp=cons*(1.d0-0.6d0*v2)
-    dh=cons*(1.d0-0.2d0*v2)
-    dpd=2.d0*cons*(1.d0-1.2d0*v2)
+    ! Expand the Maxwellian integrals through v^4 to avoid cancellation.
+    dp=cons*(1.d0+v2*(-0.6d0+v2*(3.d0/14.d0)))
+    dh=cons*(1.d0+v2*(-0.2d0+v2*(3.d0/70.d0)))
+    dpd=2.d0*cons*(1.d0+v2*(-1.2d0+v2*(9.d0/14.d0)))
   elseif(v.gt.6.d0) then
     dp=1.d0/v3
     dh=(1.d0-0.5d0/v2)/v
     dpd=-1.d0/v3
   else
     ex=exp(-v2)/sqp
-    er=erf(v)
-    dp=er/v3-2.d0*ex/v2
-    dh=er*(1.d0-0.5d0/v2)/v+ex/v2
+    er_over_v=erf(v)/v
+    dp=(er_over_v-2.d0*ex)/v2
+    dh=er_over_v-0.5d0*dp
     dpd=4.d0*ex-dp
   endif
 
