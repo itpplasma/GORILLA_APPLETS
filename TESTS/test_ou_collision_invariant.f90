@@ -1,12 +1,14 @@
 program test_ou_collision_invariant
     use, intrinsic :: iso_fortran_env, only: dp => real64
-    use collis_ions, only: stost, ou_nu_dtau
+    use collis_ions, only: onseff, stost, ou_nu_dtau
     implicit none
     real(dp) :: z(5), dt, ef(1), vr(1), er(1), draws(3)
     real(dp) :: perpendicular, vpar, moment, expected_variance, dt_slow, dt_fast
     integer :: ierr, j, seed_size
     integer, allocatable :: seed(:)
     integer, parameter :: samples = 100000
+
+    call test_collision_coefficients()
 
     ef = 0.0_dp
     vr = 1.0_dp
@@ -69,6 +71,40 @@ program test_ou_collision_invariant
 
     print *, 'PASS: OU perpendicular invariant, zero speed and Gaussian moment', &
         moment, expected_variance
+
+contains
+
+    subroutine test_collision_coefficients()
+        real(dp), parameter :: speeds(*) = [0.0_dp, 1.0e-5_dp, 0.00999_dp, &
+                                           0.01_dp, 0.01001_dp, 0.1_dp, &
+                                           1.0_dp, 6.0_dp, 10.0_dp]
+        integer, parameter :: intervals = 4096
+        real(dp) :: actual(3), expected(3), v, x, t2, weight
+        integer :: i, k
+
+        do i = 1, size(speeds)
+            v = speeds(i)
+            x = v**2
+            expected = 0.0_dp
+            ! Integrate the Maxwellian and its speed derivative without subtracting
+            ! nearly equal error-function and Gaussian terms.
+            do k = 0, intervals
+                t2 = (real(k, dp) / intervals)**2
+                weight = real(2 + 2 * mod(k, 2), dp)
+                if (k == 0 .or. k == intervals) weight = 1.0_dp
+                expected = expected + weight * exp(-x*t2) * &
+                           [2*t2, 1-t2, 4*t2*(1-x*t2)]
+            end do
+            expected = expected * (2 / sqrt(acos(-1.0_dp))) / (3 * intervals)
+            call onseff(v, actual(1), actual(2), actual(3))
+            if (.not. all(abs(actual/expected - 1) <= 1.0e-11_dp)) then
+                print *, 'Collision coefficients at normalized speed', v
+                print *, 'Relative errors (parallel, perpendicular, derivative)', &
+                    abs(actual/expected - 1)
+                error stop 'Collision coefficients disagree with Maxwellian integrals'
+            end if
+        end do
+    end subroutine test_collision_coefficients
 end program test_ou_collision_invariant
 
 subroutine getran(mode, value)
