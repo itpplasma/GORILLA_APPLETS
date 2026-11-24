@@ -436,7 +436,9 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
 
         ind_tetr_save = ind_tetr
         if (boole_df_time_dependent) then !entry point of this crossing, where the source rate is evaluated
-            z_entry = z_save
+            !local coordinates of THIS tetrahedron (as in the pusher's z_init); z_save still holds the exit point
+            !in the previous tetrahedron's frame for every crossing after the first one of a time step
+            z_entry = x - tetra_physics(ind_tetr)%x1
             x_entry = x
             vpar_entry = vpar
             vperp_entry = vperp
