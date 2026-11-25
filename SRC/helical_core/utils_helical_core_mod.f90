@@ -31,7 +31,8 @@ module utils_helical_core_mod
     logical, public :: boole_df_time_dependent = .false.
     logical, public :: boole_df_second_weight = .false.
     !source integrated exactly per crossing: int sigma dt = -[ln F0(exit) - ln F0(entry)] with F0 = n T^(-3/2) exp(-E/T)
-    !from the vertex-data profiles (continuous across faces -> telescopes on closed orbits; needs vertex data)
+    !from the vertex-data source profiles n_src, T_src (tapered flux functions, continuous across faces -> telescopes on
+    !closed orbits; needs vertex data with n_src, T_i_src, T_e_src from profile_gradients.py)
     logical, public :: boole_df_exact_source = .true.
     real(dp), public :: df_burn_in_time = 0.0_dp
     real(dp), public :: df_time_offset = 0.0_dp          !global time at the start of the current slice
@@ -699,19 +700,20 @@ end subroutine adapt_weights_delta_f
 ! ====================================================================
 function log_local_maxwellian(ind_tetr, r, z, vpar, vperp, species) result(log_f0)
 !
-! ln F0 up to a constant, F0 = n T^(-3/2) exp(-E/T), with n, T interpolated linearly (barycentric) on the 2D
-! vertex-data triangle of tetrahedron ind_tetr at (r, z) and E the kinetic energy (Phi = 0).
+! ln F0 up to a constant, F0 = n T^(-3/2) exp(-E/T), with the source profiles n_src, T_src (tapered flux
+! functions from profile_gradients.py: source switched off in the edge) interpolated linearly (barycentric) on
+! the 2D vertex-data triangle of tetrahedron ind_tetr at (r, z), and E the kinetic energy (Phi = 0).
 !
     use gorilla_applets_types_mod, only: start
     use constants, only: ev2erg
-    use vertex_data_mod, only: vertex_data_profiles
+    use vertex_data_mod, only: vertex_data_source_profiles
 
     integer, intent(in) :: ind_tetr, species
     real(dp), intent(in) :: r, z, vpar, vperp
     real(dp) :: log_f0
     real(dp) :: dens, temp_i, temp_e, temp, energy_eV
 
-    call vertex_data_profiles(ind_tetr, r, z, dens, temp_i, temp_e)
+    call vertex_data_source_profiles(ind_tetr, r, z, dens, temp_i, temp_e)
     if (start%particle_charge(species) > 0.0_dp) then
         temp = temp_i
     else
