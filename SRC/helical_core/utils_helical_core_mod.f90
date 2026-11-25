@@ -30,6 +30,9 @@ module utils_helical_core_mod
     !and moments are averaged over [delta_f_burn_in_time, time_step]. Without restoring terms w1 = w.
     logical, public :: boole_df_time_dependent = .false.
     logical, public :: boole_df_second_weight = .false.
+    !source integrated exactly per crossing: int sigma dt = -[ln F0(exit) - ln F0(entry)] with F0 = n T^(-3/2) exp(-E/T)
+    !from the vertex-data profiles (continuous across faces -> telescopes on closed orbits; needs vertex data)
+    logical, public :: boole_df_exact_source = .true.
     real(dp), public :: df_burn_in_time = 0.0_dp
     real(dp), public :: df_time_offset = 0.0_dp          !global time at the start of the current slice
     real(dp), dimension(:), allocatable, public :: w_td, w1_td
@@ -53,6 +56,7 @@ subroutine read_helical_core_inp_into_type
     logical :: boole_load_local_maxwellian = .false.
     logical :: boole_delta_f_time_dependent = .false.
     logical :: boole_delta_f_second_weight = .false.
+    logical :: boole_delta_f_exact_source = .true.
     real(dp) :: delta_f_burn_in_time = 0.0_dp
     logical :: boole_delta_f_restoring = .false.
     integer :: n_restoring_psi_bins = 30, n_restoring_theta_bins = 16, restoring_min_markers = 50
@@ -73,7 +77,7 @@ subroutine read_helical_core_inp_into_type
     & n_time_slices, boole_unidirectional_beam, beam_density_fraction, reservoir_min_volume_fraction, &
     & background_temperature_eV, reservoir_capacity_flow, reservoir_capacity_temperature, &
     & boole_profiles_from_vertex_data, boole_write_marker_weights, boole_load_local_maxwellian, &
-    & boole_delta_f_time_dependent, boole_delta_f_second_weight, delta_f_burn_in_time, &
+    & boole_delta_f_time_dependent, boole_delta_f_second_weight, delta_f_burn_in_time, boole_delta_f_exact_source, &
     & boole_delta_f_restoring, n_restoring_psi_bins, n_restoring_theta_bins, restoring_min_markers, &
     & restoring_max_condition
 
@@ -131,6 +135,7 @@ subroutine read_helical_core_inp_into_type
     in%reservoir_capacity_temperature = reservoir_capacity_temperature
     boole_df_time_dependent = boole_delta_f_time_dependent
     boole_df_second_weight = boole_delta_f_second_weight
+    boole_df_exact_source = boole_delta_f_exact_source .and. boole_profiles_from_vertex_data
     df_burn_in_time = delta_f_burn_in_time
     boole_restoring = boole_delta_f_restoring
     n_rest_psi = n_restoring_psi_bins
@@ -375,6 +380,7 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
     real(dp), dimension(3)                       :: z_save, z_entry
     real(dp)                                     :: t_pass, perpinv
     real(dp)                                     :: vpar_entry, vperp_entry, t_cross_start, dw, dw_rest, fac
+    real(dp)                                     :: log_f0_entry, log_f0_exit
     real(dp), dimension(3)                       :: x_entry
     logical                                      :: boole_t_finished, boole_pusher_failed, boole_lost_inside
     integer                                      :: ind_tetr_save, iper_phi
@@ -458,13 +464,27 @@ subroutine orbit_timestep_helical_core(x, vpar, vperp, t, particle_status, ind_t
         t%remain = t%remain - t_pass
 
         if (boole_df_time_dependent) then
-            !dw/dt = (1 - w1) sigma with sigma at the entry point, integrated over this crossing; the moments
+            !dw/dt = (1 - w1) sigma integrated over this crossing (exactly, or sigma at the entry point); the moments
             !of this crossing use the midpoint weight and are deposited only after the burn-in time
             !the restoring term (field-particle collisions) changes the physics weight w only, not the
             !marker-density weight w1 (Wang et al. 1999, Eqs. 51-52)
             fac = 1.0_dp
             if (boole_df_second_weight) fac = 1.0_dp - w1_td(n)
-            dw = fac * delta_f_source_rate(z_entry, vpar_entry, vperp_entry, ind_tetr_save, species) * t_pass
+            if (boole_df_exact_source) then
+                !exact: sigma = -d ln F0/dt along the orbit, F0 from the same continuous (barycentric) n, T at entry
+                !(after the last collision kick) and exit; (1 - w1) evolves as F0/g with g constant along the orbit
+                log_f0_entry = log_local_maxwellian(ind_tetr_save, x_entry(1), x_entry(3), vpar_entry, vperp_entry, &
+                                                    species)
+                log_f0_exit = log_local_maxwellian(ind_tetr_save, tetra_physics(ind_tetr_save)%x1(1) + z_save(1), &
+                                                   tetra_physics(ind_tetr_save)%x1(3) + z_save(3), vpar, vperp, species)
+                if (boole_df_second_weight) then
+                    dw = fac * (1.0_dp - exp(log_f0_exit - log_f0_entry))
+                else
+                    dw = log_f0_entry - log_f0_exit
+                endif
+            else
+                dw = fac * delta_f_source_rate(z_entry, vpar_entry, vperp_entry, ind_tetr_save, species) * t_pass
+            endif
             dw_rest = 0.0_dp
             if (boole_restoring) dw_rest = fac * restoring_rate(ind_tetr_save, x_entry, vpar_entry, vperp_entry, &
                                                                 species) * t_pass
@@ -675,6 +695,32 @@ subroutine adapt_weights_delta_f(n, z_save, vpar, vperp, ind_tetr, species)
     weights%w(n,species) = weights%w(n,species) * delta_f_source_rate(z_save, vpar, vperp, ind_tetr, species)
 
 end subroutine adapt_weights_delta_f
+
+! ====================================================================
+function log_local_maxwellian(ind_tetr, r, z, vpar, vperp, species) result(log_f0)
+!
+! ln F0 up to a constant, F0 = n T^(-3/2) exp(-E/T), with n, T interpolated linearly (barycentric) on the 2D
+! vertex-data triangle of tetrahedron ind_tetr at (r, z) and E the kinetic energy (Phi = 0).
+!
+    use gorilla_applets_types_mod, only: start
+    use constants, only: ev2erg
+    use vertex_data_mod, only: vertex_data_profiles
+
+    integer, intent(in) :: ind_tetr, species
+    real(dp), intent(in) :: r, z, vpar, vperp
+    real(dp) :: log_f0
+    real(dp) :: dens, temp_i, temp_e, temp, energy_eV
+
+    call vertex_data_profiles(ind_tetr, r, z, dens, temp_i, temp_e)
+    if (start%particle_charge(species) > 0.0_dp) then
+        temp = temp_i
+    else
+        temp = temp_e
+    endif
+    energy_eV = 0.5_dp*start%particle_mass(species)*(vpar**2 + vperp**2)/ev2erg
+    log_f0 = log(dens) - 1.5_dp*log(temp) - energy_eV/temp
+
+end function log_local_maxwellian
 
 ! ====================================================================
 function delta_f_source_rate(z_save, vpar, vperp, ind_tetr, species) result(sigma)
