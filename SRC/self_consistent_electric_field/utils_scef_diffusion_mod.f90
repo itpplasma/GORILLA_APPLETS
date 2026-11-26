@@ -4,6 +4,13 @@ module utils_scef_diffusion_mod
 
     implicit none
 
+    !Ghost layer of the random walk (in%rw_ghost_layer_width > 0), per species, filled by calc_density_via_random_walk
+    !and used by apply_rw_ghost_layer: shell densities of the source walkers (per shell volume, time_step and number of
+    !walkers, before the exit-time correction), reservoir part of the shell densities per unit reservoir density
+    !(absolute, from the inflow rate), and the vertex index of the wall
+    real(dp), dimension(:,:), allocatable :: rw_source_shell, rw_ghost_shell
+    integer, dimension(2) :: rw_ghost_vertex = 0
+
 contains
 
 subroutine calc_diffusion_coefficients(species)
@@ -370,6 +377,10 @@ subroutine calc_density_via_random_walk(species)
     integer, intent(in) :: species
 
     real(dp) :: delta_x, delta_t, xi, A, B, cell_size
+    real(dp) :: s_wall, A_w, B_w, cell_w, dt_w, L_w, pos, ghost_time, vprime_w, inflow_per_nb
+    real(dp), dimension(:), allocatable :: ghost_density
+    integer :: k_wall, n_tries
+    logical :: boole_ghost, boole_ghost_failed
     integer :: i, ns, k, num_steps_min, count_lost_particles, num_particles, particle_multiplication
     integer :: density_unit, n, ind_tetr, iface
     real(dp), dimension(3) :: x_particle, z_save
@@ -445,6 +456,19 @@ subroutine calc_density_via_random_walk(species)
     t%step = in%time_step
     num_steps_min = 1000
 
+    !Ghost layer: the outer layer s >= s_wall (snapped to the nearest vertex) is a reservoir at the target density.
+    !Walkers are absorbed when they enter it (instead of at s = 1); the inflow from the reservoir is represented by
+    !the ghost walkers below, whose amplitude apply_rw_ghost_layer fits after the exit-time correction.
+    boole_ghost = in%rw_ghost_layer_width.gt.0.0_dp
+    s_wall = 1.0_dp
+    k_wall = grid_size(1)+1
+    if (boole_ghost) then
+        k_wall = minloc(abs(g%s_vertices - (1.0_dp - in%rw_ghost_layer_width)**2), 1)
+        k_wall = min(max(k_wall, 3), grid_size(1))
+        s_wall = g%s_vertices(k_wall)
+        rw_ghost_vertex(species) = k_wall
+    endif
+
     !Walkers i = (n-1)*particle_multiplication+1 ... n*particle_multiplication are copies of marker n. The sum
     !and sum of squares over markers of their per-shell contributions give the statistical error of the densities.
     allocate(marker_shell(grid_size(1)))
@@ -456,6 +480,12 @@ count_lost_particles = 0
     do i = 1,num_particles
         t%confined = 0.0_dp
         boole_lost = .false.
+        if (boole_ghost) then
+            if (position(i).ge.s_wall) then   !born in the reservoir: represented by the ghost walkers
+                boole_lost = .true.
+                count_lost_particles = count_lost_particles+1
+            endif
+        endif
         if (mod(i-1,particle_multiplication).eq.0) marker_shell = 0.0_dp
         do while ((t%confined.lt.t%step).and.(.not.boole_lost))
 
@@ -478,7 +508,7 @@ count_lost_particles = 0
             if (position(i).lt.sfc_s_min) then
                 position(i) = 2.0_dp*sfc_s_min - position(i)
             endif
-            if (position(i).gt.1.0_dp)    then
+            if ((position(i).gt.1.0_dp) .or. (boole_ghost.and.(position(i).ge.s_wall))) then
                 boole_lost = .true.
                 count_lost_particles = count_lost_particles+1
             endif
@@ -515,6 +545,71 @@ count_lost_particles = 0
         rw_density(i) = rw_density(i)/(g%s_shell_volumes(i)*t%step*num_particles)
         call fill_vector_parts_with_value(rw_prism_densities, g%prisms_per_flux_tube(i,:), rw_density(i))
     enddo
+
+    if (boole_ghost) then
+        if (.not.allocated(rw_source_shell)) allocate(rw_source_shell(grid_size(1),2), rw_ghost_shell(grid_size(1),2))
+        rw_source_shell(:,species) = rw_density
+        rw_ghost_shell(:,species) = 0.0_dp
+        !Ghost walkers = reservoir particles that step into the inner region. The reservoir s >= s_wall has the density
+        !n_b, i.e. n_b*V'(s_wall) particles per unit s. Start uniformly in [s_wall, s_wall + L_w] (L_w = largest possible
+        !inward jump), one step dt_w with the coefficients at the wall, accepted if it lands inside: the accepted ones have
+        !the entry depths of real incoming particles, and the acceptance f gives the inflow per step,
+        !n_b*V'*L_w*f. Inflow rate Gamma = n_b*V'*L_w*f/dt_w; each of the N ghost walkers carries Gamma/N particles per
+        !second, so the reservoir density of shell k is (Gamma/N)*sum(time in k)/V_k. They walk like the source walkers
+        !until they are back in the layer or reach time_step.
+        call rw_coefficients(s_wall - 1.0d-12, k, cell_w, A_w, B_w)
+        boole_ghost_failed = B_w.le.0.0_dp
+        if (.not.boole_ghost_failed) then
+            allocate(ghost_density(grid_size(1)))
+            ghost_density = 0.0_dp
+            ghost_time = 0.0_dp
+            n_tries = 0
+            dt_w = min(t%step/num_steps_min, cell_w**2/((abs(A_w)+abs(B_w))*4))
+            L_w = sqrt(6.0_dp*dt_w*B_w) + abs(A_w)*dt_w
+            ghost_walkers: do i = 1,num_particles
+                do
+                    n_tries = n_tries+1
+                    if (n_tries.gt.1000*num_particles) then
+                        boole_ghost_failed = .true.
+                        exit ghost_walkers
+                    endif
+                    call random_number(xi)
+                    pos = s_wall + L_w*xi
+                    call random_number(xi)
+                    xi = sqrt(12.0_dp)*(xi-0.5_dp)
+                    pos = pos + sqrt(2*dt_w*B_w)*xi + A_w*dt_w
+                    if (pos.lt.s_wall) exit
+                enddo
+                t%confined = 0.0_dp
+                boole_lost = .false.
+                do while ((t%confined.lt.t%step).and.(.not.boole_lost))
+                    call rw_coefficients(pos, k, cell_size, A, B)
+                    delta_t = min(t%step/num_steps_min, cell_size**2/((abs(A)+abs(B))*4), t%step - t%confined)
+                    ghost_density(k) = ghost_density(k) + delta_t
+                    t%confined = t%confined + delta_t
+                    call random_number(xi)
+                    xi = sqrt(12.0_dp)*(xi-0.5_dp)
+                    pos = pos + sqrt(2*delta_t*max(B,0.0_dp))*xi + A*delta_t
+                    if (pos.lt.sfc_s_min) pos = 2.0_dp*sfc_s_min - pos
+                    boole_lost = pos.ge.s_wall
+                enddo
+                ghost_time = ghost_time + t%confined
+            enddo ghost_walkers
+        endif
+        if (boole_ghost_failed) then
+            print*, 'Warning: ghost layer of species ', species, ': no inflow could be generated at s = ', s_wall, &
+                    ' (B = ', B_w, ', A = ', A_w, '), the reservoir contributes nothing'
+        else
+            !V'(s_wall) from the real shell volumes on both sides of the wall
+            vprime_w = 0.5_dp*(g%s_shell_volumes(k_wall-1)/(g%s_vertices(k_wall)-g%s_vertices(k_wall-1)) + &
+                               g%s_shell_volumes(k_wall)/(g%s_vertices(k_wall+1)-g%s_vertices(k_wall)))
+            inflow_per_nb = vprime_w*L_w*(real(num_particles,dp)/n_tries)/dt_w
+            rw_ghost_shell(:,species) = inflow_per_nb*ghost_density/(num_particles*g%s_shell_volumes)
+            print*, 'ghost layer of species ', species, ': wall at s = ', s_wall, ' (vertex ', k_wall, '), ', &
+                    num_particles, ' ghost walkers, acceptance ', real(num_particles,dp)/n_tries, &
+                    ', strip L = ', L_w, ', step ', dt_w, ' s, mean time inside ', ghost_time/num_particles, ' s'
+        endif
+    endif
 
 
     !This is a bit cumbersome having to use rw_prism_densities and a loop over all prisms instead of simply putting
@@ -587,6 +682,60 @@ contains
     end subroutine rw_coefficients
 
 end subroutine calc_density_via_random_walk
+
+subroutine apply_rw_ghost_layer(species)
+
+    !Ghost layer (in%rw_ghost_layer_width > 0), called after the exit-time correction. Inside the wall the density of a
+    !random-walk species is n = c*n_source + n_b*n_reservoir (c = ep%exit_time_correction, n_reservoir = reservoir
+    !part per unit reservoir density from calc_density_via_random_walk), beyond the wall the target. The reservoir
+    !density n_b is the target at the wall (Dirichlet condition at s_wall); electrons use Z times the target, as in the
+    !edge buffer.
+
+    use gorilla_applets_types_mod, only: in, g, ep, output, start
+    use tetra_grid_settings_mod, only: grid_size
+    use tetra_grid_mod, only: ntetr
+    use utils_scef_electric_potential_mod, only: fill_vector_parts_with_value
+    use scef_target_profiles_mod, only: target_density, rad_from_s
+    use constants, only: echarge
+
+    integer, intent(in) :: species
+    integer :: ns, k_wall, k_b, i
+    real(dp) :: c, z_factor, n_b, value
+    real(dp), dimension(:), allocatable :: n_target, prism_values
+
+    k_wall = rw_ghost_vertex(species)
+    if (k_wall.lt.3) return
+    k_b = k_wall-1   !last shell inside the wall
+    c = ep%exit_time_correction
+    z_factor = 1.0_dp
+    if (species.eq.in%n_species) z_factor = start%particle_charge(1)/echarge
+    n_b = target_density(rad_from_s(g%s_vertices(k_wall)))*z_factor
+
+    allocate(n_target(grid_size(1)), prism_values(ntetr/3))
+    do ns = 1,grid_size(1)
+        n_target(ns) = 0.5_dp*(target_density(rad_from_s(g%s_vertices(ns))) + &
+                               target_density(rad_from_s(g%s_vertices(ns+1))))*z_factor
+    enddo
+
+    prism_values = 0.0_dp
+    do ns = 1,grid_size(1)
+        if (ns.lt.k_wall) then
+            value = c*rw_source_shell(ns,species) + n_b*rw_ghost_shell(ns,species)
+        else
+            value = n_target(ns)
+        endif
+        call fill_vector_parts_with_value(prism_values, g%prisms_per_flux_tube(ns,:), value)
+    enddo
+    do i = 1,ntetr/3
+        output%prism_moments(1,i,species) = complex(prism_values(i), 0.0_dp)
+    enddo
+
+    print*, 'ghost layer of species ', species, ': last inner shell: source part ', &
+            c*rw_source_shell(k_b,species)/n_target(k_b), ', reservoir part ', &
+            n_b*rw_ghost_shell(k_b,species)/n_target(k_b), ' of the target'
+    print*, 'ghost layer: reservoir part / reservoir density per inner shell: ', rw_ghost_shell(1:k_b,species)
+
+end subroutine apply_rw_ghost_layer
 
 subroutine get_diffusion_coefficient_data(species, boole_use_fit_function)
 

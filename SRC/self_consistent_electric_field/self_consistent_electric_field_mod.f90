@@ -135,7 +135,7 @@ subroutine run_scef_iterations(source_step)
     use utils_scef_particle_pushing_mod, only: parallelised_particle_pushing
     use utils_scef_diffusion_mod, only: calc_diffusion_coefficients
     use utils_scef_electric_potential_mod, only: perform_electric_potential_update, calc_quasineutrality_mismatch, print_data
-    use utils_scef_diffusion_mod, only: calc_density_via_random_walk
+    use utils_scef_diffusion_mod, only: calc_density_via_random_walk, apply_rw_ghost_layer
 
     integer, intent(in) :: source_step
     integer :: i, species, n_at_limit
@@ -202,6 +202,12 @@ subroutine run_scef_iterations(source_step)
             if ((species.eq.2).and.(in%boole_static_ne)) cycle
             output%prism_moments(1,:,species) = output%prism_moments(1,:,species) * ep%exit_time_correction
         enddo
+        !Ghost layer of the random-walk species: reservoir inflow fitted to the target at the wall (after the correction)
+        if (in%rw_ghost_layer_width.gt.0.0_dp) then
+            do species = 1,2
+                if (.not.in%boole_honest_tracing(species)) call apply_rw_ghost_layer(species)
+            enddo
+        endif
 
         call perform_electric_potential_update(i)
 

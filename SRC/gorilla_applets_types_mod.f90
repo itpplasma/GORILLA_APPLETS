@@ -169,6 +169,7 @@ module gorilla_applets_types_mod
     logical  :: boole_ion_electron_collisions = .true. !used in self consistent electric field and collisions without background updates: .false. switches off the collisions of ion test particles (species 1) with the background electrons
     real(dp) :: electron_tracing_time_limit = -1.0_dp !used in self consistent electric field: maximum tracing time [s] of honestly traced electrons (<= 0: time_step)
     real(dp) :: calibration_bias_tolerance = 0.02_dp !used in self consistent electric field: a calibrated surface counts as biased if more than this fraction of its test particles was mirrored at the axis or lost at the edge
+    real(dp) :: rw_ghost_layer_width = 0.0_dp !used in self consistent electric field: >0 width in r/a of the outer ghost layer of the random walk (reservoir at the target density; walkers absorbed at its inner edge, inflow fitted so that the last inner shell is at the target; 0 = off)
     end type input_t
 
     type(input_t) :: in

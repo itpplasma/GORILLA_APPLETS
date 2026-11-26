@@ -15,7 +15,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     character(len=256) :: restart_phi_file, restart_source_file
     logical :: boole_adaptive_relaxation, boole_measured_drift, boole_continuous_background
     integer :: source_buffer_mode, collision_background_mode
-    real(dp) :: source_buffer_bound_factor, drift_smoothing_width, calibration_bias_tolerance, electron_tracing_time_limit
+    real(dp) :: source_buffer_bound_factor, drift_smoothing_width, calibration_bias_tolerance, electron_tracing_time_limit, rw_ghost_layer_width
     logical :: boole_ion_electron_collisions, boole_write_3d_update
     integer :: recalibration_mode
     real(dp) :: thermodiffusion_coefficient, ion_tracing_time_limit, diffusion_sigma_A_target, diffusion_max_spread_cells
@@ -46,7 +46,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     & ion_tracing_time_limit, diffusion_sigma_A_target, diffusion_max_spread_cells, thermodiffusion_table_file, &
     & boole_measured_drift, recalibration_mode, boole_continuous_background, source_buffer_mode, &
     & source_buffer_bound_factor, collision_background_mode, drift_smoothing_width, calibration_bias_tolerance, &
-    & boole_ion_electron_collisions, electron_tracing_time_limit, boole_write_3d_update
+    & boole_ion_electron_collisions, electron_tracing_time_limit, boole_write_3d_update, rw_ghost_layer_width
 
     quasineutrality_tol = 0.0_dp   !optional in the .inp: no early exit unless set
     i_collision_mode = 1           !optional: full collision operator
@@ -76,6 +76,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     boole_ion_electron_collisions = .true. !optional: ions also collide with the background electrons
     electron_tracing_time_limit = -1.0_dp  !optional: honestly traced electrons up to time_step
     boole_write_3d_update = .false.        !optional: no 3D update diagnostics for 1D updates
+    rw_ghost_layer_width = 0.0_dp          !optional: no ghost layer, random walkers are lost at s = 1
     open(newunit = s_inp_unit, file='self_consistent_ef.inp', status='unknown')
     read(s_inp_unit,nml=self_consistent_ef_nml)
     close(s_inp_unit)
@@ -144,6 +145,7 @@ subroutine read_self_consistent_electric_field_inp_into_type
     in%boole_ion_electron_collisions = boole_ion_electron_collisions
     in%electron_tracing_time_limit = electron_tracing_time_limit
     in%boole_write_3d_update = boole_write_3d_update
+    in%rw_ghost_layer_width = rw_ghost_layer_width
 
     print *,'GORILLA_APPLETS: Loaded input data from self_consistent_ef.inp'
 
@@ -245,6 +247,14 @@ subroutine print_errors_for_bad_inputs
     if ((in%noise_tolerance_factor.lt.0.0_dp) .or. &
         ((in%noise_tolerance_factor.gt.0.0_dp) .and. (in%update_dimension.ne.1))) then
         print*, 'Error: noise_tolerance_factor must be >= 0, and > 0 is only implemented for update_dimension = 1.'
+        print*, 'Program terminated'
+        stop
+    endif
+
+    if ((in%rw_ghost_layer_width.lt.0.0_dp) .or. (in%rw_ghost_layer_width.ge.0.5_dp) .or. &
+        ((in%rw_ghost_layer_width.gt.0.0_dp) .and. ((in%update_dimension.ne.1) .or. in%boole_static_ne))) then
+        print*, 'Error: rw_ghost_layer_width must be in [0, 0.5) (width in r/a, 0 = off); > 0 needs update_dimension = 1', &
+                ' and boole_static_ne = .false.'
         print*, 'Program terminated'
         stop
     endif
