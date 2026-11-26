@@ -378,7 +378,8 @@ subroutine calc_density_via_random_walk(species)
 
     real(dp) :: delta_x, delta_t, xi, A, B, cell_size
     real(dp) :: s_wall, A_w, B_w, cell_w, dt_w, L_w, pos, ghost_time, vprime_w, inflow_per_nb
-    real(dp), dimension(:), allocatable :: ghost_density
+    real(dp), dimension(:), allocatable :: ghost_density, dt_cell, dt_env, s_centre
+    real(dp) :: lambda_dt
     integer :: k_wall, n_tries
     logical :: boole_ghost, boole_ghost_failed
     integer :: i, ns, k, num_steps_min, count_lost_particles, num_particles, particle_multiplication
@@ -456,6 +457,24 @@ subroutine calc_density_via_random_walk(species)
     t%step = in%time_step
     num_steps_min = 1000
 
+    !Step-size envelope. The natural step of a cell, cell^2/(4(|A|+B)), can jump by an order of magnitude from one
+    !cell to the next (axis cell: large geometric drift B_2/s_2). A jump on a scale shorter than the step itself biases
+    !the time-weighted density next to it (zero-flux validation: +35 % in shell 2, +21 % with dt/4). The step is
+    !therefore also limited by dt_env(k) = min_j dt_cell(j)*exp(|s_k - s_j|/lambda_dt), i.e. it grows by at most a
+    !factor e over lambda_dt = 3 cells. dt_cell(j) = natural step at both ends of cell j.
+    allocate(dt_cell(grid_size(1)), dt_env(grid_size(1)), s_centre(grid_size(1)))
+    do ns = 1,grid_size(1)
+        s_centre(ns) = 0.5_dp*(g%s_vertices(ns) + g%s_vertices(ns+1))
+        call rw_coefficients(g%s_vertices(ns) + 1.0d-9*(g%s_vertices(ns+1)-g%s_vertices(ns)), k, cell_size, A, B)
+        dt_cell(ns) = cell_size**2/((abs(A)+abs(B))*4)
+        call rw_coefficients(g%s_vertices(ns+1) - 1.0d-9*(g%s_vertices(ns+1)-g%s_vertices(ns)), k, cell_size, A, B)
+        dt_cell(ns) = min(dt_cell(ns), cell_size**2/((abs(A)+abs(B))*4))
+    enddo
+    lambda_dt = 3.0_dp*(g%s_vertices(grid_size(1)+1) - g%s_vertices(1))/grid_size(1)
+    do ns = 1,grid_size(1)
+        dt_env(ns) = minval(dt_cell*exp(abs(s_centre - s_centre(ns))/lambda_dt))
+    enddo
+
     !Ghost layer: the outer layer s >= s_wall (snapped to the nearest vertex) is a reservoir at the target density.
     !Walkers are absorbed when they enter it (instead of at s = 1); the inflow from the reservoir is represented by
     !the ghost walkers below, whose amplitude apply_rw_ghost_layer fits after the exit-time correction.
@@ -491,7 +510,7 @@ count_lost_particles = 0
 
             call rw_coefficients(position(i), k, cell_size, A, B)
 
-            delta_t = min(t%step/num_steps_min, cell_size**2/((abs(A)+abs(B))*4), t%step - t%confined) !control maximum possible jump
+            delta_t = min(t%step/num_steps_min, cell_size**2/((abs(A)+abs(B))*4), dt_env(k), t%step - t%confined) !control maximum possible jump
 
             rw_density(k) = rw_density(k) + delta_t*weight(i)
             marker_shell(k) = marker_shell(k) + delta_t*weight(i)
@@ -564,7 +583,7 @@ count_lost_particles = 0
             ghost_density = 0.0_dp
             ghost_time = 0.0_dp
             n_tries = 0
-            dt_w = min(t%step/num_steps_min, cell_w**2/((abs(A_w)+abs(B_w))*4))
+            dt_w = min(t%step/num_steps_min, cell_w**2/((abs(A_w)+abs(B_w))*4), dt_env(k_wall-1))
             L_w = sqrt(6.0_dp*dt_w*B_w) + abs(A_w)*dt_w
             ghost_walkers: do i = 1,num_particles
                 do
@@ -584,7 +603,7 @@ count_lost_particles = 0
                 boole_lost = .false.
                 do while ((t%confined.lt.t%step).and.(.not.boole_lost))
                     call rw_coefficients(pos, k, cell_size, A, B)
-                    delta_t = min(t%step/num_steps_min, cell_size**2/((abs(A)+abs(B))*4), t%step - t%confined)
+                    delta_t = min(t%step/num_steps_min, cell_size**2/((abs(A)+abs(B))*4), dt_env(k), t%step - t%confined)
                     ghost_density(k) = ghost_density(k) + delta_t
                     t%confined = t%confined + delta_t
                     call random_number(xi)
