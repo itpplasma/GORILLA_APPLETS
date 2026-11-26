@@ -369,7 +369,7 @@ subroutine calc_density_via_random_walk(species)
 
     integer, intent(in) :: species
 
-    real(dp) :: delta_x, delta_t, xi, A, B, cell_size, s_c, B_c, s_lo, s_hi, c_thermo
+    real(dp) :: delta_x, delta_t, xi, A, B, cell_size
     integer :: i, ns, k, num_steps_min, count_lost_particles, num_particles, particle_multiplication
     integer :: density_unit, n, ind_tetr, iface
     real(dp), dimension(3) :: x_particle, z_save
@@ -459,52 +459,7 @@ count_lost_particles = 0
         if (mod(i-1,particle_multiplication).eq.0) marker_shell = 0.0_dp
         do while ((t%confined.lt.t%step).and.(.not.boole_lost))
 
-            !binsrc finds k such that g%s_vertices(k-1) < position(i) < g%s_vertices(k)
-            call binsrc(g%s_vertices,1,grid_size(1)+1,position(i),k)
-            k = k-1
-            cell_size = g%s_vertices(k+1) - g%s_vertices(k)
-            A = dc%A(k, species) + dc%grad_A(k, species)*(position(i)-g%s_vertices(k))
-            B = dc%B(k, species) + dc%grad_B(k, species)*(position(i)-g%s_vertices(k))
-
-            if (in%boole_measured_drift.and.(k.eq.1)) then
-                !Axis cell: B -> 0 like s; the Ito drift B_2/s_2 replaces the measured one of the first
-                !calibrated surface (whose cloud reaches the axis), the rest of the drift is taken from it
-                B_c = dc%B(2, species)
-                B = B_c*position(i)/g%s_vertices(2)
-                A = B_c/g%s_vertices(2) + B*(dc%r_rest(2, species) + dc%qE_T(2, species))
-            endif
-
-            if (boole_use_fit_function) then
-                !B from the fit of ln B; A holds q*E/T here, so the E_r drift uses the same B as the
-                !diffusion. Below s_c, B -> 0 like s (B = (ds/dr)^2 D_r with finite D_r). Since the
-                !volume element is constant in s, the walk needs the Ito drift dB/ds.
-                s_c = g%s_vertices(4)
-                if (position(i).lt.s_c) then
-                    B_c = exp(sum(dc%polynomial_coefficients_for_B(:, species)*(/1.0_dp,s_c,s_c**2,0.0_dp/)))
-                    B = B_c*position(i)/s_c
-                    A = B*A + B_c/s_c
-                else
-                    B = exp(sum(dc%polynomial_coefficients_for_B(:, species) &
-                                *(/1.0_dp,position(i),position(i)**2,0.0_dp/)))
-                    A = B*A + B*sum(dc%polynomial_coefficients_for_A(:, species) &
-                                    *(/1.0_dp,position(i),0.0_dp/)) !dB/ds = B * d(ln B)/ds
-                endif
-            endif
-
-            !Thermodiffusion: the walkers carry no energy, so the flux driven by the temperature gradient,
-            !-c*B*n*d(ln T)/ds with c = D12/D11 - 3/2, enters as an explicit drift (central difference in s)
-            !With thermodiffusion_table_file, c comes from the table at the current field (linear between vertices)
-            c_thermo = in%thermodiffusion_coefficient
-            if (dc%boole_thermo_table.and.(species.eq.2)) c_thermo = dc%c_thermo(k, species) &
-                + (dc%c_thermo(k+1, species)-dc%c_thermo(k, species))*(position(i)-g%s_vertices(k))/cell_size
-            if (c_thermo.ne.0.0_dp) then
-                s_lo = max(position(i) - 1.0d-4, 0.0_dp)
-                s_hi = min(position(i) + 1.0d-4, 1.0_dp)
-                A = A - c_thermo*B &
-                        *log(target_temperature(rad_from_s(s_hi), species)/target_temperature(rad_from_s(s_lo), species)) &
-                        /(s_hi - s_lo)
-            endif
-
+            call rw_coefficients(position(i), k, cell_size, A, B)
 
             delta_t = min(t%step/num_steps_min, cell_size**2/((abs(A)+abs(B))*4), t%step - t%confined) !control maximum possible jump
 
@@ -573,6 +528,63 @@ count_lost_particles = 0
     print*, 'Total tracing time of species ', species, ' divided by number of particles is: ', &
     ep%mean_exit_time(species), 's'
     !print*, 'exit times are : ', exit_data%t_confined(:,species)
+
+contains
+
+    subroutine rw_coefficients(pos, k, cell_size, A, B)
+        !Drift A and diffusion coefficient B of the walk at position pos (shell k, its width cell_size)
+        real(dp), intent(in) :: pos
+        integer, intent(out) :: k
+        real(dp), intent(out) :: cell_size, A, B
+        real(dp) :: B_c, s_c, s_lo, s_hi, c_thermo
+
+        !binsrc finds k such that g%s_vertices(k-1) < pos < g%s_vertices(k)
+        call binsrc(g%s_vertices,1,grid_size(1)+1,pos,k)
+        k = k-1
+        cell_size = g%s_vertices(k+1) - g%s_vertices(k)
+        A = dc%A(k, species) + dc%grad_A(k, species)*(pos-g%s_vertices(k))
+        B = dc%B(k, species) + dc%grad_B(k, species)*(pos-g%s_vertices(k))
+
+        if (in%boole_measured_drift.and.(k.eq.1)) then
+            !Axis cell: B -> 0 like s; the Ito drift B_2/s_2 replaces the measured one of the first
+            !calibrated surface (whose cloud reaches the axis), the rest of the drift is taken from it
+            B_c = dc%B(2, species)
+            B = B_c*pos/g%s_vertices(2)
+            A = B_c/g%s_vertices(2) + B*(dc%r_rest(2, species) + dc%qE_T(2, species))
+        endif
+
+        if (boole_use_fit_function) then
+            !B from the fit of ln B; A holds q*E/T here, so the E_r drift uses the same B as the
+            !diffusion. Below s_c, B -> 0 like s (B = (ds/dr)^2 D_r with finite D_r). Since the
+            !volume element is constant in s, the walk needs the Ito drift dB/ds.
+            s_c = g%s_vertices(4)
+            if (pos.lt.s_c) then
+                B_c = exp(sum(dc%polynomial_coefficients_for_B(:, species)*(/1.0_dp,s_c,s_c**2,0.0_dp/)))
+                B = B_c*pos/s_c
+                A = B*A + B_c/s_c
+            else
+                B = exp(sum(dc%polynomial_coefficients_for_B(:, species) &
+                            *(/1.0_dp,pos,pos**2,0.0_dp/)))
+                A = B*A + B*sum(dc%polynomial_coefficients_for_A(:, species) &
+                                *(/1.0_dp,pos,0.0_dp/)) !dB/ds = B * d(ln B)/ds
+            endif
+        endif
+
+        !Thermodiffusion: the walkers carry no energy, so the flux driven by the temperature gradient,
+        !-c*B*n*d(ln T)/ds with c = D12/D11 - 3/2, enters as an explicit drift (central difference in s)
+        !With thermodiffusion_table_file, c comes from the table at the current field (linear between vertices)
+        c_thermo = in%thermodiffusion_coefficient
+        if (dc%boole_thermo_table.and.(species.eq.2)) c_thermo = dc%c_thermo(k, species) &
+            + (dc%c_thermo(k+1, species)-dc%c_thermo(k, species))*(pos-g%s_vertices(k))/cell_size
+        if (c_thermo.ne.0.0_dp) then
+            s_lo = max(pos - 1.0d-4, 0.0_dp)
+            s_hi = min(pos + 1.0d-4, 1.0_dp)
+            A = A - c_thermo*B &
+                    *log(target_temperature(rad_from_s(s_hi), species)/target_temperature(rad_from_s(s_lo), species)) &
+                    /(s_hi - s_lo)
+        endif
+
+    end subroutine rw_coefficients
 
 end subroutine calc_density_via_random_walk
 
