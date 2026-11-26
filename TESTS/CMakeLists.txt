@@ -124,3 +124,16 @@ GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
 GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
 WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/self_consistent_electric_field_work"
 )
+
+add_test(
+    NAME scef_ghost_layer
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_scef_ghost_layer.py
+)
+set_tests_properties(scef_ghost_layer PROPERTIES
+    ENVIRONMENT
+        "APPLETS_ROOT=${CMAKE_SOURCE_DIR};\
+GORILLA_ROOT=${CMAKE_SOURCE_DIR}/../GORILLA;\
+GORILLA_APPLETS_BIN=$<TARGET_FILE:gorilla_applets_main.x>;\
+WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/scef_ghost_layer_work"
+)
