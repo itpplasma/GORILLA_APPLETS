@@ -229,8 +229,9 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
     !marker_diag holds birth values and sums over all time slices: (re)set only in the first slice
     if (boole_marker_weights_output.and.(i_slice.eq.1)) then
         if (allocated(marker_diag)) deallocate(marker_diag)
-        allocate(marker_diag(8, n_particles))
+        allocate(marker_diag(12, n_particles))
         marker_diag = 0.0_dp
+        marker_diag(9, :) = -1.0_dp   !loss time: -1 = not lost
     endif
     kpart = 0
     iantithetic = 1
@@ -240,7 +241,8 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
 
     !$OMP PARALLEL DEFAULT(NONE) &
     !$OMP& SHARED(counter, kpart, species, in, c, iantithetic, start, s, n_particles, boole_reuse_weights, i_slice, &
-    !$OMP& moment_specs, ntetr, boole_restoring, n_rest_bins, rest_loss, marker_tetr, w_td, weights, rest_given) &
+    !$OMP& moment_specs, ntetr, boole_restoring, n_rest_bins, rest_loss, marker_tetr, w_td, weights, rest_given, &
+    !$OMP& boole_marker_weights_output, marker_diag, df_time_offset) &
     !$OMP& REDUCTION(+:t_tot) &
     !$OMP& PRIVATE(p, l, n, i, x, vpar, vperp, t, ind_tetr, iface, local_tetr_moments, local_counter, particle_status, &
     !$OMP& thread_tetr_moments, thread_prism_moments_squared, thread_loss, vpar_kick, vperp_kick)
@@ -316,6 +318,13 @@ subroutine parallelised_particle_pushing_helical_core(species, n_particles_in, b
 
                 if (ind_tetr.eq.-1) then
                     call handle_lost_particles(local_counter, particle_status%lost)
+                    if (boole_marker_weights_output) then
+                        !global loss time (all slices), last position, kind (1 = left the domain, 2 = pusher failure)
+                        marker_diag(9, n) = df_time_offset + t%confined
+                        marker_diag(10, n) = x(1)
+                        marker_diag(11, n) = x(3)
+                        marker_diag(12, n) = merge(2.0_dp, 1.0_dp, local_counter%pusher_failures.gt.0)
+                    endif
                     exit
                 endif
             enddo
@@ -518,16 +527,17 @@ end subroutine orbit_timestep_helical_core
 subroutine write_marker_weights
 !
 ! Writes marker_weights.dat: marker index, birth R, phi, Z, psi_N, vpar, vperp, birth weight and the
-! marker's summed contribution sum(w * int vpar dt) to the parallel-flow moment (not normalised).
-! Markers that were never placed have zeros.
+! marker's summed contribution sum(w * int vpar dt) to the parallel-flow moment (not normalised), and the
+! loss record: global loss time t_loss [s] (-1 if never lost), R_loss, Z_loss [cm] (last position) and
+! loss_kind (1 = left the domain, 2 = pusher failure, 0 = not lost). Markers that were never placed have zeros.
 !
     integer :: n, mw_unit
 
     if (.not.boole_marker_weights_output) return
     open(newunit = mw_unit, file = 'marker_weights.dat', status = 'replace')
-    write(mw_unit, '(a)') '# n  R  phi  Z  psi_N  vpar  vperp  w_birth  sum_w_vpar_dt'
+    write(mw_unit, '(a)') '# n  R  phi  Z  psi_N  vpar  vperp  w_birth  sum_w_vpar_dt  t_loss  R_loss  Z_loss  loss_kind'
     do n = 1, size(marker_diag, 2)
-        write(mw_unit, '(i10, 8es24.15)') n, marker_diag(:, n)
+        write(mw_unit, '(i10, 12es24.15)') n, marker_diag(:, n)
     enddo
     close(mw_unit)
 
